@@ -952,12 +952,13 @@ class DesktopAppService(
 
     suspend fun runTask(taskId: String): AgentTask {
         val task = getTask(taskId) ?: throw IllegalArgumentException("Task not found: $taskId")
+        val plannedTask = ensureTaskPlan(task)
         updateTaskStatus(task.id, DesktopTaskStatus.RUNNING)
         serviceScope.launch {
             // Long-running agent execution is detached from the request lifecycle.
             executeTask(task.id)
         }
-        return task.copy(status = DesktopTaskStatus.RUNNING)
+        return plannedTask.copy(status = DesktopTaskStatus.RUNNING, updatedAt = System.currentTimeMillis())
     }
 
     suspend fun getChanges(runId: String): ChangeSummary {
@@ -1102,13 +1103,14 @@ class DesktopAppService(
     private suspend fun executeTask(taskId: String) {
         val snapshot = stateStore.load()
         val task = snapshot.tasks.firstOrNull { it.id == taskId } ?: return
+        val plannedTask = ensureTaskPlan(task)
         val workspace = snapshot.workspaces.firstOrNull { it.id == task.workspaceId } ?: return
         val repository = snapshot.repositories.firstOrNull { it.id == workspace.repositoryId } ?: return
         val assignmentPlan = ensureTaskAssignments(task)
         val repositoryRoot = Path.of(repository.localPath)
         val agents = resolveAgents(repositoryRoot, assignmentPlan.map { it.agentName })
 
-        updateTaskStatus(task.id, DesktopTaskStatus.RUNNING)
+        updateTaskStatus(plannedTask.id, DesktopTaskStatus.RUNNING)
 
         coroutineScope {
             // Each requested agent gets its own branch/worktree pair, so parallel execution
@@ -1126,7 +1128,7 @@ class DesktopAppService(
             }.awaitAll()
         }
 
-        val latestRuns = listRuns(task.id)
+        val latestRuns = listRuns(plannedTask.id)
         val successCount = latestRuns.count { it.status == AgentRunStatus.COMPLETED }
         val failedCount = latestRuns.count { it.status == AgentRunStatus.FAILED }
         val finalStatus = when {
@@ -1307,6 +1309,38 @@ class DesktopAppService(
                             it
                         }
                     }
+                )
+            )
+        }
+    }
+
+    private suspend fun ensureTaskPlan(task: AgentTask): AgentTask {
+        val assignments = task.assignments.ifEmpty {
+            DesktopTaskPlanner.createAssignments(task.prompt, task.agents)
+        }
+        val leadAgent = task.leadAgent.ifBlank {
+            assignments.firstOrNull()?.agentName ?: task.agents.firstOrNull().orEmpty()
+        }
+
+        if (assignments == task.assignments && leadAgent == task.leadAgent) {
+            return task
+        }
+
+        val updatedTask = task.copy(
+            leadAgent = leadAgent,
+            assignments = assignments,
+            updatedAt = System.currentTimeMillis()
+        )
+        replaceTask(updatedTask)
+        return updatedTask
+    }
+
+    private suspend fun replaceTask(task: AgentTask) {
+        stateMutex.withLock {
+            val state = stateStore.load()
+            stateStore.save(
+                state.copy(
+                    tasks = state.tasks.map { existing -> if (existing.id == task.id) task else existing }
                 )
             )
         }
