@@ -107,6 +107,14 @@ class DefaultAgentExecutor(
                     plugin.execute(context, processManager)
                 }
                 val duration = System.currentTimeMillis() - startTime
+                val traceContext = TraceContext(
+                    traceId = metadata.traceId ?: "",
+                    spanId = metadata.spanId ?: "",
+                    parentSpanId = metadata.parentSpanId
+                )
+                if (metadata.traceId != null && metadata.spanId != null) {
+                    observabilityService.recordAgentExecution(agent.name, duration, true, traceContext)
+                }
 
                 val result = AgentResult(
                     agentName = agent.name,
@@ -116,6 +124,9 @@ class DefaultAgentExecutor(
                     duration = duration,
                     metadata = buildMap {
                         put("executedAt", Instant.now().toString())
+                        metadata.traceId?.let { put("traceId", it) }
+                        metadata.spanId?.let { put("spanId", it) }
+                        metadata.parentSpanId?.let { put("parentSpanId", it) }
                         // Mirror the pid into the string metadata map because some
                         // existing consumers still only inspect this generic field bag.
                         pluginOutput.processId?.let { put("processId", it.toString()) }
@@ -125,6 +136,14 @@ class DefaultAgentExecutor(
                 result.copy(metadata = result.metadata + observability.completeAgent(observation, metadata, result))
             } catch (e: TimeoutCancellationException) {
                 logAgentFailure("Agent timeout: ${agent.name}", e)
+                if (metadata.traceId != null && metadata.spanId != null) {
+                    observabilityService.recordAgentExecution(
+                        agent.name,
+                        agent.timeout,
+                        false,
+                        TraceContext(metadata.traceId, metadata.spanId, metadata.parentSpanId)
+                    )
+                }
                 AgentResult(
                     agentName = agent.name,
                     isSuccess = false,
@@ -135,6 +154,14 @@ class DefaultAgentExecutor(
                 )
             } catch (e: ProcessExecutionException) {
                 logAgentFailure("Agent process execution failed: ${agent.name}", e)
+                if (metadata.traceId != null && metadata.spanId != null) {
+                    observabilityService.recordAgentExecution(
+                        agent.name,
+                        0,
+                        false,
+                        TraceContext(metadata.traceId, metadata.spanId, metadata.parentSpanId)
+                    )
+                }
                 val stderr = e.stderr.trim().ifEmpty { "(no stderr)" }
                 val message = e.message?.trim().orEmpty().ifEmpty { "Process failed" }
                 AgentResult(
@@ -147,6 +174,14 @@ class DefaultAgentExecutor(
                 )
             } catch (e: Exception) {
                 logAgentFailure("Agent execution failed: ${agent.name}", e)
+                if (metadata.traceId != null && metadata.spanId != null) {
+                    observabilityService.recordAgentExecution(
+                        agent.name,
+                        0,
+                        false,
+                        TraceContext(metadata.traceId, metadata.spanId, metadata.parentSpanId)
+                    )
+                }
                 AgentResult(
                     agentName = agent.name,
                     isSuccess = false,
