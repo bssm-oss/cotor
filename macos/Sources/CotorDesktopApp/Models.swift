@@ -82,6 +82,16 @@ struct TaskRecord: Codable, Identifiable, Hashable {
 }
 
 /// Per-agent run record displayed in the run list and inspector.
+struct RunPublishInfoRecord: Codable, Hashable {
+    let status: String
+    let remoteBranch: String?
+    let commitSha: String?
+    let pullRequestUrl: String?
+    let pullRequestNumber: Int?
+    let summary: String?
+}
+
+/// Per-agent run record displayed in the run list and inspector.
 struct RunRecord: Codable, Identifiable, Hashable {
     let id: String
     let taskId: String
@@ -99,6 +109,7 @@ struct RunRecord: Codable, Identifiable, Hashable {
     let error: String?
     let publish: PublishMetadataRecord?
     let durationMs: Int64?
+    let publishInfo: RunPublishInfoRecord?
     let createdAt: Int64
     let updatedAt: Int64
 }
@@ -710,6 +721,14 @@ struct MockSeed {
             error: nil,
             publish: nil,
             durationMs: 1200,
+            publishInfo: RunPublishInfoRecord(
+                status: "NOT_STARTED",
+                remoteBranch: nil,
+                commitSha: nil,
+                pullRequestUrl: nil,
+                pullRequestNumber: nil,
+                summary: nil
+            ),
             createdAt: 0,
             updatedAt: 0
         ),
@@ -741,6 +760,14 @@ struct MockSeed {
                 error: nil
             ),
             durationMs: 1800,
+            publishInfo: RunPublishInfoRecord(
+                status: "PR_CREATED",
+                remoteBranch: "codex/cotor/superset-shell/codex",
+                commitSha: "8d4a1d9",
+                pullRequestUrl: "https://github.com/heodongun/cotor/pull/140",
+                pullRequestNumber: 140,
+                summary: "Created pull request #140"
+            ),
             createdAt: 0,
             updatedAt: 0
         )

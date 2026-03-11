@@ -2400,6 +2400,32 @@ private struct InspectorPaneView: View {
         .shellInset()
     }
 
+    @ViewBuilder
+    private func publishMetadata(for run: RunRecord) -> some View {
+        let publishInfo = run.publishInfo
+        metadataRow(
+            label: l("PUBLISH", "퍼블리시"),
+            value: publishStatusText(publishInfo?.status ?? "NOT_STARTED")
+        )
+
+        if let summary = publishInfo?.summary, !summary.isEmpty {
+            metadataRow(label: l("SUMMARY", "요약"), value: summary)
+        }
+        if let remoteBranch = publishInfo?.remoteBranch, !remoteBranch.isEmpty {
+            metadataRow(label: l("REMOTE BRANCH", "원격 브랜치"), value: remoteBranch)
+        }
+        if let commitSha = publishInfo?.commitSha, !commitSha.isEmpty {
+            metadataRow(label: l("COMMIT", "커밋"), value: commitSha)
+        }
+        if let pullRequestUrl = publishInfo?.pullRequestUrl, !pullRequestUrl.isEmpty {
+            metadataLinkRow(
+                label: l("PULL REQUEST", "풀 리퀘스트"),
+                value: publishInfo?.pullRequestNumber.map { "#\($0)" } ?? pullRequestUrl,
+                url: pullRequestUrl
+            )
+        }
+    }
+
     private func metadataRow(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label.uppercased())
@@ -2411,6 +2437,37 @@ private struct InspectorPaneView: View {
                 .foregroundStyle(ShellPalette.text)
                 .lineLimit(2)
                 .textSelection(.enabled)
+        }
+    }
+
+    private func metadataLinkRow(label: String, value: String, url: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(ShellPalette.faint)
+            Button(value) {
+                guard let destination = URL(string: url) else { return }
+                NSWorkspace.shared.open(destination)
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(ShellPalette.accent)
+        }
+    }
+
+    private func publishStatusText(_ status: String) -> String {
+        switch status.uppercased() {
+        case "SKIPPED":
+            return l("Skipped", "건너뜀")
+        case "PUSHED":
+            return l("Pushed", "푸시됨")
+        case "PR_CREATED":
+            return l("PR Created", "PR 생성됨")
+        case "FAILED":
+            return l("Failed", "실패")
+        default:
+            return l("Not Started", "시작 전")
         }
     }
 

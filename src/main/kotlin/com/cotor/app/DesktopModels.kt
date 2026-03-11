@@ -280,6 +280,7 @@ data class AgentRun(
     val error: String? = null,
     val publish: PublishMetadata? = null,
     val durationMs: Long? = null,
+    val publishInfo: AgentRunPublishInfo = AgentRunPublishInfo(),
     val createdAt: Long,
     val updatedAt: Long
 )
