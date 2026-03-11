@@ -48,7 +48,7 @@ private enum class InstallScope {
 private data class AgentPreset(
     val name: String,
     val pluginClass: String,
-    val executable: String,
+    val postInstallHint: String,
     val defaultTimeout: Long,
     val defaultModel: String? = null,
 )
@@ -113,13 +113,14 @@ class AgentAddCommand(
 
         val resolvedModel = (model ?: preset.defaultModel).orEmpty().trim()
         val resolvedTimeout = timeout ?: preset.defaultTimeout
+        val resolvedParameters = presetParameters(preset, model?.trim())
 
         val yaml = renderAgentYaml(
             AgentConfig(
                 name = resolvedName,
                 pluginClass = preset.pluginClass,
                 timeout = resolvedTimeout,
-                parameters = presetParameters(preset.name, resolvedModel)
+                parameters = resolvedParameters
             )
         )
 
@@ -153,7 +154,7 @@ class AgentAddCommand(
 
         terminal.println(green("✅ Added agent '$resolvedName' at $outPath"))
         terminal.println("Next step: cotor agent list -c $configPath")
-        terminal.println("Tip: ensure '${preset.executable}' is installed, then run 'cotor doctor'.")
+        terminal.println("Tip: ${preset.postInstallHint}")
     }
 
     private fun confirm(message: String): Boolean {
@@ -173,11 +174,18 @@ class AgentAddCommand(
         )
     }
 
-    private fun presetParameters(preset: String, model: String): Map<String, String> {
-        return when (preset) {
+    private fun presetParameters(preset: AgentPreset, modelOverride: String?): Map<String, String> {
+        if (!preset.supportsModelOverride) {
+            return preset.defaultParameters
+        }
+
+        val defaultModel = preset.defaultParameters["model"].orEmpty()
+        val resolvedModel = modelOverride?.takeIf { it.isNotBlank() } ?: defaultModel
+
+        return when (preset.name) {
             "qwen" -> mapOf(
-                "model" to model,
-                "argvJson" to "[\"qwen\",\"--model\",\"$model\",\"{input}\"]"
+                "model" to resolvedModel,
+                "argvJson" to "[\"qwen\",\"--model\",\"$resolvedModel\",\"{input}\"]"
             )
             "qa" -> emptyMap()
             else -> mapOf("model" to model)
