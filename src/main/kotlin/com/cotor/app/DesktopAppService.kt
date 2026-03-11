@@ -774,6 +774,8 @@ class DesktopAppService(
 
     suspend fun openLocalRepository(path: String): ManagedRepository {
         val repositoryRoot = gitWorkspaceService.resolveRepositoryRoot(Path.of(path))
+        val remoteUrl = gitWorkspaceService.detectRemoteUrl(repositoryRoot)
+        val defaultBranch = gitWorkspaceService.detectDefaultBranch(repositoryRoot)
         val now = System.currentTimeMillis()
         val defaultBranch = gitWorkspaceService.detectDefaultBranch(repositoryRoot)
         val remoteUrl = gitWorkspaceService.detectRemoteUrl(repositoryRoot)
@@ -856,6 +858,9 @@ class DesktopAppService(
                 )
                 return@withLock refreshed
             }
+
+            val repositoryRoot = gitWorkspaceService.cloneRepository(normalizedUrl)
+            val detectedRemote = gitWorkspaceService.detectRemoteUrl(repositoryRoot)
 
             val repository = ManagedRepository(
                 id = UUID.randomUUID().toString(),
