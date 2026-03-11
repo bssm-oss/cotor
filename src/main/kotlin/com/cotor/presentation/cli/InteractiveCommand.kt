@@ -669,6 +669,32 @@ class InteractiveCommand :
         return false
     }
 
+    private data class StarterAgent(
+        val name: String,
+        val pluginClass: String,
+        val executable: String,
+        val parameterBlock: String = ""
+    )
+
+    private fun shouldRefreshStarterConfig(config: com.cotor.model.CotorConfig): Boolean {
+        if (config.agents.size != 1) return false
+        val only = config.agents.first()
+
+        val canUseRealAi = hasCommand("codex") || hasCommand("gemini") || hasCommand("claude") || !System.getenv("OPENAI_API_KEY").isNullOrBlank()
+
+        // Upgrade legacy echo starter when real AI is available.
+        if (only.name.equals("example-agent", ignoreCase = true) && only.pluginClass.endsWith("EchoPlugin")) {
+            return canUseRealAi
+        }
+
+        // Prefer codex over starter-claude when codex exists.
+        if (only.tags.contains("starter") && only.pluginClass.endsWith("ClaudePlugin") && hasCommand("codex")) {
+            return true
+        }
+
+        return false
+    }
+
     private fun writeStarterConfig(path: java.nio.file.Path) {
         val starter = resolveStarterAgent()
 
