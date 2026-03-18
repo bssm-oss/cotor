@@ -870,6 +870,7 @@ class DesktopAppService(
     suspend fun updateBackendSettings(
         defaultBackendKind: ExecutionBackendKind,
         codePublishMode: CodePublishMode? = null,
+        codexModel: String? = null,
         codexLaunchMode: BackendLaunchMode? = null,
         codexCommand: String? = null,
         codexArgs: List<String>? = null,
@@ -905,6 +906,7 @@ class DesktopAppService(
                 backendSettings = state.backendSettings.copy(
                     defaultBackendKind = defaultBackendKind,
                     codePublishMode = codePublishMode ?: state.backendSettings.codePublishMode,
+                    codexModel = codexModel?.trim()?.takeIf { it.isNotBlank() } ?: state.backendSettings.codexModel,
                     backends = updatedConfigs
                 )
             )

@@ -211,6 +211,7 @@ internal fun Application.cotorAppModule(
                         desktopService.updateBackendSettings(
                             defaultBackendKind = request.defaultBackendKind,
                             codePublishMode = request.codePublishMode,
+                            codexModel = request.codexModel,
                             codexLaunchMode = request.codexLaunchMode,
                             codexCommand = request.codexCommand,
                             codexArgs = request.codexArgs,

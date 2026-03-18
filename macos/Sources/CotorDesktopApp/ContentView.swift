@@ -122,13 +122,20 @@ final class DesktopAppLifecycleDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminationInFlight {
+            AppLogger.info("App termination already in progress.")
             return .terminateLater
         }
+
         terminationInFlight = true
         AppLogger.info("App termination requested.")
         Task {
-            _ = await EmbeddedBackendLauncher.shared.stop(timeoutSeconds: 5)
+            let stopped = await EmbeddedBackendLauncher.shared.stop(timeoutSeconds: 5)
             await MainActor.run {
+                if stopped {
+                    AppLogger.info("Embedded backend stopped before app exit.")
+                } else {
+                    AppLogger.error("Embedded backend did not fully stop before app exit; proceeding to terminate app.")
+                }
                 sender.reply(toApplicationShouldTerminate: true)
                 self.terminationInFlight = false
             }

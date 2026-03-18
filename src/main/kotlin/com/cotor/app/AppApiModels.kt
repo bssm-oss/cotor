@@ -129,6 +129,7 @@ data class UpdateCompanyAgentDefinitionRequest(
 data class UpdateBackendSettingsRequest(
     val defaultBackendKind: ExecutionBackendKind,
     val codePublishMode: CodePublishMode? = null,
+    val codexModel: String? = null,
     val codexLaunchMode: BackendLaunchMode? = null,
     val codexCommand: String? = null,
     val codexArgs: List<String>? = null,

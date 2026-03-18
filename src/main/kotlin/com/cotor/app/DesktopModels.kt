@@ -132,6 +132,7 @@ data class ExecutionBackendStatus(
 data class DesktopBackendSettings(
     val defaultBackendKind: ExecutionBackendKind = ExecutionBackendKind.LOCAL_COTOR,
     val codePublishMode: CodePublishMode = CodePublishMode.REQUIRE_GITHUB_PR,
+    val codexModel: String = "gpt-5.3-codex-spark",
     val backends: List<BackendConnectionConfig> = defaultBackendConfigs()
 )
 
