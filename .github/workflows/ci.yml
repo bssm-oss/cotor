@@ -8,6 +8,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -24,11 +25,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Format check
+        timeout-minutes: 10
         run: ./gradlew --no-daemon formatCheck
 
       - name: Test
         id: test
-        run: ./gradlew --no-daemon test
+        timeout-minutes: 20
+        run: ./gradlew --no-daemon test --stacktrace
 
       - name: Reopen and unassign Linear issue on failed PR tests
         if: ${{ failure() && github.event_name == 'pull_request' && steps.test.outcome == 'failure' }}
@@ -38,6 +41,7 @@ jobs:
 
   verify-desktop:
     runs-on: macos-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -54,8 +58,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Swift test
+        timeout-minutes: 20
         run: swift test
         working-directory: macos
 
       - name: Desktop bundle smoke build
+        timeout-minutes: 20
         run: /bin/bash shell/build-desktop-app-bundle.sh
