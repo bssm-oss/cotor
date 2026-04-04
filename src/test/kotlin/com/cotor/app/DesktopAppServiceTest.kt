@@ -18,6 +18,7 @@ import com.cotor.model.AgentConfig
 import com.cotor.model.AgentResult
 import com.cotor.model.ProcessExecutionException
 import com.cotor.model.ProcessResult
+import com.cotor.testsupport.DesktopAppServiceRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
@@ -43,8 +44,18 @@ import java.nio.file.Path
 import kotlin.io.path.exists
 
 class DesktopAppServiceTest : FunSpec({
+    val managedServices = DesktopAppServiceRegistry()
+
+    beforeTest {
+        managedServices.shutdownAll()
+    }
+
+    afterTest {
+        managedServices.shutdownAll()
+    }
+
     test("runTask stores publish metadata on a completed run") {
-        val fixture = DesktopAppServiceFixture.create()
+        val fixture = DesktopAppServiceFixture.create(managedServices)
         coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
             branchName = "codex/cotor/desktop-publish/codex",
             worktreePath = fixture.worktreeRoot
@@ -86,7 +97,7 @@ class DesktopAppServiceTest : FunSpec({
     }
 
     test("runTask fails the run when publish metadata reports an error") {
-        val fixture = DesktopAppServiceFixture.create()
+        val fixture = DesktopAppServiceFixture.create(managedServices)
         coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
             branchName = "codex/cotor/desktop-publish/codex",
             worktreePath = fixture.worktreeRoot
@@ -121,7 +132,7 @@ class DesktopAppServiceTest : FunSpec({
     }
 
     test("runTask keeps a manual task completed when publish reports no diff") {
-        val fixture = DesktopAppServiceFixture.create()
+        val fixture = DesktopAppServiceFixture.create(managedServices)
         coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
             branchName = "codex/cotor/manual-no-diff/codex",
             worktreePath = fixture.worktreeRoot
@@ -341,7 +352,7 @@ class DesktopAppServiceTest : FunSpec({
     }
 
     test("runTask clears stale review metadata when a validation-only follow-up completes without publishing") {
-        val fixture = DesktopAppServiceFixture.create()
+        val fixture = DesktopAppServiceFixture.create(managedServices)
         val company = Company(
             id = "company-validation-run",
             name = "Validation Run Co",
@@ -535,7 +546,7 @@ class DesktopAppServiceTest : FunSpec({
     }
 
     test("runTask keeps the run completed when publish falls back to a local-only commit") {
-        val fixture = DesktopAppServiceFixture.create()
+        val fixture = DesktopAppServiceFixture.create(managedServices)
         fixture.service.updateBackendSettings(
             defaultBackendKind = ExecutionBackendKind.LOCAL_COTOR,
             codePublishMode = CodePublishMode.ALLOW_LOCAL_GIT
@@ -574,7 +585,7 @@ class DesktopAppServiceTest : FunSpec({
     }
 
     test("runTask fails code work when local-only publish happens under required GitHub PR mode") {
-        val fixture = DesktopAppServiceFixture.create()
+        val fixture = DesktopAppServiceFixture.create(managedServices)
         coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
             branchName = "codex/cotor/desktop-publish/codex",
             worktreePath = fixture.worktreeRoot
@@ -9509,7 +9520,7 @@ private class DesktopAppServiceFixture private constructor(
     }
 
     companion object {
-        suspend fun create(): DesktopAppServiceFixture {
+        suspend fun create(registry: DesktopAppServiceRegistry): DesktopAppServiceFixture {
             val appHome = Files.createTempDirectory("desktop-app-service-test")
             val repoRoot = Files.createTempDirectory("desktop-app-service-repo")
             val worktreeRoot = Files.createTempDirectory("desktop-app-service-worktree")
@@ -9517,7 +9528,9 @@ private class DesktopAppServiceFixture private constructor(
             val gitWorkspaceService = mockk<GitWorkspaceService>()
             val agentExecutor = mockk<AgentExecutor>()
             val configRepository = mockk<ConfigRepository>(relaxed = true)
-            val service = DesktopAppService(stateStore, gitWorkspaceService, configRepository, agentExecutor)
+            val service = registry.register(
+                DesktopAppService(stateStore, gitWorkspaceService, configRepository, agentExecutor)
+            )
 
             val repository = ManagedRepository(
                 id = REPOSITORY_ID,
@@ -9560,6 +9573,7 @@ private class DesktopAppServiceFixture private constructor(
 }
 
 private fun testService(
+    registry: DesktopAppServiceRegistry = DesktopAppServiceRegistry(),
     processManager: ProcessManager,
     appHome: Path? = null,
     stateStore: DesktopStateStore? = null,
@@ -9571,12 +9585,14 @@ private fun testService(
         stateStore = store,
         logger = mockk(relaxed = true)
     )
-    return DesktopAppService(
+    return registry.register(
+        DesktopAppService(
         stateStore = store,
         gitWorkspaceService = gitWorkspaceService,
         configRepository = mockk<ConfigRepository>(relaxed = true),
         agentExecutor = mockk<AgentExecutor>(relaxed = true),
         linearTracker = linearTracker
+        )
     )
 }
 
