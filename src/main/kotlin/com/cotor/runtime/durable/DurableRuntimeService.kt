@@ -126,10 +126,11 @@ class DurableRuntimeService(
         val runtimeContext = currentDurableRuntimeContext() ?: return null
         val run = inspectRun(runtimeContext.runId) ?: return null
         val checkpointId = run.latestCompletedCheckpoint?.id ?: runtimeContext.sourceCheckpointId
+        val effectiveApprovalRequiredOnReplay = approvalRequiredOnReplay || !replaySafe
         val existingPendingPause = run.approvalPauses.firstOrNull { pause ->
             pause.status == ApprovalPauseStatus.PENDING && pause.label == label && pause.checkpointId == checkpointId
         }
-        if (runtimeContext.replayMode != ReplayMode.LIVE && approvalRequiredOnReplay) {
+        if (runtimeContext.replayMode != ReplayMode.LIVE && effectiveApprovalRequiredOnReplay) {
             if (existingPendingPause != null) {
                 throw ReplayApprovalRequiredException(runtimeContext.runId, existingPendingPause)
             }
@@ -142,7 +143,7 @@ class DurableRuntimeService(
                     kind = kind,
                     label = label,
                     replaySafe = replaySafe,
-                    approvalRequiredOnReplay = approvalRequiredOnReplay,
+                    approvalRequiredOnReplay = effectiveApprovalRequiredOnReplay,
                     status = SideEffectStatus.WAITING_FOR_APPROVAL,
                     createdAt = System.currentTimeMillis(),
                     metadata = metadata + mapOf("replayMode" to runtimeContext.replayMode.name)
@@ -165,8 +166,8 @@ class DurableRuntimeService(
             kind = kind,
             label = label,
             replaySafe = replaySafe,
-            approvalRequiredOnReplay = approvalRequiredOnReplay,
-            status = if (runtimeContext.replayMode != ReplayMode.LIVE && approvalRequiredOnReplay) SideEffectStatus.APPROVED else SideEffectStatus.RECORDED,
+            approvalRequiredOnReplay = effectiveApprovalRequiredOnReplay,
+            status = if (runtimeContext.replayMode != ReplayMode.LIVE && effectiveApprovalRequiredOnReplay) SideEffectStatus.APPROVED else SideEffectStatus.RECORDED,
             createdAt = System.currentTimeMillis(),
             metadata = metadata + mapOf("replayMode" to runtimeContext.replayMode.name)
         )
