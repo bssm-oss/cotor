@@ -1227,8 +1227,10 @@ final class DesktopStore: ObservableObject {
 
         if let issueId = selectedIssueID {
             do {
-                issueExecutionDetails = try await api.issueExecutionDetails(issueId: issueId)
+                let fetchedIssueExecutionDetails = try await api.issueExecutionDetails(issueId: issueId)
                     .sorted { lhs, rhs in lhs.updatedAt > rhs.updatedAt }
+                guard selectedIssueID == issueId else { return }
+                issueExecutionDetails = fetchedIssueExecutionDetails
             } catch {
                 issueExecutionDetails = []
                 errorMessage = error.localizedDescription
@@ -1248,10 +1250,12 @@ final class DesktopStore: ObservableObject {
         let agent = selectedAgentName ?? task.agents.first
         selectedAgentName = agent
         guard let agent else { return }
+        let requestedIssueID = selectedIssueID
+        let requestedTaskID = task.id
 
         do {
             let fetchedRuns: [RunRecord]
-            if let issueId = selectedIssueID {
+            if let issueId = requestedIssueID {
                 fetchedRuns = try await api.issueRuns(issueId: issueId).sorted { lhs, rhs in
                     lhs.updatedAt > rhs.updatedAt
                 }
@@ -1260,6 +1264,7 @@ final class DesktopStore: ObservableObject {
                     lhs.updatedAt > rhs.updatedAt
                 }
             }
+            guard selectedIssueID == requestedIssueID, selectedTask?.id == requestedTaskID else { return }
             runs = fetchedRuns
 
             let latestForTask = fetchedRuns.filter { $0.taskId == task.id }
@@ -1285,10 +1290,14 @@ final class DesktopStore: ObservableObject {
             async let fetchedFiles = safeFiles(runId: effectiveRun.id)
             async let fetchedPorts = safePorts(runId: effectiveRun.id)
 
-            changes = await fetchedChanges
-            files = await fetchedFiles
-            ports = await fetchedPorts
-            browserURL = ports.first.flatMap { URL(string: $0.url) }
+            let resolvedChanges = await fetchedChanges
+            let resolvedFiles = await fetchedFiles
+            let resolvedPorts = await fetchedPorts
+            guard selectedIssueID == requestedIssueID, selectedTask?.id == effectiveRun.taskId else { return }
+            changes = resolvedChanges
+            files = resolvedFiles
+            ports = resolvedPorts
+            browserURL = resolvedPorts.first.flatMap { URL(string: $0.url) }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -2004,14 +2013,17 @@ final class DesktopStore: ObservableObject {
             return
         }
 
+        let issueId = selectedIssueID
         do {
-            companyMemorySnapshot = try await runWithEmbeddedBackendRecovery {
+            let snapshot = try await runWithEmbeddedBackendRecovery {
                 try await api.companyMemorySnapshot(
                     companyId: companyId,
-                    issueId: selectedIssueID,
+                    issueId: issueId,
                     agentProfileId: nil
                 )
             }
+            guard (selectedCompanyID ?? selectedCompany?.id) == companyId, selectedIssueID == issueId else { return }
+            companyMemorySnapshot = snapshot
         } catch is CancellationError {
             return
         } catch {

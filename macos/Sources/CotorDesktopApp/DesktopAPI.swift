@@ -12,6 +12,9 @@ import Foundation
 /// and state transitions instead of URLSession boilerplate.
 struct DesktopAPI {
     static let embeddedAppToken = "cotor-desktop-local-token"
+    static var appToken: String {
+        ProcessInfo.processInfo.environment["COTOR_APP_TOKEN"] ?? embeddedAppToken
+    }
     let baseURL: URL
     let token: String?
 
@@ -23,7 +26,7 @@ struct DesktopAPI {
             preconditionFailure("Default app server URL must be valid")
         }
         self.baseURL = URL(string: rawURL) ?? fallbackURL
-        self.token = ProcessInfo.processInfo.environment["COTOR_APP_TOKEN"] ?? Self.embeddedAppToken
+        self.token = Self.appToken
     }
 
     /// Fetch the full dashboard payload used to bootstrap most of the app state.
