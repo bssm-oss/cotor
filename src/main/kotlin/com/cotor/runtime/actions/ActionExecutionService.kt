@@ -142,7 +142,7 @@ class ActionExecutionService(
 
     private fun ActionKind.toSideEffectKind(): SideEffectKind = when (this) {
         ActionKind.SHELL_EXEC -> SideEffectKind.PROCESS_LAUNCH
-        ActionKind.FILE_WRITE -> SideEffectKind.PROCESS_LAUNCH
+        ActionKind.FILE_WRITE -> SideEffectKind.FILE_WRITE
         ActionKind.HTTP_REQUEST -> SideEffectKind.HTTP_REQUEST
         ActionKind.AGENT_EXEC -> SideEffectKind.AGENT_EXECUTION
         ActionKind.GIT_WORKTREE -> SideEffectKind.GIT_WORKTREE
@@ -150,7 +150,7 @@ class ActionExecutionService(
         ActionKind.GITHUB_REVIEW -> SideEffectKind.GITHUB_REVIEW
         ActionKind.GITHUB_COMMENT -> SideEffectKind.GITHUB_COMMENT
         ActionKind.GITHUB_MERGE -> SideEffectKind.GITHUB_MERGE
-        ActionKind.SECRET_READ -> SideEffectKind.PROCESS_LAUNCH
+        ActionKind.SECRET_READ -> SideEffectKind.SECRET_READ
     }
 
     private fun summarizeMetadata(metadata: Map<String, String>): String? =

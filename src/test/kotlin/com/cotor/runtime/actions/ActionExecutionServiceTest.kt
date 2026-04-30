@@ -8,9 +8,18 @@ import com.cotor.policy.PolicyScopeLevel
 import com.cotor.policy.PolicyStore
 import com.cotor.provenance.ProvenanceService
 import com.cotor.provenance.ProvenanceStore
+import com.cotor.runtime.durable.DurableRunSnapshot
+import com.cotor.runtime.durable.DurableRunStatus
+import com.cotor.runtime.durable.DurableRuntimeContext
+import com.cotor.runtime.durable.DurableRuntimeService
+import com.cotor.runtime.durable.DurableRuntimeStore
+import com.cotor.runtime.durable.ReplayMode
+import com.cotor.runtime.durable.SideEffectKind
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.nio.file.Files
 
 class ActionExecutionServiceTest : FunSpec({
@@ -56,5 +65,44 @@ class ActionExecutionServiceTest : FunSpec({
         val snapshot = actionStore.load("standalone")
         snapshot shouldNotBe null
         snapshot!!.records.single().status shouldBe ActionStatus.DENIED
+    }
+
+    test("file and secret actions record precise durable side effect kinds") {
+        val appHome = Files.createTempDirectory("action-execution-side-effects")
+        val runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))
+        runtimeStore.saveRun(
+            DurableRunSnapshot(
+                runId = "run-side-effects",
+                pipelineName = "side-effects",
+                status = DurableRunStatus.RUNNING,
+                createdAt = 1L,
+                updatedAt = 1L
+            )
+        )
+        val service = ActionExecutionService(
+            actionStore = ActionStore { appHome },
+            durableRuntimeService = DurableRuntimeService(runtimeStore = runtimeStore),
+            provenanceService = ProvenanceService(ProvenanceStore { appHome })
+        )
+
+        runBlocking {
+            withContext(DurableRuntimeContext(runId = "run-side-effects", replayMode = ReplayMode.LIVE)) {
+                service.run(
+                    request = ActionRequest(kind = ActionKind.FILE_WRITE, label = "file.write:test")
+                ) {
+                    "file"
+                }
+                service.run(
+                    request = ActionRequest(kind = ActionKind.SECRET_READ, label = "secret.read:test")
+                ) {
+                    "secret"
+                }
+            }
+        }
+
+        runtimeStore.loadRun("run-side-effects")!!.sideEffects.map { it.kind } shouldBe listOf(
+            SideEffectKind.FILE_WRITE,
+            SideEffectKind.SECRET_READ
+        )
     }
 })
