@@ -11,6 +11,7 @@ package com.cotor.app
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -77,6 +78,59 @@ class AppServerTest : FunSpec({
             val response = client.get("/api/app/dashboard")
             response.status shouldBe HttpStatusCode.Unauthorized
             response.bodyAsText() shouldContain "Unauthorized"
+        }
+    }
+
+    test("settings route redacts backend and Linear tokens") {
+        every { desktopService.settings() } returns DesktopSettings(
+            appHome = "/tmp/cotor-app-home",
+            managedReposRoot = "/tmp/cotor-repos",
+            availableAgents = emptyList(),
+            backendSettings = DesktopBackendSettings(
+                backends = listOf(
+                    BackendConnectionConfig(
+                        kind = ExecutionBackendKind.CODEX_APP_SERVER,
+                        authMode = "bearer",
+                        token = "codex-secret-token"
+                    )
+                )
+            ),
+            linearSettings = DesktopLinearSettings(
+                defaultConfig = LinearConnectionConfig(apiToken = "linear-secret-token")
+            ),
+            backendStatuses = listOf(
+                ExecutionBackendStatus(
+                    kind = ExecutionBackendKind.CODEX_APP_SERVER,
+                    displayName = "Codex",
+                    config = BackendConnectionConfig(
+                        kind = ExecutionBackendKind.CODEX_APP_SERVER,
+                        authMode = "bearer",
+                        token = "status-secret-token"
+                    )
+                )
+            )
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/settings") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val body = response.bodyAsText()
+
+            response.status shouldBe HttpStatusCode.OK
+            body shouldContain "\"token\":null"
+            body shouldContain "\"apiToken\":null"
+            body shouldNotContain "codex-secret-token"
+            body shouldNotContain "linear-secret-token"
+            body shouldNotContain "status-secret-token"
         }
     }
 
@@ -1536,6 +1590,12 @@ class AppServerTest : FunSpec({
                     rootPath = "/tmp/cotor",
                     repositoryId = "repo-1",
                     defaultBaseBranch = "master",
+                    backendConfigOverride = BackendConnectionConfig(
+                        kind = ExecutionBackendKind.CODEX_APP_SERVER,
+                        authMode = "bearer",
+                        token = "company-backend-secret"
+                    ),
+                    linearConfigOverride = LinearConnectionConfig(apiToken = "company-linear-secret"),
                     dailyBudgetCents = 1500,
                     monthlyBudgetCents = 12000,
                     createdAt = 1L,
@@ -1578,6 +1638,17 @@ class AppServerTest : FunSpec({
                 monthSpentCents = 1180,
                 budgetPausedAt = 5L,
                 budgetResetDate = "2026-03-28"
+            ),
+            backendStatuses = listOf(
+                ExecutionBackendStatus(
+                    kind = ExecutionBackendKind.CODEX_APP_SERVER,
+                    displayName = "Codex",
+                    config = BackendConnectionConfig(
+                        kind = ExecutionBackendKind.CODEX_APP_SERVER,
+                        authMode = "bearer",
+                        token = "dashboard-status-secret"
+                    )
+                )
             )
         )
 
@@ -1614,6 +1685,11 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"todaySpentCents\":245"
             response.bodyAsText() shouldContain "\"monthSpentCents\":1180"
             response.bodyAsText() shouldContain "\"budgetPausedAt\":5"
+            response.bodyAsText() shouldContain "\"token\":null"
+            response.bodyAsText() shouldContain "\"apiToken\":null"
+            response.bodyAsText() shouldNotContain "company-backend-secret"
+            response.bodyAsText() shouldNotContain "company-linear-secret"
+            response.bodyAsText() shouldNotContain "dashboard-status-secret"
             coVerify(exactly = 1) { desktopService.companyDashboardReadOnly("company-1") }
             coVerify(exactly = 0) { desktopService.companyDashboard("company-1") }
         }
