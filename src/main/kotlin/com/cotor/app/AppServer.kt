@@ -344,13 +344,13 @@ internal fun Application.cotorAppModule(
 
             get("/dashboard") {
                 if (!requireToken(token)) return@get
-                call.respond(desktopService.dashboard())
+                call.respond(desktopService.dashboard().redactedForApi())
             }
 
             route("/settings/backends") {
                 get {
                     if (!requireToken(token)) return@get
-                    call.respond(desktopService.backendStatuses())
+                    call.respond(desktopService.backendStatuses().map { it.redactedForApi() })
                 }
 
                 patch("/default") {
@@ -390,7 +390,7 @@ internal fun Application.cotorAppModule(
                             authMode = request.authMode,
                             token = request.token,
                             timeoutSeconds = request.timeoutSeconds
-                        )
+                        ).redactedForApi()
                     }
                 }
             }
@@ -792,7 +792,7 @@ internal fun Application.cotorAppModule(
             route("/company") {
                 get {
                     if (!requireToken(token)) return@get
-                    call.respond(desktopService.companyDashboardReadOnly())
+                    call.respond(desktopService.companyDashboardReadOnly().redactedForApi())
                 }
 
                 route("/goals") {
@@ -992,7 +992,7 @@ internal fun Application.cotorAppModule(
                     if (!requireToken(token)) return@get
                     val companyId = call.parameters["companyId"]
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
-                    call.respond(desktopService.companyDashboardReadOnly(companyId))
+                    call.respond(desktopService.companyDashboardReadOnly(companyId).redactedForApi())
                 }
 
                 get("/{companyId}/memory-snapshot") {
@@ -1745,7 +1745,7 @@ internal fun Application.cotorAppModule(
 
             get("/settings") {
                 if (!requireToken(token)) return@get
-                call.respond(desktopService.settings())
+                call.respond(desktopService.settings().redactedForApi())
             }
         }
     }

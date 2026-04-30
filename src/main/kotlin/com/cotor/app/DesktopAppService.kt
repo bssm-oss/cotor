@@ -336,7 +336,7 @@ class DesktopAppService(
                 .sortedByDescending { it.lastTickAt ?: 0L },
             agentContextEntries = state.agentContextEntries.sortedByDescending { it.createdAt },
             agentMessages = state.agentMessages.sortedByDescending { it.createdAt }
-        )
+        ).redactedForApi()
     }
 
     suspend fun companyDashboard(companyId: String? = null): CompanyDashboardResponse {
@@ -351,12 +351,12 @@ class DesktopAppService(
             prepareCompanyAutomationState(companyId)
         }
         val state = stateStore.load().withDerivedMetrics()
-        return companyDashboardSnapshot(state, companyId)
+        return companyDashboardSnapshot(state, companyId).redactedForApi()
     }
 
     suspend fun companyDashboardReadOnly(companyId: String? = null): CompanyDashboardResponse {
         val state = stateStore.load().withDerivedMetrics()
-        return companyDashboardSnapshot(state, companyId)
+        return companyDashboardSnapshot(state, companyId).redactedForApi()
     }
 
     private fun companyDashboardSnapshot(
@@ -2154,10 +2154,10 @@ class DesktopAppService(
     }
 
     suspend fun backendStatuses(): List<ExecutionBackendStatus> =
-        computeBackendStatuses(stateStore.load())
+        computeBackendStatuses(stateStore.load()).map { it.redactedForApi() }
 
     suspend fun companyBackendStatus(companyId: String): ExecutionBackendStatus =
-        companyBackendStatus(companyId, stateStore.load())
+        companyBackendStatus(companyId, stateStore.load()).redactedForApi()
 
     suspend fun startCompanyBackend(companyId: String): ExecutionBackendStatus {
         val state = stateStore.load()
@@ -7888,7 +7888,7 @@ class DesktopAppService(
             linearSettings = state.linearSettings,
             backendStatuses = computeBackendStatuses(state),
             shortcuts = ShortcutConfig()
-        )
+        ).redactedForApi()
     }
 
     fun availableAgentModels(agent: String): List<String> {
