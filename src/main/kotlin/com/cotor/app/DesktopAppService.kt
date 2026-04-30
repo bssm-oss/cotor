@@ -3887,6 +3887,8 @@ class DesktopAppService(
             val now = System.currentTimeMillis()
             val blockedIssue = currentIssue.copy(
                 status = IssueStatus.BLOCKED,
+                providerBlockReason = reason,
+                transitionReason = "Issue run could not start: $reason",
                 updatedAt = now
             )
             val nextState = state.copy(
@@ -6235,8 +6237,11 @@ class DesktopAppService(
             message.contains("githubcopilot.com/.well-known/oauth-protected-resource/mcp/")
 
     private fun isRecoverableOpenCodeCliFailure(message: String): Boolean =
-        message.contains("decimalerror") &&
-            message.contains("invalid argument: [object object]")
+        message.contains("provider returned error") ||
+            (
+                message.contains("decimalerror") &&
+                    message.contains("invalid argument: [object object]")
+                )
 
     private fun extractGitHubPublishReadinessFailureReason(
         task: AgentTask,
@@ -6295,7 +6300,8 @@ class DesktopAppService(
             return false
         }
         return failureSignals(task, run).any { message ->
-            CodexDefaults.isRetiredModelAliasFailure(message)
+            message.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) ||
+                CodexDefaults.isRetiredModelAliasFailure(message)
         }
     }
 
