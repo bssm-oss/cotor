@@ -12,6 +12,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -56,6 +57,36 @@ class WebServerTest : FunSpec({
             response.status.value shouldBe 200
             response.bodyAsText() shouldContain "Cotor Company Console"
             response.bodyAsText() shouldContain "/api/company/dashboard"
+        }
+    }
+
+    test("favicon request does not create a browser console 404") {
+        val configRepository = mockk<ConfigRepository>(relaxed = true)
+        val agentRegistry = mockk<AgentRegistry>(relaxed = true)
+        val orchestrator = mockk<PipelineOrchestrator>(relaxed = true)
+        val desktopService = mockk<DesktopAppService>(relaxed = true)
+        val editorDir = Files.createTempDirectory("cotor-web-favicon-test")
+
+        testApplication {
+            application {
+                cotorWebModule(
+                    configRepository = configRepository,
+                    agentRegistry = agentRegistry,
+                    orchestrator = orchestrator,
+                    desktopService = desktopService,
+                    editorDir = editorDir,
+                    readOnly = false,
+                    buildTemplates = { emptyList() },
+                    listSavedPipelines = { emptyList() },
+                    loadPipelineDetail = { null },
+                    savePipeline = { editorDir.resolve("saved.yaml") },
+                    buildTimelinePayload = { _, _ -> emptyList() }
+                )
+            }
+
+            val response = client.get("/favicon.ico")
+
+            response.status shouldBe HttpStatusCode.NoContent
         }
     }
 
@@ -371,6 +402,43 @@ class WebServerTest : FunSpec({
             editorPage.bodyAsText().contains("capture.js") shouldBe false
             companyPage.bodyAsText().contains("capture.js") shouldBe false
             editorPage.bodyAsText() shouldContain "function escapeHtml"
+        }
+    }
+
+    test("editor page syncs focused stage fields before save or run") {
+        val configRepository = mockk<ConfigRepository>(relaxed = true)
+        val agentRegistry = mockk<AgentRegistry>(relaxed = true)
+        val orchestrator = mockk<PipelineOrchestrator>(relaxed = true)
+        val desktopService = mockk<DesktopAppService>(relaxed = true)
+        val editorDir = Files.createTempDirectory("cotor-web-stage-input-test")
+
+        testApplication {
+            application {
+                cotorWebModule(
+                    configRepository = configRepository,
+                    agentRegistry = agentRegistry,
+                    orchestrator = orchestrator,
+                    desktopService = desktopService,
+                    editorDir = editorDir,
+                    readOnly = false,
+                    webToken = "secret-web-token",
+                    buildTemplates = { emptyList() },
+                    listSavedPipelines = { emptyList() },
+                    loadPipelineDetail = { null },
+                    savePipeline = { editorDir.resolve("saved.yaml") },
+                    buildTimelinePayload = { _, _ -> emptyList() }
+                )
+            }
+
+            val editorPage = client.get("/editor")
+            val body = editorPage.bodyAsText()
+
+            editorPage.status shouldBe HttpStatusCode.OK
+            body shouldContain "data-stage-key=\"input\""
+            body shouldContain "oninput=\"updateStageField"
+            body shouldContain "function collectStageStateFromDom()"
+            body shouldContain "collectStageStateFromDom();"
+            body shouldNotContain "textarea onchange=\"updateStageField"
         }
     }
 

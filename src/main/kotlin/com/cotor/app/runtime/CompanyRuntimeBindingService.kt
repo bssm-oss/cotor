@@ -103,6 +103,8 @@ class CompanyRuntimeBindingService(
                         WAITING_FOR_CI
                     matchingRun?.status == DurableRunStatus.FAILED && issue.status == com.cotor.app.IssueStatus.BLOCKED ->
                         QUARANTINED
+                    issue.status == com.cotor.app.IssueStatus.BLOCKED && !issue.providerBlockReason.isNullOrBlank() ->
+                        QUARANTINED
                     issue.status == com.cotor.app.IssueStatus.BLOCKED &&
                         (issuePullRequest?.checksSummary?.contains("SUCCESS", ignoreCase = true) == true) ->
                         RECOVERABLE

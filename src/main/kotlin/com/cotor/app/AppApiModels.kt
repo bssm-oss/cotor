@@ -267,6 +267,34 @@ data class CompanyDashboardResponse(
     val agentMessages: List<AgentMessage> = emptyList()
 )
 
+internal fun BackendConnectionConfig.redactedForApi(): BackendConnectionConfig = copy(token = null)
+
+internal fun ExecutionBackendStatus.redactedForApi(): ExecutionBackendStatus = copy(config = config.redactedForApi())
+
+internal fun LinearConnectionConfig.redactedForApi(): LinearConnectionConfig = copy(apiToken = null)
+
+internal fun DesktopLinearSettings.redactedForApi(): DesktopLinearSettings = copy(defaultConfig = defaultConfig.redactedForApi())
+
+internal fun DesktopBackendSettings.redactedForApi(): DesktopBackendSettings = copy(
+    backends = backends.map { it.redactedForApi() }
+)
+
+internal fun Company.redactedForApi(): Company = copy(
+    backendConfigOverride = backendConfigOverride?.redactedForApi(),
+    linearConfigOverride = linearConfigOverride?.redactedForApi()
+)
+
+internal fun DesktopSettings.redactedForApi(): DesktopSettings = copy(
+    backendSettings = backendSettings.redactedForApi(),
+    linearSettings = linearSettings.redactedForApi(),
+    backendStatuses = backendStatuses.map { it.redactedForApi() }
+)
+
+internal fun CompanyDashboardResponse.redactedForApi(): CompanyDashboardResponse = copy(
+    companies = companies.map { it.redactedForApi() },
+    backendStatuses = backendStatuses.map { it.redactedForApi() }
+)
+
 /**
  * Top-level bootstrap response consumed by the Swift client after launch/refresh.
  */
@@ -292,6 +320,12 @@ data class DashboardResponse(
     val companyRuntimes: List<CompanyRuntimeSnapshot> = emptyList(),
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
     val agentMessages: List<AgentMessage> = emptyList()
+)
+
+internal fun DashboardResponse.redactedForApi(): DashboardResponse = copy(
+    settings = settings.redactedForApi(),
+    companies = companies.map { it.redactedForApi() },
+    backendStatuses = backendStatuses.map { it.redactedForApi() }
 )
 
 /**

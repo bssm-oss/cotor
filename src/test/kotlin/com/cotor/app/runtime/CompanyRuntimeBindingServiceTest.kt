@@ -30,6 +30,7 @@ import com.cotor.runtime.durable.DurableRunStatus
 import com.cotor.runtime.durable.DurableRuntimeService
 import com.cotor.runtime.durable.DurableRuntimeStore
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import java.nio.file.Files
 
@@ -160,5 +161,54 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.issues.single().approvalPauseId shouldBe "pause-1"
         bound.issues.single().providerBlockReason shouldBe "ci=COMPLETED/FAILURE"
         bound.reviewQueue.single().providerBlockReason shouldBe "ci=COMPLETED/FAILURE"
+    }
+
+    test("bind keeps provider-blocked execution failures in blocked runtime attention without durable snapshots") {
+        val appHome = Files.createTempDirectory("company-runtime-provider-blocked")
+        val companyId = "company-provider-blocked"
+        val issueId = "issue-provider-blocked"
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))),
+            actionStore = ActionStore { appHome },
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(
+                    Company(
+                        id = companyId,
+                        name = "Provider Blocked",
+                        rootPath = ".",
+                        repositoryId = "repo-provider-blocked",
+                        defaultBaseBranch = "main",
+                        backendKind = ExecutionBackendKind.LOCAL_COTOR,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                issues = listOf(
+                    CompanyIssue(
+                        id = issueId,
+                        companyId = companyId,
+                        goalId = "goal-provider-blocked",
+                        workspaceId = "workspace-provider-blocked",
+                        title = "Provider failed issue",
+                        description = "desc",
+                        status = IssueStatus.BLOCKED,
+                        durableRunId = "missing-run",
+                        providerBlockReason = "OpenCode execution failed (exit=0): \"Provider returned error\"",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.issues.single().runtimeDisposition shouldBe "QUARANTINED"
+        bound.runtime.blockedIssueIds shouldContain issueId
     }
 })
