@@ -7,6 +7,7 @@ APP_NAME="Cotor Desktop"
 BUNDLE_NAME="$APP_NAME.app"
 DOWNLOADS_DIR="$HOME/Downloads"
 REMOVED=0
+INSTALL_ROOT="${COTOR_DESKTOP_INSTALL_ROOT:-}"
 
 remove_path() {
     local target="$1"
@@ -19,6 +20,9 @@ remove_path() {
 
 remove_path "/Applications/$BUNDLE_NAME"
 remove_path "$HOME/Applications/$BUNDLE_NAME"
+if [[ -n "$INSTALL_ROOT" ]]; then
+    remove_path "$INSTALL_ROOT/$BUNDLE_NAME"
+fi
 remove_path "$DOWNLOADS_DIR/$BUNDLE_NAME"
 remove_path "$DOWNLOADS_DIR/Cotor-Desktop-macOS.dmg"
 

@@ -30,6 +30,7 @@ enum class CheckpointNodeState {
 enum class SideEffectKind {
     AGENT_EXECUTION,
     PROCESS_LAUNCH,
+    FILE_WRITE,
     GIT_WORKTREE,
     GIT_PUBLISH,
     GITHUB_REVIEW,
@@ -37,6 +38,7 @@ enum class SideEffectKind {
     GITHUB_CLOSE_PR,
     GITHUB_REFRESH_PR,
     GITHUB_MERGE,
+    SECRET_READ,
     HTTP_REQUEST
 }
 
