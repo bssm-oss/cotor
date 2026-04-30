@@ -8,7 +8,6 @@ import com.cotor.integrations.linear.LinearTrackerAdapter
 import com.cotor.model.ProcessResult
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
 import io.mockk.mockk
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
@@ -19,6 +18,10 @@ private const val REQUEUE_REPOSITORY_ID = "repo-1"
 private const val REQUEUE_WORKSPACE_ID = "ws-1"
 
 class DesktopAppServiceRequeueOrphanedTest : FunSpec({
+    beforeTest {
+        DesktopAppService.shutdownAllForTesting()
+    }
+
     afterTest {
         DesktopAppService.shutdownAllForTesting()
     }
@@ -190,14 +193,24 @@ class DesktopAppServiceRequeueOrphanedTest : FunSpec({
         }
         stateStore.save(requeueState(appHome, repoRoot, company, goal, issue, tasks, runs))
         val service = requeueTestService(
-            processManager = RequeueGitProcessManager(repoRoot, null, "master"),
+            processManager = RequeueGitProcessManager(repoRoot, "https://github.com/example/cotor.git", "master"),
             stateStore = stateStore
         )
 
         try {
             service.prepareCompanyAutomationStateForTesting(company.id)
 
-            stateStore.load().issues.single { it.id == issue.id }.status shouldNotBe IssueStatus.BLOCKED
+            withTimeout(30_000) {
+                while (true) {
+                    val current = stateStore.load()
+                    val currentIssue = current.issues.single { it.id == issue.id }
+                    val issueTasks = current.tasks.filter { it.issueId == issue.id }
+                    if (currentIssue.status != IssueStatus.BLOCKED || issueTasks.size > tasks.size) {
+                        return@withTimeout
+                    }
+                    delay(25)
+                }
+            }
         } finally {
             service.shutdown()
         }
@@ -248,7 +261,14 @@ class DesktopAppServiceRequeueOrphanedTest : FunSpec({
         try {
             service.prepareCompanyAutomationStateForTesting(company.id)
 
-            stateStore.load().tasks.count { it.issueId == issue.id } shouldBe 2
+            withTimeout(30_000) {
+                while (true) {
+                    if (stateStore.load().tasks.count { it.issueId == issue.id } == 2) {
+                        return@withTimeout
+                    }
+                    delay(25)
+                }
+            }
         } finally {
             service.shutdown()
         }

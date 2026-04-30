@@ -5007,6 +5007,8 @@ class DesktopAppService(
                         ignoreCase = true
                     ) == true
                     val reopenedDuringThisTick = issue.updatedAt >= tickStartedAt && reopenedLegacyMergeConflict
+                    val recoveredInterruptedIssueDuringThisTick = issue.updatedAt >= tickStartedAt &&
+                        issue.providerBlockReason?.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) == true
                     val waitingForRetryCooldown =
                         issue.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED) &&
                             retryDecision.mode == RecoverableRetryMode.WAITING
@@ -5014,7 +5016,8 @@ class DesktopAppService(
                         !alreadyStarted &&
                         !waitingForRetryCooldown &&
                         !recoveredNonAutonomousDuringThisTick &&
-                        !reopenedDuringThisTick
+                        !reopenedDuringThisTick &&
+                        !recoveredInterruptedIssueDuringThisTick
                 }
             if (autonomousGoals.isEmpty() && runnableIssues.isEmpty()) {
                 actions += "idle-no-autonomous-goals"
