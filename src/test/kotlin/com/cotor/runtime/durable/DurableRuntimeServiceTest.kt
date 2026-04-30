@@ -139,4 +139,57 @@ class DurableRuntimeServiceTest : FunSpec({
 
         service.inspectRun("run-1")!!.sideEffects.last().status shouldBe SideEffectStatus.APPROVED
     }
+
+    test("recordSideEffect treats replay-unsafe effects as approval-required even when caller omits the replay flag") {
+        val runtimeDir = Files.createTempDirectory("durable-runtime-replay-invariant")
+        val service = DurableRuntimeService(runtimeStore = DurableRuntimeStore(runtimeDir))
+        val pipeline = Pipeline(
+            name = "replay-invariant-pipeline",
+            stages = listOf(PipelineStage(id = "stage-1"))
+        )
+        val context = PipelineContext(
+            pipelineId = "run-invariant",
+            pipelineName = pipeline.name,
+            totalStages = pipeline.stages.size
+        )
+        DurableRuntimeFlags.enable(context)
+        service.beginPipelineRun(pipeline, context)
+        service.recordStageCompleted(
+            context = context,
+            stage = pipeline.stages.first(),
+            result = com.cotor.model.AgentResult(
+                agentName = "codex",
+                isSuccess = true,
+                output = "ok",
+                error = null,
+                duration = 10,
+                metadata = emptyMap()
+            )
+        )
+
+        val approvalError = runCatching {
+            runBlocking {
+                withContext(
+                    DurableRuntimeContext(
+                        runId = "run-invariant",
+                        replayMode = ReplayMode.CONTINUE,
+                        sourceRunId = "run-invariant",
+                        sourceCheckpointId = service.inspectRun("run-invariant")!!.latestCompletedCheckpoint!!.id
+                    )
+                ) {
+                    service.recordSideEffect(
+                        kind = SideEffectKind.FILE_WRITE,
+                        label = "file.write:state",
+                        replaySafe = false,
+                        approvalRequiredOnReplay = false
+                    )
+                }
+            }
+        }.exceptionOrNull()
+
+        (approvalError is ReplayApprovalRequiredException) shouldBe true
+        val waiting = service.inspectRun("run-invariant")!!
+        waiting.approvalPauses.single().status shouldBe ApprovalPauseStatus.PENDING
+        waiting.sideEffects.single().approvalRequiredOnReplay shouldBe true
+    }
 })

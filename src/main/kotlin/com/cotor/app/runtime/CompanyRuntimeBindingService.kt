@@ -41,6 +41,11 @@ class CompanyRuntimeBindingService(
             .map { it.runId }
             .filter { it.isNotBlank() }
             .toSet()
+        val boundPipelineIds = state.issues
+            .filter { it.companyId == companyId }
+            .mapNotNull { it.pipelineId }
+            .filter { it.isNotBlank() }
+            .toSet()
         val directRuns = boundRunIds.mapNotNull(durableRuntimeService::inspectRun)
         val runs = if (boundRunIds.isNotEmpty() && directRuns.size == boundRunIds.size) {
             directRuns
@@ -48,6 +53,7 @@ class CompanyRuntimeBindingService(
             (
                 directRuns + durableRuntimeService.listRuns().filter { run ->
                     run.runId in boundRunIds ||
+                        run.pipelineName in boundPipelineIds ||
                         run.checkpoints.any { node -> node.metadata["companyId"] == companyId } ||
                         run.sideEffects.any { effect -> effect.metadata["companyId"] == companyId }
                 }

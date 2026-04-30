@@ -413,7 +413,7 @@ struct SettingsView: View {
         ) {
             valueRow(store.text(.installer), "cotor install / cotor update / cotor delete")
             valueRow(store.text(.appLocation), "/Applications/Cotor Desktop.app or ~/Applications/Cotor Desktop.app")
-            valueRow(store.text(.downloadArchive), "~/Downloads/Cotor-Desktop-macOS.zip")
+            valueRow(store.text(.downloadArchive), "~/Downloads/Cotor-Desktop-macOS.dmg")
         }
     }
 

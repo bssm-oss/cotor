@@ -63,7 +63,7 @@ actor EmbeddedBackendLauncher {
             "--port",
             "\(port)",
             "--token",
-            DesktopAPI.embeddedAppToken
+            DesktopAPI.appToken
         ]
         process.environment = mergedEnvironment(javaPath: javaPath)
         process.standardOutput = FileHandle(forWritingAtPath: stdoutPath)
@@ -244,7 +244,7 @@ actor EmbeddedBackendLauncher {
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 1.5
-        request.setValue("Bearer \(DesktopAPI.embeddedAppToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(DesktopAPI.appToken)", forHTTPHeaderField: "Authorization")
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
@@ -263,7 +263,7 @@ actor EmbeddedBackendLauncher {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 1.5
-        request.setValue("Bearer \(DesktopAPI.embeddedAppToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(DesktopAPI.appToken)", forHTTPHeaderField: "Authorization")
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
@@ -333,10 +333,15 @@ actor EmbeddedBackendLauncher {
     }
 
     private func resolveBundledBackendJarPath() -> String? {
+        let projectRootJar = ProcessInfo.processInfo.environment["COTOR_PROJECT_ROOT"].flatMap { rawPath -> URL? in
+            let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return URL(fileURLWithPath: trimmed).appendingPathComponent("build/libs/cotor-backend.jar")
+        }
         let candidates = [
             Bundle.main.resourceURL?.appendingPathComponent("backend/cotor-backend.jar"),
             Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/backend/cotor-backend.jar"),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/libs/cotor-backend.jar")
+            projectRootJar
         ]
         for candidate in candidates.compactMap({ $0 }) where FileManager.default.fileExists(atPath: candidate.path) {
             return candidate.path

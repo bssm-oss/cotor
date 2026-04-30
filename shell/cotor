@@ -7,6 +7,7 @@ export PATH="${PATH:+$PATH:}$HOME/.local/bin:$HOME/.opencode/bin:$HOME/bin:/opt/
 SCRIPT_PATH="$(/usr/bin/python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$0" 2>/dev/null || echo "$0")"
 SCRIPT_DIR="$(cd "$(/usr/bin/dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+GRADLE_JAVA_HELPER="$PROJECT_ROOT/shell/resolve-gradle-java.sh"
 
 # Find JDK 17 for Gradle builds and JAR execution.
 # The project targets JDK 17 (build.gradle.kts jvmToolchain(17)).
@@ -52,6 +53,12 @@ JAR_PATH="$PROJECT_ROOT/build/libs/cotor-${APP_VERSION}-all.jar"
 if [ ! -f "$JAR_PATH" ]; then
     echo "Building cotor CLI (./gradlew shadowJar)..."
     if [ -x "$PROJECT_ROOT/gradlew" ]; then
+        if [ -f "$GRADLE_JAVA_HELPER" ]; then
+            # shellcheck source=/dev/null
+            source "$GRADLE_JAVA_HELPER"
+            configure_gradle_java || exit 1
+            JAVA_CMD="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+        fi
         (cd "$PROJECT_ROOT" && ./gradlew shadowJar) || exit 1
     else
         echo "Error: gradlew not found in $PROJECT_ROOT"
