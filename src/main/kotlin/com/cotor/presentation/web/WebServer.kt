@@ -453,6 +453,10 @@ internal fun Application.cotorWebModule(
             call.respondText(landingHtml, ContentType.Text.Html)
         }
 
+        get("/favicon.ico") {
+            call.respond(HttpStatusCode.NoContent)
+        }
+
         get("/editor") {
             call.attachWebTokenCookie(webToken)
             call.respondText(editorHtml(), ContentType.Text.Html)
@@ -662,7 +666,7 @@ internal fun Application.cotorWebModule(
         route("/api/company") {
             get("/dashboard") {
                 if (!call.requireWebToken(webToken)) return@get
-                call.respond(desktopService.companyDashboardReadOnly())
+                call.respond(desktopService.companyDashboardReadOnly().redactedForApi())
             }
 
             get("/issues/{issueId}/execution-details") {
@@ -703,7 +707,7 @@ internal fun Application.cotorWebModule(
                 get("/{companyId}/dashboard") {
                     if (!call.requireWebToken(webToken)) return@get
                     val companyId = call.parameters["companyId"] ?: return@get call.respond(HttpStatusCode.BadRequest)
-                    call.respond(desktopService.companyDashboardReadOnly(companyId))
+                    call.respond(desktopService.companyDashboardReadOnly(companyId).redactedForApi())
                 }
 
                 patch("/{companyId}") {
@@ -1352,7 +1356,7 @@ private fun editorHtml(): String = """
           <div class="stage-card" draggable="true" ondragstart="onDragStart(${ '$' }{i})" ondragover="onDragOver(event, ${ '$' }{i})" ondrop="onDrop(event, ${ '$' }{i})">
             <div class="stage-header">
               <span class="grip">⋮⋮</span>
-              <input class="input" style="max-width:200px;" value="${ '$' }{escapeHtml(s.id)}" onchange="updateStageField(${ '$' }{i}, 'id', this.value)" />
+              <input class="input" data-stage-index="${ '$' }{i}" data-stage-key="id" style="max-width:200px;" value="${ '$' }{escapeHtml(s.id)}" oninput="updateStageField(${ '$' }{i}, 'id', this.value, false)" />
               <select class="input" style="max-width:140px;" onchange="updateStageField(${ '$' }{i}, 'type', this.value)">
                 ${ '$' }{["EXECUTION"].map(t => `<option value="${ '$' }{escapeHtml(t)}" ${ '$' }{s.type===t?"selected":""}>${ '$' }{escapeHtml(t)}</option>`).join("")}
               </select>
@@ -1361,16 +1365,16 @@ private fun editorHtml(): String = """
             <div class="grid-2">
               <div class="field">
                 <label>Agent</label>
-                <input class="input" value="${ '$' }{escapeHtml(s.agent || "")}" onchange="updateStageField(${ '$' }{i}, 'agent', this.value)" placeholder="claude / gemini / ..." />
+                <input class="input" data-stage-index="${ '$' }{i}" data-stage-key="agent" value="${ '$' }{escapeHtml(s.agent || "")}" oninput="updateStageField(${ '$' }{i}, 'agent', this.value, false)" placeholder="claude / gemini / ..." />
               </div>
               <div class="field">
                 <label>Dependencies</label>
-                <input class="input" value="${ '$' }{escapeHtml(deps)}" onchange="updateStageField(${ '$' }{i}, 'dependencies', this.value)" placeholder="comma 로 구분" />
+                <input class="input" data-stage-index="${ '$' }{i}" data-stage-key="dependencies" value="${ '$' }{escapeHtml(deps)}" oninput="updateStageField(${ '$' }{i}, 'dependencies', this.value, false)" placeholder="comma 로 구분" />
               </div>
             </div>
             <div class="field">
               <label>Input / Prompt</label>
-              <textarea onchange="updateStageField(${ '$' }{i}, 'input', this.value)" placeholder="이 단계가 수행할 내용">${ '$' }{escapeHtml(s.input || "")}</textarea>
+              <textarea data-stage-index="${ '$' }{i}" data-stage-key="input" oninput="updateStageField(${ '$' }{i}, 'input', this.value, false)" placeholder="이 단계가 수행할 내용">${ '$' }{escapeHtml(s.input || "")}</textarea>
             </div>
           </div>
         `;
@@ -1379,8 +1383,9 @@ private fun editorHtml(): String = """
       updateYaml();
     }
 
-    function updateStageField(index, key, value) {
+    function updateStageField(index, key, value, rerender = true) {
       const stage = state.stages[index];
+      if (!stage) return;
       if (key === "dependencies") {
         stage[key] = value.split(",").map(v => v.trim()).filter(Boolean);
       } else if (key === "loopMaxIterations") {
@@ -1388,7 +1393,13 @@ private fun editorHtml(): String = """
       } else {
         stage[key] = value;
       }
-      renderStages();
+      if (rerender) renderStages(); else updateYaml();
+    }
+
+    function collectStageStateFromDom() {
+      document.querySelectorAll("[data-stage-index][data-stage-key]").forEach(el => {
+        updateStageField(Number(el.dataset.stageIndex), el.dataset.stageKey, el.value, false);
+      });
     }
 
     function addStage(type) {
@@ -1547,6 +1558,7 @@ private fun editorHtml(): String = """
       state.name = document.getElementById("pipelineName").value.trim();
       state.description = document.getElementById("pipelineDesc").value.trim();
       state.executionMode = document.getElementById("executionMode").value;
+      collectStageStateFromDom();
     }
 
     async function savePipeline() {

@@ -8,6 +8,7 @@ import com.cotor.integrations.linear.LinearTrackerAdapter
 import com.cotor.model.ProcessResult
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.mockk.mockk
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
@@ -146,7 +147,204 @@ class DesktopAppServiceRequeueOrphanedTest : FunSpec({
             service.shutdown()
         }
     }
+
+    test("company automation requeues repeated app-server interruption blockers after restart") {
+        val appHome = Files.createTempDirectory("desktop-company-requeue-interrupted-home")
+        val repoRoot = Files.createTempDirectory("desktop-company-requeue-interrupted-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val company = requeueCompany("company-requeue-interrupted", repoRoot)
+        val goal = requeueGoal(company.id, "goal-requeue-interrupted")
+        val issue = requeueIssue(
+            id = "issue-requeue-interrupted",
+            company = company,
+            goal = goal,
+            reason = "Execution was interrupted because the app-server stopped before the run finished."
+        )
+        val tasks = (1..3).map { index ->
+            AgentTask(
+                id = "task-requeue-interrupted-$index",
+                workspaceId = REQUEUE_WORKSPACE_ID,
+                issueId = issue.id,
+                title = issue.title,
+                prompt = issue.description,
+                agents = listOf("opencode"),
+                status = DesktopTaskStatus.FAILED,
+                createdAt = index.toLong(),
+                updatedAt = index.toLong()
+            )
+        }
+        val runs = tasks.map { task ->
+            AgentRun(
+                id = "run-${task.id}",
+                taskId = task.id,
+                workspaceId = task.workspaceId,
+                repositoryId = REQUEUE_REPOSITORY_ID,
+                agentName = "opencode",
+                branchName = "codex/cotor/${task.id}/opencode",
+                worktreePath = repoRoot.resolve(task.id).toString(),
+                status = AgentRunStatus.FAILED,
+                error = "Execution was interrupted because the app-server stopped before the run finished.",
+                createdAt = task.createdAt,
+                updatedAt = task.updatedAt
+            )
+        }
+        stateStore.save(requeueState(appHome, repoRoot, company, goal, issue, tasks, runs))
+        val service = requeueTestService(
+            processManager = RequeueGitProcessManager(repoRoot, null, "master"),
+            stateStore = stateStore
+        )
+
+        try {
+            service.prepareCompanyAutomationStateForTesting(company.id)
+
+            stateStore.load().issues.single { it.id == issue.id }.status shouldNotBe IssueStatus.BLOCKED
+        } finally {
+            service.shutdown()
+        }
+    }
+
+    test("company automation requeues OpenCode provider returned error blockers") {
+        val appHome = Files.createTempDirectory("desktop-company-requeue-opencode-home")
+        val repoRoot = Files.createTempDirectory("desktop-company-requeue-opencode-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val company = requeueCompany("company-requeue-opencode", repoRoot)
+        val goal = requeueGoal(company.id, "goal-requeue-opencode")
+        val issue = requeueIssue(
+            id = "issue-requeue-opencode",
+            company = company,
+            goal = goal,
+            reason = "OpenCode execution failed (exit=0): \"Provider returned error\""
+        )
+        val task = AgentTask(
+            id = "task-requeue-opencode",
+            workspaceId = REQUEUE_WORKSPACE_ID,
+            issueId = issue.id,
+            title = issue.title,
+            prompt = issue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.FAILED,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val run = AgentRun(
+            id = "run-requeue-opencode",
+            taskId = task.id,
+            workspaceId = task.workspaceId,
+            repositoryId = REQUEUE_REPOSITORY_ID,
+            agentName = "opencode",
+            branchName = "codex/cotor/requeue-opencode/opencode",
+            worktreePath = repoRoot.resolve("opencode").toString(),
+            status = AgentRunStatus.FAILED,
+            error = "OpenCode execution failed (exit=0): \"Provider returned error\"",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        stateStore.save(requeueState(appHome, repoRoot, company, goal, issue, listOf(task), listOf(run)))
+        val service = requeueTestService(
+            processManager = RequeueGitProcessManager(repoRoot, null, "master"),
+            stateStore = stateStore
+        )
+
+        try {
+            service.prepareCompanyAutomationStateForTesting(company.id)
+
+            stateStore.load().tasks.count { it.issueId == issue.id } shouldBe 2
+        } finally {
+            service.shutdown()
+        }
+    }
 })
+
+private fun requeueCompany(id: String, repoRoot: Path): Company = Company(
+    id = id,
+    name = id,
+    rootPath = repoRoot.toString(),
+    repositoryId = REQUEUE_REPOSITORY_ID,
+    defaultBaseBranch = "master",
+    createdAt = 1L,
+    updatedAt = 1L
+)
+
+private fun requeueGoal(companyId: String, id: String): CompanyGoal = CompanyGoal(
+    id = id,
+    companyId = companyId,
+    projectContextId = "project-$id",
+    title = "Recover blocked work",
+    description = "Recover blocked work",
+    status = GoalStatus.ACTIVE,
+    autonomyEnabled = true,
+    createdAt = 1L,
+    updatedAt = 1L
+)
+
+private fun requeueIssue(
+    id: String,
+    company: Company,
+    goal: CompanyGoal,
+    reason: String
+): CompanyIssue = CompanyIssue(
+    id = id,
+    companyId = company.id,
+    projectContextId = goal.projectContextId,
+    goalId = goal.id,
+    workspaceId = REQUEUE_WORKSPACE_ID,
+    title = "Recover execution issue",
+    description = "Recover execution issue",
+    status = IssueStatus.BLOCKED,
+    kind = "execution",
+    codeProducing = false,
+    providerBlockReason = reason,
+    transitionReason = "Execution failed and requires a recoverable retry or remediation.",
+    createdAt = 1L,
+    updatedAt = 1L
+)
+
+private fun requeueState(
+    appHome: Path,
+    repoRoot: Path,
+    company: Company,
+    goal: CompanyGoal,
+    issue: CompanyIssue,
+    tasks: List<AgentTask>,
+    runs: List<AgentRun>
+): DesktopAppState = DesktopAppState(
+    companies = listOf(company),
+    repositories = listOf(
+        ManagedRepository(
+            id = REQUEUE_REPOSITORY_ID,
+            name = "repo",
+            localPath = repoRoot.toString(),
+            sourceKind = RepositorySourceKind.LOCAL,
+            defaultBranch = "master",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+    ),
+    workspaces = listOf(
+        Workspace(
+            id = REQUEUE_WORKSPACE_ID,
+            repositoryId = REQUEUE_REPOSITORY_ID,
+            name = "repo · master",
+            baseBranch = "master",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+    ),
+    projectContexts = listOf(
+        CompanyProjectContext(
+            id = goal.projectContextId ?: "project-${goal.id}",
+            companyId = company.id,
+            name = company.name,
+            slug = company.id,
+            contextDocPath = appHome.resolve("project.md").toString(),
+            lastUpdatedAt = 1L
+        )
+    ),
+    goals = listOf(goal),
+    issues = listOf(issue),
+    tasks = tasks,
+    runs = runs
+)
 
 private fun requeueTestService(
     processManager: ProcessManager,
