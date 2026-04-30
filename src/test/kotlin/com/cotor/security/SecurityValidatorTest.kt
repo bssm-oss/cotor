@@ -6,6 +6,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
+import kotlin.io.path.createSymbolicLinkPointingTo
 
 class SecurityValidatorTest : FunSpec({
     test("command whitelist accepts absolute executable path by basename") {
@@ -39,6 +40,28 @@ class SecurityValidatorTest : FunSpec({
         }
     }
 
+    test("command validation rejects combined shell execution flags") {
+        val validator = DefaultSecurityValidator(
+            SecurityConfig(allowedExecutables = setOf("bash")),
+            LoggerFactory.getLogger("SecurityValidatorTest")
+        )
+
+        shouldThrow<SecurityException> {
+            validator.validateCommand(listOf("bash", "-lc", "id"))
+        }
+    }
+
+    test("command validation blocks destructive commands instead of only warning") {
+        val validator = DefaultSecurityValidator(
+            SecurityConfig(useWhitelist = false),
+            LoggerFactory.getLogger("SecurityValidatorTest")
+        )
+
+        shouldThrow<SecurityException> {
+            validator.validateCommand(listOf("rm", "-rf", "/tmp/cotor-test"))
+        }
+    }
+
     test("command validation checks resolved absolute path against allowed directories") {
         val blockedDir = Files.createTempDirectory("cotor-blocked-bin")
         val executable = blockedDir.resolve("qwen").toFile()
@@ -55,6 +78,20 @@ class SecurityValidatorTest : FunSpec({
 
         shouldThrow<SecurityException> {
             validator.validateCommand(listOf(executable.absolutePath))
+        }
+    }
+
+    test("path validation rejects symbolic link cycles") {
+        val allowedDir = Files.createTempDirectory("cotor-symlink-cycle")
+        val link = allowedDir.resolve("self")
+        link.createSymbolicLinkPointingTo(link)
+        val validator = DefaultSecurityValidator(
+            SecurityConfig(allowedDirectories = listOf(allowedDir)),
+            LoggerFactory.getLogger("SecurityValidatorTest")
+        )
+
+        shouldThrow<SecurityException> {
+            validator.validatePath(link)
         }
     }
 })
