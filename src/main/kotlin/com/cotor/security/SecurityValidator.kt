@@ -70,7 +70,7 @@ class DefaultSecurityValidator(
         val executable = command.first().trim()
         val executableName = runCatching { Path.of(executable).fileName?.toString() }.getOrNull()
 
-        if (isShellInterpreter(executableName ?: executable) && command.drop(1).any { it == "-c" || it == "/c" }) {
+        if (isShellInterpreter(executableName ?: executable) && command.drop(1).any(::isShellExecuteOption)) {
             throw SecurityException("Shell command execution is not allowed: $executable")
         }
 
@@ -92,9 +92,10 @@ class DefaultSecurityValidator(
         }
 
         // Dangerous commands check
-        val dangerousCommands = listOf("rm", "del", "format", "dd", "mkfs")
-        if (dangerousCommands.any { executable.endsWith(it) }) {
-            logger.warn("Potentially dangerous command detected: $executable")
+        val dangerousCommands = setOf("rm", "del", "format", "dd", "mkfs")
+        if ((executableName ?: executable).lowercase() in dangerousCommands) {
+            logger.warn("Dangerous command blocked: $executable")
+            throw SecurityException("Dangerous command is not allowed: $executable")
         }
 
         // Command injection pattern check
@@ -112,6 +113,10 @@ class DefaultSecurityValidator(
     }
 
     override fun validatePath(path: Path) {
+        validatePath(path, linkedSetOf())
+    }
+
+    private fun validatePath(path: Path, visitedSymlinks: MutableSet<Path>) {
         val absolutePath = path.toAbsolutePath().normalize()
 
         // Check if path is in allowed directories
@@ -127,10 +132,14 @@ class DefaultSecurityValidator(
 
         // Validate symbolic links
         if (path.isSymbolicLink()) {
-            val target = Files.readSymbolicLink(path).let { linkTarget ->
-                if (linkTarget.isAbsolute) linkTarget else path.toAbsolutePath().parent.resolve(linkTarget)
+            val linkPath = path.toAbsolutePath().normalize()
+            if (!visitedSymlinks.add(linkPath)) {
+                throw SecurityException("Symbolic link cycle detected: $linkPath")
             }
-            validatePath(target)
+            val target = Files.readSymbolicLink(path).let { linkTarget ->
+                (if (linkTarget.isAbsolute) linkTarget else path.toAbsolutePath().parent.resolve(linkTarget)).normalize()
+            }
+            validatePath(target, visitedSymlinks)
         }
     }
 
@@ -165,5 +174,12 @@ class DefaultSecurityValidator(
 
     private fun isShellInterpreter(executableName: String): Boolean {
         return executableName.lowercase() in setOf("sh", "bash", "zsh", "fish", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh")
+    }
+
+    private fun isShellExecuteOption(arg: String): Boolean {
+        val normalized = arg.trim().lowercase()
+        if (normalized == "/c") return true
+        if (normalized in setOf("-command", "-encodedcommand", "-encodedarguments")) return true
+        return normalized.startsWith("-") && 'c' in normalized.drop(1)
     }
 }
