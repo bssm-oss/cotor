@@ -211,4 +211,63 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.issues.single().runtimeDisposition shouldBe "QUARANTINED"
         bound.runtime.blockedIssueIds shouldContain issueId
     }
+
+    test("bind falls back to pipeline id when issue durable run id is missing") {
+        val appHome = Files.createTempDirectory("company-runtime-pipeline-fallback")
+        val runStore = DurableRuntimeStore(appHome.resolve("runtime"))
+        val companyId = "company-pipeline-fallback"
+        val issueId = "issue-pipeline-fallback"
+        runStore.saveRun(
+            DurableRunSnapshot(
+                runId = "actual-run-id",
+                pipelineName = "issue-pipeline-id",
+                status = DurableRunStatus.FAILED,
+                createdAt = 1L,
+                updatedAt = 2L
+            )
+        )
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = runStore),
+            actionStore = ActionStore { appHome },
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(
+                    Company(
+                        id = companyId,
+                        name = "Pipeline Fallback",
+                        rootPath = ".",
+                        repositoryId = "repo-pipeline-fallback",
+                        defaultBaseBranch = "main",
+                        backendKind = ExecutionBackendKind.LOCAL_COTOR,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                issues = listOf(
+                    CompanyIssue(
+                        id = issueId,
+                        companyId = companyId,
+                        goalId = "goal-pipeline-fallback",
+                        workspaceId = "workspace-pipeline-fallback",
+                        pipelineId = "issue-pipeline-id",
+                        title = "Issue",
+                        description = "desc",
+                        status = IssueStatus.BLOCKED,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.issues.single().durableRunId shouldBe "actual-run-id"
+        bound.issues.single().runtimeDisposition shouldBe "QUARANTINED"
+        bound.runtime.blockedIssueIds shouldContain issueId
+    }
 })
