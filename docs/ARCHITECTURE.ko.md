@@ -75,7 +75,18 @@ sequenceDiagram
 - **관측 가능성**
   - 동일한 모니터 이벤트를 CLI, TUI, Web이 공유해 일관된 상태 표시가 가능합니다.
 
-## 5) 회사 워크플로 불변 조건
+## 5) 런타임 제어 계층
+
+- `com.cotor.runtime.actions`: agent/git/github side effect를 하나의 action substrate로 수렴
+- `com.cotor.security`: 외부 action 실행 전에 executable allow-list, shell execution flag 차단, destructive command 차단, allowed-directory/symlink 검증 수행
+- `com.cotor.runtime.durable`: checkpoint graph와 side-effect journal을 관리하며, replay-safe가 아닌 file/secret/network effect는 명시적 승인 전까지 continuation을 멈춤
+- `com.cotor.policy`: action allow/deny/approval 결정을 수행하고 audit log를 남김
+- `com.cotor.provenance`: run/checkpoint/action/file/pr 사이의 evidence graph를 저장
+- `com.cotor.providers.github`: PR state, mergeability, status-check summary를 file-backed control-plane으로 유지
+- `com.cotor.knowledge`: review outcome, mergeability, decision-like signal을 structured memory로 저장
+- `AppServer` / `WebServer`: durable runtime, policy, evidence, GitHub, knowledge를 read surface로 노출
+
+## 6) 회사 워크플로 불변 조건
 
 회사 자동화 레이어는 일반 파이프라인 런너보다 더 엄격한 workflow 불변 조건을 가집니다.
 

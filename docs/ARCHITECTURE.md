@@ -67,6 +67,8 @@ sequenceDiagram
 ## 5) Runtime Control Layers
 
 - `com.cotor.runtime.actions` : agent/git/github side effects를 하나의 action substrate로 수렴
+- `com.cotor.security` : executable allow-list, shell execution flag blocking, destructive command blocking, and allowed-directory/symlink validation before external actions run
+- `com.cotor.runtime.durable` : checkpoint graph plus side-effect journal; replay-unsafe file/secret/network effects pause continuation until explicit approval
 - `com.cotor.policy` : action allow/deny/approval 결정을 수행하고 audit log를 남김
 - `com.cotor.provenance` : run/checkpoint/action/file/pr 사이의 evidence graph를 저장
 - `com.cotor.providers.github` : PR state, mergeability, status-check summary를 file-backed control-plane으로 유지

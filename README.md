@@ -12,6 +12,7 @@ Smoke test: `cotor version`
 - Multi-company operations layer with companies, agent definitions, goals, issues, review queue, activity feed, and runtime start/stop/status
 - Estimated AI spend tracking per company with configurable daily and monthly cost guardrails
 - Per-agent git branch and worktree isolation for delegated execution
+- Runtime hardening for command validation, durable replay side-effect approval, and desktop/backend token consistency
 
 ## Current Command Surface
 
@@ -118,6 +119,8 @@ cotor resume fork <run-id> --from <checkpoint-id> --config cotor.yaml
 cotor resume approve <run-id> --checkpoint <checkpoint-id>
 ```
 
+Durable replay records side-effect kinds such as file writes and secret reads precisely. Any replay-unsafe side effect now pauses `continue` / `fork` until the run is explicitly approved.
+
 ## macOS Desktop
 
 After `brew install cotor`, install the packaged desktop app with:
@@ -139,10 +142,11 @@ Current desktop model:
 
 - top-level `Company` and `TUI` shell modes
 - `Company` mode for multi-company operations, agent roster, goals, issue board/canvas, activity feed, runtime controls, and a dedicated `Meeting Room` surface
-- right-side `Chat Control` rail with live conversation/context, backend memory snapshot, confirmation-first proposal flow, and lightweight lead/worker agent routing
+- dedicated `Chat Control` navigation surface with live conversation/context, backend memory snapshot, confirmation-first proposal flow, and lightweight lead/worker agent routing
 - `Company` summary keeps runtime health, blocked workflow count, review attention, and the latest error/action inside the main summary banner instead of a separate tall status card
 - `Company` summary now also shows estimated spend plus daily/monthly cost guardrails for the selected company runtime
 - `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
+- desktop backend launch, health checks, shutdown, and client requests use the same `COTOR_APP_TOKEN` source so token-protected local sessions stay aligned
 - `Meeting Room` now exposes a dedicated live floor map with a synthesized wall feed, seat-based agent table, and review desk summary instead of hiding that view below the summary fold
 - company issue execution details now surface agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary instead of only change metadata
 - `cotor company issue run <issue-id>` waits for a settled issue state by default so local CLI-launched agent work is not orphaned; use `--async` only when an already-running app-server should own the background work
@@ -174,8 +178,8 @@ The current build includes a working local operations layer:
 - inspect completed company issue runs through `cotor resume inspect <run-id>` without enabling the experimental pipeline replay flag
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page with synthesized runtime/backend/review/session wall events and animated seat-based agent presence
-- use the Chat Control rail to preview and explicitly confirm real goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
-- choose the lead AI and worker roster directly from the Chat Control rail before staging a confirmed company request
+- use the Chat Control surface to preview and explicitly confirm real goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
+- choose the lead AI and worker roster directly from Chat Control before staging a confirmed company request
 - inspect compact runtime status, blocked/review attention, and recent company activity from the company summary page
 - inspect estimated company spend and adjust daily/monthly runtime guardrails without leaving the company console
 - start and stop a local autonomous runtime loop per company
