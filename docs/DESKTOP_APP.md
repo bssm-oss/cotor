@@ -75,6 +75,8 @@ export COTOR_APP_TOKEN='your-local-token'
 swift run --package-path macos CotorDesktopApp
 ```
 
+When the bundled backend is launcher-managed, the launcher and `DesktopAPI` both read the same `COTOR_APP_TOKEN` value. If the variable is unset, both sides fall back to the desktop-local token used for embedded sessions.
+
 ## Install A Local App Bundle
 
 ```bash
@@ -91,6 +93,8 @@ You can update or remove the installed bundle from the CLI:
 cotor update
 cotor delete
 ```
+
+`cotor delete` removes the standard `/Applications`, `~/Applications`, and download artifacts. When `COTOR_DESKTOP_INSTALL_ROOT` is set, it also removes `Cotor Desktop.app` from that override install root.
 
 Behavior depends on the install layout:
 
@@ -111,10 +115,11 @@ The current macOS shell has two top-level modes.
   - agent-definition composer
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
-  - right-side `Chat Control` rail that shows live messages/context, backend memory snapshot, confirmation-first proposal previews, and lightweight lead/worker agent routing controls
+  - dedicated `Chat Control` navigation surface that shows live messages/context, backend memory snapshot, confirmation-first proposal previews, and lightweight lead/worker agent routing controls
 - company activity feed with live event-driven updates
 - live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event
 - issue execution detail cards now show agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary for each issue-linked run
+- async detail and memory snapshot refreshes ignore stale responses if the selected issue/task changes before the request completes
 - if the live company stream disconnects, the UI keeps the last company snapshot and shows `Live company updates disconnected. Re-syncing...` while it recovers
   - compact company summary banner that keeps runtime health, blocked workflows, review attention, and the latest error/action in one place
   - compact company summary and company settings now surface estimated spend plus daily/monthly cost guardrails for the selected runtime
@@ -184,8 +189,8 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect linked tasks and runs
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view with synthesized runtime/backend/review/session wall events plus seat/review desk summaries
-- use the Chat Control rail to preview and explicitly confirm goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
-- choose the lead AI and worker roster directly from the Chat Control rail before staging a confirmed request
+- use the Chat Control surface to preview and explicitly confirm goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
+- choose the lead AI and worker roster directly from Chat Control before staging a confirmed request
 - inspect company activity without manual refresh in normal company mode
 - inspect runtime health, blocked/review attention, and the latest runtime signal from the compact company summary banner
 - inspect estimated spend and adjust daily/monthly cost guardrails without leaving the company console
@@ -195,6 +200,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - keep active company work on a fast monitoring cadence so stale `RUNNING` tasks/runs are reconciled sooner
 - re-queue company issues that were interrupted by an app-server shutdown instead of leaving them blocked by a generic process-exit failure
 - resume queued delegated company work after the desktop app and bundled backend come back, and record that recovery in the live company activity feed
+- bind issue-linked durable runs through the issue pipeline id when needed, so `cotor resume inspect <run-id>` remains attached to the correct company issue run
 - create durable run snapshots for company issue execution by default so the issue `durableRunId` can be inspected with `cotor resume inspect <run-id>`
 - prefer locally installed agent CLIs for default company profiles, with `echo` as a final fallback
 

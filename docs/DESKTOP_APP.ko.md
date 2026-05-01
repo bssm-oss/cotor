@@ -80,6 +80,8 @@ export COTOR_APP_TOKEN='your-local-token'
 swift run --package-path macos CotorDesktopApp
 ```
 
+번들 backend를 launcher가 관리할 때 launcher와 `DesktopAPI`는 같은 `COTOR_APP_TOKEN` 값을 읽습니다. 환경 변수가 없으면 양쪽 모두 embedded session용 desktop-local token으로 폴백합니다.
+
 ## 로컬 앱 번들 설치
 
 ```bash
@@ -94,6 +96,8 @@ open "/Applications/Cotor Desktop.app" || open "$HOME/Applications/Cotor Desktop
 cotor update
 cotor delete
 ```
+
+`cotor delete`는 표준 `/Applications`, `~/Applications`, 다운로드 산출물을 지웁니다. `COTOR_DESKTOP_INSTALL_ROOT`가 설정되어 있으면 그 override 설치 루트의 `Cotor Desktop.app`도 함께 제거합니다.
 
 ### 설치 레이아웃별 차이
 
@@ -115,10 +119,11 @@ cotor delete
 - 에이전트 정의 작성
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
-- 라이브 메시지/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal preview, 리더/워커 AI 라우팅 제어를 함께 보여주는 오른쪽 `채팅 컨트롤` 레일
+- 라이브 메시지/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal preview, 리더/워커 AI 라우팅 제어를 함께 보여주는 전용 `채팅 컨트롤` 탐색 surface
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
 - 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영
 - 이슈 실행 상세 카드는 이제 각 issue-linked run마다 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약을 함께 보여줌
+- 비동기 상세 정보와 메모리 스냅샷 요청은 완료 전에 선택된 issue/task가 바뀌면 오래된 응답을 적용하지 않음
 - 회사 실시간 stream이 끊기면 마지막 snapshot은 유지한 채 `회사 실시간 업데이트 연결이 끊어졌습니다. 다시 동기화하는 중...` 메시지를 보여주며 복구
 - 런타임 건강도, 차단 워크플로우 수, 리뷰 주의 수, 최근 오류/동작을 한곳에 모아 둔 압축형 회사 요약 배너
 - 압축형 회사 요약과 회사 설정에서 선택한 런타임의 추정 비용과 일/월 비용 상한도 함께 표시
@@ -190,8 +195,8 @@ cotor delete
 - 연결된 태스크와 실행 이력 조회
 - 리뷰 큐 아이템 생성 및 머지 처리
 - runtime/backend/review/session 상태를 합성한 이벤트 월과 좌석/리뷰 데스크 요약이 포함된 전용 미팅룸 보기
-- 채팅 컨트롤 레일에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
-- 확인용 요청을 준비하기 전에 채팅 컨트롤 레일에서 리더 AI와 워커 roster를 직접 선택
+- 채팅 컨트롤 surface에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
+- 확인용 요청을 준비하기 전에 채팅 컨트롤에서 리더 AI와 워커 roster를 직접 선택
 - 정상적인 회사 모드에서는 수동 새로고침 없이 회사 활동 조회
 - 압축형 회사 요약 배너에서 런타임 건강도, 차단/리뷰 주의, 최근 런타임 신호 조회
 - 회사 콘솔 안에서 추정 비용을 확인하고 일/월 비용 상한을 조정
@@ -201,6 +206,7 @@ cotor delete
 - active task/run이 남아 있으면 빠른 monitoring cadence를 유지해서 stale `RUNNING` 상태를 더 빨리 정리
 - app-server 종료로 끊긴 회사 작업은 일반 process-exit 실패로 남기지 않고 다시 큐에 올려 재개 가능하게 복구
 - 그 후 데스크톱 앱과 번들 backend가 다시 올라오면 queued delegated 회사 작업을 다시 시작하고, 회사 활동 로그에도 그 복구 흐름을 남김
+- 필요하면 issue pipeline id로 issue-linked durable run을 묶어서 `cotor resume inspect <run-id>`가 올바른 회사 이슈 실행에 계속 연결되도록 함
 - 회사 이슈 실행은 기본적으로 durable run snapshot을 만들어서 이슈의 `durableRunId`를 `cotor resume inspect <run-id>`로 확인할 수 있음
 - 기본 회사 프로필은 로컬 설치된 agent CLI를 우선 사용하고, 끝까지 없으면 `echo` fallback 사용
 
