@@ -1,0 +1,4 @@
+# Bundled terminal frontend assets. They are intentionally minified/vendor-like,
+# and their short internal symbols can dominate graphify god-node analysis.
+macos/Sources/CotorDesktopApp/Resources/Terminal/addon-fit.js
+macos/Sources/CotorDesktopApp/Resources/Terminal/xterm.js
