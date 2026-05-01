@@ -24,6 +24,14 @@ curl http://127.0.0.1:8787/health
 
 If the app-server cannot answer `/health`, solve that first. Many desktop and company-level symptoms are downstream of a dead or stale local backend.
 
+For token-protected local testing, start the backend and probe health with the same app token:
+
+```bash
+export COTOR_APP_TOKEN='your-local-token'
+cotor app-server --port 8787 --token "$COTOR_APP_TOKEN"
+curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
+```
+
 ## 2. Where To Look
 
 ### 2.1 Desktop app logs and state
@@ -69,6 +77,7 @@ If the app-server cannot answer `/health`, solve that first. Many desktop and co
 | Local `master` does not show merged work | PR merged remotely but local branch is behind, or merge never actually happened | `git status -sb`, `git log --oneline --decorate -5`, `gh pr view` |
 | `cotor` interactive/TUI starts but does not answer well | thin PATH, unauthenticated AI CLI, or wrong starter selection | `interactive.log`, shell PATH, provider auth status |
 | `brew install cotor` works but desktop install/first run behaves strangely | packaged install layout mismatch, bad HOME resolution, or stale local overrides | `docs/HOMEBREW_INSTALL.md`, packaged config path, `interactive.log` |
+| Desktop health checks fail only when auth is enabled | desktop launcher, `DesktopAPI`, or manual curl is using a different `COTOR_APP_TOKEN` than the backend | `desktop-app.log`, runtime `app-server.token`, process arguments |
 
 ## 4. Desktop App Startup And Shutdown
 
@@ -83,6 +92,7 @@ If the app-server cannot answer `/health`, solve that first. Many desktop and co
 - stale bundled runtime files from a previous launch
 - old installed app bundle that does not match the current CLI/runtime behavior
 - packaged app launcher and in-app backend management disagreeing about who owns the backend
+- launcher/backend/client token drift when `COTOR_APP_TOKEN` was changed between app launches
 
 ### 4.3 Confirm
 
@@ -91,6 +101,7 @@ Check:
 - `~/Library/Application Support/CotorDesktop/runtime/desktop-app.log`
 - `ps` for `Cotor Desktop`, `cotor`, `cotor-backend.jar`, `com.cotor.MainKt`
 - `curl http://127.0.0.1:<port>/health`
+- when auth is enabled, `curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:<port>/health`
 
 ### 4.4 Recover
 
@@ -109,6 +120,8 @@ open "/Applications/Cotor Desktop.app" || open "$HOME/Applications/Cotor Desktop
 ```
 
 If the app is already open, quit it fully before reinstalling.
+
+If you changed `COTOR_APP_TOKEN`, quit the desktop app fully before relaunching it. Current builds use the same token source for backend launch, health checks, graceful shutdown, and desktop HTTP requests, so a persistent token mismatch after a full restart should be treated as a stale install or regression.
 
 ## 5. Company Runtime Looks Broken Even Though The App Is Connected
 
