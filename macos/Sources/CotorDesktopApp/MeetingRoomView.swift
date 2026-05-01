@@ -48,7 +48,7 @@ struct MeetingRoomRenderPlan: Hashable {
         let mode: Mode
         if agentCount >= 50 {
             mode = .grouped
-        } else if agentCount >= 20 || lowResourceMode || reduceMotion || isCompact {
+        } else if agentCount >= 8 || lowResourceMode || reduceMotion || isCompact {
             mode = .simplified
         } else {
             mode = .full
@@ -59,10 +59,10 @@ struct MeetingRoomRenderPlan: Hashable {
         switch mode {
         case .full:
             maxAgents = agentCount
-            maxFlows = 10
+            maxFlows = 5
         case .simplified:
-            maxAgents = min(agentCount, isCompact ? 10 : 18)
-            maxFlows = 6
+            maxAgents = min(agentCount, isCompact ? 6 : 7)
+            maxFlows = 4
         case .grouped:
             maxAgents = min(agentCount, 12)
             maxFlows = 4
@@ -1262,8 +1262,10 @@ private struct PixelAgentSprite: View {
             return agent.messageCount > 0
         case .done:
             return agent.messageCount > 0
-        case .running, .review, .blocked, .failed, .costBlocked:
+        case .blocked, .failed, .costBlocked:
             return true
+        case .running, .review:
+            return agent.messageCount > 0
         }
     }
 
@@ -1559,10 +1561,9 @@ private struct MeetingRoomProjectionAgentSheet: View {
             detail(language("Log summary", "로그 요약"), agent.detailLine)
             ProgressView(value: agent.progress)
                 .tint(ShellPalette.success)
-            Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: 460, height: 340)
+        .frame(width: 420, alignment: .topLeading)
         .background(ShellPalette.panel)
     }
 
@@ -1574,6 +1575,7 @@ private struct MeetingRoomProjectionAgentSheet: View {
             Text(value)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(ShellPalette.text)
+                .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
