@@ -87,7 +87,7 @@ cotor --short
 cotor list -c cotor.yaml
 cotor status
 cotor stats
-cotor checkpoint gc --dry-run
+cotor checkpoint gc --help
 cotor lint cotor.yaml
 cotor explain cotor.yaml <pipeline>
 cotor web --open
@@ -96,6 +96,6 @@ cotor app-server --port 8787
 
 ## 주의할 점
 
-- `resume`은 현재 체크포인트 확인 기능입니다. 실제 재개는 아직 아닙니다.
+- `resume inspect`는 회사 이슈의 durable snapshot 조회에 기본으로 사용할 수 있습니다. 일반 `resume continue/fork/approve`는 아직 `COTOR_EXPERIMENTAL_DURABLE_RUNTIME_V2=1` 뒤의 실험 기능이며, replay-safe가 아닌 side-effect 승인을 기다리며 멈출 수 있습니다.
 - `plugin`은 현재 `plugin init`만 실제 동작합니다.
 - `Linear` 동기화는 현재 플레이스홀더입니다.

@@ -56,7 +56,7 @@ Cotor는 하나의 Kotlin 코어 위에 세 가지 운영 표면을 제공합니
 
 ## 현재 알려진 한계
 
-- `resume`은 체크포인트 확인 기능이며 전체 실행 재개는 아직 아닙니다.
+- `resume inspect`는 회사 이슈 durable snapshot 조회에 기본으로 사용할 수 있으며, 일반 `resume continue/fork/approve`는 아직 실험 기능입니다.
 - `plugin`은 현재 `plugin init`만 실제 명령입니다.
 - 보드는 `Linear 같은` UI이지만 외부 Linear 실동기화는 현재 빌드 범위가 아닙니다.
 - 자율 런타임은 최소 루프 수준이며 정책 엔진과 풍부한 후속 이슈 자동화는 아직 구현되지 않았습니다.

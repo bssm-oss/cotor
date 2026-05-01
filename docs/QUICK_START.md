@@ -85,7 +85,7 @@ cotor --short
 cotor list -c cotor.yaml
 cotor status
 cotor stats
-cotor checkpoint gc --dry-run
+cotor checkpoint gc --help
 cotor lint cotor.yaml
 cotor explain cotor.yaml <pipeline>
 cotor web --open
@@ -94,6 +94,6 @@ cotor app-server --port 8787
 
 ## Caveats
 
-- `resume` is currently a checkpoint inspection flow, not full execution resumption.
+- `resume inspect` works for durable company issue snapshots by default; generic `resume continue/fork/approve` remains experimental behind `COTOR_EXPERIMENTAL_DURABLE_RUNTIME_V2=1` and may pause for replay-unsafe side-effect approval.
 - `plugin` currently exposes `plugin init` only.
 - `Linear` sync is still a placeholder in this build.
