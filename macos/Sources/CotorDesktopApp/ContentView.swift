@@ -378,23 +378,20 @@ struct ContentView: View {
     }
 
     private func unifiedCompanyShell(layoutMode: DesktopLayoutMode, sidebarWidth: CGFloat) -> some View {
-        ScrollView {
-            HStack(alignment: .top, spacing: 12) {
-                SidebarView(searchText: searchText, companySurface: $companySurface, scrollsInternally: false)
-                    .frame(width: sidebarWidth, alignment: .top)
+        HStack(alignment: .top, spacing: 12) {
+            SidebarView(searchText: searchText, companySurface: $companySurface)
+                .frame(width: sidebarWidth, alignment: .top)
+                .frame(maxHeight: .infinity)
 
-                CenterPaneView(
-                    layoutMode: layoutMode,
-                    searchText: searchText,
-                    companySurface: $companySurface,
-                    scrollsInternally: false
-                )
-                .frame(minWidth: layoutMode == .wide ? ShellMetrics.contentMinWidth : 0, maxWidth: .infinity, alignment: .top)
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(.trailing, 2)
+            CenterPaneView(
+                layoutMode: layoutMode,
+                searchText: searchText,
+                companySurface: $companySurface
+            )
+            .frame(minWidth: layoutMode == .wide ? ShellMetrics.contentMinWidth : 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .scrollIndicators(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.trailing, 2)
     }
 }
 
