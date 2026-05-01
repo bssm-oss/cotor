@@ -7,8 +7,11 @@ import com.cotor.model.AgentResult
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.mockk
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
 
 class DesktopAppServiceParallelDispatchTest : FunSpec({
@@ -144,6 +147,101 @@ class DesktopAppServiceParallelDispatchTest : FunSpec({
             startedTasks.single().issueId shouldBe issueOne.id
             finalState.issues.first { it.id == issueOne.id }.status shouldBe IssueStatus.IN_PROGRESS
             finalState.issues.first { it.id == issueTwo.id }.status shouldBe IssueStatus.DELEGATED
+        } finally {
+            service.shutdown()
+        }
+    }
+
+    test("runtime start failures persist actionable block reasons on issues") {
+        val appHome = Files.createTempDirectory("desktop-runtime-start-failure-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-start-failure-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns "https://github.com/heodongun/cotor.git"
+        coEvery { gitWorkspaceService.ensureGitHubPublishReady(any(), any()) } returns GitHubPublishReadiness(ready = true)
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } throws IllegalStateException("worktree locked by previous run")
+
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = agentExecutor,
+            companyRuntimeTickIntervalMs = 50,
+            commandAvailability = { command -> command == "opencode" }
+        )
+
+        try {
+            val company = service.createCompany(
+                name = "Start Failure Co",
+                rootPath = repoRoot.toString(),
+                defaultBaseBranch = "master"
+            )
+            val profile = service.listOrgProfiles().first { it.companyId == company.id && it.enabled }
+            val state = stateStore.load()
+            val workspace = state.workspaces.first { it.repositoryId == company.repositoryId }
+            val projectContext = state.projectContexts.first { it.companyId == company.id }
+            val now = System.currentTimeMillis()
+            val goal = CompanyGoal(
+                id = "goal-start-failure",
+                companyId = company.id,
+                projectContextId = projectContext.id,
+                title = "Expose start failure reason",
+                description = "Make runtime start blockers actionable.",
+                status = GoalStatus.ACTIVE,
+                autonomyEnabled = true,
+                createdAt = now,
+                updatedAt = now
+            )
+            val issue = CompanyIssue(
+                id = "issue-start-failure",
+                companyId = company.id,
+                projectContextId = projectContext.id,
+                goalId = goal.id,
+                workspaceId = workspace.id,
+                title = "Run blocked start failure issue",
+                description = "This issue should expose why it could not start.",
+                status = IssueStatus.DELEGATED,
+                priority = 1,
+                kind = "execution",
+                assigneeProfileId = profile.id,
+                createdAt = now,
+                updatedAt = now
+            )
+            stateStore.save(
+                state.copy(
+                    goals = state.goals + goal,
+                    issues = state.issues + issue,
+                    companyRuntimes = state.companyRuntimes.map { runtime ->
+                        if (runtime.companyId == company.id) {
+                            runtime.copy(
+                                status = CompanyRuntimeStatus.RUNNING,
+                                lastStartedAt = now,
+                                manuallyStoppedAt = null
+                            )
+                        } else {
+                            runtime
+                        }
+                    }
+                )
+            )
+
+            service.runCompanyRuntimeTick(company.id)
+
+            val blockedIssue = withTimeout(5_000) {
+                var current = stateStore.load().issues.single { it.id == issue.id }
+                while (current.status == IssueStatus.IN_PROGRESS) {
+                    delay(50)
+                    current = stateStore.load().issues.single { it.id == issue.id }
+                }
+                current
+            }
+            blockedIssue.status shouldBe IssueStatus.BLOCKED
+            blockedIssue.providerBlockReason shouldContain "worktree locked by previous run"
+            blockedIssue.transitionReason shouldContain "recoverable retry or remediation"
         } finally {
             service.shutdown()
         }
