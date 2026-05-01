@@ -58,6 +58,7 @@ private enum GoalSurface: CaseIterable, Identifiable {
 private enum CompanySidebarSurface: CaseIterable, Identifiable {
     case company
     case room
+    case chat
     case goals
     case agents
     case issues
@@ -68,6 +69,8 @@ private enum CompanySidebarSurface: CaseIterable, Identifiable {
             return "company"
         case .room:
             return "room"
+        case .chat:
+            return "chat"
         case .goals:
             return "goals"
         case .agents:
@@ -247,8 +250,6 @@ struct ContentView: View {
     @State private var compactSurface: CompactSurface = .console
     @State private var companySurface: CompanySidebarSurface = .company
     @State private var searchText = ""
-    @State private var companyChatDraft = ""
-    @State private var companyChatApplyReviewDraft = ""
 
     private var l: AppLanguage { store.language }
 
@@ -271,10 +272,6 @@ struct ContentView: View {
         }
         .sheet(isPresented: $store.showingCloneSheet) {
             CloneRepositorySheet()
-        }
-        .sheet(isPresented: $store.showingHelpGuide) {
-            DesktopHelpGuideSheet()
-                .environmentObject(store)
         }
         .alert(l.text(.requestFailed), isPresented: Binding(
             get: { store.actionErrorMessage != nil },
@@ -310,7 +307,7 @@ struct ContentView: View {
                         .frame(width: ShellMetrics.sidebarIdealWidth)
                         .frame(maxHeight: .infinity)
 
-                    CenterPaneView(layoutMode: layoutMode, searchText: searchText, companySurface: companySurface)
+                    CenterPaneView(layoutMode: layoutMode, searchText: searchText, companySurface: $companySurface)
                         .frame(minWidth: ShellMetrics.contentMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -323,7 +320,7 @@ struct ContentView: View {
                         .frame(width: 286)
                         .frame(maxHeight: .infinity)
 
-                    CenterPaneView(layoutMode: layoutMode, searchText: searchText, companySurface: companySurface)
+                    CenterPaneView(layoutMode: layoutMode, searchText: searchText, companySurface: $companySurface)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -343,7 +340,7 @@ struct ContentView: View {
                     case .workspace:
                         SidebarView(searchText: searchText, companySurface: $companySurface)
                     case .console:
-                        CenterPaneView(layoutMode: layoutMode, searchText: searchText, companySurface: companySurface)
+                        CenterPaneView(layoutMode: layoutMode, searchText: searchText, companySurface: $companySurface)
                     case .inspector:
                         InspectorPaneView()
                     }
@@ -389,17 +386,10 @@ struct ContentView: View {
                 CenterPaneView(
                     layoutMode: layoutMode,
                     searchText: searchText,
-                    companySurface: companySurface,
+                    companySurface: $companySurface,
                     scrollsInternally: false
                 )
                 .frame(minWidth: layoutMode == .wide ? ShellMetrics.contentMinWidth : 0, maxWidth: .infinity, alignment: .top)
-
-                CompanyChatControlRail(
-                    layoutMode: layoutMode,
-                    draft: $companyChatDraft,
-                    applyReviewDraft: $companyChatApplyReviewDraft
-                )
-                .frame(width: layoutMode == .wide ? 360 : 312, alignment: .top)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(.trailing, 2)
@@ -551,6 +541,10 @@ private struct DesktopTopBar: View {
                 Image(systemName: "questionmark.circle")
             }
             .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+            .popover(isPresented: $store.showingHelpGuide, arrowEdge: .top) {
+                DesktopHelpGuideSheet()
+                    .environmentObject(store)
+            }
 
             if store.shellMode == .tui {
                 Button {
@@ -677,6 +671,8 @@ private struct SidebarView: View {
                 companySection
             case .room:
                 companySection
+            case .chat:
+                companySection
             case .goals:
                 VStack(alignment: .leading, spacing: 14) {
                     goalSection
@@ -753,6 +749,13 @@ private struct SidebarView: View {
                     subtitle: l("Live wall, seats, and review desk", "라이브 월, 좌석, 리뷰 데스크"),
                     systemImage: "person.2.wave.2",
                     badge: "\(store.dashboard.runningAgentSessions.count)"
+                )
+                companyNavButton(
+                    .chat,
+                    title: l("Chat Control", "채팅 컨트롤"),
+                    subtitle: l("Agent traffic and confirmed actions", "에이전트 대화와 확인 액션"),
+                    systemImage: "bubble.left.and.text.bubble.right",
+                    badge: "\(store.dashboard.agentMessages.count)"
                 )
                 companyNavButton(
                     .goals,
@@ -1503,7 +1506,7 @@ private struct SidebarView: View {
 
             TextEditor(text: $store.newGoalDescription)
                 .font(.system(size: 12, design: .default))
-                .frame(minHeight: 92)
+                .frame(minHeight: 58, idealHeight: 72, maxHeight: 96)
                 .padding(10)
                 .scrollContentBackground(.hidden)
                 .background(ShellPalette.panelAlt)
@@ -4289,13 +4292,15 @@ private struct CenterPaneView: View {
     @EnvironmentObject private var store: DesktopStore
     let layoutMode: DesktopLayoutMode
     let searchText: String
-    let companySurface: CompanySidebarSurface
+    @Binding var companySurface: CompanySidebarSurface
     var scrollsInternally: Bool = true
     @State private var goalSurface: GoalSurface = .board
     @State private var companyOverviewSurface: CompanyOverviewSurface = .summary
     @State private var detailDrawerOpen = false
     @State private var issueComposerExpanded = false
     @State private var presentedGoal: GoalRecord?
+    @State private var companyChatDraft = ""
+    @State private var companyChatApplyReviewDraft = ""
     private var l: AppLanguage { store.language }
 
     private var workflowLeader: String {
@@ -4637,6 +4642,8 @@ private struct CenterPaneView: View {
             companyOverviewPage
         case .room:
             companyMeetingRoomPage
+        case .chat:
+            companyChatControlPage
         case .goals:
             goalOverviewPage
         case .agents:
@@ -4653,6 +4660,20 @@ private struct CenterPaneView: View {
                 subtitle: l("Watch the live company floor map with wall events, active seats, and review load in one place.", "이벤트 월, 실행 좌석, 리뷰 부담을 한 곳에서 보는 실시간 회사 플로어 맵입니다.")
             )
             companyMeetingRoomPanel
+        }
+    }
+
+    private var companyChatControlPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            companyPageHeader(
+                title: l("Chat Control", "채팅 컨트롤"),
+                subtitle: l("Review agent traffic, scope memory, and confirmation-first company actions without crowding every page.", "모든 페이지를 복잡하게 만들지 않고 에이전트 대화, 범위 메모리, 확인 우선 회사 액션을 봅니다.")
+            )
+            CompanyChatControlRail(
+                layoutMode: layoutMode,
+                draft: $companyChatDraft,
+                applyReviewDraft: $companyChatApplyReviewDraft
+            )
         }
     }
 
@@ -4703,6 +4724,9 @@ private struct CenterPaneView: View {
                             subtitle: l.status(issue.status),
                             tint: statusTint(for: issue.status)
                         ) {
+                            withAnimation(ShellMotion.spring) {
+                                companySurface = .issues
+                            }
                             Task { await store.selectIssue(issue) }
                         }
                     }
@@ -4991,8 +5015,13 @@ private struct CenterPaneView: View {
                         .frame(width: 344, alignment: .top)
                 }
             } else {
+                if store.selectedIssue != nil {
+                    selectedIssueDetailPanel
+                }
                 issueBoardWorkspacePanel
-                selectedIssueDetailPanel
+                if store.selectedIssue == nil {
+                    selectedIssueDetailPanel
+                }
             }
             detailDrawer
         }
@@ -5116,7 +5145,7 @@ private struct CenterPaneView: View {
 
             TextEditor(text: $store.newIssueDescription)
                 .font(.system(size: 12, weight: .medium))
-                .frame(minHeight: 72, idealHeight: 84, maxHeight: 120)
+                .frame(minHeight: 58, idealHeight: 72, maxHeight: 92)
                 .padding(10)
                 .scrollContentBackground(.hidden)
                 .background(ShellPalette.panelAlt)
@@ -5222,7 +5251,15 @@ private struct CenterPaneView: View {
                                 .foregroundStyle(ShellPalette.muted)
                         } else {
                             ForEach(selectedGoalIssues.prefix(5)) { issue in
-                                IssueSummaryRow(issue: issue, language: l)
+                                Button {
+                                    withAnimation(ShellMotion.spring) {
+                                        companySurface = .issues
+                                    }
+                                    Task { await store.selectIssue(issue) }
+                                } label: {
+                                    IssueSummaryRow(issue: issue, language: l)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -5279,7 +5316,15 @@ private struct CenterPaneView: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(filteredIssues.prefix(5)) { issue in
-                        IssueSummaryRow(issue: issue, language: l, assignee: store.orgProfiles.first(where: { $0.id == issue.assigneeProfileId }))
+                        Button {
+                            withAnimation(ShellMotion.spring) {
+                                companySurface = .issues
+                            }
+                            Task { await store.selectIssue(issue) }
+                        } label: {
+                            IssueSummaryRow(issue: issue, language: l, assignee: store.orgProfiles.first(where: { $0.id == issue.assigneeProfileId }))
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -8049,6 +8094,24 @@ private struct DesktopHelpGuideSheet: View {
             ShellCanvas().ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .center) {
+                        Text(store.language("Help & Commands", "도움말과 명령"))
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundStyle(ShellPalette.faint)
+                        Spacer()
+                        Button {
+                            store.showingHelpGuide = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(ShellPalette.text)
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .background(ShellPalette.panelAlt)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .accessibilityLabel(store.language("Close help", "도움말 닫기"))
+                    }
                     if let guide = store.helpGuide {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(guide.title)
@@ -8111,7 +8174,7 @@ private struct DesktopHelpGuideSheet: View {
                 .padding(20)
             }
         }
-        .frame(minWidth: 820, minHeight: 720)
+        .frame(width: 760, height: 640)
     }
 
     private var shellCardBackground: some View {
