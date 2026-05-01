@@ -41,6 +41,8 @@ out/
 .codex/
 .kiro/
 .omc/
+.playwright-mcp/
+.sisyphus/
 
 # macOS
 .DS_Store
@@ -186,6 +188,10 @@ coverage/
 
 # Local runtime/state
 .cotor/
+
+# Graphify local extraction cache
+graphify-out/cache/
+graphify-out/.graphify_*
 
 # Documentation builds
 docs/_build/

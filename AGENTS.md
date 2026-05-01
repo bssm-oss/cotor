@@ -774,3 +774,13 @@ Cotor를 저장소가 오늘 실제로 구현한 모습에 맞춰 유지하세�
 - Codex 지원을 바꿀 때는 `codex-exec`, `codex-oauth` 구분을 코드, 문서, 검증 기록에 모두 명시하고, CLI나 앱에 노출된 인증 흐름이 실제로 테스트 가능해야 합니다.
 - 패키징을 바꾸면 source-checkout 설치만 보지 말고 실제 사용자가 따르는 Homebrew/릴리스 경로를 검증합니다. packaged install에서 repo-local build file이 있다고 가정하지 않습니다.
 - 사용자가 전체 ship 흐름을 요청했다면 커밋은 의도를 드러내게 잘게 나누고, 검증 메모를 포함한 PR을 연 뒤, 문서화된 체크와 수동 검증이 끝난 다음에만 머지합니다.
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
