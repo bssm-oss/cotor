@@ -24,6 +24,14 @@ curl http://127.0.0.1:8787/health
 
 `/health`가 응답하지 않으면 그 문제를 먼저 해결하세요. 데스크톱이나 회사 런타임 증상 중 상당수는 죽어 있거나 꼬인 로컬 백엔드에서 시작됩니다.
 
+토큰이 걸린 로컬 테스트에서는 backend와 health 확인에 같은 app token을 쓰세요.
+
+```bash
+export COTOR_APP_TOKEN='your-local-token'
+cotor app-server --port 8787 --token "$COTOR_APP_TOKEN"
+curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
+```
+
 ## 2. 어디를 봐야 하나
 
 ### 2.1 데스크톱 앱 로그와 상태
@@ -69,6 +77,7 @@ curl http://127.0.0.1:8787/health
 | 로컬 `master`에 머지 결과가 안 보임 | 원격에서 merge는 됐지만 로컬 branch가 뒤처짐, 또는 실제 merge가 안 됨 | `git status -sb`, `git log --oneline --decorate -5`, `gh pr view` |
 | `cotor` 인터랙티브/TUI가 시작은 되는데 응답이 이상함 | 얇은 PATH, 인증되지 않은 AI CLI, 잘못된 starter 선택 | `interactive.log`, shell PATH, provider 인증 상태 |
 | `brew install cotor`는 됐는데 데스크톱 설치/첫 실행이 이상함 | packaged install 레이아웃 오인, HOME 경로 해석 문제, stale local override | `docs/HOMEBREW_INSTALL.ko.md`, packaged config 경로, `interactive.log` |
+| 인증을 켰을 때만 desktop health check가 실패함 | desktop launcher, `DesktopAPI`, 수동 curl이 backend와 다른 `COTOR_APP_TOKEN`을 사용 | `desktop-app.log`, runtime `app-server.token`, process arguments |
 
 ## 4. 데스크톱 앱 시작과 종료 문제
 
@@ -83,6 +92,7 @@ curl http://127.0.0.1:8787/health
 - 이전 실행의 stale runtime 파일
 - 현재 CLI/런타임 동작과 맞지 않는 오래된 설치 앱
 - packaged 앱 launcher와 앱 내부 backend 관리 주체가 서로 충돌
+- 앱 실행 사이에 `COTOR_APP_TOKEN`이 바뀌어 launcher/backend/client token이 어긋남
 
 ### 4.3 확인
 
@@ -91,6 +101,7 @@ curl http://127.0.0.1:8787/health
 - `~/Library/Application Support/CotorDesktop/runtime/desktop-app.log`
 - `ps`에서 `Cotor Desktop`, `cotor`, `cotor-backend.jar`, `com.cotor.MainKt`
 - `curl http://127.0.0.1:<port>/health`
+- 인증을 켰다면 `curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:<port>/health`
 
 ### 4.4 복구
 
@@ -109,6 +120,8 @@ open "/Applications/Cotor Desktop.app" || open "$HOME/Applications/Cotor Desktop
 ```
 
 앱이 이미 떠 있다면 완전히 종료한 뒤 재설치하세요.
+
+`COTOR_APP_TOKEN`을 바꿨다면 데스크톱 앱을 완전히 종료한 뒤 다시 여세요. 현재 빌드는 backend launch, health check, graceful shutdown, desktop HTTP request에 같은 token source를 사용하므로, 완전 재시작 뒤에도 token mismatch가 남으면 stale install 또는 regression으로 봐야 합니다.
 
 ## 5. 앱은 연결되어 있는데 회사 런타임이 이상함
 
