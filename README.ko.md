@@ -10,6 +10,7 @@ Cotor는 로컬 우선 AI 워크플로우 실행기에서 출발해, CEO AI가 �
 - `cotor app-server` 기반 macOS 데스크톱 셸
 - 회사, 에이전트 정의, 목표, 이슈, 리뷰 큐, 활동 피드, 런타임 상태를 포함한 다중 컴퍼니 운영 레이어
 - 회사별 추정 AI 비용 집계와 일/월 비용 상한 설정
+- 명령 검증, durable replay side-effect 승인, 데스크톱/백엔드 토큰 일관성에 대한 런타임 hardening
 
 ## 현재 CLI 명령 체계
 
@@ -116,6 +117,8 @@ cotor resume fork <run-id> --from <checkpoint-id> --config cotor.yaml
 cotor resume approve <run-id> --checkpoint <checkpoint-id>
 ```
 
+Durable replay는 file write, secret read 같은 side-effect 종류를 정확히 기록합니다. replay-safe가 아닌 side-effect는 `continue` / `fork` 중 명시적 승인이 있기 전까지 실행을 멈춥니다.
+
 ## macOS 데스크톱
 
 `brew install cotor` 후 데스크톱 앱 설치:
@@ -142,10 +145,11 @@ cotor delete    # 삭제
 
 - 최상위 `Company` / `TUI` 모드 분리
 - `Company` 모드에서 회사 목록, 에이전트 정의, 목표, 이슈 보드/캔버스, 활동 피드, 런타임 제어, 전용 `미팅룸` surface 제공
-- 라이브 대화/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal 흐름, 리더/워커 AI 라우팅을 담은 오른쪽 `채팅 컨트롤` 레일 제공
+- 라이브 대화/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal 흐름, 리더/워커 AI 라우팅을 담은 전용 `채팅 컨트롤` 탐색 surface 제공
 - `Company` 요약은 별도 긴 상태 카드 대신 메인 요약 배너 안에서 런타임 건강도, 차단 수, 리뷰 주의 수, 최근 오류/동작을 함께 보여줌
 - `Company` 요약은 선택한 회사의 추정 비용과 일/월 비용 상한도 함께 보여줌
 - `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
+- 데스크톱 backend launch, health check, shutdown, client request가 같은 `COTOR_APP_TOKEN` source를 사용해서 token-protected local session이 어긋나지 않음
 - `미팅룸`은 이제 summary 아래에 묻히지 않고, 합성된 wall feed·좌석 기반 에이전트 테이블·리뷰 데스크 요약을 가진 전용 페이지로 노출됨
 - 회사 이슈 실행 상세는 이제 단순 변경점이 아니라 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약까지 함께 보여줌
 - `cotor company issue run <issue-id>`는 기본적으로 이슈가 정착 상태가 될 때까지 기다려서, CLI에서 시작한 로컬 에이전트 작업이 중간에 고아 작업으로 끊기지 않게 함. 이미 실행 중인 app-server가 백그라운드 작업을 맡아야 할 때만 `--async` 사용
@@ -177,8 +181,8 @@ cotor delete    # 삭제
 - 완료된 회사 이슈 실행은 실험적 pipeline replay flag 없이도 `cotor resume inspect <run-id>`로 durable run을 확인 가능
 - 리뷰 큐 생성
 - runtime/backend/review/session 상태를 합성한 이벤트 월과 움직이는 좌석 기반 에이전트 존재감을 포함한 전용 미팅룸 보기
-- 채팅 컨트롤 레일에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
-- 확인용 요청을 만들기 전에 채팅 컨트롤 레일에서 리더 AI와 워커 roster를 직접 선택
+- 채팅 컨트롤 surface에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
+- 확인용 요청을 만들기 전에 채팅 컨트롤에서 리더 AI와 워커 roster를 직접 선택
 - 한 wave가 끝나면 CEO planning lane을 다시 열어서 active goal이 첫 batch 이후에도 다음 이슈 wave를 이어서 만들 수 있음
 - continuous improvement goal은 한 개의 좁은 후속 이슈보다 여러 branchable issue와 병렬 slice를 우선 만들도록 유도
 - 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 roster가 한두 개 이슈로만 수렴하지 않게 함
