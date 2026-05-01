@@ -65,7 +65,7 @@ starter 선택 규칙은 아래와 같습니다.
 
 - `cotor install`은 packaged app bundle을 복사합니다.
 - `cotor update`는 packaged app bundle을 다시 복사합니다.
-- `cotor delete`는 설치된 앱 산출물을 삭제합니다.
+- `cotor delete`는 `/Applications`, `~/Applications`, Downloads staging 경로, 그리고 `COTOR_DESKTOP_INSTALL_ROOT` override가 설정된 경우 그 위치의 앱 산출물을 삭제합니다.
 - 런타임에 Gradle 재빌드는 하지 않습니다.
 - 런타임에 Swift 재빌드는 하지 않습니다.
 
@@ -175,6 +175,16 @@ rm -rf ~/.cotor/interactive/default
 ```bash
 cotor
 ```
+
+### 설치된 데스크톱 산출물을 전부 지우고 싶다
+
+아래를 실행하세요.
+
+```bash
+cotor delete
+```
+
+delete 흐름은 `/Applications`, `~/Applications`, Downloads staging 경로, 그리고 `COTOR_DESKTOP_INSTALL_ROOT`가 설정된 override 경로의 앱을 제거합니다. `~/.cotor/interactive/default` starter config는 삭제하지 않으므로, CLI 첫 실행 상태까지 초기화하려면 그 디렉터리를 별도로 지우세요.
 
 ### interactive 실패 원인을 보고 싶다
 

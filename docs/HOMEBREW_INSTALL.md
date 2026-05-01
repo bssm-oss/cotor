@@ -65,7 +65,7 @@ Examples:
 
 - `cotor install` copies the packaged app bundle
 - `cotor update` recopies the packaged app bundle
-- `cotor delete` removes installed app artifacts
+- `cotor delete` removes installed app artifacts from `/Applications`, `~/Applications`, the Downloads staging path, and `COTOR_DESKTOP_INSTALL_ROOT` when that override is set
 - no Gradle rebuild happens at runtime
 - no Swift rebuild happens at runtime
 
@@ -175,6 +175,16 @@ Then run:
 ```bash
 cotor
 ```
+
+### You want to remove every installed desktop artifact
+
+Run:
+
+```bash
+cotor delete
+```
+
+The delete flow removes the app from `/Applications`, `~/Applications`, the Downloads staging path, and the override path when `COTOR_DESKTOP_INSTALL_ROOT` is set. It does not remove your `~/.cotor/interactive/default` starter config; remove that directory separately if you want to reset first-run CLI state.
 
 ### You want to inspect a failed interactive session
 
