@@ -16,9 +16,9 @@ class DesktopAppServiceMergeConfirmationTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 22, any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 22, any(), any(), any()) } returns Unit
         coEvery {
-            gitWorkspaceService.submitPullRequestReview(any(), 22, PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 22, PullRequestReviewVerdict.APPROVE, any(), any(), any())
         } returns PublishMetadata(
             pullRequestNumber = 22,
             pullRequestUrl = "https://github.com/heodongun/cotor-test/pull/22",
@@ -26,7 +26,7 @@ class DesktopAppServiceMergeConfirmationTest : FunSpec({
             reviewState = "APPROVED",
             mergeability = "CLEAN"
         )
-        coEvery { gitWorkspaceService.mergePullRequest(any(), 22) } returns PullRequestMergeResult(
+        coEvery { gitWorkspaceService.mergePullRequest(any(), 22, any(), any(), any()) } returns PullRequestMergeResult(
             number = 22,
             url = "https://github.com/heodongun/cotor-test/pull/22",
             state = "OPEN",

@@ -6,6 +6,7 @@ import com.cotor.policy.PolicyEngine
 import com.cotor.policy.PolicyRule
 import com.cotor.policy.PolicyScopeLevel
 import com.cotor.policy.PolicyStore
+import com.cotor.provenance.EvidenceNodeKind
 import com.cotor.provenance.ProvenanceService
 import com.cotor.provenance.ProvenanceStore
 import com.cotor.runtime.durable.DurableRunSnapshot
@@ -104,5 +105,34 @@ class ActionExecutionServiceTest : FunSpec({
             SideEffectKind.FILE_WRITE,
             SideEffectKind.SECRET_READ
         )
+    }
+
+    test("provenance records evidence returned by action success hooks") {
+        val appHome = Files.createTempDirectory("action-execution-provenance-evidence")
+        val provenanceStore = ProvenanceStore { appHome }
+        val service = ActionExecutionService(
+            actionStore = ActionStore { appHome },
+            provenanceService = ProvenanceService(provenanceStore)
+        )
+
+        runBlocking {
+            service.run(
+                request = ActionRequest(kind = ActionKind.GIT_PUBLISH, label = "git.publish:feature"),
+                onSuccess = {
+                    ActionEvidence(
+                        branchName = "feature/test",
+                        pullRequestNumber = 42,
+                        pullRequestUrl = "https://github.com/example/cotor/pull/42"
+                    )
+                }
+            ) {
+                "published"
+            }
+        }
+
+        val graph = provenanceStore.load()
+        graph.nodes.any { it.kind == EvidenceNodeKind.BRANCH && it.ref == "branch:feature/test" } shouldBe true
+        graph.nodes.any { it.kind == EvidenceNodeKind.PR && it.ref == "pr:42" } shouldBe true
+        graph.edges.any { it.toRef == "pr:42" && it.relation == "published-pr" } shouldBe true
     }
 })

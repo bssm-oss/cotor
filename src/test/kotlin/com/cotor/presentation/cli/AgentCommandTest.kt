@@ -148,7 +148,41 @@ class AgentCommandTest : FunSpec({
         val added = root.resolve(".cotor/agents/opencode.yaml")
         added.exists() shouldBe true
         added.readText() shouldContain "pluginClass: com.cotor.data.plugin.OpenCodePlugin"
-        added.readText() shouldContain "model: \"opencode/nemotron-3-super-free\""
+        added.readText() shouldContain "model: \"opencode-go/deepseek-v4-flash\""
+    }
+
+    test("agent add gemma4 writes local model provider defaults") {
+        val root = Path("build/tmp/agent-gemma4-${System.currentTimeMillis()}")
+        createdRoots.add(root)
+        root.createDirectories()
+        val config = root.resolve("cotor.yaml")
+        config.writeText("version: \"1.0\"\nagents: []\n")
+
+        val result = AgentCommand().test("add gemma4 --config $config --local --yes")
+
+        result.statusCode shouldBe 0
+        val added = root.resolve(".cotor/agents/gemma4.yaml")
+        added.exists() shouldBe true
+        added.readText() shouldContain "pluginClass: com.cotor.data.plugin.LocalModelPlugin"
+        added.readText() shouldContain "baseUrl: \"http://127.0.0.1:11434\""
+        added.readText() shouldContain "model: \"gemma4:e2b\""
+        added.readText() shouldContain "provider: \"ollama\""
+    }
+
+    test("agent add graphify writes built in graph query command") {
+        val root = Path("build/tmp/agent-graphify-${System.currentTimeMillis()}")
+        createdRoots.add(root)
+        root.createDirectories()
+        val config = root.resolve("cotor.yaml")
+        config.writeText("version: \"1.0\"\nagents: []\n")
+
+        val result = AgentCommand().test("add graphify --config $config --local --yes")
+
+        result.statusCode shouldBe 0
+        val added = root.resolve(".cotor/agents/graphify.yaml")
+        added.exists() shouldBe true
+        added.readText() shouldContain "pluginClass: com.cotor.data.plugin.CommandPlugin"
+        added.readText() shouldContain "argvJson: \"[\\\"graphify\\\",\\\"explain\\\",\\\"{input}\\\"]\""
     }
 
     test("agent add help shows detailed usage") {

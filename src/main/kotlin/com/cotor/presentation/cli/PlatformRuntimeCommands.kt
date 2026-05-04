@@ -1,7 +1,11 @@
 package com.cotor.presentation.cli
 
 import com.cotor.app.AppServer
+import com.cotor.app.BrowserSmokeRequest
+import com.cotor.app.CapabilityKey
 import com.cotor.app.DesktopAppService
+import com.cotor.app.VideoPlanRequest
+import com.cotor.app.capabilityCatalog
 import com.cotor.policy.PolicyDocument
 import com.cotor.policy.PolicyEngine
 import com.cotor.policy.PolicyStore
@@ -37,6 +41,227 @@ class PolicyCommand : CliktCommand(name = "policy", help = "Validate and simulat
     override fun run() = Unit
 }
 
+class CapabilityCommand : CliktCommand(name = "capability", help = "Inspect and simulate agent capability gates.") {
+    init {
+        subcommands(CapabilityListCommand(), CapabilityInspectCommand(), CapabilitySimulateCommand())
+    }
+
+    override fun run() = Unit
+}
+
+class ProviderCommand : CliktCommand(name = "provider", help = "Inspect local provider availability without network or cost side effects.") {
+    init {
+        subcommands(ProviderListCommand(), ProviderScanCommand(), ProviderTestCommand())
+    }
+
+    override fun run() = Unit
+}
+
+class SkillCommand : CliktCommand(name = "skill", help = "Inspect, validate, and gate skill runs.") {
+    init {
+        subcommands(SkillListCommand(), SkillInspectCommand(), SkillValidateCommand(), SkillRunCommand())
+    }
+
+    override fun run() = Unit
+}
+
+class BrowserCommand : CliktCommand(name = "browser", help = "Plan guarded browser automation with capability gates.") {
+    init {
+        subcommands(BrowserSmokeCommand())
+    }
+
+    override fun run() = Unit
+}
+
+class VideoCommand : CliktCommand(name = "video", help = "Plan guarded video work with capability gates.") {
+    init {
+        subcommands(VideoPlanCommand(), VideoRenderCommand(), VideoTranscodeCommand(), VideoGenerateRemoteCommand())
+    }
+
+    override fun run() = Unit
+}
+
+private abstract class VideoBaseCommand(name: String, help: String) : CliktCommand(name = name, help = help), KoinComponent {
+    protected val desktopService: DesktopAppService by inject()
+    protected val companyId by option("--company").required()
+    protected val agentId by option("--agent").required()
+    protected val issueId by option("--issue")
+    protected val prompt by option("--prompt")
+    protected val projectPath by option("--project")
+    protected val inputPath by option("--input")
+    protected val outputPath by option("--output")
+    protected val provider by option("--provider")
+
+    protected fun request(): VideoPlanRequest = VideoPlanRequest(
+        companyId = companyId,
+        agentId = agentId,
+        issueId = issueId,
+        prompt = prompt,
+        projectPath = projectPath,
+        inputPath = inputPath,
+        outputPath = outputPath,
+        provider = provider
+    )
+}
+
+private class VideoPlanCommand : VideoBaseCommand(name = "plan", help = "Plan video script work for one company agent.") {
+    override fun run() = runBlocking {
+        echo(platformJson.encodeToString(desktopService.planVideoScript(request())))
+    }
+}
+
+private class VideoRenderCommand : VideoBaseCommand(name = "render", help = "Plan a local video render for one company agent.") {
+    override fun run() = runBlocking {
+        echo(platformJson.encodeToString(desktopService.planVideoRenderLocal(request())))
+    }
+}
+
+private class VideoTranscodeCommand : VideoBaseCommand(name = "transcode", help = "Plan a local video transcode for one company agent.") {
+    override fun run() = runBlocking {
+        echo(platformJson.encodeToString(desktopService.planVideoTranscode(request())))
+    }
+}
+
+private class VideoGenerateRemoteCommand : VideoBaseCommand(name = "generate-remote", help = "Plan a remote video generation call for one company agent.") {
+    override fun run() = runBlocking {
+        echo(platformJson.encodeToString(desktopService.planVideoGenerateRemote(request())))
+    }
+}
+
+private class BrowserSmokeCommand : CliktCommand(name = "smoke", help = "Plan a browser smoke check for one company agent."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+    private val companyId by option("--company").required()
+    private val agentId by option("--agent").required()
+    private val url by option("--url").required()
+    private val screenshot by option("--screenshot").flag(default = false)
+    private val trace by option("--trace").flag(default = false)
+    private val record by option("--record").flag(default = false)
+    private val interact by option("--interact").flag(default = false)
+
+    override fun run() = runBlocking {
+        echo(
+            platformJson.encodeToString(
+                desktopService.planBrowserSmoke(
+                    BrowserSmokeRequest(
+                        companyId = companyId,
+                        agentId = agentId,
+                        url = url,
+                        screenshot = screenshot,
+                        trace = trace,
+                        record = record,
+                        interact = interact
+                    )
+                )
+            )
+        )
+    }
+}
+
+private class SkillListCommand : CliktCommand(name = "list", help = "List known skills."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+
+    override fun run() {
+        echo(platformJson.encodeToString(desktopService.skillCatalog()))
+    }
+}
+
+private class SkillInspectCommand : CliktCommand(name = "inspect", help = "Inspect one skill."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+    private val name by argument("name")
+
+    override fun run() {
+        echo(platformJson.encodeToString(desktopService.inspectSkill(name)))
+    }
+}
+
+private class SkillValidateCommand : CliktCommand(name = "validate", help = "Validate one skill manifest."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+    private val path by argument("path").path(mustExist = true)
+
+    override fun run() {
+        echo(platformJson.encodeToString(desktopService.validateSkill(path.toString())))
+    }
+}
+
+private class SkillRunCommand : CliktCommand(name = "run", help = "Run the backend skill gate for one company agent."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+    private val name by argument("name")
+    private val companyId by option("--company").required()
+    private val agentId by option("--agent").required()
+    private val input by option("--input")
+
+    override fun run() = runBlocking {
+        echo(platformJson.encodeToString(desktopService.runSkill(name, companyId, agentId, input)))
+    }
+}
+
+private class ProviderListCommand : CliktCommand(name = "list", help = "List known providers.") {
+    override fun run() {
+        echo(platformJson.encodeToString(com.cotor.app.providerCatalog()))
+    }
+}
+
+private class ProviderScanCommand : CliktCommand(name = "scan", help = "Scan local provider commands on PATH."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+
+    override fun run() {
+        echo(platformJson.encodeToString(desktopService.scanProviders()))
+    }
+}
+
+private class ProviderTestCommand : CliktCommand(name = "test", help = "Test one provider command on PATH."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+    private val id by argument("id")
+
+    override fun run() {
+        echo(platformJson.encodeToString(desktopService.testProvider(id)))
+    }
+}
+
+private class CapabilityListCommand : CliktCommand(name = "list", help = "List the capability catalog.") {
+    override fun run() {
+        echo(platformJson.encodeToString(capabilityCatalog()))
+    }
+}
+
+private class CapabilityInspectCommand : CliktCommand(name = "inspect", help = "Inspect one capability.") {
+    private val key by argument("key")
+
+    override fun run() {
+        val capability = CapabilityKey.valueOf(key.trim().uppercase().replace('-', '_').replace('.', '_'))
+        val entry = capabilityCatalog().firstOrNull { it.key == capability }
+            ?: error("Capability not found: $key")
+        echo(platformJson.encodeToString(entry))
+    }
+}
+
+private class CapabilitySimulateCommand : CliktCommand(name = "simulate", help = "Simulate one action against an agent capability profile."), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+    private val companyId by option("--company").required()
+    private val agentId by option("--agent").required()
+    private val action by option("--action").required()
+    private val path by option("--path")
+    private val networkTarget by option("--network-target")
+    private val command by option("--command")
+    private val skill by option("--skill")
+
+    override fun run() = runBlocking {
+        echo(
+            platformJson.encodeToString(
+                desktopService.simulateAgentCapability(
+                    companyId = companyId,
+                    agentId = agentId,
+                    action = action,
+                    path = path,
+                    networkTarget = networkTarget,
+                    command = command,
+                    skill = skill
+                )
+            )
+        )
+    }
+}
+
 private class PolicyValidateCommand : CliktCommand(name = "validate", help = "Validate one policy document.") {
     private val path by argument("path").path(mustExist = true)
     private val store = PolicyStore()
@@ -56,6 +281,7 @@ private class PolicySimulateCommand : CliktCommand(name = "simulate", help = "Si
     private val path by option("--path")
     private val networkTarget by option("--network-target")
     private val command by option("--command")
+    private val skill by option("--skill")
 
     override fun run() {
         val kind = ActionKind.fromWireValue(action)
@@ -76,16 +302,20 @@ private class PolicySimulateCommand : CliktCommand(name = "simulate", help = "Si
                 ),
                 command = command?.let { listOf(it) }.orEmpty(),
                 path = path,
-                networkTarget = networkTarget
+                networkTarget = networkTarget,
+                metadata = skillMetadata(skill)
             )
         )
         echo(platformJson.encodeToString(decision))
     }
 }
 
+private fun skillMetadata(skill: String?): Map<String, String> =
+    skill?.trim()?.takeIf { it.isNotBlank() }?.let { mapOf("skill" to it) }.orEmpty()
+
 class EvidenceCommand : CliktCommand(name = "evidence", help = "Inspect provenance bundles.") {
     init {
-        subcommands(EvidenceRunCommand(), EvidenceFileCommand())
+        subcommands(EvidenceRunCommand(), EvidenceFileCommand(), EvidencePullRequestCommand())
     }
 
     override fun run() = Unit
@@ -106,6 +336,15 @@ private class EvidenceFileCommand : CliktCommand(name = "file"), KoinComponent {
 
     override fun run() = runBlocking {
         echo(platformJson.encodeToString(desktopService.evidenceForFile(path)))
+    }
+}
+
+private class EvidencePullRequestCommand : CliktCommand(name = "pr"), KoinComponent {
+    private val desktopService: DesktopAppService by inject()
+    private val pullRequestNumber by argument("pullRequestNumber").int()
+
+    override fun run() = runBlocking {
+        echo(platformJson.encodeToString(desktopService.evidenceForPullRequest(pullRequestNumber)))
     }
 }
 

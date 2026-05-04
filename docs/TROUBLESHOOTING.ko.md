@@ -77,7 +77,7 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 | 로컬 `master`에 머지 결과가 안 보임 | 원격에서 merge는 됐지만 로컬 branch가 뒤처짐, 또는 실제 merge가 안 됨 | `git status -sb`, `git log --oneline --decorate -5`, `gh pr view` |
 | `cotor` 인터랙티브/TUI가 시작은 되는데 응답이 이상함 | 얇은 PATH, 인증되지 않은 AI CLI, 잘못된 starter 선택 | `interactive.log`, shell PATH, provider 인증 상태 |
 | `brew install cotor`는 됐는데 데스크톱 설치/첫 실행이 이상함 | packaged install 레이아웃 오인, HOME 경로 해석 문제, stale local override | `docs/HOMEBREW_INSTALL.ko.md`, packaged config 경로, `interactive.log` |
-| 인증을 켰을 때만 desktop health check가 실패함 | desktop launcher, `DesktopAPI`, 수동 curl이 backend와 다른 `COTOR_APP_TOKEN`을 사용 | `desktop-app.log`, runtime `app-server.token`, process arguments |
+| 인증을 켰을 때만 desktop health check가 실패함 | desktop launcher, `DesktopAPI`, 수동 curl이 backend와 다른 `COTOR_APP_TOKEN`을 사용 | `desktop-app.log`, runtime `app-server.token`, backend 환경 변수, 수동 실행 process argument |
 
 ## 4. 데스크톱 앱 시작과 종료 문제
 

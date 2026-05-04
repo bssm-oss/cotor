@@ -10,6 +10,7 @@ package com.cotor.di
 
 import com.cotor.analysis.DefaultResultAnalyzer
 import com.cotor.analysis.ResultAnalyzer
+import com.cotor.app.AgentCapabilityGuard
 import com.cotor.app.DesktopAppService
 import com.cotor.app.DesktopStateStore
 import com.cotor.app.DesktopTuiSessionService
@@ -94,8 +95,10 @@ val cotorModule = module {
     single { ProvenanceService() }
     single { KnowledgeService() }
     single { PolicyEngine() }
+    single { AgentCapabilityGuard(get()) }
     single<ActionInterceptor>(qualifier = org.koin.core.qualifier.named("policy")) { get<PolicyEngine>() }
     single<ActionInterceptor>(qualifier = org.koin.core.qualifier.named("risk")) { RiskApprovalInterceptor() }
+    single<ActionInterceptor>(qualifier = org.koin.core.qualifier.named("capability")) { get<AgentCapabilityGuard>() }
     single { GitHubControlPlaneStore() }
     single { GitHubControlPlaneService(get(), get(), get()) }
     single { VerificationBundleService(get(), get(), com.cotor.verification.VerificationStore()) }
@@ -105,6 +108,7 @@ val cotorModule = module {
             durableRuntimeService = get(),
             provenanceService = get(),
             interceptors = listOf(
+                get(org.koin.core.qualifier.named("capability")),
                 get(org.koin.core.qualifier.named("policy")),
                 get(org.koin.core.qualifier.named("risk"))
             ),

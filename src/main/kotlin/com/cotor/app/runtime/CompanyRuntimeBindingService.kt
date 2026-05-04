@@ -105,6 +105,8 @@ class CompanyRuntimeBindingService(
                 val runtimeDisposition = when {
                     matchingRun?.status == DurableRunStatus.WAITING_FOR_APPROVAL || matchingRun?.approvalPauses?.any { it.status.name == "PENDING" } == true ->
                         WAITING_FOR_APPROVAL
+                    issue.status == com.cotor.app.IssueStatus.WAITING_FOR_APPROVAL ->
+                        WAITING_FOR_APPROVAL
                     issuePullRequest?.checksSummary?.contains("FAILURE", ignoreCase = true) == true ->
                         WAITING_FOR_CI
                     matchingRun?.status == DurableRunStatus.FAILED && issue.status == com.cotor.app.IssueStatus.BLOCKED ->
@@ -161,8 +163,11 @@ class CompanyRuntimeBindingService(
             }
         }
         val pendingIssueIds = boundIssues.filter { it.runtimeDisposition == RUNNABLE }.map { it.id }
+        val pendingApprovalIssueIds = boundIssues
+            .filter { it.runtimeDisposition == WAITING_FOR_APPROVAL && it.durableRunId !in pendingApprovalRunIds }
+            .map { it.id }
         val blockedIssueIds = boundIssues.filter {
-            it.runtimeDisposition in setOf(WAITING_FOR_APPROVAL, WAITING_FOR_CI, QUARANTINED)
+            it.runtimeDisposition in setOf(WAITING_FOR_CI, QUARANTINED)
         }.map { it.id }
         val reviewQueueAttentionIds = boundQueue.filter {
             it.runtimeDisposition in setOf(WAITING_FOR_APPROVAL, WAITING_FOR_CI, RECOVERABLE)
@@ -170,7 +175,7 @@ class CompanyRuntimeBindingService(
         return BoundCompanyRuntime(
             runtime = runtime.copy(
                 resumableRunCount = resumableRunIds.size,
-                waitingApprovalCount = pendingApprovalRunIds.size,
+                waitingApprovalCount = pendingApprovalRunIds.size + pendingApprovalIssueIds.size,
                 blockedByPolicyCount = blockedByPolicy,
                 blockedByCiCount = blockedByCi,
                 resumableRunIds = resumableRunIds,

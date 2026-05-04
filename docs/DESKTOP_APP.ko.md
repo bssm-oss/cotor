@@ -80,7 +80,7 @@ export COTOR_APP_TOKEN='your-local-token'
 swift run --package-path macos CotorDesktopApp
 ```
 
-번들 backend를 launcher가 관리할 때 launcher와 `DesktopAPI`는 같은 `COTOR_APP_TOKEN` 값을 읽습니다. 환경 변수가 없으면 양쪽 모두 embedded session용 desktop-local token으로 폴백합니다.
+번들 backend를 launcher가 관리할 때 launcher와 `DesktopAPI`는 같은 `COTOR_APP_TOKEN` 값을 읽습니다. 환경 변수가 없으면 양쪽 모두 embedded session용 desktop-local token으로 폴백합니다. 패키지 launcher는 이 token을 backend process argument에 넣지 않고 backend 환경 변수와 `0600` runtime token file로 전달합니다.
 
 ## 로컬 앱 번들 설치
 
@@ -115,17 +115,17 @@ cotor delete
 
 - 회사 선택기
 - 하나의 루트 폴더에 묶이는 회사 생성
-- 이벤트 월, 실행 좌석, 리뷰 데스크를 한 화면에서 보는 실시간 회사 플로어 맵용 `미팅룸` 직접 탐색
+- 기본으로 쉬운 저장소 `지도`를 열고 기술적인 그래프 파일 경로는 숨기며, 실시간 활동·실행 현황·리뷰 현황으로 전환할 수 있는 `상황실` 직접 탐색
 - 에이전트 정의 작성
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
-- 라이브 메시지/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal preview, 리더/워커 AI 라우팅 제어를 함께 보여주는 전용 `채팅 컨트롤` 탐색 surface
+- 라이브 메시지/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal preview, 대표/도움 에이전트 배정 제어를 함께 보여주는 전용 `채팅 컨트롤` 탐색 surface
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
 - 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영
 - 이슈 실행 상세 카드는 이제 각 issue-linked run마다 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약을 함께 보여줌
 - 비동기 상세 정보와 메모리 스냅샷 요청은 완료 전에 선택된 issue/task가 바뀌면 오래된 응답을 적용하지 않음
 - 회사 실시간 stream이 끊기면 마지막 snapshot은 유지한 채 `회사 실시간 업데이트 연결이 끊어졌습니다. 다시 동기화하는 중...` 메시지를 보여주며 복구
-- 런타임 건강도, 차단 워크플로우 수, 리뷰 주의 수, 최근 오류/동작을 한곳에 모아 둔 압축형 회사 요약 배너
+- 런타임 건강도, PR 승인 대기, 차단 워크플로우 수, 리뷰 주의 수, 최근 오류/동작을 한곳에 모아 둔 압축형 회사 요약 배너
 - 압축형 회사 요약과 회사 설정에서 선택한 런타임의 추정 비용과 일/월 비용 상한도 함께 표시
 - 고정된 보드 surface 안에서도 lane 내부 스크롤로 차단/리뷰 카드가 길게 쌓여도 읽을 수 있는 이슈 보드
 - stale한 Cotor retry PR은 배치 정리로 닫아서 리뷰 루프가 오래된 open PR을 계속 쌓아 두지 않게 함
@@ -136,8 +136,8 @@ cotor delete
 - 회사 런타임을 명시적으로 중지하면 앱 재실행이나 회사 refresh 뒤에도 사용자가 다시 시작할 때까지 그대로 유지
 - 회사 모드 이벤트마다 전체 데스크톱 새로고침을 돌리지 않고, 회사 전용 dashboard snapshot으로 상태를 바로 패치
 - 한 wave의 goal work가 끝나면 CEO planning lane을 다시 열어서 첫 decomposition 이후 goal이 얼어붙지 않게 함
-- continuous improvement goal은 roster가 허용하면 여러 branchable issue와 병렬 slice를 만들도록 유도
-- 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 roster가 한두 개 이슈로만 줄어들지 않게 함
+- continuous improvement goal은 팀 구성이 허용하면 여러 branchable issue와 병렬 slice를 만들도록 유도
+- 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 팀이 한두 개 이슈로만 줄어들지 않게 함
 - 새 runnable work가 생기면 stale polling tick을 기다리지 않고 런타임이 즉시 깨어나며, 여러 회사 역할이 같은 execution CLI를 써도 runnable issue를 병렬로 시작할 수 있음
 - 로컬 merge 완료 표시는 GitHub 새로고침 결과가 실제 `MERGED`일 때만 기록됨
 
@@ -187,24 +187,26 @@ cotor delete
 - 여러 회사 생성
 - 회사당 하나의 작업 폴더 바인딩
 - 최소 입력 기반 회사 에이전트 정의
-- 회사 에이전트별 provider 모델 override 저장
+- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 설치된 로컬 모델도 같은 방식으로 선택 가능
+- 로컬 지도 도구가 있으면 작업공간 구조 확인용 내장 회사 에이전트 선택 가능, 그리고 모든 회사 에이전트 실행 메모리에 가벼운 작업공간 지도 지침 주입
 - 회사 목표 생성
 - 목표를 이슈로 자동 분해
 - 이슈 위임 및 실행
 - 회사 단위 Linear sync가 켜져 있으면 바깥 Linear로 이슈/진행 상태 미러링
 - 연결된 태스크와 실행 이력 조회
 - 리뷰 큐 아이템 생성 및 머지 처리
-- runtime/backend/review/session 상태를 합성한 이벤트 월과 좌석/리뷰 데스크 요약이 포함된 전용 미팅룸 보기
+- 기본 저장소 `지도`와 runtime/backend/review/session 상태를 합성한 실시간 활동, 실행 현황/리뷰 요약을 함께 제공하는 전용 상황실 보기
 - 채팅 컨트롤 surface에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
-- 확인용 요청을 준비하기 전에 채팅 컨트롤에서 리더 AI와 워커 roster를 직접 선택
+- 확인용 요청을 준비하기 전에 채팅 컨트롤에서 대표 에이전트와 도움 에이전트 팀을 직접 선택
 - 정상적인 회사 모드에서는 수동 새로고침 없이 회사 활동 조회
-- 압축형 회사 요약 배너에서 런타임 건강도, 차단/리뷰 주의, 최근 런타임 신호 조회
+- 압축형 회사 요약 배너에서 런타임 건강도, 승인 필요/차단/리뷰 주의, 최근 런타임 신호 조회
 - 회사 콘솔 안에서 추정 비용을 확인하고 일/월 비용 상한을 조정
 - GitHub PR 발행이 필요한데 `gh`/`origin` 준비가 안 된 저장소는 회사 생성 시 경고
 - 로컬 런타임 루프의 시작/중지/상태 확인
 - active autonomous goal이 남아 있어도, 수동으로 중지한 회사 런타임은 사용자가 다시 시작할 때까지 유지
 - active task/run이 남아 있으면 빠른 monitoring cadence를 유지해서 stale `RUNNING` 상태를 더 빨리 정리
 - app-server 종료로 끊긴 회사 작업은 일반 process-exit 실패로 남기지 않고 다시 큐에 올려 재개 가능하게 복구
+- PR 생성 정책 승인 대기는 일반 차단 워크플로우가 아니라 `승인 필요`로 표시하며, 게시 전 명시적 승인은 계속 요구함
 - 그 후 데스크톱 앱과 번들 backend가 다시 올라오면 queued delegated 회사 작업을 다시 시작하고, 회사 활동 로그에도 그 복구 흐름을 남김
 - 필요하면 issue pipeline id로 issue-linked durable run을 묶어서 `cotor resume inspect <run-id>`가 올바른 회사 이슈 실행에 계속 연결되도록 함
 - 회사 이슈 실행은 기본적으로 durable run snapshot을 만들어서 이슈의 `durableRunId`를 `cotor resume inspect <run-id>`로 확인할 수 있음

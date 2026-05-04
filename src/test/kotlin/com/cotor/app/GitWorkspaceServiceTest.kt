@@ -430,6 +430,36 @@ class GitWorkspaceServiceTest : FunSpec({
         processManager.remainingSteps() shouldBe 0
     }
 
+    test("inspectGitHubPublishEnvironment redacts credentials from origin urls") {
+        val repositoryRoot = Files.createTempDirectory("git-workspace-redacted-origin")
+        val processManager = FakeProcessManager(
+            listOf(
+                FakeProcessManager.Step(
+                    listOf("gh", "--version"),
+                    ProcessResult(0, "gh version 2.0.0\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("gh", "auth", "status"),
+                    ProcessResult(0, "Logged in\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(0, "https://user:secret-token@github.com/heodongun/cotor.git\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(0, "https://user:secret-token@github.com/heodongun/cotor.git\n", "", true)
+                )
+            )
+        )
+        val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
+
+        val environment = service.inspectGitHubPublishEnvironment(repositoryRoot, "master")
+
+        environment.originUrl shouldBe "https://github.com/heodongun/cotor.git"
+        processManager.remainingSteps() shouldBe 0
+    }
+
     test("submitPullRequestReview skips self-authored approvals before invoking gh pr review") {
         val repositoryRoot = Files.createTempDirectory("git-workspace-self-approval")
         val processManager = FakeProcessManager(

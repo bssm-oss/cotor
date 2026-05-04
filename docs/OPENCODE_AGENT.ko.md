@@ -43,15 +43,15 @@ agents:
 `OpenCodePlugin`은 다음을 실행합니다:
 
 ```bash
-opencode run --model <model> --format json "<prompt>"
+opencode run --model <model> --format json "Execute the instructions in the attached prompt file." --file <0600-prompt-file>
 ```
 
-이는 주어진 프롬프트로 OpenCode를 논인터랙티브 모드로 실행합니다. 플러그인은 stdout을 캡처하여 Cotor의 오케스트레이션 레이어에 반환합니다.
+이는 전체 작업 프롬프트를 process argument에 노출하지 않고 OpenCode를 논인터랙티브 모드로 실행합니다. 플러그인은 프롬프트를 임시 `0600` 파일에 쓰고, 파일로 첨부한 뒤 stdout을 캡처하고, 임시 파일을 삭제한 다음 파싱된 출력을 Cotor의 오케스트레이션 레이어에 반환합니다.
 
 ### 명령 흐름
 
 1. Cotor가 프롬프트 수신 (파이프라인, 인터랙티브 세션, 또는 회사 워크플로우에서)
-2. `OpenCodePlugin.execute()`가 명령어 빌드: `["opencode", "run", "--model", "<model>", "--format", "json", "<prompt>"]`
+2. `OpenCodePlugin.execute()`가 프롬프트를 임시 파일에 쓰고 명령어 빌드: `["opencode", "run", "--model", "<model>", "--format", "json", "Execute the instructions in the attached prompt file.", "--file", "<prompt-file>"]`
 3. `ProcessManager`가 설정된 env/작업 디렉토리로 자식 프로세스 생성
 4. 프로세스 출력이 캡처되어 `PluginExecutionOutput`으로 반환
 5. 프로세스가 0이 아닌 종료 코드로 종료되면 캡처된 stdout/stderr와 함께 `ProcessExecutionException` 발생
@@ -60,7 +60,7 @@ opencode run --model <model> --format json "<prompt>"
 
 ### 에이전트 파라미터
 
-OpenCode는 선택적 `model` 파라미터를 받습니다. 지정하지 않으면 Cotor는 기본값 `opencode/nemotron-3-super-free`를 사용합니다.
+OpenCode는 선택적 `model` 파라미터를 받습니다. 지정하지 않으면 Cotor는 기본값 `opencode-go/deepseek-v4-flash`를 사용합니다.
 
 회사 생성 시 시드되는 기본 에이전트도 실행 파일이 존재하면 OpenCode를 우선 사용하도록 바뀌었기 때문에, 사용자가 명시적으로 바꾸지 않는 한 회사 워크플로우는 이 저비용 기본 모델을 우선 사용합니다.
 

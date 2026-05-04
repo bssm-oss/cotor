@@ -6,6 +6,7 @@ import com.cotor.app.CompanyIssue
 import com.cotor.app.DesktopAppService
 import com.cotor.app.ReviewQueueItem
 import com.cotor.app.ReviewQueueStatus
+import com.cotor.provenance.EvidenceBundle
 import com.github.ajalt.clikt.testing.test
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -114,6 +115,50 @@ class CompanyCommandTest : FunSpec({
         result.output shouldContain "\"enabled\": false"
     }
 
+    test("company agent capabilities prints backend profile") {
+        coEvery { service.agentCapabilities("company-1", "agent-1") } returns com.cotor.app.AgentCapabilityProfile(
+            companyId = "company-1",
+            agentId = "agent-1"
+        )
+
+        val result = CompanyCommand().test("agent capabilities agent-1 --company-id company-1")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "\"agentId\": \"agent-1\""
+        result.output shouldContain "SHELL_EXEC"
+    }
+
+    test("company agent capability set forwards one mode patch") {
+        coEvery { service.agentCapabilities("company-1", "agent-1") } returns com.cotor.app.AgentCapabilityProfile(
+            companyId = "company-1",
+            agentId = "agent-1"
+        )
+        coEvery {
+            service.updateAgentCapabilities(
+                companyId = "company-1",
+                agentId = "agent-1",
+                settings = match { settings ->
+                    settings[com.cotor.app.CapabilityKey.SHELL_EXEC]?.mode == com.cotor.app.CapabilityMode.AUTO
+                }
+            )
+        } returns com.cotor.app.AgentCapabilityProfile(
+            companyId = "company-1",
+            agentId = "agent-1",
+            settings = com.cotor.app.defaultAgentCapabilitySettings() + mapOf(
+                com.cotor.app.CapabilityKey.SHELL_EXEC to com.cotor.app.AgentCapabilitySetting(
+                    enabled = true,
+                    mode = com.cotor.app.CapabilityMode.AUTO
+                )
+            )
+        )
+
+        val result = CompanyCommand().test("agent capability agent-1 SHELL_EXEC --company-id company-1 --mode AUTO")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "SHELL_EXEC"
+        result.output shouldContain "AUTO"
+    }
+
     test("company issue run waits for settled issue output") {
         coEvery { service.runIssueAndAwaitSettlement("issue-1") } returns CompanyIssue(
             id = "issue-1",
@@ -176,6 +221,149 @@ class CompanyCommandTest : FunSpec({
         result.output shouldContain "\"id\": \"issue-async\""
         result.output shouldContain "\"status\": \"IN_PROGRESS\""
         io.mockk.coVerify(exactly = 1) { service.runIssue("issue-async") }
+    }
+
+    test("evidence pr prints pull request evidence bundle") {
+        coEvery { service.evidenceForPullRequest(12) } returns EvidenceBundle(query = "pr:12")
+
+        val result = EvidenceCommand().test("pr 12")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "\"query\": \"pr:12\""
+    }
+
+    test("skill run prints backend skill payload") {
+        coEvery { service.runSkill("graphify", "company-1", "agent-1", "map-repo") } returns com.cotor.app.SkillRunResult(
+            skill = "graphify",
+            status = "READY",
+            capability = com.cotor.app.CapabilitySimulationResult(
+                action = "skill.run",
+                capability = com.cotor.app.CapabilityKey.SKILL_RUN,
+                mode = com.cotor.app.CapabilityMode.AUTO,
+                allowed = true,
+                reason = "allowed"
+            ),
+            output = "Graphify is allowed."
+        )
+
+        val result = SkillCommand().test("run graphify --company company-1 --agent agent-1 --input map-repo")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "\"skill\": \"graphify\""
+        result.output shouldContain "\"status\": \"READY\""
+    }
+
+    test("provider test prints provider availability payload") {
+        io.mockk.every { service.testProvider("gh") } returns com.cotor.app.ProviderScanResult(
+            provider = com.cotor.app.ProviderCatalogEntry(
+                id = "gh",
+                displayName = "GitHub CLI",
+                command = "gh",
+                capabilities = listOf(com.cotor.app.CapabilityKey.GITHUB_READ)
+            ),
+            available = true,
+            message = "gh is available on PATH."
+        )
+
+        val result = ProviderCommand().test("test gh")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "\"id\": \"gh\""
+        result.output shouldContain "\"available\": true"
+    }
+
+    test("capability inspect and simulate print backend capability payloads") {
+        coEvery {
+            service.simulateAgentCapability(
+                companyId = "company-1",
+                agentId = "agent-1",
+                action = "browser.external-domain",
+                path = null,
+                networkTarget = "example.com",
+                command = null,
+                skill = null
+            )
+        } returns com.cotor.app.CapabilitySimulationResult(
+            action = "browser.external-domain",
+            capability = com.cotor.app.CapabilityKey.BROWSER_EXTERNAL_DOMAIN,
+            mode = com.cotor.app.CapabilityMode.DISABLED,
+            allowed = false,
+            reason = "disabled"
+        )
+
+        val inspect = CapabilityCommand().test("inspect browser.external-domain")
+        val simulate = CapabilityCommand().test("simulate --company company-1 --agent agent-1 --action browser.external-domain --network-target example.com")
+
+        inspect.statusCode shouldBe 0
+        inspect.output shouldContain "BROWSER_EXTERNAL_DOMAIN"
+        simulate.statusCode shouldBe 0
+        simulate.output shouldContain "\"allowed\": false"
+    }
+
+    test("browser smoke prints guarded browser plan") {
+        coEvery {
+            service.planBrowserSmoke(
+                com.cotor.app.BrowserSmokeRequest(
+                    companyId = "company-1",
+                    agentId = "agent-1",
+                    url = "http://127.0.0.1:3000",
+                    screenshot = true
+                )
+            )
+        } returns com.cotor.app.BrowserSmokeResult(
+            url = "http://127.0.0.1:3000",
+            status = "READY",
+            checks = listOf(
+                com.cotor.app.CapabilitySimulationResult(
+                    action = "browser.read",
+                    capability = com.cotor.app.CapabilityKey.BROWSER_READ,
+                    mode = com.cotor.app.CapabilityMode.AUTO,
+                    allowed = true,
+                    reason = "allowed"
+                )
+            ),
+            command = listOf("playwright", "open", "http://127.0.0.1:3000", "--screenshot"),
+            message = "Browser smoke is allowed."
+        )
+
+        val result = BrowserCommand().test("smoke --company company-1 --agent agent-1 --url http://127.0.0.1:3000 --screenshot")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "\"status\": \"READY\""
+        result.output shouldContain "--screenshot"
+    }
+
+    test("video plan prints guarded video plan") {
+        coEvery {
+            service.planVideoScript(
+                com.cotor.app.VideoPlanRequest(
+                    companyId = "company-1",
+                    agentId = "agent-1",
+                    issueId = "issue-1",
+                    projectPath = "/tmp/video"
+                )
+            )
+        } returns com.cotor.app.VideoPlanResult(
+            action = "video.script-write",
+            status = "READY",
+            checks = listOf(
+                com.cotor.app.CapabilitySimulationResult(
+                    action = "video.script-write",
+                    capability = com.cotor.app.CapabilityKey.VIDEO_SCRIPT_WRITE,
+                    mode = com.cotor.app.CapabilityMode.AUTO,
+                    allowed = true,
+                    reason = "allowed"
+                )
+            ),
+            command = listOf("video-plan", "--issue=issue-1", "--project=/tmp/video"),
+            message = "Video script planning is allowed."
+        )
+
+        val result = VideoCommand().test("plan --company company-1 --agent agent-1 --issue issue-1 --project /tmp/video")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "\"action\": \"video.script-write\""
+        result.output shouldContain "\"status\": \"READY\""
     }
 
     test("company issue show uses the projected issue path") {

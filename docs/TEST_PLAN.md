@@ -39,6 +39,12 @@ Purpose:
 | `plugin` | repo checkout | `./gradlew run --args='plugin --help'` | help renders | automated |
 | `agent` | repo checkout | `./gradlew run --args='agent --help'` | help renders | automated |
 | `app-server` | repo checkout | `./gradlew run --args='app-server --help'` | help renders | automated |
+| `capability` | repo checkout | `./gradlew run --args='capability list'` | capability catalog prints | automated |
+| `provider` | repo checkout | `./gradlew run --args='provider list'` | provider catalog prints without network calls | automated |
+| `skill` | repo checkout | `./gradlew run --args='skill list'` | built-in skill catalog prints | automated |
+| `browser` | sandbox company + agent | `cotor browser smoke --company <id> --agent <id> --url http://127.0.0.1:3000` | backend-gated browser plan returns `READY` or capability denial | manual |
+| `video` | sandbox company + agent | `cotor video plan --company <id> --agent <id>` | backend-gated video plan returns `READY` or capability denial | manual |
+| `evidence` | local provenance data | `cotor evidence pr <number>` | PR evidence bundle prints without token leakage | manual |
 
 Failure capture:
 
@@ -62,6 +68,9 @@ Failure capture:
 | board/canvas switch | company board/canvas changes without losing selected issue |
 | session card click | clicking anywhere on a session/run card changes selection |
 | base branch update | applying `Current workspace base branch` updates the backend workspace and restarts the TUI session |
+| Meeting Room map | repository `Map` renders without exposing technical graph file paths, and missing/empty states stay readable |
+| GitHub readiness card | company settings show `gh`/auth/origin status and redact credential-bearing remote URLs |
+| capability/provider controls | backend capability/provider payloads render without storing secret values |
 
 ## 4. Autonomous-Company Validation Matrix
 
@@ -78,9 +87,12 @@ Failure capture:
 | activity feed | company activity appears in company mode | live |
 | runtime status | status/start/stop endpoints respond | live |
 | ready-to-merge loop | runtime can merge `READY_TO_MERGE` queue items | live |
+| GitHub mutation capability gate | PR comments/reviews/close/merge carry company+agent subjects and require configured capability/recorded approval | live |
+| browser/video planning gates | external browser domains and video render/transcode/remote generation deny by default unless capabilities allow them | live |
+| provenance evidence | PR/file/branch evidence returned by action success hooks is recorded in the local evidence graph | live |
 | multi-company separation | company A state does not leak into company B lists | live in state model |
 | follow-up issue generation | n/a | not implemented |
-| policy engine | n/a | not implemented |
+| policy engine | action-level allow/deny/approval simulation and enforcement | live v1 |
 | external Linear sync | n/a | not implemented in this build |
 
 ## 5. Issue Logging Template
