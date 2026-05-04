@@ -210,7 +210,7 @@ class DesktopAppServiceAiOnlyIntegrationTest : FunSpec({
                 gitWorkspaceServiceTransform = { realService ->
                     spyk(realService).also { spyService ->
                         coEvery {
-                            spyService.publishRun(any(), any(), any(), any(), any(), any())
+                            spyService.publishRun(any(), any(), any(), any(), any(), any(), any())
                         } answers {
                             publishedWorktreePath = thirdArg<java.nio.file.Path>().toString()
                             publishedBranchName = arg<String>(3)

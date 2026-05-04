@@ -92,6 +92,7 @@ sequenceDiagram
 
 - review queue 항목, QA 이슈, CEO approval 이슈, workflow task, workflow run은 한 번의 PR review cycle을 나타내는 explicit workflow lineage metadata로 묶입니다
 - 같은 execution 이슈에서 더 새로운 PR이 publish되면 예전 review lineage는 원자적으로 supersede 되어야 하며, stale QA/CEO verdict가 새 PR cycle에 흘러들어가면 안 됩니다
+- PR 생성 정책 게이트는 사용 가능한 CEO/최종 승인 권한 에이전트가 있으면 내부 승인으로 처리하고, 사용자 수동 승인 대기로 멈추지 말고 게시를 다시 큐에 올려야 합니다
 - 예전 회사 상태는 startup healing, 회사 dashboard read, runtime tick에서 자동으로 복구되어야 하며, stale workflow 결과를 조용히 재사용하면 안 됩니다
 - merge conflict 복구와 stale PR 정리는 superseded lineage에 연결되어야 하며, 그래야 회사가 blocked review 흔적을 남기지 않고 계속 진행할 수 있습니다
 - follow-up goal에는 explicit failure context가 있어야 하며, 그래야 일반 blocked work와 merge-conflict remediation 같은 후속 작업을 구분할 수 있습니다

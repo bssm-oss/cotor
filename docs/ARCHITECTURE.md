@@ -81,6 +81,7 @@ The company automation layer has stricter workflow invariants than the generic p
 
 - review queue items, QA issues, CEO approval issues, workflow tasks, and workflow runs are bound by explicit workflow lineage metadata for one PR review cycle
 - a newer execution publish must supersede the older review lineage atomically; stale QA or CEO verdicts may not flow into the new PR cycle
+- PR creation policy gates are satisfied by an enabled CEO/chief approval authority when available; they must requeue publishing instead of becoming a user-facing manual approval stop
 - legacy company state is repaired during startup healing, company dashboard reads, and runtime ticks instead of silently reusing stale workflow results
 - merge-conflict recovery and stale PR cleanup are tied to the superseded lineage so the company can continue without leaving blocked review artifacts behind
 - follow-up goals carry explicit failure context so the company can distinguish generic blocked work from merge-conflict remediation and other review follow-up

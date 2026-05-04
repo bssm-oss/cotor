@@ -314,7 +314,7 @@ struct DesktopStrings {
         case (.english, "READY_FOR_CEO"):
             return "Ready for CEO"
         case (.english, "WAITING_FOR_APPROVAL"):
-            return "Approval Needed"
+            return "CEO Approval"
         case (.english, "BLOCKED"):
             return "Blocked"
         case (.english, "DONE"):
@@ -366,7 +366,7 @@ struct DesktopStrings {
         case (.korean, "READY_FOR_CEO"):
             return "CEO 승인 대기"
         case (.korean, "WAITING_FOR_APPROVAL"):
-            return "승인 필요"
+            return "CEO 승인"
         case (.korean, "BLOCKED"):
             return "차단됨"
         case (.korean, "DONE"):
