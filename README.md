@@ -152,7 +152,7 @@ Current desktop model:
 - `Company` summary now also shows estimated spend plus daily/monthly cost guardrails for the selected company runtime
 - `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
 - desktop backend launch, health checks, shutdown, and client requests use the same `COTOR_APP_TOKEN` source so token-protected local sessions stay aligned
-- `Meeting Room` now opens to a plain repository `Map` by default, keeping technical graph files hidden while the live floor map stays available beside it
+- `Meeting Room` opens to a plain repository `Map` by default, falls back to a simple folder map when a prepared graph is missing, and keeps the `Agent Meeting` and live floor views one click away
 - company issue execution details now surface agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary instead of only change metadata
 - `cotor company issue run <issue-id>` waits for a settled issue state by default so local CLI-launched agent work is not orphaned; use `--async` only when an already-running app-server should own the background work
 - company runtime now wakes immediately on issue/task/review transitions and can dispatch multiple runnable issues in parallel even when different roles share the same execution CLI
@@ -175,7 +175,8 @@ Current desktop model:
 The current build includes a working local operations layer:
 
 - create multiple companies, each bound to one working folder
-- surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing
+- surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing; Cotor does not create GitHub repositories automatically when no origin exists
+- connect an existing GitHub repository from the desktop app by signing in with `gh` and saving the repository URL as `origin`
 - define company agents with only title, CLI, and role summary
 - optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents when Ollama or LM Studio is running locally with installed models
 - use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory
@@ -184,7 +185,7 @@ The current build includes a working local operations layer:
 - delegate and run issues
 - inspect completed company issue runs through `cotor resume inspect <run-id>` without enabling the experimental pipeline replay flag
 - populate and merge ready review queue items
-- inspect the dedicated Meeting Room page with a default repository `Map`, plus synthesized runtime/backend/review/session wall events and animated agent presence in the floor view
+- inspect the dedicated Meeting Room page with a default repository `Map`, a visible `Agent Meeting` table for live coordination, synthesized runtime/backend/review/session wall events, and animated agent presence in the floor view
 - use the Chat Control surface to preview and explicitly confirm real goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
 - choose the main agent and helper team directly from Chat Control before staging a confirmed company request
 - inspect compact runtime status, blocked/review attention, and recent company activity from the company summary page

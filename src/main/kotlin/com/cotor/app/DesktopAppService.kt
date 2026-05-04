@@ -8767,6 +8767,30 @@ class DesktopAppService(
         return computeGitHubPublishStatus(state = state, company = company)
     }
 
+    suspend fun configureGitHubOrigin(companyId: String, remoteUrl: String): GitHubPublishStatus {
+        val state = stateStore.load()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val repository = state.repositories.firstOrNull { it.id == company.repositoryId }
+            ?: throw IllegalStateException("Company repository is not available.")
+        val normalizedUrl = gitWorkspaceService.configureOriginRemote(Path.of(repository.localPath), remoteUrl)
+        stateMutex.withLock {
+            val current = stateStore.load()
+            stateStore.save(
+                current.copy(
+                    repositories = current.repositories.map {
+                        if (it.id == repository.id) {
+                            it.copy(remoteUrl = normalizedUrl, updatedAt = System.currentTimeMillis())
+                        } else {
+                            it
+                        }
+                    }
+                )
+            )
+        }
+        return githubPublishStatus(companyId)
+    }
+
     private suspend fun computeGitHubPublishStatus(
         state: DesktopAppState,
         company: Company? = null
@@ -11956,6 +11980,7 @@ class DesktopAppService(
                     appendLine("- Deliver this issue with a real repository change: ${issue.title}")
                     appendLine("- Scope: ${summarizeForPrompt(issue.description, 160)}")
                     appendLine("- Work as a direct implementer. Start editing immediately and do not plan, delegate, or do broad repo exploration.")
+                    appendLine("- Only read or write files reachable from the current working directory. Never write to absolute paths, parent directories, or unrelated repository checkouts.")
                     appendLine("- Do not create placeholder diffs, marker comments, README-only edits, or validation-only artifacts.")
                     appendLine("- Keep the result coherent and shippable when opened directly by a user.")
                     appendLine("- ${graphifyKnowledgeGuidance()}")

@@ -144,8 +144,16 @@ val cotorModule = module {
                 "claude", "codex", "copilot", "gemini", "cursor-cli", "opencode", "qwen"
             ),
             allowedDirectories = listOf(
+                Path("/usr/bin"),
+                Path("/bin"),
+                Path("/usr/sbin"),
+                Path("/sbin"),
                 Path("/usr/local/bin"),
+                Path("/usr/local/Cellar"),
+                Path("/usr/local/opt"),
                 Path("/opt/homebrew/bin"),
+                Path("/opt/homebrew/Cellar"),
+                Path("/opt/homebrew/opt"),
                 Path("/opt/cotor"),
                 Path(System.getProperty("user.home")).resolve("Library").resolve("Application Support").resolve("CotorDesktop")
             )
