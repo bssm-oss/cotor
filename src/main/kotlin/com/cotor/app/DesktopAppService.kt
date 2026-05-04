@@ -517,6 +517,7 @@ class DesktopAppService(
             reconcileNonPublishingReviewRuns(activeCompanyId)
             reconcileTerminalIssueStates(activeCompanyId)
             normalizePublishApprovalRequiredIssues(activeCompanyId)
+            requeueAgentApprovedPublishApprovalIssues(activeCompanyId)
             archiveRecursiveFollowUpGoals(activeCompanyId)
             reopenResolvedMergeConflictIssues(activeCompanyId)
             reopenNoOpPullRequestExecutionIssues(activeCompanyId)
@@ -612,12 +613,27 @@ class DesktopAppService(
                         seedCompanyAgentCapabilityProfile(company, definition, now)
                     }
                 }
-            if (missingProfiles.isEmpty()) {
+            val definitionsByKey = state.companyAgentDefinitions
+                .associateBy { it.companyId to it.id }
+            var upgraded = false
+            val upgradedProfiles = state.agentCapabilityProfiles.map { profile ->
+                val definition = definitionsByKey[profile.companyId to profile.agentId]
+                val company = companiesById[profile.companyId]
+                if (definition == null || company == null || (companyId != null && profile.companyId != companyId)) {
+                    return@map profile
+                }
+                val upgradedProfile = upgradeCompanyAgentCapabilityProfile(company, definition, profile, now)
+                if (upgradedProfile != profile) {
+                    upgraded = true
+                }
+                upgradedProfile
+            }
+            if (missingProfiles.isEmpty() && !upgraded) {
                 return@withLock
             }
             stateStore.save(
                 state.copy(
-                    agentCapabilityProfiles = state.agentCapabilityProfiles + missingProfiles
+                    agentCapabilityProfiles = upgradedProfiles + missingProfiles
                 )
             )
         }
@@ -4679,11 +4695,15 @@ class DesktopAppService(
             verdict = item.ceoVerdict ?: "APPROVE",
             feedback = reviewBody
         )
+        val chiefProfile = findChiefProfile(
+            item.companyId,
+            ensureOrgProfiles(before.orgProfiles, before.companyAgentDefinitions, before.companies)
+        )
         val ceoActionSubject = ActionSubject(
             companyId = item.companyId,
             goalId = executionIssueBeforeMerge?.goalId,
             issueId = item.approvalIssueId ?: item.issueId,
-            agentName = "ceo-cli"
+            agentName = chiefProfile?.id ?: "ceo-cli"
         )
         runCatching {
             gitWorkspaceService.commentOnPullRequest(
@@ -5333,6 +5353,7 @@ class DesktopAppService(
             val reopenedInterruptedIssues = reopenInterruptedBlockedIssues(companyId)
             val reconciledIssues = reconcileTerminalIssueStates(companyId)
             var normalizedStates = normalizeCompanyAutomationState(companyId)
+            val agentApprovedPublishApprovals = requeueAgentApprovedPublishApprovalIssues(companyId)
             val initial = stateStore.load()
             val runtime = initial.companyRuntimes.firstOrNull { it.companyId == companyId } ?: CompanyRuntimeSnapshot(companyId = companyId)
             if (runtime.status != CompanyRuntimeStatus.RUNNING) {
@@ -5354,6 +5375,9 @@ class DesktopAppService(
             }
             if (normalizedStates > 0) {
                 actions += "normalized-states:$normalizedStates"
+            }
+            if (agentApprovedPublishApprovals > 0) {
+                actions += "agent-approved-publish:$agentApprovedPublishApprovals"
             }
             val resolvedGitHubReadinessIssues = resolveGitHubReadinessBlockedIssues(companyId)
             if (resolvedGitHubReadinessIssues > 0) {
@@ -6716,6 +6740,7 @@ class DesktopAppService(
             val latestRunsByTaskId = state.runs
                 .groupBy { it.taskId }
                 .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
+            val chiefApproval = companyChiefApprovalToken(state, companyId)
             var changed = false
             var nextState = state
             val updatedIssues = state.issues.map { issue ->
@@ -6732,13 +6757,19 @@ class DesktopAppService(
                 }
                 changed = true
                 normalized += 1
+                val approvedByChief = chiefApproval != null
+                val nextStatus = if (approvedByChief) IssueStatus.PLANNED else IssueStatus.WAITING_FOR_APPROVAL
                 val reason = providerBlockReasonForIssue(IssueStatus.WAITING_FOR_APPROVAL, latestRun)
                     ?: "Capability GITHUB_PR_CREATE requires approval for git.publish."
                 val updatedIssue = issue.copy(
-                    status = IssueStatus.WAITING_FOR_APPROVAL,
+                    status = nextStatus,
                     blockedBy = emptyList(),
-                    providerBlockReason = reason,
-                    transitionReason = "PR creation is waiting for explicit approval before Cotor publishes this branch.",
+                    providerBlockReason = if (approvedByChief) null else reason,
+                    transitionReason = if (approvedByChief) {
+                        "CEO agent approved PR creation internally; Cotor will retry publishing this branch."
+                    } else {
+                        "PR creation is waiting for a company approval agent before Cotor publishes this branch."
+                    },
                     updatedAt = now
                 )
                 traceEvents += buildCompanyAutomationTraceEvent(
@@ -6747,7 +6778,11 @@ class DesktopAppService(
                     oldStatus = issue.status,
                     newStatus = updatedIssue.status,
                     source = "normalizePublishApprovalRequiredIssues",
-                    reason = "PR creation requires explicit approval before Cotor can publish this branch.",
+                    reason = if (approvedByChief) {
+                        "PR creation approval was delegated to the company CEO agent."
+                    } else {
+                        "PR creation requires a company approval agent before Cotor can publish this branch."
+                    },
                     latestTask = latestTask,
                     latestRun = latestRun
                 )
@@ -6764,15 +6799,88 @@ class DesktopAppService(
                     goalId = trace.goalId,
                     issueId = trace.issueId,
                     source = trace.source,
-                    title = "Waiting for PR approval",
+                    title = if (trace.newStatus == IssueStatus.PLANNED) "CEO approved PR retry" else "Waiting for CEO approval",
                     detail = "${trace.issueTitle}: ${trace.reason}",
-                    severity = "warning"
+                    severity = if (trace.newStatus == IssueStatus.PLANNED) "info" else "warning"
                 )
             }
             stateStore.save(nextState.withDerivedMetrics())
         }
         traceEvents.forEach(::appendCompanyAutomationTrace)
         return normalized
+    }
+
+    private suspend fun requeueAgentApprovedPublishApprovalIssues(companyId: String): Int {
+        var requeued = 0
+        val traceEvents = mutableListOf<CompanyAutomationTraceEvent>()
+        stateMutex.withLock {
+            val state = stateStore.load()
+            if (companyChiefApprovalToken(state, companyId) == null) {
+                return@withLock
+            }
+            val now = System.currentTimeMillis()
+            val goalsById = state.goals.associateBy { it.id }
+            val latestRunsByTaskId = state.runs
+                .groupBy { it.taskId }
+                .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
+            val activeTaskIssueIds = state.tasks
+                .filter { it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED }
+                .mapNotNull { it.issueId }
+                .toSet()
+            var changed = false
+            val updatedIssues = state.issues.map { issue ->
+                if (issue.companyId != companyId || issue.status != IssueStatus.WAITING_FOR_APPROVAL || issue.id in activeTaskIssueIds) {
+                    return@map issue
+                }
+                val latestTask = state.tasks
+                    .filter { it.issueId == issue.id }
+                    .maxByOrNull { it.updatedAt }
+                    ?: return@map issue
+                val latestRun = latestRunsByTaskId[latestTask.id]
+                if (!isGitHubPrCreateApprovalRequired(latestTask, latestRun)) {
+                    return@map issue
+                }
+                changed = true
+                requeued += 1
+                val updatedIssue = issue.copy(
+                    status = IssueStatus.PLANNED,
+                    blockedBy = emptyList(),
+                    providerBlockReason = null,
+                    transitionReason = "CEO agent approved PR creation internally; Cotor will retry publishing this branch.",
+                    updatedAt = now
+                )
+                traceEvents += buildCompanyAutomationTraceEvent(
+                    issue = issue,
+                    goal = issue.goalId?.let(goalsById::get),
+                    oldStatus = issue.status,
+                    newStatus = updatedIssue.status,
+                    source = "requeueAgentApprovedPublishApprovalIssues",
+                    reason = "A company CEO approval agent is available, so Cotor can retry PR creation without user approval.",
+                    latestTask = latestTask,
+                    latestRun = latestRun
+                )
+                updatedIssue
+            }
+            if (!changed) {
+                return@withLock
+            }
+            var nextState = state.copy(issues = updatedIssues)
+            traceEvents.forEach { trace ->
+                nextState = nextState.recordCompanyActivity(
+                    companyId = trace.companyId,
+                    projectContextId = trace.projectContextId,
+                    goalId = trace.goalId,
+                    issueId = trace.issueId,
+                    source = trace.source,
+                    title = "CEO approved PR retry",
+                    detail = "${trace.issueTitle}: ${trace.reason}",
+                    severity = "info"
+                )
+            }
+            stateStore.save(nextState.withDerivedMetrics())
+        }
+        traceEvents.forEach(::appendCompanyAutomationTrace)
+        return requeued
     }
 
     private fun failureSignals(task: AgentTask, run: AgentRun?): List<String> {
@@ -9791,6 +9899,9 @@ class DesktopAppService(
                 }
                 val publishRequired = requiresCodePublish(issue)
                 val localPullRequestRequired = requiresGitHubPullRequest(issue, currentState) && issue != null
+                val publishApproval = issue
+                    ?.takeIf { localPullRequestRequired }
+                    ?.let { companyChiefApprovalToken(currentState, it.companyId) }
                 val publishResult = if (executionResult.isSuccess && publishRequired) {
                     gitWorkspaceService.publishRun(
                         task = task,
@@ -9798,7 +9909,8 @@ class DesktopAppService(
                         worktreePath = binding.worktreePath,
                         branchName = binding.branchName,
                         baseBranch = workspace.baseBranch,
-                        requirePullRequest = localPullRequestRequired
+                        requirePullRequest = localPullRequestRequired,
+                        approval = publishApproval
                     )
                 } else {
                     null
@@ -10922,6 +11034,21 @@ class DesktopAppService(
         profiles.firstOrNull {
             it.companyId == companyId && it.enabled && (it.mergeAuthority || it.roleName.equals("CEO", ignoreCase = true))
         } ?: profiles.firstOrNull { it.companyId == companyId && it.enabled }
+
+    private fun companyChiefApprovalToken(state: DesktopAppState, companyId: String): String? {
+        val chief = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+            .firstOrNull { it.companyId == companyId && isApprovalAuthorityProfile(it) }
+            ?: return null
+        return "company-chief:${chief.roleName}:${chief.id}"
+    }
+
+    private fun isApprovalAuthorityProfile(profile: OrgAgentProfile): Boolean =
+        profile.enabled &&
+            (
+                profile.mergeAuthority ||
+                    profile.roleName.equals("CEO", ignoreCase = true) ||
+                    profile.roleName.contains("chief", ignoreCase = true)
+                )
 
     private fun isQaCapableProfile(profile: OrgAgentProfile): Boolean =
         profile.reviewerPolicy != null ||
@@ -12398,9 +12525,48 @@ class DesktopAppService(
         AgentCapabilityProfile(
             companyId = company.id,
             agentId = definition.id,
-            settings = repositoryScopedCompanyAgentCapabilitySettings(company.rootPath),
+            settings = companyAgentCapabilitySettings(company, definition),
             updatedAt = now
         )
+
+    private fun upgradeCompanyAgentCapabilityProfile(
+        company: Company,
+        definition: CompanyAgentDefinition,
+        profile: AgentCapabilityProfile,
+        now: Long
+    ): AgentCapabilityProfile {
+        if (!isChiefAgentDefinition(definition)) {
+            return profile
+        }
+        var changed = false
+        val nextSettings = profile.settings.toMutableMap()
+        chiefAgentApprovalSettings().forEach { (key, setting) ->
+            val current = nextSettings[key]
+            if (current == null || !current.enabled || current.mode == CapabilityMode.DISABLED) {
+                nextSettings[key] = setting
+                changed = true
+            }
+        }
+        if (!changed) {
+            return profile
+        }
+        return profile.copy(
+            settings = companyAgentCapabilitySettings(company, definition) + nextSettings,
+            updatedAt = now
+        )
+    }
+
+    private fun companyAgentCapabilitySettings(
+        company: Company,
+        definition: CompanyAgentDefinition
+    ): Map<CapabilityKey, AgentCapabilitySetting> {
+        val base = repositoryScopedCompanyAgentCapabilitySettings(company.rootPath)
+        return if (isChiefAgentDefinition(definition)) {
+            base + chiefAgentApprovalSettings()
+        } else {
+            base
+        }
+    }
 
     private fun repositoryScopedCompanyAgentCapabilitySettings(rootPath: String): Map<CapabilityKey, AgentCapabilitySetting> {
         val repositoryRoot = Path.of(rootPath).toAbsolutePath().normalize().toString()
@@ -12423,6 +12589,32 @@ class DesktopAppService(
                 requiresReview = true,
                 notes = localExecutionNotes
             )
+        )
+    }
+
+    private fun isChiefAgentDefinition(definition: CompanyAgentDefinition): Boolean {
+        val descriptor = listOf(definition.title, definition.roleSummary, definition.specialties.joinToString(" "))
+            .joinToString(" ")
+            .lowercase()
+        return definition.title.equals("CEO", ignoreCase = true) ||
+            descriptor.contains("chief") ||
+            descriptor.contains("final merge approval") ||
+            descriptor.contains("merge authority")
+    }
+
+    private fun chiefAgentApprovalSettings(): Map<CapabilityKey, AgentCapabilitySetting> {
+        val notes = "Company chief agents can provide internal approval for PR creation, PR review, and merge execution inside the company workflow."
+        val approvalSetting = AgentCapabilitySetting(
+            enabled = true,
+            mode = CapabilityMode.APPROVAL_REQUIRED,
+            requiresEvidence = true,
+            requiresReview = true,
+            notes = notes
+        )
+        return mapOf(
+            CapabilityKey.GITHUB_PR_CREATE to approvalSetting,
+            CapabilityKey.GITHUB_PR_UPDATE to approvalSetting,
+            CapabilityKey.GITHUB_MERGE_EXECUTE to approvalSetting
         )
     }
 

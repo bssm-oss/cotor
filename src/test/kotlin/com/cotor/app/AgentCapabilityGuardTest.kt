@@ -219,11 +219,21 @@ class AgentCapabilityGuardTest : FunSpec({
                 metadata = mapOf("approvedBy" to "qa-cli")
             )
         )
+        val recordedPublishApproval = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.GIT_PUBLISH,
+                label = "git.publish:branch",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                metadata = mapOf("approvedBy" to "company-chief:CEO:agent-ceo")
+            )
+        )
 
         missingSubject.allow shouldBe false
         pendingApproval.requiresApproval shouldBe true
         recordedApproval.allowed shouldBe true
         recordedApproval.requiresApproval shouldBe false
+        recordedPublishApproval.allowed shouldBe true
+        recordedPublishApproval.requiresApproval shouldBe false
     }
 
     test("unscoped generic agent execution stays outside company capability authority") {
