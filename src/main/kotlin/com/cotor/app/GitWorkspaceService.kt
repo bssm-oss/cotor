@@ -451,7 +451,8 @@ class GitWorkspaceService(
         worktreePath: Path,
         branchName: String,
         baseBranch: String,
-        requirePullRequest: Boolean = true
+        requirePullRequest: Boolean = true,
+        approval: String? = null
     ): PublishMetadata {
         var commitSha: String? = null
         var pushedBranch: String? = null
@@ -471,7 +472,7 @@ class GitWorkspaceService(
                     "agentName" to agentName,
                     "branchName" to branchName,
                     "baseBranch" to baseBranch
-                )
+                ) + approvalMetadata(approval)
             ),
             onSuccess = { metadata ->
                 ActionEvidence(
@@ -1277,10 +1278,15 @@ class GitWorkspaceService(
     ): Map<String, String> = buildMap {
         put("pullRequestNumber", pullRequestNumber.toString())
         putAll(extras)
-        approval?.trim()?.takeIf { it.isNotBlank() }?.let { approvedBy ->
-            put("approvedBy", approvedBy)
-        }
+        putAll(approvalMetadata(approval))
     }
+
+    private fun approvalMetadata(approval: String?): Map<String, String> =
+        approval
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { approvedBy -> mapOf("approvedBy" to approvedBy) }
+            .orEmpty()
 
     private suspend fun resolveLatestBaseReference(
         repositoryRoot: Path,

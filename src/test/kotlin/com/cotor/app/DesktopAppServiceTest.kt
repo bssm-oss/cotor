@@ -207,6 +207,25 @@ class DesktopAppServiceTest : FunSpec({
         profile.settings[CapabilityKey.BROWSER_SCREENSHOT]?.mode shouldBe CapabilityMode.AUTO
     }
 
+    test("seeded CEO agent can internally approve PR creation, review, and merge actions") {
+        val appHome = Files.createTempDirectory("capability-chief-home")
+        val service = DesktopAppService(
+            stateStore = DesktopStateStore { appHome },
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Chief Capability QA", rootPath = appHome.toString())
+        val ceo = service.listCompanyAgentDefinitions(company.id).single { it.title == "CEO" }
+
+        val profile = service.agentCapabilities(company.id, ceo.id)
+
+        profile.settings.getValue(CapabilityKey.GITHUB_PR_CREATE).mode shouldBe CapabilityMode.APPROVAL_REQUIRED
+        profile.settings.getValue(CapabilityKey.GITHUB_PR_UPDATE).mode shouldBe CapabilityMode.APPROVAL_REQUIRED
+        profile.settings.getValue(CapabilityKey.GITHUB_MERGE_EXECUTE).mode shouldBe CapabilityMode.APPROVAL_REQUIRED
+        profile.settings.getValue(CapabilityKey.GITHUB_MERGE_EXECUTE).enabled shouldBe true
+    }
+
     test("video plans are gated by video capabilities") {
         val appHome = Files.createTempDirectory("video-plan-home")
         val service = DesktopAppService(
@@ -310,7 +329,7 @@ class DesktopAppServiceTest : FunSpec({
             processId = 4242
         )
         coEvery {
-            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any())
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any())
         } returns PublishMetadata(
             commitSha = "abc1234567890",
             pushedBranch = "codex/cotor/desktop-publish/codex",
@@ -352,7 +371,7 @@ class DesktopAppServiceTest : FunSpec({
             processId = 4242
         )
         coEvery {
-            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any())
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any())
         } returns PublishMetadata(
             commitSha = "abc1234567890",
             error = "Publish failed: gh auth refresh required"
@@ -387,7 +406,7 @@ class DesktopAppServiceTest : FunSpec({
             processId = 4242
         )
         coEvery {
-            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any())
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any())
         } returns PublishMetadata(
             commitSha = "abc1234567890",
             error = "No changes to publish from codex/cotor/manual-no-diff/codex against master"
@@ -819,7 +838,7 @@ class DesktopAppServiceTest : FunSpec({
             processId = 4242
         )
         coEvery {
-            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any())
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any())
         } returns PublishMetadata(
             commitSha = "abc1234567890",
             error = "No GitHub remote configured; kept local commit only"
@@ -854,7 +873,7 @@ class DesktopAppServiceTest : FunSpec({
             processId = 4242
         )
         coEvery {
-            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any())
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any())
         } returns PublishMetadata(
             commitSha = "abc1234567890",
             error = "No GitHub remote configured; kept local commit only"
@@ -871,6 +890,7 @@ class DesktopAppServiceTest : FunSpec({
         val fixture = DesktopAppServiceFixture.create()
         val approvalError = "Capability GITHUB_PR_CREATE requires approval for git.publish in company=company-pr-approval agent=codex."
         val now = System.currentTimeMillis()
+        var publishApproval: String? = null
         val company = Company(
             id = "company-pr-approval",
             name = "PR Approval Co",
@@ -930,11 +950,14 @@ class DesktopAppServiceTest : FunSpec({
             processId = 4242
         )
         coEvery {
-            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any())
-        } returns PublishMetadata(
-            commitSha = "abc1234567890",
-            error = approvalError
-        )
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any())
+        } answers {
+            publishApproval = invocation.args[6] as String?
+            PublishMetadata(
+                commitSha = "abc1234567890",
+                error = approvalError
+            )
+        }
 
         fixture.service.runTask(fixture.task.id)
         val run = fixture.awaitRuns().single()
@@ -952,11 +975,13 @@ class DesktopAppServiceTest : FunSpec({
 
         run.status shouldBe AgentRunStatus.FAILED
         run.error shouldBe approvalError
+        val capturedApproval = publishApproval.shouldNotBeNull()
+        capturedApproval shouldContain "company-chief:CEO:"
         updatedIssue.providerBlockReason shouldContain "GITHUB_PR_CREATE"
         refreshed.opsMetrics.blockedIssues shouldBe 0
     }
 
-    test("prepareCompanyAutomationState converts blocked PR approval failures into approval needed") {
+    test("prepareCompanyAutomationState lets the CEO agent approve PR creation and requeue publishing") {
         val fixture = DesktopAppServiceFixture.create()
         val approvalError = "Capability GITHUB_PR_CREATE requires approval for git.publish in company=company-pr-approval-migrate agent=codex."
         val now = System.currentTimeMillis()
@@ -1027,9 +1052,173 @@ class DesktopAppServiceTest : FunSpec({
         fixture.service.prepareCompanyAutomationStateForTesting(company.id)
         val migrated = fixture.stateStore.load().issues.single { it.id == issue.id }
 
-        migrated.status shouldBe IssueStatus.WAITING_FOR_APPROVAL
-        migrated.providerBlockReason shouldContain "GITHUB_PR_CREATE"
+        migrated.status shouldBe IssueStatus.PLANNED
+        migrated.providerBlockReason shouldBe null
+        migrated.transitionReason shouldContain "CEO agent approved PR creation internally"
         fixture.stateStore.load().opsMetrics.blockedIssues shouldBe 0
+    }
+
+    test("prepareCompanyAutomationState requeues already waiting PR approval issues when a CEO agent exists") {
+        val fixture = DesktopAppServiceFixture.create()
+        val approvalError = "Capability GITHUB_PR_CREATE requires approval for git.publish in company=company-pr-approval-existing agent=codex."
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-pr-approval-existing",
+            name = "Existing PR Approval Co",
+            rootPath = fixture.stateStore.load().repositories.single().localPath,
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-pr-approval-existing",
+            companyId = company.id,
+            title = "Resume approval state",
+            description = "Older waiting PR approval issues should not require the user to approve manually.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "issue-pr-approval-existing",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Resume approval issue",
+            description = "Previously persisted as waiting for manual PR approval.",
+            status = IssueStatus.WAITING_FOR_APPROVAL,
+            kind = "execution",
+            codeProducing = true,
+            providerBlockReason = approvalError,
+            createdAt = now,
+            updatedAt = now
+        )
+        val failedTask = fixture.task.copy(
+            issueId = issue.id,
+            status = DesktopTaskStatus.FAILED,
+            updatedAt = now
+        )
+        val failedRun = AgentRun(
+            id = "run-pr-approval-existing",
+            taskId = failedTask.id,
+            workspaceId = WORKSPACE_ID,
+            repositoryId = REPOSITORY_ID,
+            agentName = "codex",
+            branchName = "codex/cotor/desktop-publish/codex",
+            worktreePath = fixture.worktreeRoot.toString(),
+            status = AgentRunStatus.FAILED,
+            error = approvalError,
+            publish = PublishMetadata(error = approvalError),
+            createdAt = now,
+            updatedAt = now
+        )
+        val initial = fixture.stateStore.load()
+        fixture.stateStore.save(
+            initial.copy(
+                companies = listOf(company),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                tasks = listOf(failedTask),
+                runs = listOf(failedRun)
+            )
+        )
+
+        fixture.service.prepareCompanyAutomationStateForTesting(company.id)
+        val requeued = fixture.stateStore.load().issues.single { it.id == issue.id }
+
+        requeued.status shouldBe IssueStatus.PLANNED
+        requeued.providerBlockReason shouldBe null
+        requeued.transitionReason shouldContain "CEO agent approved PR creation internally"
+        fixture.stateStore.load().opsMetrics.blockedIssues shouldBe 0
+    }
+
+    test("prepareCompanyAutomationState keeps PR approval waiting when no CEO approval authority exists") {
+        val fixture = DesktopAppServiceFixture.create()
+        val approvalError = "Capability GITHUB_PR_CREATE requires approval for git.publish in company=company-pr-approval-no-chief agent=codex."
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-pr-approval-no-chief",
+            name = "No Chief PR Approval Co",
+            rootPath = fixture.stateStore.load().repositories.single().localPath,
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-pr-approval-no-chief",
+            companyId = company.id,
+            title = "Keep manual approval gate",
+            description = "Without an approval authority, PR approval should remain paused.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "issue-pr-approval-no-chief",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "No chief approval issue",
+            description = "Do not auto-requeue when the company has no CEO or merge authority.",
+            status = IssueStatus.WAITING_FOR_APPROVAL,
+            kind = "execution",
+            codeProducing = true,
+            providerBlockReason = approvalError,
+            createdAt = now,
+            updatedAt = now
+        )
+        val failedTask = fixture.task.copy(
+            issueId = issue.id,
+            status = DesktopTaskStatus.FAILED,
+            updatedAt = now
+        )
+        val failedRun = AgentRun(
+            id = "run-pr-approval-no-chief",
+            taskId = failedTask.id,
+            workspaceId = WORKSPACE_ID,
+            repositoryId = REPOSITORY_ID,
+            agentName = "codex",
+            branchName = "codex/cotor/desktop-publish/codex",
+            worktreePath = fixture.worktreeRoot.toString(),
+            status = AgentRunStatus.FAILED,
+            error = approvalError,
+            publish = PublishMetadata(error = approvalError),
+            createdAt = now,
+            updatedAt = now
+        )
+        val builderDefinition = CompanyAgentDefinition(
+            id = "builder-only",
+            companyId = company.id,
+            title = "Builder",
+            agentCli = "opencode",
+            roleSummary = "implement assigned product slices",
+            specialties = listOf("implementation"),
+            createdAt = now,
+            updatedAt = now
+        )
+        val initial = fixture.stateStore.load()
+        fixture.stateStore.save(
+            initial.copy(
+                companies = listOf(company),
+                companyAgentDefinitions = listOf(builderDefinition),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                tasks = listOf(failedTask),
+                runs = listOf(failedRun)
+            )
+        )
+
+        fixture.service.prepareCompanyAutomationStateForTesting(company.id)
+        val stillWaiting = fixture.stateStore.load().issues.single { it.id == issue.id }
+
+        stillWaiting.status shouldBe IssueStatus.WAITING_FOR_APPROVAL
+        stillWaiting.providerBlockReason shouldContain "GITHUB_PR_CREATE"
     }
 
     test("prepareCompanyAutomationState retries stale OpenCode prompt file argument failures") {
@@ -1670,7 +1859,7 @@ class DesktopAppServiceTest : FunSpec({
                 processId = 123L
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata(
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata(
             commitSha = "abc1234567890",
             pushedBranch = "codex/cotor/test/branch",
             pullRequestNumber = 77,
@@ -1754,7 +1943,7 @@ class DesktopAppServiceTest : FunSpec({
                 processId = 123L
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
 
         val service = DesktopAppService(
             stateStore = stateStore,
@@ -1847,7 +2036,7 @@ class DesktopAppServiceTest : FunSpec({
                 worktreePath = worktreeRoot.resolve(agentName)
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } answers {
             val agent = invocation.args[0] as AgentConfig
             AgentResult(
@@ -1903,7 +2092,7 @@ class DesktopAppServiceTest : FunSpec({
                 worktreePath = worktreeRoot.resolve(agentName)
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } answers {
             val agent = invocation.args[0] as AgentConfig
             AgentResult(
@@ -3243,7 +3432,7 @@ class DesktopAppServiceTest : FunSpec({
                 worktreePath = worktreeRoot.resolve(agentName)
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { gitWorkspaceService.ensureGitHubPublishReady(any(), any()) } returns GitHubPublishReadiness(ready = true)
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } answers {
             val agent = invocation.args[0] as AgentConfig
@@ -5572,7 +5761,7 @@ class DesktopAppServiceTest : FunSpec({
             branchName = "codex/cotor/review-test/codex",
             worktreePath = repoRoot.resolve(".cotor/worktrees/review-test/codex")
         )
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { gitWorkspaceService.ensureGitHubPublishReady(any(), any()) } returns GitHubPublishReadiness(ready = true)
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
             agentName = "codex",
@@ -6177,7 +6366,7 @@ class DesktopAppServiceTest : FunSpec({
                 worktreePath = worktreeRoot
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { gitWorkspaceService.ensureGitHubPublishReady(any(), any()) } returns GitHubPublishReadiness(ready = true)
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } answers {
             val agent = invocation.args[0] as AgentConfig
@@ -6303,7 +6492,7 @@ class DesktopAppServiceTest : FunSpec({
                 worktreePath = worktreeRoot
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { gitWorkspaceService.ensureGitHubPublishReady(any(), any()) } returns GitHubPublishReadiness(ready = true)
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } answers {
             capturedAgents += invocation.args[0] as AgentConfig
@@ -6387,7 +6576,7 @@ class DesktopAppServiceTest : FunSpec({
                 worktreePath = worktreeRoot.resolve(agentName)
             )
         }
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } answers {
             capturedInputs += invocation.args[1] as String?
             val agent = invocation.args[0] as AgentConfig

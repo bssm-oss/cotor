@@ -160,6 +160,7 @@ cotor delete    # 삭제
 - `cotor company issue run <issue-id>`는 기본적으로 이슈가 정착 상태가 될 때까지 기다려서, CLI에서 시작한 로컬 에이전트 작업이 중간에 고아 작업으로 끊기지 않게 함. 이미 실행 중인 app-server가 백그라운드 작업을 맡아야 할 때만 `--async` 사용
 - 회사 런타임은 이제 이슈/태스크/리뷰 상태 변화가 생기면 바로 깨어나며, 서로 다른 역할이 같은 execution CLI를 쓰더라도 runnable issue를 병렬로 시작할 수 있음
 - CEO 머지는 GitHub 새로고침 결과가 실제 `MERGED`로 확인된 뒤에만 로컬 workflow 상태를 merged로 기록함
+- 회사 CEO/최종 승인 에이전트가 있으면 PR 생성 정책 게이트도 내부 승인으로 처리해서, 사용자가 직접 승인 프롬프트를 누르지 않아도 게시 재시도가 이어짐
 - 회사 에이전트 정의는 이제 Codex, OpenCode, Ollama, LM Studio, 설치된 로컬 Gemma 4 모델 같은 provider별로 선택 모델을 개별 지정할 수 있음
 - 회사 실시간 stream이 잠깐 끊겨도 현재 company snapshot은 유지하고, generic decode 오류 대신 회사 전용 재동기화 메시지를 보여줌
 - 이슈 보드는 lane 내부 스크롤을 써서 차단/리뷰 카드가 많아져도 상단만 잘린 채 보이지 않게 함

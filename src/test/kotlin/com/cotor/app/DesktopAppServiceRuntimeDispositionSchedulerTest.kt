@@ -134,7 +134,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             branchName = "codex/cotor/manual-issue/opencode",
             worktreePath = repoRoot.resolve(".cotor/worktrees/manual-issue/opencode")
         )
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
 
         val agentExecutor = mockk<AgentExecutor>()
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } coAnswers {
