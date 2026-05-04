@@ -589,4 +589,100 @@ struct DesktopStoreTests {
 
         #expect(proposal == ChatGoalAutonomyProposal(mode: .enable, summary: "Enable autonomy for this goal."))
     }
+
+    @Test
+    func selectedIssueTaskAndMetricsStayScopedToSelectedCompany() {
+        let store = DesktopStore()
+        store.dashboard = scopedSelectionDashboard()
+        store.selectedCompanyID = "company-a"
+        store.selectedRepositoryID = "repo-a"
+        store.selectedWorkspaceID = "workspace-a"
+        store.selectedGoalID = "goal-b"
+        store.selectedIssueID = "issue-b"
+        store.selectedTaskID = "task-b"
+
+        #expect(store.selectedGoal == nil)
+        #expect(store.selectedIssue == nil)
+        #expect(store.selectedTask == nil)
+        #expect(store.selectedReviewQueueItem == nil)
+
+        let metrics = store.scopedOpsMetrics(companyID: "company-a")
+        #expect(metrics.openGoals == 1)
+        #expect(metrics.activeIssues == 1)
+        #expect(metrics.blockedIssues == 0)
+        #expect(metrics.readyToMergeCount == 0)
+    }
+
+    private func scopedSelectionDashboard() -> DashboardPayload {
+        DashboardPayload(
+            repositories: [
+                repository(id: "repo-a", name: "repo-a"),
+                repository(id: "repo-b", name: "repo-b")
+            ],
+            workspaces: [
+                workspace(id: "workspace-a", repositoryId: "repo-a", name: "Company A · master"),
+                workspace(id: "workspace-b", repositoryId: "repo-b", name: "Company B · master")
+            ],
+            tasks: [
+                task(id: "task-a", workspaceId: "workspace-a", issueId: "issue-a"),
+                task(id: "task-b", workspaceId: "workspace-b", issueId: "issue-b")
+            ],
+            settings: DashboardPayload.empty.settings,
+            companies: [
+                company(id: "company-a", repositoryId: "repo-a", name: "Company A"),
+                company(id: "company-b", repositoryId: "repo-b", name: "Company B")
+            ],
+            companyAgentDefinitions: [],
+            projectContexts: [],
+            goals: [
+                goal(id: "goal-a", companyId: "company-a", title: "Company A goal", status: "ACTIVE"),
+                goal(id: "goal-b", companyId: "company-b", title: "Company B goal", status: "ACTIVE")
+            ],
+            issues: [
+                issue(id: "issue-a", companyId: "company-a", goalId: "goal-a", workspaceId: "workspace-a", status: "PLANNED"),
+                issue(id: "issue-b", companyId: "company-b", goalId: "goal-b", workspaceId: "workspace-b", status: "BLOCKED")
+            ],
+            reviewQueue: [
+                reviewQueueItem(id: "review-b", companyId: "company-b", issueId: "issue-b", status: "READY_TO_MERGE")
+            ],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: OpsMetricSnapshotRecord(openGoals: 2, activeIssues: 1, blockedIssues: 1, readyToMergeCount: 1, mergedCount: 0, lastUpdatedAt: 42),
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: []
+        )
+    }
+
+    private func repository(id: String, name: String) -> RepositoryRecord {
+        RepositoryRecord(id: id, name: name, localPath: "/tmp/\(name)", sourceKind: "local", remoteUrl: nil, defaultBranch: "master", createdAt: 0, updatedAt: 0)
+    }
+
+    private func workspace(id: String, repositoryId: String, name: String) -> WorkspaceRecord {
+        WorkspaceRecord(id: id, repositoryId: repositoryId, name: name, baseBranch: "master", createdAt: 0, updatedAt: 0)
+    }
+
+    private func company(id: String, repositoryId: String, name: String) -> CompanyRecord {
+        CompanyRecord(id: id, name: name, rootPath: "/tmp/\(name)", repositoryId: repositoryId, defaultBaseBranch: "master", backendKind: "LOCAL_COTOR", linearSyncEnabled: false, linearConfigOverride: nil, autonomyEnabled: true, dailyBudgetCents: nil, monthlyBudgetCents: nil, createdAt: 0, updatedAt: 0)
+    }
+
+    private func goal(id: String, companyId: String, title: String, status: String) -> GoalRecord {
+        GoalRecord(id: id, companyId: companyId, projectContextId: nil, title: title, description: title, status: status, priority: 0, successMetrics: [], operatingPolicy: nil, followUpContext: nil, autonomyEnabled: true, createdAt: 0, updatedAt: 0)
+    }
+
+    private func issue(id: String, companyId: String, goalId: String, workspaceId: String, status: String) -> IssueRecord {
+        IssueRecord(id: id, companyId: companyId, projectContextId: nil, goalId: goalId, workspaceId: workspaceId, title: id, description: id, status: status, priority: 0, kind: "execution", assigneeProfileId: nil, linearIssueId: nil, linearIssueIdentifier: nil, linearIssueUrl: nil, lastLinearSyncAt: nil, blockedBy: [], dependsOn: [], acceptanceCriteria: [], riskLevel: "LOW", codeProducing: true, executionIntent: nil, branchName: nil, worktreePath: nil, pullRequestNumber: nil, pullRequestUrl: nil, pullRequestState: nil, qaVerdict: nil, qaFeedback: nil, ceoVerdict: nil, ceoFeedback: nil, mergeResult: nil, transitionReason: nil, sourceSignal: "test", createdAt: 0, updatedAt: 0)
+    }
+
+    private func task(id: String, workspaceId: String, issueId: String) -> TaskRecord {
+        TaskRecord(id: id, workspaceId: workspaceId, issueId: issueId, title: id, prompt: id, agents: ["opencode"], status: "PENDING", createdAt: 0, updatedAt: 0)
+    }
+
+    private func reviewQueueItem(id: String, companyId: String, issueId: String, status: String) -> ReviewQueueItemRecord {
+        ReviewQueueItemRecord(id: id, companyId: companyId, projectContextId: nil, issueId: issueId, runId: "run-\(id)", branchName: nil, worktreePath: nil, pullRequestNumber: nil, pullRequestUrl: nil, pullRequestState: nil, status: status, checksSummary: nil, mergeability: nil, requestedReviewers: [], qaVerdict: nil, qaFeedback: nil, qaReviewedAt: nil, qaIssueId: nil, ceoVerdict: nil, ceoFeedback: nil, ceoReviewedAt: nil, approvalIssueId: nil, mergeCommitSha: nil, mergedAt: nil, createdAt: 0, updatedAt: 0)
+    }
 }

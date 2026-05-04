@@ -10128,7 +10128,9 @@ class DesktopAppService(
 
     private suspend fun runTaskIfPresent(taskId: String): AgentTask? {
         val task = getTask(taskId) ?: return null
-        val job = serviceScope.launch(start = CoroutineStart.LAZY) {
+        val job = serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val activeJob = requireNotNull(coroutineContext[Job])
+            activeTaskJobs[task.id] = activeJob
             // Long-running agent execution is detached from the request lifecycle.
             try {
                 executeTask(task.id)
@@ -10138,12 +10140,13 @@ class DesktopAppService(
                 updateTaskStatus(task.id, DesktopTaskStatus.FAILED)
                 syncIssueFromTask(task.id, DesktopTaskStatus.FAILED)
             } finally {
-                activeTaskJobs.remove(task.id)
+                activeTaskJobs.remove(task.id, activeJob)
                 intentionallyInterruptedTaskIds.remove(task.id)
             }
         }
-        activeTaskJobs[task.id] = job
-        job.start()
+        if (job.isCompleted) {
+            activeTaskJobs.remove(task.id, job)
+        }
         return task
     }
 
