@@ -155,7 +155,7 @@ cotor delete    # 삭제
 - `Company` 요약은 선택한 회사의 추정 비용과 일/월 비용 상한도 함께 보여줌
 - `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
 - 데스크톱 backend launch, health check, shutdown, client request가 같은 `COTOR_APP_TOKEN` source를 사용해서 token-protected local session이 어긋나지 않음
-- `미팅룸`은 이제 기본으로 쉬운 `지도`를 열어 기술적인 그래프 파일 경로는 숨기고, 옆에서 기존 라이브 플로어 맵도 전환해서 볼 수 있음
+- `미팅룸`은 기본으로 쉬운 `지도`를 열고, 준비된 그래프가 없어도 폴더 기반 기본 지도를 보여주며, `에이전트 회의`와 라이브 플로어 보기를 바로 전환할 수 있음
 - 회사 이슈 실행 상세는 이제 단순 변경점이 아니라 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약까지 함께 보여줌
 - `cotor company issue run <issue-id>`는 기본적으로 이슈가 정착 상태가 될 때까지 기다려서, CLI에서 시작한 로컬 에이전트 작업이 중간에 고아 작업으로 끊기지 않게 함. 이미 실행 중인 app-server가 백그라운드 작업을 맡아야 할 때만 `--async` 사용
 - 회사 런타임은 이제 이슈/태스크/리뷰 상태 변화가 생기면 바로 깨어나며, 서로 다른 역할이 같은 execution CLI를 쓰더라도 runnable issue를 병렬로 시작할 수 있음
@@ -187,7 +187,7 @@ cotor delete    # 삭제
 - 이슈 위임 및 실행
 - 완료된 회사 이슈 실행은 실험적 pipeline replay flag 없이도 `cotor resume inspect <run-id>`로 durable run을 확인 가능
 - 리뷰 큐 생성
-- 기본 `지도`와 runtime/backend/review/session 상태를 합성한 이벤트 월 및 움직이는 에이전트 플로어를 함께 제공하는 전용 미팅룸 보기
+- 기본 `지도`, 실시간 협업을 보는 `에이전트 회의` 테이블, runtime/backend/review/session 상태를 합성한 이벤트 월, 움직이는 에이전트 플로어를 함께 제공하는 전용 미팅룸 보기
 - 채팅 컨트롤 surface에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
 - 확인용 요청을 만들기 전에 채팅 컨트롤에서 대표 에이전트와 도움 에이전트 팀을 직접 선택
 - 한 wave가 끝나면 CEO planning lane을 다시 열어서 active goal이 첫 batch 이후에도 다음 이슈 wave를 이어서 만들 수 있음

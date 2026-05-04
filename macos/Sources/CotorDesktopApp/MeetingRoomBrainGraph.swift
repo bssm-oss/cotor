@@ -5,6 +5,7 @@ struct MeetingRoomBrainGraph: Hashable {
     static let maxVisibleNodes = 96
 
     let sourcePath: String?
+    let isFallback: Bool
     let totalNodeCount: Int
     let totalLinkCount: Int
     let nodes: [MeetingRoomBrainGraphNode]
@@ -22,6 +23,7 @@ struct MeetingRoomBrainGraph: Hashable {
     static func empty(sourcePath: String? = nil) -> MeetingRoomBrainGraph {
         MeetingRoomBrainGraph(
             sourcePath: sourcePath,
+            isFallback: false,
             totalNodeCount: 0,
             totalLinkCount: 0,
             nodes: [],
@@ -32,11 +34,14 @@ struct MeetingRoomBrainGraph: Hashable {
 
     static func load(rootPath: String?) throws -> MeetingRoomBrainGraph {
         let graphPath = graphFileURL(rootPath: rootPath)
-        guard FileManager.default.fileExists(atPath: graphPath.path) else {
-            throw MeetingRoomBrainGraphLoadError.missingMap
+        if FileManager.default.fileExists(atPath: graphPath.path) {
+            let data = try Data(contentsOf: graphPath)
+            return try decode(data: data, sourcePath: graphPath.path)
         }
-        let data = try Data(contentsOf: graphPath)
-        return try decode(data: data, sourcePath: graphPath.path)
+        if let fallback = fallback(rootPath: rootPath) {
+            return fallback
+        }
+        throw MeetingRoomBrainGraphLoadError.missingMap
     }
 
     static func decode(data: Data, sourcePath: String? = nil) throws -> MeetingRoomBrainGraph {
@@ -49,6 +54,95 @@ struct MeetingRoomBrainGraph: Hashable {
             return URL(fileURLWithPath: rootPath).appendingPathComponent("graphify-out/graph.json")
         }
         return URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("graphify-out/graph.json")
+    }
+
+    static func fallback(rootPath: String?) -> MeetingRoomBrainGraph? {
+        guard let rootPath, !rootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let rootURL = URL(fileURLWithPath: rootPath)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return nil
+        }
+
+        let rootName = rootURL.lastPathComponent.isEmpty ? "Workspace" : rootURL.lastPathComponent
+        var candidates: [MeetingRoomBrainGraphNode] = [
+            MeetingRoomBrainGraphNode(
+                id: "workspace-root",
+                label: rootName,
+                fileType: "folder",
+                sourceFile: rootName,
+                sourceLocation: "",
+                community: 0,
+                degree: 0
+            )
+        ]
+        var links: [MeetingRoomBrainGraphLink] = []
+        var totalCandidateCount = 1
+
+        let topLevel = prioritizedRepositoryEntries(in: rootURL)
+        totalCandidateCount += topLevel.count
+
+        for (index, entry) in topLevel.prefix(24).enumerated() where candidates.count < maxVisibleNodes {
+            let node = fallbackNode(for: entry, relativeTo: rootURL, community: index + 1)
+            candidates.append(node)
+            links.append(
+                MeetingRoomBrainGraphLink(
+                    id: "workspace-root->\(node.id)",
+                    source: "workspace-root",
+                    target: node.id,
+                    relation: "contains",
+                    weight: node.fileType == "folder" ? 1.2 : 0.9,
+                    confidenceScore: 1
+                )
+            )
+
+            if node.fileType == "folder" {
+                let childEntries = prioritizedRepositoryEntries(in: entry)
+                totalCandidateCount += childEntries.count
+                for child in childEntries.prefix(5) where candidates.count < maxVisibleNodes {
+                    let childNode = fallbackNode(for: child, relativeTo: rootURL, community: index + 1)
+                    candidates.append(childNode)
+                    links.append(
+                        MeetingRoomBrainGraphLink(
+                            id: "\(node.id)->\(childNode.id)",
+                            source: node.id,
+                            target: childNode.id,
+                            relation: "contains",
+                            weight: childNode.fileType == "folder" ? 1.0 : 0.7,
+                            confidenceScore: 1
+                        )
+                    )
+                }
+            }
+        }
+
+        let degree = links.reduce(into: [String: Int]()) { counts, link in
+            counts[link.source, default: 0] += 1
+            counts[link.target, default: 0] += 1
+        }
+        let nodes = candidates.map { node in
+            MeetingRoomBrainGraphNode(
+                id: node.id,
+                label: node.label,
+                fileType: node.fileType,
+                sourceFile: node.sourceFile,
+                sourceLocation: node.sourceLocation,
+                community: node.community,
+                degree: degree[node.id, default: 0]
+            )
+        }
+
+        return MeetingRoomBrainGraph(
+            sourcePath: rootURL.path,
+            isFallback: true,
+            totalNodeCount: totalCandidateCount,
+            totalLinkCount: links.count,
+            nodes: nodes,
+            links: links,
+            hiddenNodeCount: max(0, totalCandidateCount - nodes.count)
+        )
     }
 
     private static func build(from document: MeetingRoomBrainGraphDocument, sourcePath: String?) -> MeetingRoomBrainGraph {
@@ -95,12 +189,101 @@ struct MeetingRoomBrainGraph: Hashable {
 
         return MeetingRoomBrainGraph(
             sourcePath: sourcePath,
+            isFallback: false,
             totalNodeCount: document.nodes.count,
             totalLinkCount: document.links.count,
             nodes: nodes,
             links: links,
             hiddenNodeCount: max(0, document.nodes.count - nodes.count)
         )
+    }
+
+    private static func prioritizedRepositoryEntries(in directory: URL) -> [URL] {
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        )) ?? []
+        return entries
+            .filter { !ignoredRepositoryEntry($0) }
+            .sorted { lhs, rhs in
+                let lhsScore = repositoryEntryScore(lhs)
+                let rhsScore = repositoryEntryScore(rhs)
+                if lhsScore != rhsScore { return lhsScore > rhsScore }
+                return lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedAscending
+            }
+    }
+
+    private static func fallbackNode(for url: URL, relativeTo rootURL: URL, community: Int) -> MeetingRoomBrainGraphNode {
+        let relativePath = relativePath(for: url, rootURL: rootURL)
+        let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        return MeetingRoomBrainGraphNode(
+            id: "workspace-\(relativePath)",
+            label: displayLabel(for: url, isDirectory: isDirectory),
+            fileType: isDirectory ? "folder" : "file",
+            sourceFile: relativePath,
+            sourceLocation: "",
+            community: community,
+            degree: 0
+        )
+    }
+
+    private static func ignoredRepositoryEntry(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        let ignored = [
+            ".git",
+            ".cotor",
+            ".omx",
+            ".gradle",
+            ".idea",
+            ".swiftpm",
+            "build",
+            "DerivedData",
+            "dist",
+            "graphify-out",
+            "node_modules",
+            "out",
+            "tmp"
+        ]
+        return ignored.contains(name)
+    }
+
+    private static func repositoryEntryScore(_ url: URL) -> Int {
+        let name = url.lastPathComponent
+        let lowercasedName = name.lowercased()
+        let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        if ["readme.md", "readme.ko.md", "agents.md", "package.swift", "build.gradle.kts", "settings.gradle.kts", "package.json", "pyproject.toml", "cargo.toml"].contains(lowercasedName) {
+            return 100
+        }
+        if ["src", "macos", "docs", "tests", "test", "shell", "formula"].contains(lowercasedName) {
+            return 90
+        }
+        if isDirectory { return 70 }
+        if lowercasedName.hasSuffix(".md") { return 62 }
+        if lowercasedName.hasSuffix(".swift") || lowercasedName.hasSuffix(".kt") || lowercasedName.hasSuffix(".kts") {
+            return 58
+        }
+        return 40
+    }
+
+    private static func displayLabel(for url: URL, isDirectory: Bool) -> String {
+        let name = url.deletingPathExtension().lastPathComponent
+        guard !name.isEmpty else {
+            return isDirectory ? "Folder" : "File"
+        }
+        return name
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+    }
+
+    private static func relativePath(for url: URL, rootURL: URL) -> String {
+        let rootPath = rootURL.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(rootPath) else {
+            return url.lastPathComponent
+        }
+        let start = path.index(path.startIndex, offsetBy: rootPath.count)
+        return String(path[start...]).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 }
 
@@ -234,7 +417,7 @@ struct MeetingRoomBrainGraphPane: View {
                     ShellTag(text: "+\(graph.hiddenNodeCount)", tint: ShellPalette.panelRaised)
                 }
                 Spacer(minLength: 0)
-                Text(language("Map", "지도"))
+                Text(graph.isFallback ? language("Folder Map", "폴더 지도") : language("Map", "지도"))
                     .font(.system(size: 10, weight: .heavy, design: .monospaced))
                     .foregroundStyle(ShellPalette.muted)
             }
@@ -282,11 +465,21 @@ struct MeetingRoomBrainGraphPane: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(language("Repository Map", "저장소 지도"))
+                Text(graph.isFallback ? language("Workspace Map", "작업공간 지도") : language("Repository Map", "저장소 지도"))
                     .font(.system(size: 8, weight: .heavy, design: .monospaced))
                     .tracking(0.7)
                     .foregroundStyle(ShellPalette.accentWarm)
-                Text(language("Key files and concepts appear here so the team can understand the workspace faster.", "팀이 작업공간을 빠르게 이해하도록 중요한 파일과 개념을 보여줍니다."))
+                Text(
+                    graph.isFallback
+                        ? language(
+                            "Key folders and files appear here even before a full map is prepared.",
+                            "전체 지도가 없어도 중요한 폴더와 파일을 먼저 보여줍니다."
+                        )
+                        : language(
+                            "Key files and concepts appear here so the team can understand the workspace faster.",
+                            "팀이 작업공간을 빠르게 이해하도록 중요한 파일과 개념을 보여줍니다."
+                        )
+                )
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(ShellPalette.muted)
                     .lineLimit(2)
@@ -315,10 +508,15 @@ struct MeetingRoomBrainGraphPane: View {
         for community in communities {
             let index = communityIndex[community] ?? 0
             let clusterAngle = (Double(index) / Double(communityCount)) * Double.pi * 2
-            let clusterCenter = CGPoint(
-                x: center.x + cos(clusterAngle) * ringRadius,
-                y: center.y + sin(clusterAngle) * ringRadius * 0.76
-            )
+            let clusterCenter: CGPoint
+            if communityCount == 1 || (graph.isFallback && community == 0) {
+                clusterCenter = center
+            } else {
+                clusterCenter = CGPoint(
+                    x: center.x + cos(clusterAngle) * ringRadius,
+                    y: center.y + sin(clusterAngle) * ringRadius * 0.76
+                )
+            }
             let nodes = (groupedNodes[community] ?? []).sorted { lhs, rhs in
                 if lhs.degree != rhs.degree { return lhs.degree > rhs.degree }
                 return lhs.label < rhs.label
