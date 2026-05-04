@@ -55,6 +55,243 @@ class DesktopAppServiceTest : FunSpec({
         BuiltinAgentCatalog.get("opencode")!!.timeout shouldBe 45 * 60_000L
     }
 
+    test("builtin local model and graphify agents are available by default") {
+        BuiltinAgentCatalog.names().containsAll(listOf("gemma4", "ollama", "lmstudio", "graphify")) shouldBe true
+        BuiltinAgentCatalog.get("gemma4")!!.parameters["model"] shouldBe "gemma4:e2b"
+        BuiltinAgentCatalog.get("ollama")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:11434"
+        BuiltinAgentCatalog.get("lmstudio")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:1234/v1"
+        BuiltinAgentCatalog.get("graphify")!!.parameters["argvJson"] shouldBe """["graphify","explain","{input}"]"""
+    }
+
+    test("skill manifest validation accepts minimal yaml and rejects invalid names") {
+        val appHome = Files.createTempDirectory("skill-validation-home")
+        val manifest = Files.createTempFile("cotor-skill", ".yaml")
+        Files.writeString(
+            manifest,
+            """
+            name: graphify
+            description: Query repository graph structure.
+            """.trimIndent()
+        )
+        val service = DesktopAppService(
+            stateStore = DesktopStateStore { appHome },
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+
+        val valid = service.validateSkill(manifest.toString())
+        val invalidManifest = Files.createTempFile("cotor-skill-invalid", ".yaml")
+        Files.writeString(
+            invalidManifest,
+            """
+            name: Bad Skill
+            description: Invalid name.
+            """.trimIndent()
+        )
+        val invalid = service.validateSkill(invalidManifest.toString())
+
+        valid.valid shouldBe true
+        valid.name shouldBe "graphify"
+        invalid.valid shouldBe false
+        invalid.errors.single() shouldContain "lowercase letters"
+    }
+
+    test("browser smoke plan is blocked by default and ready after explicit browser capability grant") {
+        val appHome = Files.createTempDirectory("browser-smoke-home")
+        val service = DesktopAppService(
+            stateStore = DesktopStateStore { appHome },
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(
+            name = "Browser QA",
+            rootPath = appHome.toString()
+        )
+        val agent = service.createCompanyAgentDefinition(
+            companyId = company.id,
+            title = "Browser Agent",
+            agentCli = "opencode",
+            roleSummary = "Smoke browser surfaces"
+        )
+
+        val blocked = service.planBrowserSmoke(
+            BrowserSmokeRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                url = "http://127.0.0.1:3000",
+                screenshot = true
+            )
+        )
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = agent.id,
+            settings = mapOf(
+                CapabilityKey.BROWSER_READ to AgentCapabilitySetting(mode = CapabilityMode.AUTO),
+                CapabilityKey.BROWSER_SCREENSHOT to AgentCapabilitySetting(mode = CapabilityMode.AUTO)
+            )
+        )
+        val ready = service.planBrowserSmoke(
+            BrowserSmokeRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                url = "http://127.0.0.1:3000",
+                screenshot = true
+            )
+        )
+
+        blocked.status shouldBe "DENIED"
+        blocked.checks.map { it.capability }.contains(CapabilityKey.BROWSER_READ) shouldBe true
+        ready.status shouldBe "READY"
+        ready.command shouldBe listOf("playwright", "open", "http://127.0.0.1:3000", "--screenshot")
+    }
+
+    test("browser smoke rejects malformed or hostless urls before capability checks") {
+        val appHome = Files.createTempDirectory("browser-smoke-invalid-home")
+        val service = DesktopAppService(
+            stateStore = DesktopStateStore { appHome },
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Browser Invalid QA", rootPath = appHome.toString())
+        val agent = service.createCompanyAgentDefinition(
+            companyId = company.id,
+            title = "Browser Agent",
+            agentCli = "opencode",
+            roleSummary = "Smoke browser surfaces"
+        )
+
+        val result = service.planBrowserSmoke(
+            BrowserSmokeRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                url = "not-a-url"
+            )
+        )
+
+        result.status shouldBe "DENIED"
+        result.checks.shouldBeEmpty()
+        result.error shouldContain "Unsupported browser smoke URL"
+    }
+
+    test("capability updates preserve previously customized capability settings") {
+        val appHome = Files.createTempDirectory("capability-merge-home")
+        val service = DesktopAppService(
+            stateStore = DesktopStateStore { appHome },
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Capability QA", rootPath = appHome.toString())
+        val agent = service.createCompanyAgentDefinition(
+            companyId = company.id,
+            title = "Capability Agent",
+            agentCli = "opencode",
+            roleSummary = "Check capability patch behavior"
+        )
+
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = agent.id,
+            settings = mapOf(CapabilityKey.BROWSER_READ to AgentCapabilitySetting(mode = CapabilityMode.AUTO))
+        )
+        val profile = service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = agent.id,
+            settings = mapOf(CapabilityKey.BROWSER_SCREENSHOT to AgentCapabilitySetting(mode = CapabilityMode.AUTO))
+        )
+
+        profile.settings[CapabilityKey.BROWSER_READ]?.mode shouldBe CapabilityMode.AUTO
+        profile.settings[CapabilityKey.BROWSER_SCREENSHOT]?.mode shouldBe CapabilityMode.AUTO
+    }
+
+    test("video plans are gated by video capabilities") {
+        val appHome = Files.createTempDirectory("video-plan-home")
+        val service = DesktopAppService(
+            stateStore = DesktopStateStore { appHome },
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Video QA", rootPath = appHome.toString())
+        val agent = service.createCompanyAgentDefinition(
+            companyId = company.id,
+            title = "Video Agent",
+            agentCli = "opencode",
+            roleSummary = "Plan video work"
+        )
+
+        val blocked = service.planVideoScript(
+            VideoPlanRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                issueId = "issue-1",
+                projectPath = appHome.resolve("video").toString()
+            )
+        )
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = agent.id,
+            settings = mapOf(CapabilityKey.VIDEO_SCRIPT_WRITE to AgentCapabilitySetting(mode = CapabilityMode.AUTO))
+        )
+        val ready = service.planVideoScript(
+            VideoPlanRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                issueId = "issue-1",
+                projectPath = appHome.resolve("video").toString()
+            )
+        )
+
+        blocked.status shouldBe "APPROVAL_REQUIRED"
+        blocked.checks.single().capability shouldBe CapabilityKey.VIDEO_SCRIPT_WRITE
+        ready.status shouldBe "READY"
+        ready.command.first() shouldBe "video-plan"
+    }
+
+    test("video transcode checks every requested path against capability allowlists") {
+        val appHome = Files.createTempDirectory("video-path-home")
+        val allowed = Files.createTempDirectory("video-allowed")
+        val outside = Files.createTempDirectory("video-outside")
+        val service = DesktopAppService(
+            stateStore = DesktopStateStore { appHome },
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Video Path QA", rootPath = appHome.toString())
+        val agent = service.createCompanyAgentDefinition(
+            companyId = company.id,
+            title = "Video Agent",
+            agentCli = "opencode",
+            roleSummary = "Plan video work"
+        )
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = agent.id,
+            settings = mapOf(
+                CapabilityKey.VIDEO_TRANSCODE to AgentCapabilitySetting(
+                    mode = CapabilityMode.AUTO,
+                    pathAllowlist = listOf(allowed.toString())
+                )
+            )
+        )
+
+        val result = service.planVideoTranscode(
+            VideoPlanRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                inputPath = allowed.resolve("input.mov").toString(),
+                outputPath = outside.resolve("output.mp4").toString()
+            )
+        )
+
+        result.status shouldBe "DENIED"
+        result.checks shouldHaveSize 2
+    }
+
     test("runTask stores publish metadata on a completed run") {
         val fixture = DesktopAppServiceFixture.create()
         coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
@@ -628,6 +865,254 @@ class DesktopAppServiceTest : FunSpec({
 
         run.status shouldBe AgentRunStatus.FAILED
         run.error shouldBe "No GitHub remote configured; kept local commit only"
+    }
+
+    test("runTask marks PR creation approval as waiting for approval instead of blocked") {
+        val fixture = DesktopAppServiceFixture.create()
+        val approvalError = "Capability GITHUB_PR_CREATE requires approval for git.publish in company=company-pr-approval agent=codex."
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-pr-approval",
+            name = "PR Approval Co",
+            rootPath = fixture.stateStore.load().repositories.single().localPath,
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-pr-approval",
+            companyId = company.id,
+            title = "Ship with approval",
+            description = "Require explicit approval before PR creation.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "issue-pr-approval",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Publish approval issue",
+            description = "Produce code and publish a pull request.",
+            status = IssueStatus.PLANNED,
+            kind = "execution",
+            codeProducing = true,
+            createdAt = now,
+            updatedAt = now
+        )
+        val initial = fixture.stateStore.load()
+        fixture.stateStore.save(
+            initial.copy(
+                companies = listOf(company),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                tasks = initial.tasks.map { task ->
+                    if (task.id == fixture.task.id) task.copy(issueId = issue.id) else task
+                }
+            )
+        )
+        coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/desktop-publish/codex",
+            worktreePath = fixture.worktreeRoot
+        )
+        coEvery {
+            fixture.agentExecutor.executeAgent(any(), any(), any())
+        } returns AgentResult(
+            agentName = "codex",
+            isSuccess = true,
+            output = "done",
+            error = null,
+            duration = 250,
+            metadata = emptyMap(),
+            processId = 4242
+        )
+        coEvery {
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any())
+        } returns PublishMetadata(
+            commitSha = "abc1234567890",
+            error = approvalError
+        )
+
+        fixture.service.runTask(fixture.task.id)
+        val run = fixture.awaitRuns().single()
+        val updatedIssue = withTimeout(5_000) {
+            while (true) {
+                val candidate = fixture.stateStore.load().issues.single { it.id == issue.id }
+                if (candidate.status == IssueStatus.WAITING_FOR_APPROVAL) {
+                    return@withTimeout candidate
+                }
+                delay(25)
+            }
+            error("Unreachable")
+        }
+        val refreshed = fixture.stateStore.load()
+
+        run.status shouldBe AgentRunStatus.FAILED
+        run.error shouldBe approvalError
+        updatedIssue.providerBlockReason shouldContain "GITHUB_PR_CREATE"
+        refreshed.opsMetrics.blockedIssues shouldBe 0
+    }
+
+    test("prepareCompanyAutomationState converts blocked PR approval failures into approval needed") {
+        val fixture = DesktopAppServiceFixture.create()
+        val approvalError = "Capability GITHUB_PR_CREATE requires approval for git.publish in company=company-pr-approval-migrate agent=codex."
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-pr-approval-migrate",
+            name = "PR Approval Migration Co",
+            rootPath = fixture.stateStore.load().repositories.single().localPath,
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-pr-approval-migrate",
+            companyId = company.id,
+            title = "Migrate approval state",
+            description = "Keep approval-required publishing out of generic blocked state.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "issue-pr-approval-migrate",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Migrate approval issue",
+            description = "Previously persisted as blocked after PR creation approval was required.",
+            status = IssueStatus.BLOCKED,
+            kind = "execution",
+            codeProducing = true,
+            providerBlockReason = approvalError,
+            createdAt = now,
+            updatedAt = now
+        )
+        val failedTask = fixture.task.copy(
+            issueId = issue.id,
+            status = DesktopTaskStatus.FAILED,
+            updatedAt = now
+        )
+        val failedRun = AgentRun(
+            id = "run-pr-approval-migrate",
+            taskId = failedTask.id,
+            workspaceId = WORKSPACE_ID,
+            repositoryId = REPOSITORY_ID,
+            agentName = "codex",
+            branchName = "codex/cotor/desktop-publish/codex",
+            worktreePath = fixture.worktreeRoot.toString(),
+            status = AgentRunStatus.FAILED,
+            error = approvalError,
+            publish = PublishMetadata(error = approvalError),
+            createdAt = now,
+            updatedAt = now
+        )
+        val initial = fixture.stateStore.load()
+        fixture.stateStore.save(
+            initial.copy(
+                companies = listOf(company),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                tasks = listOf(failedTask),
+                runs = listOf(failedRun)
+            )
+        )
+
+        fixture.service.prepareCompanyAutomationStateForTesting(company.id)
+        val migrated = fixture.stateStore.load().issues.single { it.id == issue.id }
+
+        migrated.status shouldBe IssueStatus.WAITING_FOR_APPROVAL
+        migrated.providerBlockReason shouldContain "GITHUB_PR_CREATE"
+        fixture.stateStore.load().opsMetrics.blockedIssues shouldBe 0
+    }
+
+    test("prepareCompanyAutomationState retries stale OpenCode prompt file argument failures") {
+        val fixture = DesktopAppServiceFixture.create()
+        val failure = "OpenCode execution failed (exit=1): Error: File not found: Execute the instructions in the attached prompt file."
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-opencode-prompt-file-retry",
+            name = "OpenCode Prompt File Retry Co",
+            rootPath = fixture.stateStore.load().repositories.single().localPath,
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-opencode-prompt-file-retry",
+            companyId = company.id,
+            title = "Retry OpenCode prompt file failures",
+            description = "A fixed wrapper bug should not leave older issues permanently blocked.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "issue-opencode-prompt-file-retry",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Retry stale OpenCode issue",
+            description = "Previously blocked by OpenCode treating the instruction text as a file path.",
+            status = IssueStatus.BLOCKED,
+            kind = "execution",
+            codeProducing = true,
+            providerBlockReason = failure,
+            createdAt = now,
+            updatedAt = now
+        )
+        val failedTasks = (0 until 3).map { index ->
+            val timestamp = now - ((3 - index) * 1_000L)
+            fixture.task.copy(
+                id = "task-opencode-prompt-file-retry-$index",
+                issueId = issue.id,
+                status = DesktopTaskStatus.FAILED,
+                createdAt = timestamp,
+                updatedAt = timestamp
+            )
+        }
+        val failedRuns = failedTasks.mapIndexed { index, task ->
+            AgentRun(
+                id = "run-opencode-prompt-file-retry-$index",
+                taskId = task.id,
+                workspaceId = WORKSPACE_ID,
+                repositoryId = REPOSITORY_ID,
+                agentName = "opencode",
+                branchName = "codex/cotor/opencode-prompt-file-retry/opencode-$index",
+                worktreePath = fixture.worktreeRoot.toString(),
+                status = AgentRunStatus.FAILED,
+                error = failure,
+                createdAt = task.createdAt,
+                updatedAt = task.updatedAt
+            )
+        }
+        val initial = fixture.stateStore.load()
+        fixture.stateStore.save(
+            initial.copy(
+                companies = listOf(company),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                tasks = failedTasks,
+                runs = failedRuns
+            )
+        )
+
+        fixture.service.prepareCompanyAutomationStateForTesting(company.id)
+        val retried = fixture.stateStore.load().issues.single { it.id == issue.id }
+
+        retried.status shouldBe IssueStatus.PLANNED
+        retried.blockedBy shouldBe emptyList()
+        retried.providerBlockReason shouldBe null
+        fixture.stateStore.load().opsMetrics.blockedIssues shouldBe 0
     }
 
     test("runTask keeps a slow in-flight run alive while waiting for the final backend result") {
@@ -5856,33 +6341,29 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Run arbitrary roster CLI",
             description = "Build the implementation and hand it back to the CEO.",
-            autonomyEnabled = true
+            autonomyEnabled = false,
+            startRuntimeIfNeeded = false
         )
+        val issue = service.createIssue(
+            companyId = company.id,
+            goalId = goal.id,
+            title = "Builder implementation with arbitrary CLI",
+            description = "Use the Builder roster entry to execute this implementation issue.",
+            kind = "execution"
+        )
+        service.updateIssueAssignee(issue.id, seededBuilder.id)
+        service.runIssue(issue.id)
 
-        withTimeout(30_000) {
-            while (capturedAgents.isEmpty()) {
-                runCatching { service.runCompanyRuntimeTick(goal.companyId) }
-                delay(200)
+        withTimeout(5_000) {
+            while (capturedAgents.none { it.name == "/bin/echo" }) {
+                delay(25)
             }
         }
 
         coVerify(atLeast = 1) { agentExecutor.executeAgent(any(), any(), any()) }
-        // The planner assigns work based on prompt relevance.  Verify that
-        // at least one agent was dispatched and that the /bin/echo builder
-        // would be routed through CommandPlugin when it is selected.
-        capturedAgents.shouldNotBeEmpty()
-        val builderAgent = capturedAgents.firstOrNull { it.name == "/bin/echo" }
-        if (builderAgent != null) {
-            builderAgent.pluginClass shouldBe "com.cotor.data.plugin.CommandPlugin"
-            builderAgent.parameters["argvJson"] shouldBe """["/bin/echo","{input}"]"""
-        } else {
-            // The /bin/echo builder was not selected for this prompt; verify the
-            // command plugin config is properly computed for arbitrary CLIs.
-            val commandConfig = service.settings().let { settings ->
-                capturedAgents.firstOrNull()
-            }
-            commandConfig.shouldNotBeNull()
-        }
+        val builderAgent = capturedAgents.first { it.name == "/bin/echo" }
+        builderAgent.pluginClass shouldBe "com.cotor.data.plugin.CommandPlugin"
+        builderAgent.parameters["argvJson"] shouldBe """["/bin/echo","{input}"]"""
         service.stopCompanyRuntime(goal.companyId).status shouldBe CompanyRuntimeStatus.STOPPED
     }
 
@@ -6605,7 +7086,7 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 11, any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 11, any(), any(), any()) } returns Unit
         val service = DesktopAppService(
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
@@ -6786,9 +7267,9 @@ class DesktopAppServiceTest : FunSpec({
         refreshedQueue.ceoFeedback shouldBe null
         refreshedQueue.ceoReviewedAt shouldBe null
         refreshedQueue.qaVerdict shouldBe "PASS"
-        coVerify(exactly = 1) { gitWorkspaceService.commentOnPullRequest(any(), 11, any()) }
+        coVerify(exactly = 1) { gitWorkspaceService.commentOnPullRequest(any(), 11, any(), any(), any()) }
         coVerify(exactly = 1) {
-            gitWorkspaceService.submitPullRequestReview(any(), 11, PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 11, PullRequestReviewVerdict.APPROVE, any(), any(), any())
         }
     }
 
@@ -6895,7 +7376,7 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
-        coEvery { gitWorkspaceService.closePullRequest(any(), 11, any()) } returns PublishMetadata(
+        coEvery { gitWorkspaceService.closePullRequest(any(), 11, any(), any(), any()) } returns PublishMetadata(
             pullRequestNumber = 11,
             pullRequestUrl = "https://github.com/heodongun/cotor-test/pull/11",
             pullRequestState = "CLOSED"
@@ -7149,8 +7630,8 @@ class DesktopAppServiceTest : FunSpec({
                     it.status in setOf(DesktopTaskStatus.QUEUED, DesktopTaskStatus.RUNNING, DesktopTaskStatus.COMPLETED)
             } shouldBe true
         }
-        coVerify(exactly = 1) { gitWorkspaceService.closePullRequest(any(), 11, any()) }
-        coVerify(exactly = 0) { gitWorkspaceService.submitPullRequestReview(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { gitWorkspaceService.closePullRequest(any(), 11, any(), any(), any()) }
+        coVerify(exactly = 0) { gitWorkspaceService.submitPullRequestReview(any(), any(), any(), any(), any(), any()) }
     }
 
     test("runtime keeps dirty published PRs out of QA and re-plans the execution issue") {
@@ -8070,7 +8551,7 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 22, any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 22, any(), any(), any()) } returns Unit
         coEvery {
             gitWorkspaceService.syncBaseBranchAfterMerge(any(), "master")
         } returns BaseBranchSyncResult(
@@ -8078,7 +8559,7 @@ class DesktopAppServiceTest : FunSpec({
             workingTreeUpdated = true
         )
         coEvery {
-            gitWorkspaceService.submitPullRequestReview(any(), 22, PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 22, PullRequestReviewVerdict.APPROVE, any(), any(), any())
         } returns PublishMetadata(
             pullRequestNumber = 22,
             pullRequestUrl = "https://github.com/heodongun/cotor-test/pull/22",
@@ -8087,7 +8568,7 @@ class DesktopAppServiceTest : FunSpec({
             mergeability = "MERGEABLE"
         )
         coEvery {
-            gitWorkspaceService.mergePullRequest(any(), 22, true)
+            gitWorkspaceService.mergePullRequest(any(), 22, true, any(), any())
         } returns PullRequestMergeResult(
             number = 22,
             url = "https://github.com/heodongun/cotor-test/pull/22",
@@ -8260,7 +8741,7 @@ class DesktopAppServiceTest : FunSpec({
         val merged = service.mergeReviewQueueItem(reviewQueueItem.id)
         merged.status shouldBe ReviewQueueStatus.MERGED
         merged.mergeCommitSha shouldBe "deadbeef"
-        coVerify(exactly = 1) { gitWorkspaceService.commentOnPullRequest(any(), 22, any()) }
+        coVerify(exactly = 1) { gitWorkspaceService.commentOnPullRequest(any(), 22, any(), any(), any()) }
         coVerify(exactly = 1) { gitWorkspaceService.syncBaseBranchAfterMerge(any(), "master") }
 
         val finalState = stateStore.load()
@@ -8275,9 +8756,9 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 22, any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), 22, any(), any(), any()) } returns Unit
         coEvery {
-            gitWorkspaceService.submitPullRequestReview(any(), 22, PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 22, PullRequestReviewVerdict.APPROVE, any(), any(), any())
         } returns PublishMetadata(
             pullRequestNumber = 22,
             pullRequestUrl = "https://github.com/heodongun/cotor-test/pull/22",
@@ -8286,7 +8767,7 @@ class DesktopAppServiceTest : FunSpec({
             mergeability = "DIRTY"
         )
         coEvery {
-            gitWorkspaceService.mergePullRequest(any(), 22)
+            gitWorkspaceService.mergePullRequest(any(), 22, any(), any(), any())
         } throws ProcessExecutionException(
             message = "GH command failed",
             exitCode = 1,
@@ -8400,7 +8881,7 @@ class DesktopAppServiceTest : FunSpec({
         updated.status shouldBe ReviewQueueStatus.CHANGES_REQUESTED
         updated.ceoVerdict shouldBe "CHANGES_REQUESTED"
         updated.ceoFeedback.shouldContain("GitHub could not merge this pull request cleanly.")
-        coVerify(exactly = 0) { gitWorkspaceService.mergePullRequest(any(), 22) }
+        coVerify(exactly = 0) { gitWorkspaceService.mergePullRequest(any(), 22, any(), any(), any()) }
         coVerify(exactly = 0) { gitWorkspaceService.syncBaseBranchAfterMerge(any(), any()) }
 
         val finalState = stateStore.load()
@@ -8701,7 +9182,7 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
-        coEvery { gitWorkspaceService.closeSupersededManagedPullRequests(any(), any()) } returns ManagedPullRequestCleanupResult()
+        coEvery { gitWorkspaceService.closeSupersededManagedPullRequests(any(), any(), any(), any()) } returns ManagedPullRequestCleanupResult()
         val service = DesktopAppService(
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
@@ -9024,7 +9505,7 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
-        coEvery { gitWorkspaceService.closeSupersededManagedPullRequests(any(), any()) } returns ManagedPullRequestCleanupResult()
+        coEvery { gitWorkspaceService.closeSupersededManagedPullRequests(any(), any(), any(), any()) } returns ManagedPullRequestCleanupResult()
         val service = DesktopAppService(
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,

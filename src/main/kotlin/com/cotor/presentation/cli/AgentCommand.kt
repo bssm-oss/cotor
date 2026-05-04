@@ -14,6 +14,7 @@ import com.cotor.data.config.YamlParser
 import com.cotor.model.AgentConfig
 import com.cotor.model.CodexDefaults
 import com.cotor.model.CotorConfig
+import com.cotor.model.LocalModelDefaults
 import com.cotor.model.OpenCodeDefaults
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
@@ -75,6 +76,10 @@ private val builtinPresets = listOf(
     AgentPreset("codex-oauth", "com.cotor.data.plugin.CodexPlugin", "codex", 60000, CodexDefaults.DEFAULT_MODEL),
     AgentPreset("copilot", "com.cotor.data.plugin.CopilotPlugin", "copilot", 60000, "copilot"),
     AgentPreset("opencode", "com.cotor.data.plugin.OpenCodePlugin", "opencode", 60000, OpenCodeDefaults.DEFAULT_MODEL),
+    AgentPreset("gemma4", "com.cotor.data.plugin.LocalModelPlugin", "ollama", 60000, LocalModelDefaults.GEMMA4_MODEL),
+    AgentPreset("ollama", "com.cotor.data.plugin.LocalModelPlugin", "ollama", 60000, LocalModelDefaults.GEMMA4_MODEL),
+    AgentPreset("lmstudio", "com.cotor.data.plugin.LocalModelPlugin", "lmstudio", 60000, LocalModelDefaults.GEMMA4_MODEL),
+    AgentPreset("graphify", "com.cotor.data.plugin.CommandPlugin", "graphify", 60000),
     AgentPreset("qwen", "com.cotor.data.plugin.CommandPlugin", "qwen", 60000, "qwen3-coder"),
     AgentPreset("qa", "com.cotor.data.plugin.QaVerificationPlugin", "project test tool", 600000)
 )
@@ -199,6 +204,17 @@ class AgentAddCommand(
                 "model" to model,
                 "argvJson" to "[\"qwen\",\"--model\",\"$model\",\"{input}\"]"
             )
+            "gemma4", "ollama" -> mapOf(
+                "provider" to "ollama",
+                "baseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                "model" to model.ifBlank { LocalModelDefaults.GEMMA4_MODEL }
+            )
+            "lmstudio" -> mapOf(
+                "provider" to "lmstudio",
+                "baseUrl" to LocalModelDefaults.LM_STUDIO_BASE_URL,
+                "model" to model.ifBlank { LocalModelDefaults.GEMMA4_MODEL }
+            )
+            "graphify" -> mapOf("argvJson" to """["graphify","explain","{input}"]""")
             "qa" -> emptyMap()
             else -> mapOf("model" to model)
         }

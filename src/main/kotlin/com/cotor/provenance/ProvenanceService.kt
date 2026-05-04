@@ -31,6 +31,7 @@ class ProvenanceService(
             }
         )
         val newNodes = mutableListOf(runNode, actionNode)
+        val evidence = record.evidence
         if (checkpointRef != null) {
             newNodes += EvidenceNode(
                 kind = EvidenceNodeKind.CHECKPOINT,
@@ -38,35 +39,35 @@ class ProvenanceService(
                 label = request.metadata["checkpointId"] ?: checkpointRef.removePrefix("checkpoint:")
             )
         }
-        request.evidence.filePaths.forEach { filePath ->
+        evidence.filePaths.forEach { filePath ->
             newNodes += EvidenceNode(
                 kind = EvidenceNodeKind.FILE,
                 ref = "file:$filePath",
                 label = filePath
             )
         }
-        request.evidence.branchName?.let { branchName ->
+        evidence.branchName?.let { branchName ->
             newNodes += EvidenceNode(
                 kind = EvidenceNodeKind.BRANCH,
                 ref = "branch:$branchName",
                 label = branchName
             )
         }
-        request.evidence.pullRequestNumber?.let { number ->
+        evidence.pullRequestNumber?.let { number ->
             newNodes += EvidenceNode(
                 kind = EvidenceNodeKind.PR,
                 ref = "pr:$number",
-                label = request.evidence.pullRequestUrl ?: "#$number",
-                metadata = mapOf("url" to (request.evidence.pullRequestUrl ?: ""))
+                label = evidence.pullRequestUrl ?: "#$number",
+                metadata = mapOf("url" to (evidence.pullRequestUrl ?: ""))
             )
         }
         val mergedNodes = mergeNodes(graph.nodes, newNodes)
         val edges = buildList {
             add(EvidenceEdge(fromRef = runRef, toRef = actionRef, relation = "executed"))
             checkpointRef?.let { add(EvidenceEdge(fromRef = it, toRef = actionRef, relation = "triggered")) }
-            request.evidence.filePaths.forEach { add(EvidenceEdge(fromRef = actionRef, toRef = "file:$it", relation = "touched")) }
-            request.evidence.branchName?.let { add(EvidenceEdge(fromRef = runRef, toRef = "branch:$it", relation = "published-branch")) }
-            request.evidence.pullRequestNumber?.let { add(EvidenceEdge(fromRef = runRef, toRef = "pr:$it", relation = "published-pr")) }
+            evidence.filePaths.forEach { add(EvidenceEdge(fromRef = actionRef, toRef = "file:$it", relation = "touched")) }
+            evidence.branchName?.let { add(EvidenceEdge(fromRef = runRef, toRef = "branch:$it", relation = "published-branch")) }
+            evidence.pullRequestNumber?.let { add(EvidenceEdge(fromRef = runRef, toRef = "pr:$it", relation = "published-pr")) }
         }
         store.save(
             graph.copy(

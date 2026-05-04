@@ -182,10 +182,55 @@ private class CompanyAgentCommand : CliktCommand(name = "agent", help = "Manage 
             CompanyAgentListCommand(),
             CompanyAgentAddCommand(),
             CompanyAgentUpdateCommand(),
-            CompanyAgentBatchUpdateCommand()
+            CompanyAgentBatchUpdateCommand(),
+            CompanyAgentCapabilitiesCommand(),
+            CompanyAgentCapabilitySetCommand()
         )
     }
     override fun run() = Unit
+}
+
+private class CompanyAgentCapabilitiesCommand : CompanyServiceCommand(name = "capabilities") {
+    private val agentId by argument("agentId")
+    private val companyId by option("--company-id").required()
+
+    override fun run() = runBlocking {
+        printJson(desktopService.agentCapabilities(companyId, agentId), AgentCapabilityProfile.serializer())
+    }
+}
+
+private class CompanyAgentCapabilitySetCommand : CompanyServiceCommand(name = "capability") {
+    private val agentId by argument("agentId")
+    private val capability by argument("capability")
+    private val companyId by option("--company-id").required()
+    private val mode by option("--mode").required()
+    private val providerId by option("--provider-id")
+    private val modelOverride by option("--model-override")
+    private val domainAllowlist by option("--domain").multiple()
+    private val pathAllowlist by option("--path").multiple()
+    private val skillAllowlist by option("--skill").multiple()
+    private val secretRefs by option("--secret-ref").multiple()
+
+    override fun run() = runBlocking {
+        val key = CapabilityKey.valueOf(capability.trim().uppercase().replace('-', '_'))
+        val capabilityMode = CapabilityMode.valueOf(mode.trim().uppercase().replace('-', '_'))
+        val current = desktopService.agentCapabilities(companyId, agentId)
+        val currentSetting = current.settings[key] ?: AgentCapabilitySetting()
+        val nextSetting = currentSetting.copy(
+            enabled = capabilityMode != CapabilityMode.DISABLED,
+            mode = capabilityMode,
+            providerId = providerId ?: currentSetting.providerId,
+            modelOverride = modelOverride ?: currentSetting.modelOverride,
+            domainAllowlist = domainAllowlist.takeIf { it.isNotEmpty() } ?: currentSetting.domainAllowlist,
+            pathAllowlist = pathAllowlist.takeIf { it.isNotEmpty() } ?: currentSetting.pathAllowlist,
+            skillAllowlist = skillAllowlist.takeIf { it.isNotEmpty() } ?: currentSetting.skillAllowlist,
+            secretRefs = secretRefs.takeIf { it.isNotEmpty() } ?: currentSetting.secretRefs
+        )
+        printJson(
+            desktopService.updateAgentCapabilities(companyId, agentId, mapOf(key to nextSetting)),
+            AgentCapabilityProfile.serializer()
+        )
+    }
 }
 
 private class CompanyAgentListCommand : CompanyServiceCommand(name = "list") {

@@ -247,6 +247,21 @@ class GitWorkspaceService(
         return currentHead
     }
 
+    suspend fun hasLocalBranch(repositoryRoot: Path, branch: String): Boolean {
+        val normalizedBranch = branch.trim()
+        if (normalizedBranch.isBlank()) {
+            return false
+        }
+        return runGit(
+            repositoryRoot,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            "refs/heads/$normalizedBranch",
+            failOnError = false
+        ).isSuccess
+    }
+
     /**
      * Read the canonical origin URL for repositories that were opened from an
      * existing local checkout instead of cloned through the desktop app.
@@ -321,7 +336,7 @@ class GitWorkspaceService(
                 kind = ActionKind.GIT_WORKTREE,
                 label = "git.ensureWorktree:$taskId:$agentName",
                 scope = ActionScope.GLOBAL,
-                subject = ActionSubject(taskId = taskId, agentName = agentName),
+                subject = actionSubjectForTask(taskId, agentName),
                 replaySafe = true,
                 approvalRequiredOnReplay = false,
                 metadata = mapOf(
@@ -448,7 +463,7 @@ class GitWorkspaceService(
                 kind = ActionKind.GIT_PUBLISH,
                 label = "git.publish:$branchName",
                 scope = ActionScope.GLOBAL,
-                subject = ActionSubject(taskId = task.id, agentName = agentName),
+                subject = actionSubjectForTask(task.id, agentName),
                 replaySafe = false,
                 approvalRequiredOnReplay = true,
                 metadata = mapOf(
@@ -651,6 +666,27 @@ class GitWorkspaceService(
         }
     }
 
+    private suspend fun actionSubjectForTask(taskId: String, agentName: String): ActionSubject {
+        val state = runCatching { stateStore.load() }.getOrNull()
+        val task = state?.tasks?.firstOrNull { it.id == taskId }
+        val issue = task?.issueId?.let { issueId -> state.issues.firstOrNull { it.id == issueId } }
+        val definition = issue?.assigneeProfileId?.let { profileId ->
+            state.companyAgentDefinitions.firstOrNull { it.id == profileId }
+        } ?: issue?.companyId?.let { companyId ->
+            state.companyAgentDefinitions.firstOrNull { definition ->
+                definition.companyId == companyId &&
+                    (definition.agentCli.equals(agentName, ignoreCase = true) || definition.title.equals(agentName, ignoreCase = true))
+            }
+        }
+        return ActionSubject(
+            companyId = issue?.companyId,
+            goalId = issue?.goalId,
+            issueId = issue?.id,
+            taskId = taskId,
+            agentName = definition?.id ?: agentName
+        )
+    }
+
     suspend fun inspectGitHubPublishEnvironment(
         repositoryRoot: Path?,
         baseBranch: String?
@@ -692,16 +728,23 @@ class GitWorkspaceService(
         worktreePath: Path,
         pullRequestNumber: Int,
         verdict: PullRequestReviewVerdict,
-        body: String
+        body: String,
+        subject: ActionSubject = ActionSubject(),
+        approval: String? = null
     ): PublishMetadata {
         return actionExecutionService.run(
             request = ActionRequest(
                 kind = ActionKind.GITHUB_REVIEW,
                 label = "github.review:$pullRequestNumber:$verdict",
                 scope = ActionScope.GLOBAL,
+                subject = subject,
                 replaySafe = false,
                 approvalRequiredOnReplay = true,
-                metadata = mapOf("pullRequestNumber" to pullRequestNumber.toString(), "verdict" to verdict.name)
+                metadata = githubActionMetadata(
+                    pullRequestNumber = pullRequestNumber,
+                    extras = mapOf("verdict" to verdict.name),
+                    approval = approval
+                )
             ),
             onSuccess = { metadata ->
                 ActionEvidence(
@@ -784,16 +827,19 @@ class GitWorkspaceService(
     suspend fun commentOnPullRequest(
         worktreePath: Path,
         pullRequestNumber: Int,
-        body: String
+        body: String,
+        subject: ActionSubject = ActionSubject(),
+        approval: String? = null
     ) {
         actionExecutionService.run(
             request = ActionRequest(
                 kind = ActionKind.GITHUB_COMMENT,
                 label = "github.comment:$pullRequestNumber",
                 scope = ActionScope.GLOBAL,
+                subject = subject,
                 replaySafe = false,
                 approvalRequiredOnReplay = true,
-                metadata = mapOf("pullRequestNumber" to pullRequestNumber.toString())
+                metadata = githubActionMetadata(pullRequestNumber = pullRequestNumber, approval = approval)
             )
         ) {
             val repo = if (githubHttpEnabled()) runCatching { githubRepositoryRef(worktreePath) }.getOrNull() else null
@@ -818,16 +864,19 @@ class GitWorkspaceService(
     suspend fun closePullRequest(
         worktreePath: Path,
         pullRequestNumber: Int,
-        comment: String? = null
+        comment: String? = null,
+        subject: ActionSubject = ActionSubject(),
+        approval: String? = null
     ): PublishMetadata {
         return actionExecutionService.run(
             request = ActionRequest(
                 kind = ActionKind.GITHUB_COMMENT,
                 label = "github.close:$pullRequestNumber",
                 scope = ActionScope.GLOBAL,
+                subject = subject,
                 replaySafe = false,
                 approvalRequiredOnReplay = true,
-                metadata = mapOf("pullRequestNumber" to pullRequestNumber.toString())
+                metadata = githubActionMetadata(pullRequestNumber = pullRequestNumber, approval = approval)
             ),
             onSuccess = { metadata ->
                 ActionEvidence(
@@ -842,7 +891,9 @@ class GitWorkspaceService(
                     commentOnPullRequest(
                         worktreePath = worktreePath,
                         pullRequestNumber = pullRequestNumber,
-                        body = comment
+                        body = comment,
+                        subject = subject,
+                        approval = approval
                     )
                 } catch (error: ProcessExecutionException) {
                     if (isAlreadyClosed(error) || isAlreadyMerged(error)) {
@@ -893,7 +944,9 @@ class GitWorkspaceService(
 
     suspend fun closeSupersededManagedPullRequests(
         worktreePath: Path,
-        preservePullRequestNumbers: Set<Int> = emptySet()
+        preservePullRequestNumbers: Set<Int> = emptySet(),
+        subject: ActionSubject = ActionSubject(),
+        approval: String? = null
     ): ManagedPullRequestCleanupResult {
         val currentLogin = currentGitHubLogin(worktreePath)
         val openPullRequests = listOpenPullRequests(worktreePath)
@@ -945,7 +998,9 @@ class GitWorkspaceService(
                             closePullRequest(
                                 worktreePath = worktreePath,
                                 pullRequestNumber = pullRequestNumber,
-                                comment = "Superseded by newer retry $replacementRef. Closing this outdated Cotor-managed PR to keep the review queue aligned with the latest execution branch."
+                                comment = "Superseded by newer retry $replacementRef. Closing this outdated Cotor-managed PR to keep the review queue aligned with the latest execution branch.",
+                                subject = subject,
+                                approval = approval
                             )
                         }.getOrElse { error ->
                             if (error is CancellationException) {
@@ -1003,21 +1058,27 @@ class GitWorkspaceService(
     suspend fun mergePullRequest(
         worktreePath: Path,
         pullRequestNumber: Int,
-        preApprovedReviewFlow: Boolean = false
+        preApprovedReviewFlow: Boolean = false,
+        subject: ActionSubject = ActionSubject(),
+        approval: String? = null
     ): PullRequestMergeResult {
         return actionExecutionService.run(
             request = ActionRequest(
                 kind = ActionKind.GITHUB_MERGE,
                 label = "github.merge:$pullRequestNumber",
                 scope = ActionScope.GLOBAL,
+                subject = subject,
                 replaySafe = false,
                 approvalRequiredOnReplay = true,
-                metadata = buildMap {
-                    put("pullRequestNumber", pullRequestNumber.toString())
-                    if (preApprovedReviewFlow) {
-                        put("preApprovedReviewFlow", "true")
-                    }
-                }
+                metadata = githubActionMetadata(
+                    pullRequestNumber = pullRequestNumber,
+                    extras = buildMap {
+                        if (preApprovedReviewFlow) {
+                            put("preApprovedReviewFlow", "true")
+                        }
+                    },
+                    approval = approval
+                )
             ),
             onSuccess = { result ->
                 ActionEvidence(
@@ -1187,7 +1248,38 @@ class GitWorkspaceService(
             failOnError = false,
             timeoutMs = 10_000
         )
-        return result.stdout.trim().takeIf { result.isSuccess && it.isNotBlank() }
+        return result.stdout.trim()
+            .takeIf { result.isSuccess && it.isNotBlank() }
+            ?.redactRemoteUrlCredentials()
+    }
+
+    private fun String.redactRemoteUrlCredentials(): String {
+        val raw = trim()
+        val uri = runCatching { URI(raw) }.getOrNull()
+        if (uri?.rawUserInfo != null) {
+            return URI(
+                uri.scheme,
+                null,
+                uri.host,
+                uri.port,
+                uri.rawPath,
+                uri.rawQuery,
+                uri.rawFragment
+            ).toString()
+        }
+        return raw.replace(Regex("://[^/@\\s]+@"), "://")
+    }
+
+    private fun githubActionMetadata(
+        pullRequestNumber: Int,
+        extras: Map<String, String> = emptyMap(),
+        approval: String? = null
+    ): Map<String, String> = buildMap {
+        put("pullRequestNumber", pullRequestNumber.toString())
+        putAll(extras)
+        approval?.trim()?.takeIf { it.isNotBlank() }?.let { approvedBy ->
+            put("approvedBy", approvedBy)
+        }
     }
 
     private suspend fun resolveLatestBaseReference(

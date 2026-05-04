@@ -1,0 +1,30 @@
+package com.cotor.model
+
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+
+class LocalModelDefaultsTest : FunSpec({
+    test("detects Gemma 4 model aliases from local model lists") {
+        LocalModelDefaults.isGemma4Model("gemma4:e2b") shouldBe true
+        LocalModelDefaults.isGemma4Model("google/gemma-4-31b-it") shouldBe true
+        LocalModelDefaults.isGemma4Model("nvidia/google/gemma_4_31b_it") shouldBe true
+    }
+
+    test("does not treat older Gemma or unrelated models as Gemma 4") {
+        LocalModelDefaults.isGemma4Model("gemma3:4b") shouldBe false
+        LocalModelDefaults.isGemma4Model("qwen2.5-coder:32b") shouldBe false
+        LocalModelDefaults.isGemma4Model("notgemma4:latest") shouldBe false
+    }
+
+    test("installed Gemma 4 models are trimmed and de-duplicated in discovery order") {
+        LocalModelDefaults.installedGemma4Models(
+            listOf(
+                " qwen2.5:3b ",
+                "gemma4:e2b",
+                "google/gemma-4-31b-it",
+                "gemma4:e2b",
+                "gemma3:4b"
+            )
+        ) shouldBe listOf("gemma4:e2b", "google/gemma-4-31b-it")
+    }
+})

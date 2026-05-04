@@ -188,7 +188,7 @@ class AppServerTest : FunSpec({
     test("agent model route returns discovered provider models when authorized") {
         every { desktopService.availableAgentModels("opencode") } returns listOf(
             "opencode/big-pickle",
-            "opencode/nemotron-3-super-free"
+            "opencode-go/deepseek-v4-flash"
         )
 
         testApplication {
@@ -205,8 +205,358 @@ class AppServerTest : FunSpec({
             }
 
             response.status shouldBe HttpStatusCode.OK
-            response.bodyAsText() shouldBe "[\"opencode/big-pickle\",\"opencode/nemotron-3-super-free\"]"
+            response.bodyAsText() shouldBe "[\"opencode/big-pickle\",\"opencode-go/deepseek-v4-flash\"]"
             io.mockk.verify(exactly = 1) { desktopService.availableAgentModels("opencode") }
+        }
+    }
+
+    test("capability catalog route returns safe defaults when authorized") {
+        every { desktopService.capabilityCatalog() } returns listOf(
+            CapabilityCatalogEntry(
+                key = CapabilityKey.GITHUB_MERGE_EXECUTE,
+                defaultMode = CapabilityMode.DISABLED,
+                description = "Execute a GitHub merge.",
+                dangerous = true,
+                requiresReview = true
+            )
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/capabilities/catalog") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "GITHUB_MERGE_EXECUTE"
+            response.bodyAsText() shouldContain "DISABLED"
+        }
+    }
+
+    test("company agent capability simulation route calls backend guard surface") {
+        coEvery {
+            desktopService.simulateAgentCapability(
+                companyId = "company-1",
+                agentId = "agent-1",
+                action = "github.merge",
+                path = null,
+                networkTarget = null,
+                command = null,
+                skill = null
+            )
+        } returns CapabilitySimulationResult(
+            action = "github.merge",
+            capability = CapabilityKey.GITHUB_MERGE_EXECUTE,
+            mode = CapabilityMode.DISABLED,
+            allowed = false,
+            reason = "Capability GITHUB_MERGE_EXECUTE is disabled."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/companies/company-1/agents/agent-1/capabilities/simulate") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"action":"github.merge"}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "GITHUB_MERGE_EXECUTE"
+            response.bodyAsText() shouldContain "\"allowed\":false"
+        }
+    }
+
+    test("company agent capability simulation route forwards skill name") {
+        coEvery {
+            desktopService.simulateAgentCapability(
+                companyId = "company-1",
+                agentId = "agent-1",
+                action = "skill.run",
+                path = null,
+                networkTarget = null,
+                command = null,
+                skill = "graphify"
+            )
+        } returns CapabilitySimulationResult(
+            action = "skill.run",
+            capability = CapabilityKey.SKILL_RUN,
+            mode = CapabilityMode.APPROVAL_REQUIRED,
+            allowed = true,
+            requiresApproval = true,
+            reason = "Capability SKILL_RUN requires approval."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/companies/company-1/agents/agent-1/capabilities/simulate") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"action":"skill.run","skill":"graphify"}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "SKILL_RUN"
+            response.bodyAsText() shouldContain "\"requiresApproval\":true"
+            coVerify(exactly = 1) {
+                desktopService.simulateAgentCapability(
+                    companyId = "company-1",
+                    agentId = "agent-1",
+                    action = "skill.run",
+                    path = null,
+                    networkTarget = null,
+                    command = null,
+                    skill = "graphify"
+                )
+            }
+        }
+    }
+
+    test("provider scan route uses no-network backend scan surface") {
+        every { desktopService.providerCatalog() } returns listOf(
+            ProviderCatalogEntry(
+                id = "gh",
+                displayName = "GitHub CLI",
+                command = "gh"
+            )
+        )
+        every { desktopService.scanProviders() } returns listOf(
+            ProviderScanResult(
+                provider = ProviderCatalogEntry(
+                    id = "opencode",
+                    displayName = "OpenCode",
+                    command = "opencode"
+                ),
+                available = true,
+                message = "opencode is available on PATH."
+            )
+        )
+        every { desktopService.testProvider("gh") } returns ProviderScanResult(
+            provider = ProviderCatalogEntry(
+                id = "gh",
+                displayName = "GitHub CLI",
+                command = "gh"
+            ),
+            available = true,
+            message = "gh is available on PATH."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val list = client.get("/api/app/providers") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val response = client.post("/api/app/providers/scan") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val test = client.post("/api/app/providers/gh/test") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            list.status shouldBe HttpStatusCode.OK
+            list.bodyAsText() shouldContain "GitHub CLI"
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "opencode"
+            response.bodyAsText() shouldContain "\"available\":true"
+            test.status shouldBe HttpStatusCode.OK
+            test.bodyAsText() shouldContain "gh is available on PATH."
+        }
+    }
+
+    test("skill catalog and run routes use backend skill gate") {
+        every { desktopService.skillCatalog() } returns listOf(
+            SkillCatalogEntry(
+                name = "graphify",
+                displayName = "Graphify",
+                description = "Query repository graph."
+            )
+        )
+        every { desktopService.inspectSkill("graphify") } returns SkillCatalogEntry(
+            name = "graphify",
+            displayName = "Graphify",
+            description = "Query repository graph."
+        )
+        coEvery { desktopService.runSkill("graphify", "company-1", "agent-1", "map repo") } returns SkillRunResult(
+            skill = "graphify",
+            status = "READY",
+            capability = CapabilitySimulationResult(
+                action = "skill.run",
+                capability = CapabilityKey.SKILL_RUN,
+                mode = CapabilityMode.AUTO,
+                allowed = true,
+                reason = "allowed"
+            ),
+            output = "Graphify is allowed."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            client.get("/api/app/skills") {
+                header("Authorization", "Bearer secret-token")
+            }.bodyAsText() shouldContain "graphify"
+
+            client.get("/api/app/skills/graphify") {
+                header("Authorization", "Bearer secret-token")
+            }.bodyAsText() shouldContain "Query repository graph."
+
+            val response = client.post("/api/app/skills/graphify/run") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"companyId":"company-1","agentId":"agent-1","input":"map repo"}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"status\":\"READY\""
+            response.bodyAsText() shouldContain "Graphify is allowed."
+            coVerify(exactly = 1) { desktopService.runSkill("graphify", "company-1", "agent-1", "map repo") }
+        }
+    }
+
+    test("browser smoke route delegates to guarded backend planner") {
+        coEvery {
+            desktopService.planBrowserSmoke(
+                BrowserSmokeRequest(
+                    companyId = "company-1",
+                    agentId = "agent-1",
+                    url = "http://127.0.0.1:3000",
+                    screenshot = true
+                )
+            )
+        } returns BrowserSmokeResult(
+            url = "http://127.0.0.1:3000",
+            status = "READY",
+            checks = listOf(
+                CapabilitySimulationResult(
+                    action = "browser.read",
+                    capability = CapabilityKey.BROWSER_READ,
+                    mode = CapabilityMode.AUTO,
+                    allowed = true,
+                    reason = "allowed"
+                )
+            ),
+            command = listOf("playwright", "open", "http://127.0.0.1:3000", "--screenshot"),
+            message = "Browser smoke is allowed."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/browser/smoke") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"companyId":"company-1","agentId":"agent-1","url":"http://127.0.0.1:3000","screenshot":true}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"status\":\"READY\""
+            response.bodyAsText() shouldContain "--screenshot"
+            coVerify(exactly = 1) {
+                desktopService.planBrowserSmoke(
+                    BrowserSmokeRequest(
+                        companyId = "company-1",
+                        agentId = "agent-1",
+                        url = "http://127.0.0.1:3000",
+                        screenshot = true
+                    )
+                )
+            }
+        }
+    }
+
+    test("video plan route delegates to guarded backend planner") {
+        coEvery {
+            desktopService.planVideoScript(
+                VideoPlanRequest(
+                    companyId = "company-1",
+                    agentId = "agent-1",
+                    issueId = "issue-1",
+                    projectPath = "/tmp/video"
+                )
+            )
+        } returns VideoPlanResult(
+            action = "video.script-write",
+            status = "READY",
+            checks = listOf(
+                CapabilitySimulationResult(
+                    action = "video.script-write",
+                    capability = CapabilityKey.VIDEO_SCRIPT_WRITE,
+                    mode = CapabilityMode.AUTO,
+                    allowed = true,
+                    reason = "allowed"
+                )
+            ),
+            command = listOf("video-plan", "--issue=issue-1", "--project=/tmp/video"),
+            message = "Video script planning is allowed."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/video/plan") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"companyId":"company-1","agentId":"agent-1","issueId":"issue-1","projectPath":"/tmp/video"}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"status\":\"READY\""
+            response.bodyAsText() shouldContain "video.script-write"
+            coVerify(exactly = 1) {
+                desktopService.planVideoScript(
+                    VideoPlanRequest(
+                        companyId = "company-1",
+                        agentId = "agent-1",
+                        issueId = "issue-1",
+                        projectPath = "/tmp/video"
+                    )
+                )
+            }
         }
     }
 
@@ -235,6 +585,40 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"workflowMemory\":\"Workflow memory\""
             response.bodyAsText() shouldContain "\"agentMemory\":\"Agent memory\""
             coVerify(exactly = 1) { desktopService.companyMemorySnapshot("company-1", "issue-1", null) }
+        }
+    }
+
+    test("company github status route returns backend readiness payload when authorized") {
+        coEvery { desktopService.githubPublishStatus("company-1") } returns GitHubPublishStatus(
+            policy = CodePublishMode.REQUIRE_GITHUB_PR,
+            ghInstalled = true,
+            ghAuthenticated = false,
+            originConfigured = true,
+            originUrl = "https://github.com/example/cotor.git",
+            repositoryPath = "/tmp/cotor",
+            companyId = "company-1",
+            companyName = "Example Co",
+            message = "gh auth is required."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/companies/company-1/github/status") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"originConfigured\":true"
+            response.bodyAsText() shouldContain "https://github.com/example/cotor.git"
+            response.bodyAsText() shouldContain "gh auth is required."
+            coVerify(exactly = 1) { desktopService.githubPublishStatus("company-1") }
         }
     }
 

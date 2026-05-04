@@ -145,6 +145,19 @@ class ActionExecutionService(
         ActionKind.FILE_WRITE -> SideEffectKind.FILE_WRITE
         ActionKind.HTTP_REQUEST -> SideEffectKind.HTTP_REQUEST
         ActionKind.AGENT_EXEC -> SideEffectKind.AGENT_EXECUTION
+        ActionKind.SKILL_RUN -> SideEffectKind.SKILL_RUN
+        ActionKind.BROWSER_READ -> SideEffectKind.BROWSER_READ
+        ActionKind.BROWSER_INTERACT -> SideEffectKind.BROWSER_INTERACT
+        ActionKind.BROWSER_SCREENSHOT -> SideEffectKind.BROWSER_SCREENSHOT
+        ActionKind.BROWSER_TRACE -> SideEffectKind.BROWSER_TRACE
+        ActionKind.BROWSER_RECORD -> SideEffectKind.BROWSER_RECORD
+        ActionKind.BROWSER_EXTERNAL_DOMAIN -> SideEffectKind.BROWSER_EXTERNAL_DOMAIN
+        ActionKind.BROWSER_LOGIN_FLOW -> SideEffectKind.BROWSER_LOGIN_FLOW
+        ActionKind.VIDEO_SCRIPT_WRITE -> SideEffectKind.VIDEO_SCRIPT_WRITE
+        ActionKind.VIDEO_RENDER_LOCAL -> SideEffectKind.VIDEO_RENDER_LOCAL
+        ActionKind.VIDEO_GENERATE_REMOTE -> SideEffectKind.VIDEO_GENERATE_REMOTE
+        ActionKind.VIDEO_TRANSCODE -> SideEffectKind.VIDEO_TRANSCODE
+        ActionKind.VIDEO_UPLOAD -> SideEffectKind.VIDEO_UPLOAD
         ActionKind.GIT_WORKTREE -> SideEffectKind.GIT_WORKTREE
         ActionKind.GIT_PUBLISH -> SideEffectKind.GIT_PUBLISH
         ActionKind.GITHUB_REVIEW -> SideEffectKind.GITHUB_REVIEW

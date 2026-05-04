@@ -87,6 +87,26 @@ class DesktopAppServiceAgentModelNormalizationTest : FunSpec({
         updated.agentCli shouldBe "codex"
         updated.model shouldBe "gpt-5.4"
     }
+
+    test("updating an agent to local Gemma keeps the local model string") {
+        val service = normalizationTestService()
+        val company = service.createCompany(
+            name = "Gemma Model Co",
+            rootPath = Files.createTempDirectory("agent-model-gemma").toString(),
+            defaultBaseBranch = "main"
+        )
+        val builder = service.listCompanyAgentDefinitions(company.id).first { it.title == "Builder" }
+
+        val updated = service.updateCompanyAgentDefinition(
+            companyId = company.id,
+            agentId = builder.id,
+            agentCli = "gemma4",
+            model = "gemma4:e2b"
+        )
+
+        updated.agentCli shouldBe "gemma4"
+        updated.model shouldBe "gemma4:e2b"
+    }
 })
 
 private fun normalizationTestService(): DesktopAppService {

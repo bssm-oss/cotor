@@ -403,6 +403,7 @@ enum class IssueStatus {
     IN_PROGRESS,
     IN_REVIEW,
     READY_FOR_CEO,
+    WAITING_FOR_APPROVAL,
     BLOCKED,
     DONE,
     CANCELED
@@ -1012,6 +1013,7 @@ data class ShortcutBinding(
 data class DesktopAppState(
     val companies: List<Company> = emptyList(),
     val companyAgentDefinitions: List<CompanyAgentDefinition> = emptyList(),
+    val agentCapabilityProfiles: List<AgentCapabilityProfile> = emptyList(),
     val projectContexts: List<CompanyProjectContext> = emptyList(),
     val repositories: List<ManagedRepository> = emptyList(),
     val workspaces: List<Workspace> = emptyList(),

@@ -407,6 +407,119 @@ internal fun Application.cotorAppModule(
                 call.respond(desktopService.availableAgentModels(agent))
             }
 
+            route("/capabilities") {
+                get("/catalog") {
+                    if (!requireToken(token)) return@get
+                    call.respond(desktopService.capabilityCatalog())
+                }
+            }
+
+            route("/providers") {
+                get {
+                    if (!requireToken(token)) return@get
+                    call.respond(desktopService.providerCatalog())
+                }
+
+                post("/scan") {
+                    if (!requireToken(token)) return@post
+                    respondDesktopRequest {
+                        desktopService.scanProviders()
+                    }
+                }
+
+                post("/{providerId}/test") {
+                    if (!requireToken(token)) return@post
+                    val providerId = call.parameters["providerId"]
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "providerId is required"))
+                    respondDesktopRequest {
+                        desktopService.testProvider(providerId)
+                    }
+                }
+            }
+
+            route("/skills") {
+                get {
+                    if (!requireToken(token)) return@get
+                    call.respond(desktopService.skillCatalog())
+                }
+
+                get("/{name}") {
+                    if (!requireToken(token)) return@get
+                    val name = call.parameters["name"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name is required"))
+                    respondDesktopRequest {
+                        desktopService.inspectSkill(name)
+                    }
+                }
+
+                post("/{name}/validate") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<SkillValidationRequest>()
+                    respondDesktopRequest {
+                        desktopService.validateSkill(request.path)
+                    }
+                }
+
+                post("/{name}/run") {
+                    if (!requireToken(token)) return@post
+                    val name = call.parameters["name"]
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name is required"))
+                    val request = call.receive<SkillRunRequest>()
+                    respondDesktopRequest {
+                        desktopService.runSkill(
+                            name = name,
+                            companyId = request.companyId,
+                            agentId = request.agentId,
+                            input = request.input
+                        )
+                    }
+                }
+            }
+
+            route("/browser") {
+                post("/smoke") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<BrowserSmokeRequest>()
+                    respondDesktopRequest {
+                        desktopService.planBrowserSmoke(request)
+                    }
+                }
+            }
+
+            route("/video") {
+                post("/plan") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<VideoPlanRequest>()
+                    respondDesktopRequest {
+                        desktopService.planVideoScript(request)
+                    }
+                }
+
+                post("/render-local") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<VideoPlanRequest>()
+                    respondDesktopRequest {
+                        desktopService.planVideoRenderLocal(request)
+                    }
+                }
+
+                post("/transcode") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<VideoPlanRequest>()
+                    respondDesktopRequest {
+                        desktopService.planVideoTranscode(request)
+                    }
+                }
+
+                post("/generate-remote") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<VideoPlanRequest>()
+                    respondDesktopRequest {
+                        desktopService.planVideoGenerateRemote(request)
+                    }
+                }
+            }
+
             route("/repositories") {
                 get {
                     if (!requireToken(token)) return@get
@@ -658,6 +771,13 @@ internal fun Application.cotorAppModule(
                         return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "path must not be blank"))
                     }
                     call.respond(desktopService.evidenceForFile(path))
+                }
+
+                get("/pull-requests/{pullRequestNumber}") {
+                    if (!requireToken(token)) return@get
+                    val pullRequestNumber = call.parameters["pullRequestNumber"]?.toIntOrNull()
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "pullRequestNumber is required"))
+                    call.respond(desktopService.evidenceForPullRequest(pullRequestNumber))
                 }
             }
 
@@ -1006,6 +1126,15 @@ internal fun Application.cotorAppModule(
                     }
                 }
 
+                get("/{companyId}/github/status") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    respondDesktopRequest {
+                        desktopService.githubPublishStatus(companyId)
+                    }
+                }
+
                 patch("/{companyId}") {
                     if (!requireToken(token)) return@patch
                     val companyId = call.parameters["companyId"]
@@ -1188,6 +1317,49 @@ internal fun Application.cotorAppModule(
                                 memoryNotes = request.memoryNotes,
                                 enabled = request.enabled,
                                 displayOrder = request.displayOrder
+                            )
+                        }
+                    }
+
+                    get("/{agentId}/capabilities") {
+                        if (!requireToken(token)) return@get
+                        val companyId = call.parameters["companyId"]
+                            ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                        val agentId = call.parameters["agentId"]
+                            ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "agentId is required"))
+                        respondDesktopRequest {
+                            desktopService.agentCapabilities(companyId, agentId)
+                        }
+                    }
+
+                    patch("/{agentId}/capabilities") {
+                        if (!requireToken(token)) return@patch
+                        val companyId = call.parameters["companyId"]
+                            ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                        val agentId = call.parameters["agentId"]
+                            ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "agentId is required"))
+                        val request = call.receive<UpdateAgentCapabilitiesRequest>()
+                        respondDesktopRequest {
+                            desktopService.updateAgentCapabilities(companyId, agentId, request.settings)
+                        }
+                    }
+
+                    post("/{agentId}/capabilities/simulate") {
+                        if (!requireToken(token)) return@post
+                        val companyId = call.parameters["companyId"]
+                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                        val agentId = call.parameters["agentId"]
+                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "agentId is required"))
+                        val request = call.receive<CapabilitySimulationRequest>()
+                        respondDesktopRequest {
+                            desktopService.simulateAgentCapability(
+                                companyId = companyId,
+                                agentId = agentId,
+                                action = request.action,
+                                path = request.path,
+                                networkTarget = request.networkTarget,
+                                command = request.command,
+                                skill = request.skill
                             )
                         }
                     }

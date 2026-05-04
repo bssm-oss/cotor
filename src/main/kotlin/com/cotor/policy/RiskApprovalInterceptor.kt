@@ -49,6 +49,17 @@ class RiskApprovalInterceptor(
             }
             ActionKind.GIT_PUBLISH -> signals += RiskSignal("git-publish", 70, "Publishing a branch or PR affects shared repository state.")
             ActionKind.SHELL_EXEC -> signals += RiskSignal("shell-exec", 40, "Shell execution may mutate local state.")
+            ActionKind.SKILL_RUN -> signals += RiskSignal("skill-run", 80, "Running a skill pack can execute bundled automation.")
+            ActionKind.BROWSER_INTERACT,
+            ActionKind.BROWSER_SCREENSHOT,
+            ActionKind.BROWSER_TRACE,
+            ActionKind.BROWSER_RECORD,
+            ActionKind.BROWSER_EXTERNAL_DOMAIN,
+            ActionKind.BROWSER_LOGIN_FLOW -> signals += RiskSignal("browser-automation", 80, "Browser automation can expose private state or mutate remote pages.")
+            ActionKind.VIDEO_GENERATE_REMOTE,
+            ActionKind.VIDEO_UPLOAD -> signals += RiskSignal("remote-media", 85, "Remote media generation or upload can spend money or publish artifacts externally.")
+            ActionKind.VIDEO_RENDER_LOCAL,
+            ActionKind.VIDEO_TRANSCODE -> signals += RiskSignal("local-media", 60, "Local media work can consume significant compute and disk.")
             ActionKind.SECRET_READ -> signals += RiskSignal("secret-read", 95, "Secret access is highly sensitive.")
             else -> Unit
         }

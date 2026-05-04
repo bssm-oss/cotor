@@ -61,9 +61,7 @@ actor EmbeddedBackendLauncher {
             runtimeJarPath,
             "app-server",
             "--port",
-            "\(port)",
-            "--token",
-            DesktopAPI.appToken
+            "\(port)"
         ]
         process.environment = mergedEnvironment(javaPath: javaPath)
         process.standardOutput = FileHandle(forWritingAtPath: stdoutPath)
@@ -282,6 +280,7 @@ actor EmbeddedBackendLauncher {
         env["JAVA_HOME"] = env["JAVA_HOME"] ?? javaHome
         env["COTOR_DESKTOP_APP_HOME"] = env["COTOR_DESKTOP_APP_HOME"] ?? appHome
         env["COTOR_APP_HOME"] = env["COTOR_APP_HOME"] ?? appHome
+        env["COTOR_APP_TOKEN"] = env["COTOR_APP_TOKEN"] ?? DesktopAPI.appToken
         let defaultPath = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
         env["PATH"] = [env["PATH"], defaultPath].compactMap { $0 }.joined(separator: ":")
         return env

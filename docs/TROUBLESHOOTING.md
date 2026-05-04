@@ -77,7 +77,7 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 | Local `master` does not show merged work | PR merged remotely but local branch is behind, or merge never actually happened | `git status -sb`, `git log --oneline --decorate -5`, `gh pr view` |
 | `cotor` interactive/TUI starts but does not answer well | thin PATH, unauthenticated AI CLI, or wrong starter selection | `interactive.log`, shell PATH, provider auth status |
 | `brew install cotor` works but desktop install/first run behaves strangely | packaged install layout mismatch, bad HOME resolution, or stale local overrides | `docs/HOMEBREW_INSTALL.md`, packaged config path, `interactive.log` |
-| Desktop health checks fail only when auth is enabled | desktop launcher, `DesktopAPI`, or manual curl is using a different `COTOR_APP_TOKEN` than the backend | `desktop-app.log`, runtime `app-server.token`, process arguments |
+| Desktop health checks fail only when auth is enabled | desktop launcher, `DesktopAPI`, or manual curl is using a different `COTOR_APP_TOKEN` than the backend | `desktop-app.log`, runtime `app-server.token`, backend environment, manual process arguments |
 
 ## 4. Desktop App Startup And Shutdown
 

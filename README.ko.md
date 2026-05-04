@@ -38,7 +38,12 @@ Cotor는 로컬 우선 AI 워크플로우 실행기에서 출발해, CEO AI가 �
 - `plugin init`
 - `checkpoint gc`
 - `policy validate`, `policy simulate`
-- `evidence run`, `evidence file`
+- `capability list`, `capability inspect`, `capability simulate`
+- `provider list`, `provider scan`, `provider test`
+- `skill list`, `skill inspect`, `skill validate`, `skill run`
+- backend capability gate를 통과한 browser smoke 계획을 만드는 `browser smoke`
+- backend capability gate를 통과한 video 작업 계획을 만드는 `video plan`, `video render`, `video transcode`, `video generate-remote`
+- `evidence run`, `evidence file`, `evidence pr`
 - `github sync`, `github inspect-pr`, `github list`, `github events`
 - `knowledge inspect`
 - `verification inspect`
@@ -145,17 +150,17 @@ cotor delete    # 삭제
 
 - 최상위 `Company` / `TUI` 모드 분리
 - `Company` 모드에서 회사 목록, 에이전트 정의, 목표, 이슈 보드/캔버스, 활동 피드, 런타임 제어, 전용 `미팅룸` surface 제공
-- 라이브 대화/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal 흐름, 리더/워커 AI 라우팅을 담은 전용 `채팅 컨트롤` 탐색 surface 제공
+- 라이브 대화/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal 흐름, 대표/도움 에이전트 배정을 담은 전용 `채팅 컨트롤` 탐색 surface 제공
 - `Company` 요약은 별도 긴 상태 카드 대신 메인 요약 배너 안에서 런타임 건강도, 차단 수, 리뷰 주의 수, 최근 오류/동작을 함께 보여줌
 - `Company` 요약은 선택한 회사의 추정 비용과 일/월 비용 상한도 함께 보여줌
 - `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
 - 데스크톱 backend launch, health check, shutdown, client request가 같은 `COTOR_APP_TOKEN` source를 사용해서 token-protected local session이 어긋나지 않음
-- `미팅룸`은 이제 summary 아래에 묻히지 않고, 합성된 wall feed·좌석 기반 에이전트 테이블·리뷰 데스크 요약을 가진 전용 페이지로 노출됨
+- `미팅룸`은 이제 기본으로 쉬운 `지도`를 열어 기술적인 그래프 파일 경로는 숨기고, 옆에서 기존 라이브 플로어 맵도 전환해서 볼 수 있음
 - 회사 이슈 실행 상세는 이제 단순 변경점이 아니라 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약까지 함께 보여줌
 - `cotor company issue run <issue-id>`는 기본적으로 이슈가 정착 상태가 될 때까지 기다려서, CLI에서 시작한 로컬 에이전트 작업이 중간에 고아 작업으로 끊기지 않게 함. 이미 실행 중인 app-server가 백그라운드 작업을 맡아야 할 때만 `--async` 사용
 - 회사 런타임은 이제 이슈/태스크/리뷰 상태 변화가 생기면 바로 깨어나며, 서로 다른 역할이 같은 execution CLI를 쓰더라도 runnable issue를 병렬로 시작할 수 있음
 - CEO 머지는 GitHub 새로고침 결과가 실제 `MERGED`로 확인된 뒤에만 로컬 workflow 상태를 merged로 기록함
-- 회사 에이전트 정의는 이제 Codex/OpenCode 같은 provider별로 선택 모델을 개별 지정할 수 있음
+- 회사 에이전트 정의는 이제 Codex, OpenCode, Ollama, LM Studio, 설치된 로컬 Gemma 4 모델 같은 provider별로 선택 모델을 개별 지정할 수 있음
 - 회사 실시간 stream이 잠깐 끊겨도 현재 company snapshot은 유지하고, generic decode 오류 대신 회사 전용 재동기화 메시지를 보여줌
 - 이슈 보드는 lane 내부 스크롤을 써서 차단/리뷰 카드가 많아져도 상단만 잘린 채 보이지 않게 함
 - stale한 Cotor retry PR은 배치 정리로 닫아서 같은 리뷰 루프가 수백 개의 오래된 open PR을 계속 남기지 않게 함
@@ -167,25 +172,26 @@ cotor delete    # 삭제
 - 변경점, 파일, 포트, 브라우저, 리뷰 메타데이터를 담는 접이식 상세 드로어
 - 앱 안에서 명령어 모음집과 빠른 사용 흐름을 볼 수 있는 내장 Help sheet
 
-## 자율 운영 컴퍼니 상태
+## 자율 운영 회사 상태
 
 현재 빌드에서 실제로 가능한 흐름:
 
 - 작업 폴더별로 여러 회사 생성
 - GitHub PR 모드인데 `gh` 인증이나 `origin` 연결이 없으면 회사 생성 직후 바로 경고 표시
 - 직함/CLI/역할 설명만으로 회사 에이전트 정의
-- 회사 에이전트별 provider 모델 선택 저장
+- 로컬 Ollama/LM Studio가 실행 중이고 모델이 설치되어 있으면 `gemma4`, `ollama`, `lmstudio` 에이전트로 회사 에이전트별 provider 모델 선택 저장
+- 같은 에이전트 팀에서 내장 저장소 지도 에이전트로 작업공간 구조를 확인하며, 모든 회사 에이전트의 실행 메모리에도 가벼운 작업공간 지도 지침 주입
 - 회사 목표 생성
 - 목표를 이슈로 분해
 - 이슈 위임 및 실행
 - 완료된 회사 이슈 실행은 실험적 pipeline replay flag 없이도 `cotor resume inspect <run-id>`로 durable run을 확인 가능
 - 리뷰 큐 생성
-- runtime/backend/review/session 상태를 합성한 이벤트 월과 움직이는 좌석 기반 에이전트 존재감을 포함한 전용 미팅룸 보기
+- 기본 `지도`와 runtime/backend/review/session 상태를 합성한 이벤트 월 및 움직이는 에이전트 플로어를 함께 제공하는 전용 미팅룸 보기
 - 채팅 컨트롤 surface에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
-- 확인용 요청을 만들기 전에 채팅 컨트롤에서 리더 AI와 워커 roster를 직접 선택
+- 확인용 요청을 만들기 전에 채팅 컨트롤에서 대표 에이전트와 도움 에이전트 팀을 직접 선택
 - 한 wave가 끝나면 CEO planning lane을 다시 열어서 active goal이 첫 batch 이후에도 다음 이슈 wave를 이어서 만들 수 있음
 - continuous improvement goal은 한 개의 좁은 후속 이슈보다 여러 branchable issue와 병렬 slice를 우선 만들도록 유도
-- 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 roster가 한두 개 이슈로만 수렴하지 않게 함
+- 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 팀이 한두 개 이슈로만 수렴하지 않게 함
 - 회사 런타임을 수동으로 중지하면 앱 재실행, dashboard 조회, 실시간 재연결 뒤에도 시작을 다시 누르기 전까지 그대로 중지 상태 유지
 - 회사 요약 페이지에서 압축된 런타임 상태, 차단/리뷰 주의, 활동 피드 조회
 - 회사별 로컬 자율 런타임 시작/중지
