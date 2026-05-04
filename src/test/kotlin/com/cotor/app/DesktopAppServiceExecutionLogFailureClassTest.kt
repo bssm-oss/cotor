@@ -192,7 +192,7 @@ class DesktopAppServiceExecutionLogFailureClassTest : FunSpec({
             metadata = emptyMap(),
             processId = 4242
         )
-        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any()) } returns PublishMetadata(
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata(
             pushedBranch = "codex/cotor/no-diff/codex",
             error = "No changes to publish from codex/cotor/no-diff/codex against master"
         )

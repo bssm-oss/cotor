@@ -121,7 +121,7 @@ The current macOS shell has two top-level modes.
 - issue execution detail cards now show agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary for each issue-linked run
 - async detail and memory snapshot refreshes ignore stale responses if the selected issue/task changes before the request completes
 - if the live company stream disconnects, the UI keeps the last company snapshot and shows `Live company updates disconnected. Re-syncing...` while it recovers
-  - compact company summary banner that keeps runtime health, PR approvals, blocked workflows, review attention, and the latest error/action in one place
+  - compact company summary banner that keeps runtime health, CEO-handled PR approvals, blocked workflows, review attention, and the latest error/action in one place
   - compact company summary and company settings now surface estimated spend plus daily/monthly cost guardrails for the selected runtime
   - scrollable issue-board lanes so tall blocked/review queues stay readable inside the fixed board surface
   - stale Cotor-managed retry PRs are reconciled and closed in batches so the review loop does not keep piling up obsolete open PRs
@@ -193,14 +193,14 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - use the Chat Control surface to preview and explicitly confirm goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
 - choose the main agent and helper team directly from Chat Control before staging a confirmed request
 - inspect company activity without manual refresh in normal company mode
-- inspect runtime health, approval-needed/blocked/review attention, and the latest runtime signal from the compact company summary banner
+- inspect runtime health, CEO approval/blocked/review attention, and the latest runtime signal from the compact company summary banner
 - inspect estimated spend and adjust daily/monthly cost guardrails without leaving the company console
 - warn during company creation when GitHub PR publishing is required but the repository is not ready for `gh`/`origin` publishing
 - start, stop, and inspect the local runtime loop
 - keep an explicit company stop sticky until the user presses Start again, even if active autonomous goals still exist
 - keep active company work on a fast monitoring cadence so stale `RUNNING` tasks/runs are reconciled sooner
 - re-queue company issues that were interrupted by an app-server shutdown instead of leaving them blocked by a generic process-exit failure
-- show PR creation policy pauses as `Approval Needed` instead of a generic blocked workflow, while still requiring explicit approval before publishing
+- delegate PR creation policy approval pauses to the company's CEO/chief approval agent when one exists, then requeue publishing without requiring the user to approve the gate manually
 - resume queued delegated company work after the desktop app and bundled backend come back, and record that recovery in the live company activity feed
 - bind issue-linked durable runs through the issue pipeline id when needed, so `cotor resume inspect <run-id>` remains attached to the correct company issue run
 - create durable run snapshots for company issue execution by default so the issue `durableRunId` can be inspected with `cotor resume inspect <run-id>`

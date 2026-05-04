@@ -157,6 +157,7 @@ Current desktop model:
 - `cotor company issue run <issue-id>` waits for a settled issue state by default so local CLI-launched agent work is not orphaned; use `--async` only when an already-running app-server should own the background work
 - company runtime now wakes immediately on issue/task/review transitions and can dispatch multiple runnable issues in parallel even when different roles share the same execution CLI
 - CEO merge only marks local workflow state as merged after GitHub refresh confirms the PR is actually `MERGED`
+- company CEO/chief approval agents can satisfy PR creation policy gates internally, so publish retries do not stop on a user-facing approval prompt when the company has an approval authority
 - company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, Ollama, LM Studio, and installed local Gemma 4 models
 - stale Cotor-managed retry PRs are reconciled and closed in batches so repeated review loops do not keep hundreds of obsolete open PRs around
 - legacy CEO merge-conflict blockers are pushed back into execution so the company can rebase, republish, and continue instead of staying stuck in a blocked approval lane

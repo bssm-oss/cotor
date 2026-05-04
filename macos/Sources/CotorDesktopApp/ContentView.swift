@@ -4984,7 +4984,7 @@ private struct CenterPaneView: View {
                         StatusSummaryPill(text: runtime.backendHealth.uppercased(), tint: companyRuntimeHealthTint(runtime.backendHealth))
                         if approvalNeededCount > 0 {
                             ShellTag(
-                                text: "\(approvalNeededCount) \(l("PR approvals needed", "PR 승인 필요"))",
+                                text: "\(approvalNeededCount) \(l("CEO approvals queued", "CEO 승인 대기"))",
                                 tint: ShellPalette.accentWarm
                             )
                         }
@@ -5057,8 +5057,8 @@ private struct CenterPaneView: View {
                 } else if runtimeHealthy && approvalNeededCount > 0 {
                     Text(
                         l(
-                            "Runtime is healthy. Pull request creation is waiting for approval.",
-                            "런타임은 정상입니다. PR 생성이 승인 대기 중입니다."
+                            "Runtime is healthy. A company approval agent is handling pull request creation.",
+                            "런타임은 정상입니다. 회사 승인 에이전트가 PR 생성을 처리 중입니다."
                         )
                     )
                     .font(.system(size: 11, weight: .medium))
@@ -6330,7 +6330,7 @@ private struct CenterPaneView: View {
                 ShellTag(text: "\(l("Goals", "목표")) \(scopedMetrics.openGoals)", tint: ShellPalette.accentWarm)
                 ShellTag(text: "\(l("Active Issues", "활성 이슈")) \(scopedMetrics.activeIssues)", tint: ShellPalette.accent)
                 if approvalNeededCount > 0 {
-                    ShellTag(text: "\(l("Approval Needed", "승인 필요")) \(approvalNeededCount)", tint: ShellPalette.accentWarm)
+                    ShellTag(text: "\(l("CEO Approval", "CEO 승인")) \(approvalNeededCount)", tint: ShellPalette.accentWarm)
                 }
                 ShellTag(text: "\(l("Blocked", "차단")) \(blockedIssueCount)", tint: ShellPalette.warning)
                 ShellTag(text: "\(l("Merge", "병합")) \(scopedMetrics.readyToMergeCount)", tint: ShellPalette.success)
