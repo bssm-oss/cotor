@@ -59,6 +59,36 @@ func parseCodexArguments(_ raw: String) -> [String] {
     return args
 }
 
+func isExpectedCompanyEventStreamInterruption(_ error: Error) -> Bool {
+    if error is CancellationError {
+        return true
+    }
+    if let urlError = error as? URLError {
+        switch urlError.code {
+        case .cancelled, .networkConnectionLost, .timedOut:
+            return true
+        default:
+            return false
+        }
+    }
+    let nsError = error as NSError
+    if nsError.domain == NSURLErrorDomain {
+        switch nsError.code {
+        case NSURLErrorCancelled, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut:
+            return true
+        default:
+            return false
+        }
+    }
+    let message = error.localizedDescription
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+    return message == "cancelled"
+        || message == "canceled"
+        || message.contains("network connection was lost")
+        || message.contains("request timed out")
+}
+
 /// Tracks the high-level backend/runtime state shown in the shell header.
 ///
 /// The visible text is derived later through the active app language so the same
@@ -240,6 +270,7 @@ final class DesktopStore: ObservableObject {
     @Published var companyMonthlyBudgetInput = ""
     @Published var companyLinearStatusMessage: String?
     @Published var companyGitHubStatusMessage: String?
+    @Published var companyGitHubOriginInput = ""
     @Published var newTaskTitle = ""
     @Published var newTaskPrompt = ""
     @Published var agentSelection: Set<String> = ["claude", "codex"]
@@ -2209,6 +2240,7 @@ final class DesktopStore: ObservableObject {
             selectedCompanyID = company.id
             companyGitHubStatusMessage = githubRequirementMessage(for: response.githubPublishStatus)
             selectedCompanyGitHubStatus = response.githubPublishStatus
+            syncGitHubOriginInput(with: response.githubPublishStatus)
             AppLogger.info("Created company '\(company.name)' (\(company.id)).")
             await performNonCriticalCompanyRefresh(selecting: company)
         } catch is CancellationError {
@@ -2230,10 +2262,10 @@ final class DesktopStore: ObservableObject {
             requirements.append(language("install the gh CLI", "gh CLI를 설치"))
         }
         if !status.ghAuthenticated {
-            requirements.append(language("run gh auth login", "gh auth login 실행"))
+            requirements.append(language("sign in with GitHub", "GitHub 로그인"))
         }
         if !status.originConfigured {
-            requirements.append(language("connect an origin remote", "origin remote를 연결"))
+            requirements.append(language("connect an existing origin remote", "기존 origin remote 연결"))
         }
         guard !requirements.isEmpty else { return nil }
         let prefix = language(
@@ -2257,12 +2289,80 @@ final class DesktopStore: ObservableObject {
         do {
             let status = try await api.companyGitHubStatus(companyId: company.id)
             selectedCompanyGitHubStatus = status
+            syncGitHubOriginInput(with: status)
             companyGitHubStatusMessage = githubRequirementMessage(for: status) ?? status.message
             errorMessage = nil
         } catch {
             companyGitHubStatusMessage = error.localizedDescription
             errorMessage = error.localizedDescription
         }
+    }
+
+    func openGitHubLoginTerminal() {
+        guard selectedCompany != nil else {
+            companyGitHubStatusMessage = language("Select a company before signing in to GitHub.", "GitHub에 로그인하려면 회사를 먼저 선택하세요.")
+            return
+        }
+        let path = activeGitHubPublishStatus.repositoryPath ?? selectedCompany?.rootPath ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let command = "cd \(shellQuoted(path)) && gh auth login"
+        let script = """
+        tell application "Terminal"
+            activate
+            do script \(appleScriptStringLiteral(command))
+        end tell
+        """
+        guard let appleScript = NSAppleScript(source: script) else {
+            companyGitHubStatusMessage = language("Could not open Terminal for GitHub login.", "GitHub 로그인을 위한 터미널을 열 수 없습니다.")
+            return
+        }
+        var scriptError: NSDictionary?
+        appleScript.executeAndReturnError(&scriptError)
+        if let scriptError {
+            companyGitHubStatusMessage = scriptError.description
+        } else {
+            companyGitHubStatusMessage = language("Opened Terminal for GitHub login. Finish the prompt, then check GitHub again.", "GitHub 로그인을 위해 터미널을 열었습니다. 안내를 마친 뒤 GitHub를 다시 확인하세요.")
+        }
+    }
+
+    func saveSelectedCompanyGitHubOrigin() async {
+        guard let company = selectedCompany else {
+            companyGitHubStatusMessage = language("Select a company before connecting GitHub.", "GitHub를 연결하려면 회사를 먼저 선택하세요.")
+            return
+        }
+        let remoteURL = companyGitHubOriginInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remoteURL.isEmpty else {
+            companyGitHubStatusMessage = language("Paste an existing GitHub repository URL first.", "먼저 기존 GitHub 저장소 URL을 붙여 넣으세요.")
+            return
+        }
+        do {
+            let status = try await api.configureCompanyGitHubOrigin(companyId: company.id, remoteURL: remoteURL)
+            selectedCompanyGitHubStatus = status
+            syncGitHubOriginInput(with: status)
+            companyGitHubStatusMessage = status.originConfigured
+                ? language("GitHub origin is connected. Check GitHub again before starting code work.", "GitHub origin이 연결되었습니다. 코드 작업을 시작하기 전에 GitHub를 다시 확인하세요.")
+                : status.message
+            errorMessage = nil
+            await refreshDashboard()
+        } catch {
+            companyGitHubStatusMessage = error.localizedDescription
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func syncGitHubOriginInput(with status: GitHubPublishStatusPayload) {
+        if let originURL = status.originUrl, !originURL.isEmpty {
+            companyGitHubOriginInput = originURL
+        } else if companyGitHubOriginInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            companyGitHubOriginInput = ""
+        }
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func appleScriptStringLiteral(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
     }
 
     func deleteSelectedCompany() async {
@@ -2976,10 +3076,15 @@ final class DesktopStore: ObservableObject {
                 }
             } catch is CancellationError {
             } catch {
-                AppLogger.error("Company event stream failed: \(error.localizedDescription)")
+                let expectedInterruption = isExpectedCompanyEventStreamInterruption(error)
+                if expectedInterruption {
+                    AppLogger.info("Company event stream reconnecting after expected interruption: \(error.localizedDescription)")
+                } else {
+                    AppLogger.error("Company event stream failed: \(error.localizedDescription)")
+                }
                 let shouldRetry = await MainActor.run { () -> Bool in
                     guard self.selectedCompanyID == companyID, self.shellMode == .company else { return false }
-                    self.companyStreamStatusMessage = self.companyStreamRecoveryMessage()
+                    self.companyStreamStatusMessage = expectedInterruption ? nil : self.companyStreamRecoveryMessage()
                     self.errorMessage = nil
                     return true
                 }

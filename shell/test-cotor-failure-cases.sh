@@ -91,7 +91,7 @@ agents:
   - name: bad
     pluginClass: com.cotor.data.plugin.CommandPlugin
     parameters:
-      argvJson: '["/usr/bin/false"]'
+      argvJson: '["git","not-a-real-cotor-test-command"]'
 pipelines:
   - name: fail-agent
     executionMode: SEQUENTIAL

@@ -96,15 +96,18 @@ private enum CompanyOverviewSurface: CaseIterable, Identifiable {
 }
 
 private enum MeetingRoomSurface: CaseIterable, Identifiable {
-    case floor
     case map
+    case meeting
+    case floor
 
     var id: String {
         switch self {
-        case .floor:
-            return "floor"
         case .map:
             return "map"
+        case .meeting:
+            return "meeting"
+        case .floor:
+            return "floor"
         }
     }
 }
@@ -1323,6 +1326,32 @@ private struct SidebarView: View {
                         (l("origin", "origin"), status.originConfigured ? (status.originUrl ?? l("Configured", "설정됨")) : l("Not configured", "설정 안 됨")),
                         (l("Checked repo", "확인한 저장소"), status.repositoryPath ?? company.rootPath),
                     ])
+
+                    TextField(l("https://github.com/owner/repo.git", "https://github.com/owner/repo.git"), text: $store.companyGitHubOriginInput)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1)
+
+                    HStack(spacing: 8) {
+                        Button {
+                            store.openGitHubLoginTerminal()
+                        } label: {
+                            Label(l("Sign in", "로그인"), systemImage: "person.crop.circle.badge.checkmark")
+                                .frame(maxWidth: .infinity)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+                        .disabled(!status.ghInstalled)
+
+                        Button {
+                            Task { await store.saveSelectedCompanyGitHubOrigin() }
+                        } label: {
+                            Label(l("Connect origin", "origin 연결"), systemImage: "link.badge.plus")
+                                .frame(maxWidth: .infinity)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+                        .disabled(store.companyGitHubOriginInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
 
                     HStack(spacing: 8) {
                         Button {
@@ -2671,7 +2700,7 @@ private struct MeetingRoomSeatCard: View {
             }
         }
         .padding(8)
-        .frame(width: 144, height: 74, alignment: .topLeading)
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 74, maxHeight: 74, alignment: .topLeading)
         .background(ShellPalette.panelAlt)
         .overlay(
             RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
@@ -5551,35 +5580,119 @@ private struct CenterPaneView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 meetingRoomSurfaceButton(
-                    surface: .floor,
-                    title: l("Floor", "플로어"),
-                    systemImage: "person.2.wave.2"
-                )
-                meetingRoomSurfaceButton(
                     surface: .map,
                     title: l("Map", "지도"),
                     systemImage: "point.3.connected.trianglepath.dotted"
                 )
+                meetingRoomSurfaceButton(
+                    surface: .meeting,
+                    title: l("Agent Meeting", "에이전트 회의"),
+                    systemImage: "person.3.sequence"
+                )
+                meetingRoomSurfaceButton(
+                    surface: .floor,
+                    title: l("Live Floor", "라이브 플로어"),
+                    systemImage: "person.2.wave.2"
+                )
                 Spacer(minLength: 0)
             }
 
-            if meetingRoomSurface == .map {
+            meetingRoomAgendaStrip
+
+            switch meetingRoomSurface {
+            case .map:
+                meetingRoomMapSurface
+            case .meeting:
+                meetingRoomMeetingSurface
+            case .floor:
+                meetingRoomFloorSurface
+            }
+        }
+        .padding(12)
+        .shellInset()
+    }
+
+    @ViewBuilder
+    private var meetingRoomAgendaStrip: some View {
+        if layoutMode == .wide {
+            HStack(alignment: .top, spacing: 8) {
+                agendaSummaryRow(label: l("Agenda", "안건"), value: meetingRoomCurrentAgendaTitle, tint: ShellPalette.accent)
+                agendaSummaryRow(label: l("State", "상태"), value: meetingRoomCurrentAgendaDetail, tint: ShellPalette.accentWarm)
+                agendaSummaryRow(label: l("Next", "다음"), value: meetingRoomNextActionLabel, tint: ShellPalette.warning)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                agendaSummaryRow(label: l("Agenda", "안건"), value: meetingRoomCurrentAgendaTitle, tint: ShellPalette.accent)
+                agendaSummaryRow(label: l("Next", "다음"), value: meetingRoomNextActionLabel, tint: ShellPalette.warning)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var meetingRoomMapSurface: some View {
+        if layoutMode == .wide {
+            HStack(alignment: .top, spacing: 12) {
                 MeetingRoomBrainGraphPane(
                     rootPath: store.selectedCompany?.rootPath,
                     language: store.language,
                     isCompact: layoutMode == .compact
                 )
-            } else {
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    meetingRoomCenterTableZone
+                    meetingRoomReviewDeskZone
+                }
+                .frame(width: 336, alignment: .topLeading)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                MeetingRoomBrainGraphPane(
+                    rootPath: store.selectedCompany?.rootPath,
+                    language: store.language,
+                    isCompact: layoutMode == .compact
+                )
+                meetingRoomCenterTableZone
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var meetingRoomMeetingSurface: some View {
+        if layoutMode == .wide {
+            HStack(alignment: .top, spacing: 12) {
+                meetingRoomCenterTableZone
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+                meetingRoomEventWallZone
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+            }
+            HStack(alignment: .top, spacing: 12) {
+                meetingRoomReviewDeskZone
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
                 MeetingRoomView(
                     projection: meetingRoomProjection,
                     language: store.language,
                     inboxCount: meetingRoomReviewItems.count + meetingRoomMessages.count,
-                    isCompact: layoutMode == .compact
+                    isCompact: true
                 )
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                meetingRoomCenterTableZone
+                meetingRoomEventWallZone
+                meetingRoomReviewDeskZone
             }
         }
-        .padding(12)
-        .shellInset()
+    }
+
+    private var meetingRoomFloorSurface: some View {
+        MeetingRoomView(
+            projection: meetingRoomProjection,
+            language: store.language,
+            inboxCount: meetingRoomReviewItems.count + meetingRoomMessages.count,
+            isCompact: layoutMode == .compact
+        )
     }
 
     private func meetingRoomSurfaceButton(surface: MeetingRoomSurface, title: String, systemImage: String) -> some View {
@@ -6250,7 +6363,7 @@ private struct CenterPaneView: View {
             )
         } else {
             Color.clear
-                .frame(width: 124, height: 56)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 56, maxHeight: 74)
         }
     }
 

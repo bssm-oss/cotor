@@ -37,6 +37,7 @@ import io.kotest.matchers.string.shouldNotContain
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -598,6 +599,104 @@ class DesktopAppServiceTest : FunSpec({
         prompt shouldContain "Do not create README-only, VALIDATION.md-only, or other placeholder repository changes just to produce a diff."
         prompt shouldNotContain "Make the smallest complete repository change"
         prompt shouldNotContain "prefer editing README.md or adding one small text/script artifact"
+    }
+
+    test("code-producing execution prompts forbid writes outside current worktree") {
+        val appHome = Files.createTempDirectory("desktop-app-service-code-prompt-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = Company(
+            id = "company-code-prompt",
+            name = "Code Co",
+            rootPath = appHome.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "main",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val projectContextId = "context-code-prompt"
+        val goal = CompanyGoal(
+            id = "goal-code-prompt",
+            companyId = company.id,
+            projectContextId = projectContextId,
+            title = "Improve product",
+            description = "Ship a real product change.",
+            status = GoalStatus.ACTIVE,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val issue = CompanyIssue(
+            id = "issue-code-prompt",
+            companyId = company.id,
+            projectContextId = goal.projectContextId,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Add a useful product slice.",
+            description = "Implement a user-visible improvement.",
+            status = IssueStatus.PLANNED,
+            priority = 2,
+            kind = "execution",
+            codeProducing = true,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        stateStore.save(
+            DesktopAppState(
+                repositories = listOf(
+                    ManagedRepository(
+                        id = REPOSITORY_ID,
+                        name = "repo",
+                        localPath = appHome.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = WORKSPACE_ID,
+                        repositoryId = REPOSITORY_ID,
+                        name = "repo · main",
+                        baseBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                companies = listOf(company),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                projectContexts = listOf(
+                    CompanyProjectContext(
+                        id = projectContextId,
+                        companyId = company.id,
+                        name = "Code Co",
+                        slug = "code-co",
+                        contextDocPath = appHome.resolve("context.md").toString(),
+                        lastUpdatedAt = 1L
+                    )
+                )
+            )
+        )
+
+        val prompt = service.buildIssueExecutionPromptForTesting(
+            stateStore.load(),
+            issue,
+            OrgAgentProfile(
+                id = "profile-code-prompt",
+                companyId = company.id,
+                roleName = "Builder",
+                executionAgentName = "opencode"
+            )
+        )
+
+        prompt shouldContain "Only read or write files reachable from the current working directory."
+        prompt shouldContain "Never write to absolute paths, parent directories, or unrelated repository checkouts."
     }
 
     test("runTask clears stale review metadata when a validation-only follow-up completes without publishing") {
@@ -1311,6 +1410,8 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>()
         val agentExecutor = mockk<AgentExecutor>()
+        val executionStarted = CompletableDeferred<Unit>()
+        val finishExecution = CompletableDeferred<Unit>()
         val service = DesktopAppService(
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
@@ -1328,7 +1429,8 @@ class DesktopAppServiceTest : FunSpec({
             worktreePath = worktreeRoot
         )
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } coAnswers {
-            delay(150)
+            executionStarted.complete(Unit)
+            finishExecution.await()
             AgentResult(
                 agentName = "codex",
                 isSuccess = true,
@@ -1366,13 +1468,22 @@ class DesktopAppServiceTest : FunSpec({
         )
 
         service.runTask(task.id)
-        delay(90)
+        withTimeout(5_000) {
+            executionStarted.await()
+        }
+        val initialRun = stateStore.load().runs.first { it.taskId == task.id }
+        withTimeout(5_000) {
+            while (stateStore.load().runs.first { it.taskId == task.id }.updatedAt <= initialRun.updatedAt) {
+                delay(25)
+            }
+        }
         service.runCompanyRuntimeTick(company.id)
 
         val runningRun = stateStore.load().runs.first { it.taskId == task.id }
         runningRun.status shouldBe AgentRunStatus.RUNNING
         runningRun.error shouldBe null
 
+        finishExecution.complete(Unit)
         awaitTaskCompletion(stateStore, task.id)
         val completedRun = stateStore.load().runs.first { it.taskId == task.id }
         completedRun.status shouldBe AgentRunStatus.COMPLETED

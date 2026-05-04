@@ -105,6 +105,11 @@ data class CreateCompanyResponse(
 )
 
 @Serializable
+data class ConfigureGitHubOriginRequest(
+    val remoteUrl: String
+)
+
+@Serializable
 data class UpdateCompanyRequest(
     val name: String? = null,
     val defaultBaseBranch: String? = null,

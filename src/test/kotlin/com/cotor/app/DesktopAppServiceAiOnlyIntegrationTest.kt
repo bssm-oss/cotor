@@ -210,6 +210,12 @@ class DesktopAppServiceAiOnlyIntegrationTest : FunSpec({
                 gitWorkspaceServiceTransform = { realService ->
                     spyk(realService).also { spyService ->
                         coEvery {
+                            spyService.ensureGitHubPublishReady(any(), any())
+                        } returns GitHubPublishReadiness(
+                            ready = true,
+                            originUrl = "https://github.com/example/cotor.git"
+                        )
+                        coEvery {
                             spyService.publishRun(any(), any(), any(), any(), any(), any(), any())
                         } answers {
                             publishedWorktreePath = thirdArg<java.nio.file.Path>().toString()
