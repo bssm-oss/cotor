@@ -43,15 +43,15 @@ agents:
 The `OpenCodePlugin` executes:
 
 ```bash
-opencode run --model <model> --format json "<prompt>"
+opencode run --model <model> --format json "Execute the instructions in the attached prompt file." --file <0600-prompt-file>
 ```
 
-This runs OpenCode in non-interactive mode with the given prompt. The plugin captures stdout and returns it to Cotor's orchestration layer.
+This runs OpenCode in non-interactive mode while keeping the full task prompt out of process arguments. The plugin writes the prompt to a temporary `0600` file, attaches it, captures stdout, deletes the temporary file, and returns the parsed output to Cotor's orchestration layer.
 
 ### Command Flow
 
 1. Cotor receives a prompt (from pipeline, interactive session, or company workflow)
-2. `OpenCodePlugin.execute()` builds the command: `["opencode", "run", "--model", "<model>", "--format", "json", "<prompt>"]`
+2. `OpenCodePlugin.execute()` writes the prompt to a temporary file and builds the command: `["opencode", "run", "--model", "<model>", "--format", "json", "Execute the instructions in the attached prompt file.", "--file", "<prompt-file>"]`
 3. `ProcessManager` spawns the child process with configured env/working directory
 4. Process output is captured and returned as `PluginExecutionOutput`
 5. If the process exits with a non-zero code, a `ProcessExecutionException` is thrown with captured stdout/stderr
@@ -60,7 +60,7 @@ This runs OpenCode in non-interactive mode with the given prompt. The plugin cap
 
 ### Agent Parameters
 
-OpenCode accepts an optional `model` parameter. If omitted, Cotor uses the built-in default `opencode/nemotron-3-super-free`.
+OpenCode accepts an optional `model` parameter. If omitted, Cotor uses the built-in default `opencode-go/deepseek-v4-flash`.
 
 Company-seeded agents now prefer OpenCode by default when the executable is available so autonomous company workflows can run on the lower-cost default model unless the user explicitly switches agents.
 

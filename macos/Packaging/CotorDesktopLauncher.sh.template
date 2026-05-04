@@ -256,14 +256,17 @@ start_managed_backend() {
     env \
         COTOR_DESKTOP_APP_HOME="$APP_HOME" \
         COTOR_APP_HOME="$APP_HOME" \
-        "$java_bin" -jar "$BACKEND_RUNTIME_JAR" app-server --port "$SERVER_PORT" --token "$SERVER_TOKEN" >>"$LOG_FILE" 2>&1 &
+        COTOR_APP_TOKEN="$SERVER_TOKEN" \
+        "$java_bin" -jar "$BACKEND_RUNTIME_JAR" app-server --port "$SERVER_PORT" >>"$LOG_FILE" 2>&1 &
     local backend_pid=$!
     MANAGED_BACKEND_PID="$backend_pid"
     MANAGED_BACKEND_STARTED=1
 
     echo "$backend_pid" > "$PID_FILE"
     echo "$SERVER_PORT" > "$PORT_FILE"
+    umask 077
     echo "$SERVER_TOKEN" > "$TOKEN_FILE"
+    chmod 600 "$TOKEN_FILE" >/dev/null 2>&1 || true
 
     if ! wait_for_backend "$SERVER_URL"; then
         stop_managed_backend || true

@@ -189,6 +189,7 @@ final class DesktopStore: ObservableObject {
     @Published var ports: [PortEntryPayload] = []
     @Published var browserURL: URL?
     @Published var companyMemorySnapshot: CompanyMemorySnapshotPayload?
+    @Published var selectedCompanyGitHubStatus: GitHubPublishStatusPayload?
     @Published var language: AppLanguage
     @Published var theme: AppTheme
     @Published var isOffline = false
@@ -347,11 +348,26 @@ final class DesktopStore: ObservableObject {
     func selectNewCompanyAgentCli(_ agentCli: String) {
         newCompanyAgentCli = agentCli
         let options = modelOptions(for: agentCli)
-        if let defaultModel = defaultModel(for: agentCli) {
+        if let defaultModel = defaultModel(for: agentCli),
+           shouldAutoFillDefaultModel(for: agentCli, options: options, defaultModel: defaultModel) {
             newCompanyAgentModel = defaultModel
+        } else if !options.isEmpty {
+            newCompanyAgentModel = options.first ?? ""
         } else if options.isEmpty || !options.contains(newCompanyAgentModel) {
             newCompanyAgentModel = ""
         }
+    }
+
+    func shouldAutoFillDefaultModel(for agentCli: String, options: [String], defaultModel: String) -> Bool {
+        if options.contains(defaultModel) {
+            return true
+        }
+        return options.isEmpty && !requiresDiscoveredLocalModel(agentCli)
+    }
+
+    func requiresDiscoveredLocalModel(_ agentCli: String) -> Bool {
+        let normalized = agentCli.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["gemma4", "ollama", "lmstudio"].contains(normalized)
     }
 
     var availableCompanyAgentCollaborators: [CompanyAgentDefinitionRecord] {
@@ -490,6 +506,16 @@ final class DesktopStore: ObservableObject {
 
     var selectedRuntime: CompanyRuntimeSnapshotRecord? {
         companyRuntimes.first { $0.companyId == (selectedCompanyID ?? selectedCompany?.id) }
+    }
+
+    var activeGitHubPublishStatus: GitHubPublishStatusPayload {
+        selectedCompanyGitHubStatus ?? dashboard.settings.githubPublishStatus
+    }
+
+    var activeGitHubConnectionReady: Bool {
+        activeGitHubPublishStatus.ghInstalled &&
+            activeGitHubPublishStatus.ghAuthenticated &&
+            activeGitHubPublishStatus.originConfigured
     }
 
     var currentWorkspaceBaseBranch: String {
@@ -1057,7 +1083,12 @@ final class DesktopStore: ObservableObject {
             selectNewCompanyAgentCli(preferredAgent(from: cliAgents) ?? preferredAgent(from: availableAgents) ?? "")
         }
         if newCompanyAgentModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let defaultModel = defaultModel(for: newCompanyAgentCli) {
+           let defaultModel = defaultModel(for: newCompanyAgentCli),
+           shouldAutoFillDefaultModel(
+                for: newCompanyAgentCli,
+                options: modelOptions(for: newCompanyAgentCli),
+                defaultModel: defaultModel
+           ) {
             newCompanyAgentModel = defaultModel
         }
 
@@ -1070,6 +1101,15 @@ final class DesktopStore: ObservableObject {
         let normalized = agents.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         if let opencode = normalized.first(where: { $0.caseInsensitiveCompare("opencode") == .orderedSame }) {
             return opencode
+        }
+        if let gemma4 = normalized.first(where: { $0.caseInsensitiveCompare("gemma4") == .orderedSame }) {
+            return gemma4
+        }
+        if let ollama = normalized.first(where: { $0.caseInsensitiveCompare("ollama") == .orderedSame }) {
+            return ollama
+        }
+        if let lmstudio = normalized.first(where: { $0.caseInsensitiveCompare("lmstudio") == .orderedSame }) {
+            return lmstudio
         }
         if let qwen = normalized.first(where: { $0.caseInsensitiveCompare("qwen") == .orderedSame }) {
             return qwen
@@ -2151,6 +2191,7 @@ final class DesktopStore: ObservableObject {
             newCompanyMonthlyBudgetInput = ""
             selectedCompanyID = company.id
             companyGitHubStatusMessage = githubRequirementMessage(for: response.githubPublishStatus)
+            selectedCompanyGitHubStatus = response.githubPublishStatus
             AppLogger.info("Created company '\(company.name)' (\(company.id)).")
             await performNonCriticalCompanyRefresh(selecting: company)
         } catch is CancellationError {
@@ -2188,6 +2229,23 @@ final class DesktopStore: ObservableObject {
             return "\(prefix) \(body). \(detail)"
         }
         return "\(prefix) \(body)."
+    }
+
+    func refreshSelectedCompanyGitHubStatus() async {
+        guard let company = selectedCompany else {
+            selectedCompanyGitHubStatus = nil
+            companyGitHubStatusMessage = language("Select a company before checking GitHub readiness.", "GitHub 준비 상태를 확인하려면 회사를 먼저 선택하세요.")
+            return
+        }
+        do {
+            let status = try await api.companyGitHubStatus(companyId: company.id)
+            selectedCompanyGitHubStatus = status
+            companyGitHubStatusMessage = githubRequirementMessage(for: status) ?? status.message
+            errorMessage = nil
+        } catch {
+            companyGitHubStatusMessage = error.localizedDescription
+            errorMessage = error.localizedDescription
+        }
     }
 
     func deleteSelectedCompany() async {
@@ -2653,6 +2711,7 @@ final class DesktopStore: ObservableObject {
         selectedTaskID = selectedTask?.id
         pendingWorkspaceBaseBranch = selectedWorkspace?.baseBranch ?? company.defaultBaseBranch
         await refreshAvailableBranches()
+        await refreshSelectedCompanyGitHubStatus()
         await refreshTaskDetails()
         syncIssueComposerState()
         syncSelectedCompanyBudgetFormState()

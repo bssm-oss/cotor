@@ -10,6 +10,7 @@ package com.cotor.app
 
 import com.cotor.model.AgentConfig
 import com.cotor.model.CodexDefaults
+import com.cotor.model.LocalModelDefaults
 import com.cotor.model.OpenCodeDefaults
 
 /**
@@ -73,6 +74,38 @@ object BuiltinAgentCatalog {
             pluginClass = "com.cotor.data.plugin.OpenCodePlugin",
             defaultTimeoutMs = DEFAULT_OPENCODE_TIMEOUT_MS,
             defaultParameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL)
+        ),
+        "gemma4" to BuiltinAgentSpec(
+            pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
+            defaultTimeoutMs = DEFAULT_AI_TIMEOUT_MS,
+            defaultParameters = mapOf(
+                "provider" to "ollama",
+                "baseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                "model" to LocalModelDefaults.GEMMA4_MODEL
+            )
+        ),
+        "ollama" to BuiltinAgentSpec(
+            pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
+            defaultTimeoutMs = DEFAULT_AI_TIMEOUT_MS,
+            defaultParameters = mapOf(
+                "provider" to "ollama",
+                "baseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                "model" to LocalModelDefaults.GEMMA4_MODEL
+            )
+        ),
+        "lmstudio" to BuiltinAgentSpec(
+            pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
+            defaultTimeoutMs = DEFAULT_AI_TIMEOUT_MS,
+            defaultParameters = mapOf(
+                "provider" to "lmstudio",
+                "baseUrl" to LocalModelDefaults.LM_STUDIO_BASE_URL,
+                "model" to LocalModelDefaults.GEMMA4_MODEL
+            )
+        ),
+        "graphify" to BuiltinAgentSpec(
+            pluginClass = "com.cotor.data.plugin.CommandPlugin",
+            defaultTimeoutMs = DEFAULT_AI_TIMEOUT_MS,
+            defaultParameters = mapOf("argvJson" to """["graphify","explain","{input}"]""")
         ),
         "qwen" to BuiltinAgentSpec(
             pluginClass = "com.cotor.data.plugin.CommandPlugin",

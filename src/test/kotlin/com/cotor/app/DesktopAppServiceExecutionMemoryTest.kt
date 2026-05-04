@@ -121,6 +121,52 @@ class DesktopAppServiceExecutionMemoryTest : FunSpec({
         memoryBundle.workflowMemory shouldContain "knowledge=qa-feedback:Preserve this execution-time knowledge."
     }
 
+    test("buildExecutionMemoryBundle gives every company agent graphify knowledge guidance") {
+        val appHome = Files.createTempDirectory("desktop-execution-graphify-home")
+        val stateStore = DesktopStateStore { appHome }
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-execution-graphify-repo").resolve("repo"))
+        seedExecutionMemoryWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "main"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+        )
+
+        val company = service.createCompany(
+            name = "Graphify Memory Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "main"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Use graphify in every agent",
+            description = "Ensure all company agents know the repository brain graph.",
+            autonomyEnabled = false
+        )
+        val issue = service.listIssues(goal.id).first { it.kind == "execution" }
+        val state = stateStore.load()
+        val ceoProfile = state.orgProfiles.first { it.companyId == company.id && it.roleName == "CEO" }
+        val memoryBundle = service.buildExecutionMemoryBundleForTesting(
+            state,
+            company,
+            state.projectContexts.first { it.companyId == company.id },
+            goal,
+            issue,
+            ceoProfile
+        )
+        val prompt = service.buildIssueExecutionPromptForTesting(state, issue, ceoProfile)
+
+        memoryBundle.workflowMemory shouldContain "graphify=Use graphify for repository structure"
+        prompt shouldContain "graphify=Use graphify for repository structure"
+        prompt shouldContain "workspace map reads local graph data"
+    }
+
     test("review and approval prompts include company memory section") {
         val appHome = Files.createTempDirectory("desktop-execution-review-memory-home")
         val stateStore = DesktopStateStore { appHome }

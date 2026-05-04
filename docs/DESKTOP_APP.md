@@ -75,7 +75,7 @@ export COTOR_APP_TOKEN='your-local-token'
 swift run --package-path macos CotorDesktopApp
 ```
 
-When the bundled backend is launcher-managed, the launcher and `DesktopAPI` both read the same `COTOR_APP_TOKEN` value. If the variable is unset, both sides fall back to the desktop-local token used for embedded sessions.
+When the bundled backend is launcher-managed, the launcher and `DesktopAPI` both read the same `COTOR_APP_TOKEN` value. If the variable is unset, both sides fall back to the desktop-local token used for embedded sessions. The packaged launcher passes this token through the backend environment and a `0600` runtime token file rather than placing it in the backend process arguments.
 
 ## Install A Local App Bundle
 
@@ -111,17 +111,17 @@ The current macOS shell has two top-level modes.
 - `Company`
   - company selector
   - company creation bound to one root folder
-  - direct `Meeting Room` navigation for a live company floor map with an event wall, active seats, and a review desk
+  - direct `Meeting Room` navigation that opens to a plain repository `Map`, with the technical graph files hidden and the live company floor map available as the adjacent view
   - agent-definition composer
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
-  - dedicated `Chat Control` navigation surface that shows live messages/context, backend memory snapshot, confirmation-first proposal previews, and lightweight lead/worker agent routing controls
+  - dedicated `Chat Control` navigation surface that shows live messages/context, backend memory snapshot, confirmation-first proposal previews, and lightweight main/helper assignment controls
 - company activity feed with live event-driven updates
 - live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event
 - issue execution detail cards now show agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary for each issue-linked run
 - async detail and memory snapshot refreshes ignore stale responses if the selected issue/task changes before the request completes
 - if the live company stream disconnects, the UI keeps the last company snapshot and shows `Live company updates disconnected. Re-syncing...` while it recovers
-  - compact company summary banner that keeps runtime health, blocked workflows, review attention, and the latest error/action in one place
+  - compact company summary banner that keeps runtime health, PR approvals, blocked workflows, review attention, and the latest error/action in one place
   - compact company summary and company settings now surface estimated spend plus daily/monthly cost guardrails for the selected runtime
   - scrollable issue-board lanes so tall blocked/review queues stay readable inside the fixed board surface
   - stale Cotor-managed retry PRs are reconciled and closed in batches so the review loop does not keep piling up obsolete open PRs
@@ -132,8 +132,8 @@ The current macOS shell has two top-level modes.
   - an explicit runtime stop remains sticky across app restarts and company refreshes until the user starts that company again
   - company mode uses a focused company dashboard snapshot instead of forcing a full desktop refresh on every event
 - when one wave of goal work finishes, the CEO planning lane can reopen for the next wave instead of freezing the goal after the first decomposition
-- continuous improvement goals now ask for multi-issue portfolios and parallel branchable work when the roster can support it
-- short high-level goal descriptions are enriched into a broader execution portfolio so larger rosters do not collapse into only one or two issues
+- continuous improvement goals now ask for multi-issue portfolios and parallel branchable work when the team can support it
+- short high-level goal descriptions are enriched into a broader execution portfolio so larger teams do not collapse into only one or two issues
 - runtime dispatch is no longer forced to wait for a stale polling tick before reacting to new runnable work, and multiple runnable issues can start in parallel even when several company roles share the same execution CLI
 - local merge completion is only recorded after GitHub confirms the refreshed pull request state is actually `MERGED`
 - `TUI`
@@ -181,24 +181,26 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - create multiple companies
 - bind each company to one working folder
 - define company agents with minimal user input
-- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models explicitly
+- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or installed local models discovered from Ollama/LM Studio explicitly
+- expose the repository map as a built-in company-agent choice when the local map tool is available, and inject lightweight workspace-map guidance into every company agent execution memory bundle
 - create a company goal
 - auto-decompose that goal into issues
 - delegate and run issues
 - mirror company issues and progress to Linear when company-scoped Linear sync is enabled
 - inspect linked tasks and runs
 - populate and merge review queue items
-- inspect a dedicated Meeting Room view with synthesized runtime/backend/review/session wall events plus seat/review desk summaries
+- inspect a dedicated Meeting Room view that defaults to a plain repository `Map`, with synthesized runtime/backend/review/session wall events and floor-view summaries
 - use the Chat Control surface to preview and explicitly confirm goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
-- choose the lead AI and worker roster directly from Chat Control before staging a confirmed request
+- choose the main agent and helper team directly from Chat Control before staging a confirmed request
 - inspect company activity without manual refresh in normal company mode
-- inspect runtime health, blocked/review attention, and the latest runtime signal from the compact company summary banner
+- inspect runtime health, approval-needed/blocked/review attention, and the latest runtime signal from the compact company summary banner
 - inspect estimated spend and adjust daily/monthly cost guardrails without leaving the company console
 - warn during company creation when GitHub PR publishing is required but the repository is not ready for `gh`/`origin` publishing
 - start, stop, and inspect the local runtime loop
 - keep an explicit company stop sticky until the user presses Start again, even if active autonomous goals still exist
 - keep active company work on a fast monitoring cadence so stale `RUNNING` tasks/runs are reconciled sooner
 - re-queue company issues that were interrupted by an app-server shutdown instead of leaving them blocked by a generic process-exit failure
+- show PR creation policy pauses as `Approval Needed` instead of a generic blocked workflow, while still requiring explicit approval before publishing
 - resume queued delegated company work after the desktop app and bundled backend come back, and record that recovery in the live company activity feed
 - bind issue-linked durable runs through the issue pipeline id when needed, so `cotor resume inspect <run-id>` remains attached to the correct company issue run
 - create durable run snapshots for company issue execution by default so the issue `durableRunId` can be inspected with `cotor resume inspect <run-id>`

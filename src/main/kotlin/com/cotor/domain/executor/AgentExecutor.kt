@@ -192,8 +192,11 @@ class DefaultAgentExecutor(
                     scope = if (metadata.pipelineContext != null) ActionScope.RUN else ActionScope.GLOBAL,
                     subject = ActionSubject(
                         runId = metadata.pipelineContext?.metadata?.get("durableRunId")?.toString(),
+                        companyId = metadata.pipelineContext?.metadata?.get("companyId")?.toString(),
+                        goalId = metadata.pipelineContext?.metadata?.get("goalId")?.toString(),
+                        issueId = metadata.pipelineContext?.metadata?.get("issueId")?.toString(),
                         taskId = metadata.taskId,
-                        agentName = agent.name
+                        agentName = metadata.agentId ?: agent.name
                     ),
                     replaySafe = true,
                     approvalRequiredOnReplay = false,
@@ -202,6 +205,8 @@ class DefaultAgentExecutor(
                         metadata.stageId?.let { put("stageId", it) }
                         metadata.taskId?.let { put("taskId", it) }
                         metadata.pipelineContext?.metadata?.get("configPath")?.toString()?.let { put("configPath", it) }
+                        metadata.repoRoot?.let { put("repositoryRoot", it.toAbsolutePath().normalize().toString()) }
+                        metadata.workingDirectory?.let { put("worktreePath", it.toAbsolutePath().normalize().toString()) }
                     }
                 )
                 val pluginOutput = actionExecutionService.run(

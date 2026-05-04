@@ -213,6 +213,7 @@ class DesktopStateStore(
         val recovered = DesktopAppState(
             companies = decodeList("companies", Company.serializer()),
             companyAgentDefinitions = decodeList("companyAgentDefinitions", CompanyAgentDefinition.serializer()),
+            agentCapabilityProfiles = decodeList("agentCapabilityProfiles", AgentCapabilityProfile.serializer()),
             projectContexts = decodeList("projectContexts", CompanyProjectContext.serializer()),
             repositories = decodeList("repositories", ManagedRepository.serializer()),
             workspaces = decodeList("workspaces", Workspace.serializer()),

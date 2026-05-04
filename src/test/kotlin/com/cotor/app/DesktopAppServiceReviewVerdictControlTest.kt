@@ -20,9 +20,9 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
         coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
         coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns "https://github.com/example/cotor.git"
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any(), any(), any()) } returns Unit
         coEvery {
-            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.APPROVE, any(), any(), any())
         } returns PublishMetadata(
             pullRequestNumber = 42,
             pullRequestUrl = "https://github.com/example/cotor/pull/42",
@@ -135,7 +135,7 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         approvalIssue.status shouldBe IssueStatus.PLANNED
         approvalIssue.qaVerdict shouldBe "PASS"
         coVerify(exactly = 1) {
-            gitWorkspaceService.submitPullRequestReview(any(), 42, PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 42, PullRequestReviewVerdict.APPROVE, any(), any(), any())
         }
     }
 
@@ -148,9 +148,9 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
         coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
         coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns "https://github.com/example/cotor.git"
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any(), any(), any()) } returns Unit
         coEvery {
-            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.REQUEST_CHANGES, any())
+            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.REQUEST_CHANGES, any(), any(), any())
         } returns PublishMetadata(
             pullRequestNumber = 43,
             pullRequestUrl = "https://github.com/example/cotor/pull/43",
@@ -259,7 +259,7 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         refreshedExecution.status shouldBe IssueStatus.PLANNED
         refreshedExecution.qaVerdict shouldBe "CHANGES_REQUESTED"
         coVerify(exactly = 1) {
-            gitWorkspaceService.submitPullRequestReview(any(), 43, PullRequestReviewVerdict.REQUEST_CHANGES, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 43, PullRequestReviewVerdict.REQUEST_CHANGES, any(), any(), any())
         }
     }
 
@@ -272,9 +272,9 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
         coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
         coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns "https://github.com/example/cotor.git"
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any(), any(), any()) } returns Unit
         coEvery {
-            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.REQUEST_CHANGES, any())
+            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.REQUEST_CHANGES, any(), any(), any())
         } returns PublishMetadata(
             pullRequestNumber = 77,
             pullRequestUrl = "https://github.com/example/cotor/pull/77",
@@ -389,7 +389,7 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         refreshedExecution.status shouldBe IssueStatus.PLANNED
         refreshedExecution.ceoVerdict shouldBe "CHANGES_REQUESTED"
         coVerify(exactly = 1) {
-            gitWorkspaceService.submitPullRequestReview(any(), 77, PullRequestReviewVerdict.REQUEST_CHANGES, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 77, PullRequestReviewVerdict.REQUEST_CHANGES, any(), any(), any())
         }
     }
 
@@ -402,16 +402,16 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
         coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
         coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns "https://github.com/example/cotor.git"
-        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any()) } returns Unit
+        coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any(), any(), any()) } returns Unit
         coEvery {
-            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), any(), PullRequestReviewVerdict.APPROVE, any(), any(), any())
         } returns PublishMetadata(
             pullRequestNumber = 88,
             pullRequestUrl = "https://github.com/example/cotor/pull/88",
             pullRequestState = "OPEN",
             mergeability = "CLEAN"
         )
-        coEvery { gitWorkspaceService.mergePullRequest(any(), 88, true) } returns PullRequestMergeResult(
+        coEvery { gitWorkspaceService.mergePullRequest(any(), 88, true, any(), any()) } returns PullRequestMergeResult(
             number = 88,
             url = "https://github.com/example/cotor/pull/88",
             state = "MERGED",
@@ -529,9 +529,9 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         refreshedApproval.status shouldBe IssueStatus.DONE
         refreshedApproval.ceoVerdict shouldBe "APPROVE"
         coVerify(exactly = 1) {
-            gitWorkspaceService.submitPullRequestReview(any(), 88, PullRequestReviewVerdict.APPROVE, any())
+            gitWorkspaceService.submitPullRequestReview(any(), 88, PullRequestReviewVerdict.APPROVE, any(), any(), any())
         }
-        coVerify(exactly = 1) { gitWorkspaceService.mergePullRequest(any(), 88, true) }
+        coVerify(exactly = 1) { gitWorkspaceService.mergePullRequest(any(), 88, true, any(), any()) }
     }
 
     test("submitQaReviewVerdict rejects a missing review queue item") {

@@ -12,8 +12,12 @@ Korean companion docs use the same path with `.ko.md` when available.
 - `docs/HOMEBREW_INSTALL.md` / `docs/HOMEBREW_INSTALL.ko.md`: packaged install, first-run paths, and Homebrew troubleshooting
 - `docs/TROUBLESHOOTING.md` / `docs/TROUBLESHOOTING.ko.md`: desktop, company runtime, GitHub, QA/CEO, and interactive recovery paths
 - `docs/FEATURES.md` / `docs/FEATURES.ko.md`: code-backed capability inventory
+- `docs/CAPABILITIES.md` / `docs/CAPABILITIES.ko.md`: per-agent capability profiles, safe defaults, API, and CLI
+- `docs/PROVIDERS.md` / `docs/PROVIDERS.ko.md`: no-network local provider scan catalog and commands
 - `docs/DESKTOP_APP.md` / `docs/DESKTOP_APP.ko.md`: `app-server`, Company/TUI shell, and multi-company operations UI
 - `docs/TEST_PLAN.md` / `docs/TEST_PLAN.ko.md`: automated, CLI, desktop, and autonomous-company validation plan
+- `docs/FULL_E2E_QA_CHECKLIST.ko.md`: exhaustive Korean full E2E QA checklist for CLI, app-server, desktop, company runtime, GitHub, capability/security, browser/video, provider/model, evidence/graphify, web, and packaging
+- `docs/FULL_E2E_QA_RESULTS.ko.md`: latest Korean full E2E QA result report with executed checks, blocked destructive/external items, and residual constraints
 - `docs/USAGE_TIPS.md` / `docs/USAGE_TIPS.ko.md`: operator shortcuts and recovery habits
 - `docs/WEB_EDITOR.md` / `docs/WEB_EDITOR.ko.md`: web editor usage
 - `docs/ARCHITECTURE.md` / `docs/ARCHITECTURE.ko.md`: shared runtime architecture

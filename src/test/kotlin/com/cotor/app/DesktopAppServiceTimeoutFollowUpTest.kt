@@ -75,8 +75,8 @@ class DesktopAppServiceTimeoutFollowUpTest : FunSpec({
                 )
             )
 
-            service.updateGoal(goal.id, autonomyEnabled = true)
-            service.companyDashboard(company.id)
+            service.updateGoal(goal.id, autonomyEnabled = true, startRuntimeIfNeeded = false)
+            service.synthesizeAutonomousFollowUpGoalForTesting(company.id) shouldBe null
 
             val refreshed = stateStore.load()
             refreshed.goals.first { it.id == goal.id }.status shouldBe GoalStatus.ACTIVE
@@ -106,7 +106,8 @@ private fun timeoutFollowUpService(
         gitWorkspaceService = gitWorkspaceService,
         configRepository = mockk<ConfigRepository>(relaxed = true),
         agentExecutor = mockk<AgentExecutor>(relaxed = true),
-        linearTracker = NoopTimeoutFollowUpLinearTrackerAdapter()
+        linearTracker = NoopTimeoutFollowUpLinearTrackerAdapter(),
+        autoStartAutomationRefresh = false
     )
 }
 

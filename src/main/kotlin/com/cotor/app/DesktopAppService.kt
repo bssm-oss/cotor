@@ -26,6 +26,7 @@ import com.cotor.model.AgentConfig
 import com.cotor.model.AgentExecutionMetadata
 import com.cotor.model.AgentResult
 import com.cotor.model.CodexDefaults
+import com.cotor.model.LocalModelDefaults
 import com.cotor.model.OpenCodeDefaults
 import com.cotor.model.Pipeline
 import com.cotor.model.PipelineContext
@@ -42,9 +43,15 @@ import com.cotor.providers.github.GitHubSyncResponse
 import com.cotor.providers.github.MergeQueueState
 import com.cotor.providers.github.MergeRequirement
 import com.cotor.providers.github.PullRequestSnapshot
+import com.cotor.runtime.actions.ActionKind
+import com.cotor.runtime.actions.ActionRequest
+import com.cotor.runtime.actions.ActionScope
+import com.cotor.runtime.actions.ActionStore
+import com.cotor.runtime.actions.ActionSubject
 import com.cotor.runtime.durable.DurableRuntimeContext
 import com.cotor.runtime.durable.DurableRuntimeFlags
 import com.cotor.runtime.durable.DurableRuntimeService
+import com.cotor.runtime.durable.DurableRuntimeStore
 import com.cotor.runtime.durable.ReplayMode
 import com.cotor.verification.VerificationBundle
 import com.cotor.verification.VerificationBundleService
@@ -74,8 +81,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -137,6 +149,15 @@ private data class CeoPlannedIssue(
  * This layer deliberately hides git/worktree details from the HTTP handlers so the
  * desktop contract stays centered on repositories, workspaces, tasks, and runs.
  */
+private fun defaultDesktopDurableRuntimeService(stateStore: DesktopStateStore): DurableRuntimeService =
+    DurableRuntimeService(runtimeStore = DurableRuntimeStore(stateStore.appHome().resolve("runtime")))
+
+private fun defaultCompanyRuntimeBindingService(stateStore: DesktopStateStore): CompanyRuntimeBindingService =
+    CompanyRuntimeBindingService(
+        durableRuntimeService = defaultDesktopDurableRuntimeService(stateStore),
+        actionStore = ActionStore { stateStore.appHome() }
+    )
+
 class DesktopAppService(
     private val stateStore: DesktopStateStore,
     private val gitWorkspaceService: GitWorkspaceService,
@@ -149,12 +170,12 @@ class DesktopAppService(
     private val codexAppServerManager: CodexAppServerManager = CodexAppServerManager(),
     private val staleRunStartupGraceMs: Long = 15_000L,
     private val runHeartbeatIntervalMs: Long = 5_000L,
-    private val runtimeBindingService: CompanyRuntimeBindingService = CompanyRuntimeBindingService(),
+    private val runtimeBindingService: CompanyRuntimeBindingService = defaultCompanyRuntimeBindingService(stateStore),
     private val policyEngine: PolicyEngine = PolicyEngine(),
     private val provenanceService: ProvenanceService = ProvenanceService(),
     private val gitHubControlPlaneService: GitHubControlPlaneService = GitHubControlPlaneService(),
     private val knowledgeService: KnowledgeService = KnowledgeService(),
-    private val durableRuntimeService: DurableRuntimeService = DurableRuntimeService(),
+    private val durableRuntimeService: DurableRuntimeService = defaultDesktopDurableRuntimeService(stateStore),
     private val verificationBundleService: VerificationBundleService = VerificationBundleService(),
     private val autoStartAutomationRefresh: Boolean = true
 ) {
@@ -180,6 +201,17 @@ class DesktopAppService(
             "Execution was interrupted because the app-server stopped before the run finished."
         private const val INTERRUPTED_ISSUE_REASON =
             "Runtime stopped while execution was in progress; the issue was returned to the queue."
+        private val localModelHttpThreadCounter = java.util.concurrent.atomic.AtomicInteger()
+        private val localModelHttpClient = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(2))
+            .executor(
+                java.util.concurrent.Executors.newCachedThreadPool { runnable ->
+                    Thread(runnable, "cotor-local-model-http-${localModelHttpThreadCounter.incrementAndGet()}").apply {
+                        isDaemon = true
+                    }
+                }
+            )
+            .build()
 
         internal fun shutdownAllForTesting() {
             val services = synchronized(liveServicesForTesting) { liveServicesForTesting.toList() }
@@ -471,6 +503,7 @@ class DesktopAppService(
 
     private suspend fun prepareCompanyAutomationState(companyId: String? = null) {
         migrateLegacyCompanyRosters(companyId)
+        ensureBaselineAgentCapabilityProfiles(companyId)
         migrateLegacyFollowUpGoals(companyId)
         resumeRunningCompanyRuntimes(companyId)
         ensureAutonomousCompanyRuntimes(companyId)
@@ -483,6 +516,7 @@ class DesktopAppService(
             repairWorkflowLineages(activeCompanyId)
             reconcileNonPublishingReviewRuns(activeCompanyId)
             reconcileTerminalIssueStates(activeCompanyId)
+            normalizePublishApprovalRequiredIssues(activeCompanyId)
             archiveRecursiveFollowUpGoals(activeCompanyId)
             reopenResolvedMergeConflictIssues(activeCompanyId)
             reopenNoOpPullRequestExecutionIssues(activeCompanyId)
@@ -491,10 +525,36 @@ class DesktopAppService(
             reconcileSupersededManagedPullRequests(activeCompanyId)
         }
         stimulateAutonomousCompanyProgress(companyId)
+        clearNonAttentionProviderBlockReasons(companyId)
     }
 
     internal suspend fun prepareCompanyAutomationStateForTesting(companyId: String? = null) {
         prepareCompanyAutomationState(companyId)
+    }
+
+    private suspend fun clearNonAttentionProviderBlockReasons(companyId: String? = null): Int {
+        var changed = 0
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val now = System.currentTimeMillis()
+            val updatedIssues = state.issues.map { issue ->
+                val inScope = companyId == null || issue.companyId == companyId
+                val isAttentionState = issue.status == IssueStatus.BLOCKED || issue.status == IssueStatus.WAITING_FOR_APPROVAL
+                if (inScope && !isAttentionState && issue.providerBlockReason != null) {
+                    changed += 1
+                    issue.copy(
+                        providerBlockReason = null,
+                        updatedAt = now
+                    )
+                } else {
+                    issue
+                }
+            }
+            if (changed > 0) {
+                stateStore.save(state.copy(issues = updatedIssues).withDerivedMetrics())
+            }
+        }
+        return changed
     }
 
     private suspend fun migrateLegacyCompanyRosters(companyId: String? = null) {
@@ -533,6 +593,33 @@ class DesktopAppService(
                 issues = migratedIssueAssignments
             ).withDerivedMetrics()
             stateStore.save(nextState)
+        }
+    }
+
+    private suspend fun ensureBaselineAgentCapabilityProfiles(companyId: String? = null) {
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val companiesById = state.companies.associateBy { it.id }
+            val existingProfiles = state.agentCapabilityProfiles
+                .map { it.companyId to it.agentId }
+                .toSet()
+            val now = System.currentTimeMillis()
+            val missingProfiles = state.companyAgentDefinitions
+                .filter { definition -> companyId == null || definition.companyId == companyId }
+                .filter { definition -> definition.companyId to definition.id !in existingProfiles }
+                .mapNotNull { definition ->
+                    companiesById[definition.companyId]?.let { company ->
+                        seedCompanyAgentCapabilityProfile(company, definition, now)
+                    }
+                }
+            if (missingProfiles.isEmpty()) {
+                return@withLock
+            }
+            stateStore.save(
+                state.copy(
+                    agentCapabilityProfiles = state.agentCapabilityProfiles + missingProfiles
+                )
+            )
         }
     }
 
@@ -1306,11 +1393,389 @@ class DesktopAppService(
     suspend fun policyDecisions(runId: String? = null, issueId: String? = null): List<PolicyDecision> =
         policyEngine.decisions(runId = runId, issueId = issueId)
 
+    fun capabilityCatalog(): List<CapabilityCatalogEntry> = com.cotor.app.capabilityCatalog()
+
+    fun providerCatalog(): List<ProviderCatalogEntry> = com.cotor.app.providerCatalog()
+
+    fun skillCatalog(): List<SkillCatalogEntry> = com.cotor.app.skillCatalog()
+
+    fun inspectSkill(name: String): SkillCatalogEntry = skillCatalog().firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
+        ?: throw IllegalArgumentException("Skill not found: $name")
+
+    fun validateSkill(path: String): SkillValidationResult {
+        val manifestPath = Path.of(path).toAbsolutePath().normalize()
+        if (!Files.exists(manifestPath)) {
+            return SkillValidationResult(valid = false, errors = listOf("Skill manifest not found: $manifestPath"))
+        }
+        if (Files.isDirectory(manifestPath)) {
+            return SkillValidationResult(valid = false, errors = listOf("Skill manifest path is a directory: $manifestPath"))
+        }
+        val raw = runCatching { Files.readString(manifestPath) }
+            .getOrElse { return SkillValidationResult(valid = false, errors = listOf(it.message ?: "Unable to read skill manifest")) }
+        return parseSkillManifest(raw)
+    }
+
+    suspend fun runSkill(name: String, companyId: String, agentId: String, input: String? = null): SkillRunResult {
+        val skill = inspectSkill(name)
+        val simulation = simulateAgentCapability(
+            companyId = companyId,
+            agentId = agentId,
+            action = ActionKind.SKILL_RUN.wireValue,
+            skill = skill.name
+        )
+        return when {
+            !simulation.allowed -> SkillRunResult(
+                skill = skill.name,
+                status = "DENIED",
+                capability = simulation,
+                error = simulation.reason
+            )
+            simulation.requiresApproval -> SkillRunResult(
+                skill = skill.name,
+                status = "APPROVAL_REQUIRED",
+                capability = simulation,
+                error = simulation.reason
+            )
+            else -> SkillRunResult(
+                skill = skill.name,
+                status = "READY",
+                capability = simulation,
+                output = buildString {
+                    append(skill.displayName)
+                    append(" is allowed for this agent. ")
+                    append("Use the dedicated skill runtime to execute the next concrete step.")
+                    input?.trim()?.takeIf { it.isNotBlank() }?.let { append(" Input: ").append(it) }
+                }
+            )
+        }
+    }
+
+    suspend fun planBrowserSmoke(request: BrowserSmokeRequest): BrowserSmokeResult {
+        val normalizedUrl = request.url.trim()
+        require(normalizedUrl.isNotBlank()) { "Browser smoke URL is required." }
+        val browserTarget = browserNetworkTarget(normalizedUrl)
+        if (browserTarget == null) {
+            return BrowserSmokeResult(
+                url = normalizedUrl,
+                status = "DENIED",
+                checks = emptyList(),
+                command = listOf("playwright", "open", normalizedUrl),
+                message = "Browser smoke requires an http(s) URL with a host.",
+                error = "Unsupported browser smoke URL: $normalizedUrl"
+            )
+        }
+        val networkTarget = browserTarget.hostWithPort
+        val requestedActions = buildList {
+            add(ActionKind.BROWSER_READ)
+            if (request.screenshot) add(ActionKind.BROWSER_SCREENSHOT)
+            if (request.trace) add(ActionKind.BROWSER_TRACE)
+            if (request.record) add(ActionKind.BROWSER_RECORD)
+            if (request.interact) add(ActionKind.BROWSER_INTERACT)
+            if (!browserTarget.isLocal) add(ActionKind.BROWSER_EXTERNAL_DOMAIN)
+        }
+        val checks = requestedActions.map { action ->
+            simulateAgentCapability(
+                companyId = request.companyId,
+                agentId = request.agentId,
+                action = action.wireValue,
+                networkTarget = networkTarget
+            )
+        }
+        val denied = checks.firstOrNull { !it.allowed }
+        val approvalRequired = checks.firstOrNull { it.requiresApproval }
+        val command = buildList {
+            add("playwright")
+            add("open")
+            add(normalizedUrl)
+            if (request.screenshot) add("--screenshot")
+            if (request.trace) add("--trace")
+            if (request.record) add("--record")
+        }
+        return when {
+            denied != null -> BrowserSmokeResult(
+                url = normalizedUrl,
+                status = "DENIED",
+                checks = checks,
+                command = command,
+                message = "Browser smoke is blocked by ${denied.capability}.",
+                error = denied.reason
+            )
+            approvalRequired != null -> BrowserSmokeResult(
+                url = normalizedUrl,
+                status = "APPROVAL_REQUIRED",
+                checks = checks,
+                command = command,
+                message = "Browser smoke requires approval before running.",
+                error = approvalRequired.reason
+            )
+            else -> BrowserSmokeResult(
+                url = normalizedUrl,
+                status = "READY",
+                checks = checks,
+                command = command,
+                message = "Browser smoke is allowed. Run the command with the browser runtime and attach evidence."
+            )
+        }
+    }
+
+    private data class BrowserTarget(val hostWithPort: String, val isLocal: Boolean)
+
+    private fun browserNetworkTarget(url: String): BrowserTarget? = runCatching {
+        val uri = URI(url)
+        val scheme = uri.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") return@runCatching null
+        uri.host?.let { host ->
+            val port = uri.port.takeIf { it > 0 }?.let { ":$it" }.orEmpty()
+            val hostWithPort = "$host$port"
+            BrowserTarget(hostWithPort = hostWithPort, isLocal = isLocalBrowserTarget(host))
+        }
+    }.getOrNull()
+
+    private fun isLocalBrowserTarget(target: String): Boolean {
+        val host = target.trim('[', ']').lowercase()
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    suspend fun planVideoScript(request: VideoPlanRequest): VideoPlanResult = planVideoAction(
+        action = ActionKind.VIDEO_SCRIPT_WRITE,
+        request = request,
+        command = buildList {
+            add("video-plan")
+            request.issueId?.trim()?.takeIf { it.isNotBlank() }?.let { add("--issue=$it") }
+            request.projectPath?.trim()?.takeIf { it.isNotBlank() }?.let { add("--project=$it") }
+        },
+        readyMessage = "Video script planning is allowed. Write a local script plan and keep render/upload as separate gated steps."
+    )
+
+    suspend fun planVideoRenderLocal(request: VideoPlanRequest): VideoPlanResult = planVideoAction(
+        action = ActionKind.VIDEO_RENDER_LOCAL,
+        request = request,
+        command = when ((request.provider ?: "remotion").trim().lowercase()) {
+            "ffmpeg" -> listOf("ffmpeg", "-i", request.inputPath.orEmpty(), request.outputPath.orEmpty()).filter { it.isNotBlank() }
+            "manim" -> listOf("manim", request.projectPath.orEmpty()).filter { it.isNotBlank() }
+            else -> listOf("remotion", "render", request.projectPath.orEmpty()).filter { it.isNotBlank() }
+        },
+        readyMessage = "Local video render is allowed. Run the renderer locally and attach output evidence."
+    )
+
+    suspend fun planVideoTranscode(request: VideoPlanRequest): VideoPlanResult = planVideoAction(
+        action = ActionKind.VIDEO_TRANSCODE,
+        request = request,
+        command = listOf("ffmpeg", "-i", request.inputPath.orEmpty(), request.outputPath.orEmpty()).filter { it.isNotBlank() },
+        readyMessage = "Video transcode is allowed. Run FFmpeg locally and attach output evidence."
+    )
+
+    suspend fun planVideoGenerateRemote(request: VideoPlanRequest): VideoPlanResult = planVideoAction(
+        action = ActionKind.VIDEO_GENERATE_REMOTE,
+        request = request,
+        command = listOf("remote-video-generate", request.provider.orEmpty()).filter { it.isNotBlank() },
+        readyMessage = "Remote video generation is allowed by capability policy; confirm provider cost and evidence before use."
+    )
+
+    private suspend fun planVideoAction(
+        action: ActionKind,
+        request: VideoPlanRequest,
+        command: List<String>,
+        readyMessage: String
+    ): VideoPlanResult {
+        val checks = videoCapabilityChecks(action, request)
+        val denied = checks.firstOrNull { !it.allowed }
+        val approvalRequired = checks.firstOrNull { it.requiresApproval }
+        return when {
+            denied != null -> VideoPlanResult(
+                action = action.wireValue,
+                status = "DENIED",
+                checks = checks,
+                command = command,
+                message = "Video action is blocked by ${denied.capability}.",
+                error = denied.reason
+            )
+            approvalRequired != null -> VideoPlanResult(
+                action = action.wireValue,
+                status = "APPROVAL_REQUIRED",
+                checks = checks,
+                command = command,
+                message = "Video action requires approval before running.",
+                error = approvalRequired.reason
+            )
+            else -> VideoPlanResult(
+                action = action.wireValue,
+                status = "READY",
+                checks = checks,
+                command = command,
+                message = readyMessage
+            )
+        }
+    }
+
+    private suspend fun videoCapabilityChecks(action: ActionKind, request: VideoPlanRequest): List<CapabilitySimulationResult> {
+        val paths = listOfNotNull(request.projectPath, request.inputPath, request.outputPath)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        return if (paths.isEmpty()) {
+            listOf(
+                simulateAgentCapability(
+                    companyId = request.companyId,
+                    agentId = request.agentId,
+                    action = action.wireValue
+                )
+            )
+        } else {
+            paths.map { path ->
+                simulateAgentCapability(
+                    companyId = request.companyId,
+                    agentId = request.agentId,
+                    action = action.wireValue,
+                    path = path
+                )
+            }
+        }
+    }
+
+    fun scanProviders(): List<ProviderScanResult> = providerCatalog().map { provider ->
+        val available = commandAvailability(provider.command)
+        ProviderScanResult(
+            provider = provider,
+            available = available,
+            message = if (available) "${provider.command} is available on PATH." else "${provider.command} was not found on PATH."
+        )
+    }
+
+    private fun parseSkillManifest(raw: String): SkillValidationResult {
+        fun jsonValue(key: String): String? {
+            val pattern = Regex("\"$key\"\\s*:\\s*\"([^\"]+)\"")
+            return pattern.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+        }
+        fun yamlValue(key: String): String? {
+            val pattern = Regex("(?m)^$key\\s*:\\s*(.+)$")
+            return pattern.find(raw)?.groupValues?.getOrNull(1)?.trim()?.trim('"', '\'')?.takeIf { it.isNotBlank() }
+        }
+
+        val name = jsonValue("name") ?: yamlValue("name")
+        val description = jsonValue("description") ?: yamlValue("description")
+        val displayName = jsonValue("displayName") ?: yamlValue("displayName") ?: jsonValue("title") ?: yamlValue("title") ?: name
+        val errors = buildList {
+            if (name.isNullOrBlank()) add("Skill manifest requires a non-blank name.")
+            if (description.isNullOrBlank()) add("Skill manifest requires a non-blank description.")
+            if (name != null && !Regex("[a-z0-9][a-z0-9._-]*").matches(name)) {
+                add("Skill name must use lowercase letters, numbers, dots, underscores, or hyphens.")
+            }
+        }
+        return SkillValidationResult(
+            valid = errors.isEmpty(),
+            name = name,
+            displayName = displayName,
+            description = description,
+            errors = errors
+        )
+    }
+
+    fun testProvider(providerId: String): ProviderScanResult {
+        val provider = providerCatalog().firstOrNull { it.id.equals(providerId, ignoreCase = true) }
+            ?: throw IllegalArgumentException("Provider not found: $providerId")
+        val available = commandAvailability(provider.command)
+        return ProviderScanResult(
+            provider = provider,
+            available = available,
+            message = if (available) "${provider.command} is available on PATH." else "${provider.command} was not found on PATH."
+        )
+    }
+
+    suspend fun agentCapabilities(companyId: String, agentId: String): AgentCapabilityProfile {
+        val state = stateStore.load()
+        require(state.companies.any { it.id == companyId }) { "Company not found: $companyId" }
+        val definition = state.companyAgentDefinitions.firstOrNull { it.companyId == companyId && it.id == agentId }
+            ?: throw IllegalArgumentException("Company agent not found: $agentId")
+        return state.agentCapabilityProfiles.firstOrNull { it.companyId == companyId && it.agentId == definition.id }
+            ?: AgentCapabilityProfile(companyId = companyId, agentId = definition.id)
+    }
+
+    suspend fun updateAgentCapabilities(
+        companyId: String,
+        agentId: String,
+        settings: Map<CapabilityKey, AgentCapabilitySetting>
+    ): AgentCapabilityProfile = stateMutex.withLock {
+        val state = stateStore.load()
+        require(state.companies.any { it.id == companyId }) { "Company not found: $companyId" }
+        val definition = state.companyAgentDefinitions.firstOrNull { it.companyId == companyId && it.id == agentId }
+            ?: throw IllegalArgumentException("Company agent not found: $agentId")
+        val currentSettings = state.agentCapabilityProfiles
+            .firstOrNull { it.companyId == companyId && it.agentId == definition.id }
+            ?.settings
+            .orEmpty()
+        val sanitizedSettings = defaultAgentCapabilitySettings() + currentSettings + settings.mapValues { (_, setting) -> sanitizeCapabilitySetting(setting) }
+        val profile = AgentCapabilityProfile(
+            companyId = companyId,
+            agentId = definition.id,
+            settings = sanitizedSettings,
+            updatedAt = System.currentTimeMillis()
+        )
+        val nextProfiles = state.agentCapabilityProfiles
+            .filterNot { it.companyId == companyId && it.agentId == definition.id } + profile
+        val nextState = state.copy(agentCapabilityProfiles = nextProfiles)
+            .recordCompanyActivity(
+                companyId = companyId,
+                source = "capability-policy",
+                title = "Updated agent capabilities",
+                detail = "${definition.title} · ${settings.keys.joinToString(", ")}"
+            ).withDerivedMetrics()
+        stateStore.save(nextState)
+        nextState.companies.firstOrNull { it.id == companyId }?.let { company ->
+            nextState.projectContexts.firstOrNull { it.companyId == companyId }?.let { context ->
+                writeCompanyContextSnapshot(nextState, company, context)
+            }
+        }
+        profile
+    }
+
+    suspend fun simulateAgentCapability(
+        companyId: String,
+        agentId: String,
+        action: String,
+        path: String? = null,
+        networkTarget: String? = null,
+        command: String? = null,
+        skill: String? = null
+    ): CapabilitySimulationResult {
+        val state = stateStore.load()
+        require(state.companies.any { it.id == companyId }) { "Company not found: $companyId" }
+        val definition = state.companyAgentDefinitions.firstOrNull { it.companyId == companyId && it.id == agentId }
+            ?: throw IllegalArgumentException("Company agent not found: $agentId")
+        val kind = ActionKind.fromWireValue(action)
+            ?: throw IllegalArgumentException("Unsupported action kind: $action")
+        return AgentCapabilityGuard(stateStore).simulate(
+            ActionRequest(
+                kind = kind,
+                label = "capability.simulate:$action",
+                scope = ActionScope.COMPANY,
+                subject = ActionSubject(companyId = companyId, agentName = definition.id),
+                command = command?.split(' ')?.filter { it.isNotBlank() }.orEmpty(),
+                path = path,
+                networkTarget = networkTarget,
+                metadata = skill?.trim()?.takeIf { it.isNotBlank() }?.let { mapOf("skill" to it) }.orEmpty()
+            )
+        )
+    }
+
+    private fun sanitizeCapabilitySetting(setting: AgentCapabilitySetting): AgentCapabilitySetting = setting.copy(
+        providerId = setting.providerId?.trim()?.takeIf { it.isNotBlank() },
+        modelOverride = setting.modelOverride?.trim()?.takeIf { it.isNotBlank() },
+        domainAllowlist = setting.domainAllowlist.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+        pathAllowlist = setting.pathAllowlist.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+        skillAllowlist = setting.skillAllowlist.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+        secretRefs = setting.secretRefs.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+        notes = setting.notes?.trim()?.takeIf { it.isNotBlank() }
+    )
+
     suspend fun evidenceForRun(runId: String): EvidenceBundle =
         provenanceService.bundleForRun(runId)
 
     suspend fun evidenceForFile(path: String): EvidenceBundle =
         provenanceService.bundleForFile(path)
+
+    suspend fun evidenceForPullRequest(pullRequestNumber: Int): EvidenceBundle =
+        provenanceService.bundleForPullRequest(pullRequestNumber)
 
     suspend fun inspectGitHubPullRequest(pullRequestNumber: Int): PullRequestSnapshot? =
         gitHubControlPlaneService.inspectPullRequest(pullRequestNumber)
@@ -1628,7 +2093,7 @@ class DesktopAppService(
         nextStatus: IssueStatus,
         run: AgentRun?
     ): String? {
-        if (nextStatus != IssueStatus.BLOCKED) {
+        if (nextStatus != IssueStatus.BLOCKED && nextStatus != IssueStatus.WAITING_FOR_APPROVAL) {
             return null
         }
         return run?.publish?.checksSummary
@@ -1638,6 +2103,9 @@ class DesktopAppService(
             ?: run?.error
                 ?.takeIf { it.isNotBlank() }
     }
+
+    private fun issueAttentionSeverity(status: IssueStatus): String =
+        if (status == IssueStatus.BLOCKED || status == IssueStatus.WAITING_FOR_APPROVAL) "warning" else "info"
 
     private fun syntheticCompanyRunPipeline(issue: CompanyIssue?): Pair<Pipeline, PipelineStage> {
         val stage = PipelineStage(id = "company-agent-execution", type = StageType.EXECUTION)
@@ -1820,7 +2288,19 @@ class DesktopAppService(
             }
         }
         val repository = upsertRepositoryForPath(loadedState.repositories, repositoryRoot, now)
-        val resolvedBranch = defaultBaseBranch?.takeIf { it.isNotBlank() } ?: repository.defaultBranch
+        val requestedBranch = defaultBaseBranch?.trim()?.takeIf { it.isNotBlank() }
+        val resolvedBranch = if (requestedBranch == null) {
+            repository.defaultBranch
+        } else {
+            val requestedBranchExists = runCatching {
+                gitWorkspaceService.hasLocalBranch(repositoryRoot, requestedBranch)
+            }.getOrDefault(true)
+            if (requestedBranchExists || repository.defaultBranch.isBlank()) {
+                requestedBranch
+            } else {
+                repository.defaultBranch
+            }
+        }
         val existing = loadedState.companies.firstOrNull {
             Path.of(it.rootPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
         }
@@ -1878,11 +2358,13 @@ class DesktopAppService(
             lastUpdatedAt = now
         )
         val seededDefinitions = seedCompanyAgentDefinitions(companyId, now)
+        val seededCapabilityProfiles = seedCompanyAgentCapabilityProfiles(company, seededDefinitions, now)
         val baseState = loadedState.copy(
             repositories = mergeRepository(loadedState.repositories, repository),
             companies = loadedState.companies + company,
             projectContexts = loadedState.projectContexts + context,
             companyAgentDefinitions = loadedState.companyAgentDefinitions + seededDefinitions,
+            agentCapabilityProfiles = loadedState.agentCapabilityProfiles + seededCapabilityProfiles,
             companyRuntimes = loadedState.companyRuntimes + CompanyRuntimeSnapshot(companyId = companyId, backendKind = company.backendKind)
         )
         val workspaceState = ensureCompanyWorkspace(baseState, company, now).first
@@ -2727,7 +3209,7 @@ class DesktopAppService(
                                 "outputSummary" to run.output?.takeLast(200),
                                 "durationMs" to run.durationMs,
                                 "pullRequestUrl" to run.publish?.pullRequestUrl,
-                                "publishError" to run.publish?.error?.take(200),
+                                "publishError" to effectiveExecutionLogPublishError(run)?.take(200),
                                 "failureClass" to classifyExecutionLogFailure(issue, run),
                                 "createdAt" to run.createdAt,
                                 "updatedAt" to run.updatedAt
@@ -2741,16 +3223,22 @@ class DesktopAppService(
 
     private fun classifyExecutionLogFailure(issue: CompanyIssue, run: AgentRun): String? {
         val error = run.error.orEmpty()
-        val publishError = run.publish?.error.orEmpty()
+        val publishError = effectiveExecutionLogPublishError(run).orEmpty()
         return when {
             error.contains("Generated artifact quality scan failed", ignoreCase = true) ||
                 error.contains("QA artifact quality scan failed", ignoreCase = true) -> "artifact-quality"
-            publishError.startsWith("No changes to publish", ignoreCase = true) -> "no-diff"
+            isNoChangesToPublishError(publishError) -> "no-diff"
             !requiresCodePublish(issue) && publishError.isNotBlank() -> "publish-nonfatal"
             error.isBlank() && publishError.isBlank() -> null
             else -> "execution"
         }
     }
+
+    private fun effectiveExecutionLogPublishError(run: AgentRun): String? =
+        run.publish?.error ?: run.error?.takeIf(::isNoChangesToPublishError)
+
+    private fun isNoChangesToPublishError(error: String): Boolean =
+        error.startsWith("No changes to publish", ignoreCase = true)
 
     suspend fun issueGraph(companyId: String): Map<String, Any> {
         val state = stateStore.load()
@@ -2840,7 +3328,8 @@ class DesktopAppService(
         model: String? = null
     ): CompanyAgentDefinition = stateMutex.withLock {
         val state = stateStore.load()
-        require(state.companies.any { it.id == companyId }) { "Company not found: $companyId" }
+        val company = state.companies.firstOrNull { it.id == companyId }
+        require(company != null) { "Company not found: $companyId" }
         val now = System.currentTimeMillis()
         val normalizedCollaborators = preferredCollaboratorIds
             .map { it.trim() }
@@ -2867,6 +3356,7 @@ class DesktopAppService(
         val nextProfiles = deriveProfiles(state.companyAgentDefinitions + definition, state.companies)
         val nextState = state.copy(
             companyAgentDefinitions = state.companyAgentDefinitions + definition,
+            agentCapabilityProfiles = state.agentCapabilityProfiles + seedCompanyAgentCapabilityProfile(company, definition, now),
             orgProfiles = nextProfiles
         ).recordCompanyActivity(
             companyId = companyId,
@@ -4189,18 +4679,28 @@ class DesktopAppService(
             verdict = item.ceoVerdict ?: "APPROVE",
             feedback = reviewBody
         )
+        val ceoActionSubject = ActionSubject(
+            companyId = item.companyId,
+            goalId = executionIssueBeforeMerge?.goalId,
+            issueId = item.approvalIssueId ?: item.issueId,
+            agentName = "ceo-cli"
+        )
         runCatching {
             gitWorkspaceService.commentOnPullRequest(
                 worktreePath = Path.of(worktreePath),
                 pullRequestNumber = pullRequestNumber,
-                body = commentBody
+                body = commentBody,
+                subject = ceoActionSubject,
+                approval = "ceo-review-queue"
             )
         }
         val approvedMetadata = gitWorkspaceService.submitPullRequestReview(
             worktreePath = Path.of(worktreePath),
             pullRequestNumber = pullRequestNumber,
             verdict = PullRequestReviewVerdict.APPROVE,
-            body = reviewBody
+            body = reviewBody,
+            subject = ceoActionSubject,
+            approval = "ceo-review-queue"
         )
         if (approvedMetadata.mergeability.equals("DIRTY", ignoreCase = true)) {
             return markReviewQueueMergeConflict(
@@ -4218,7 +4718,9 @@ class DesktopAppService(
             gitWorkspaceService.mergePullRequest(
                 worktreePath = Path.of(worktreePath),
                 pullRequestNumber = pullRequestNumber,
-                preApprovedReviewFlow = true
+                preApprovedReviewFlow = true,
+                subject = ceoActionSubject,
+                approval = "ceo-review-queue"
             )
         } catch (error: ProcessExecutionException) {
             if (isMergeConflictFailure(error)) {
@@ -5420,7 +5922,12 @@ class DesktopAppService(
         val cleanupResult = runCatching {
             gitWorkspaceService.closeSupersededManagedPullRequests(
                 worktreePath = Path.of(rootPath),
-                preservePullRequestNumbers = preservePullRequestNumbers
+                preservePullRequestNumbers = preservePullRequestNumbers,
+                subject = ActionSubject(
+                    companyId = companyId,
+                    agentName = "company-runtime"
+                ),
+                approval = "company-runtime-cleanup"
             )
         }.getOrElse {
             if (it is CancellationException) {
@@ -6110,6 +6617,7 @@ class DesktopAppService(
                     val updatedIssue = issue.copy(
                         status = IssueStatus.PLANNED,
                         blockedBy = emptyList(),
+                        providerBlockReason = null,
                         updatedAt = now
                     )
                     traceEvents += buildCompanyAutomationTraceEvent(
@@ -6160,6 +6668,7 @@ class DesktopAppService(
                 val updatedIssue = issue.copy(
                     status = IssueStatus.PLANNED,
                     blockedBy = emptyList(),
+                    providerBlockReason = null,
                     updatedAt = now
                 )
                 traceEvents += buildCompanyAutomationTraceEvent(
@@ -6197,6 +6706,75 @@ class DesktopAppService(
         return retried
     }
 
+    private suspend fun normalizePublishApprovalRequiredIssues(companyId: String): Int {
+        var normalized = 0
+        val traceEvents = mutableListOf<CompanyAutomationTraceEvent>()
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val now = System.currentTimeMillis()
+            val goalsById = state.goals.associateBy { it.id }
+            val latestRunsByTaskId = state.runs
+                .groupBy { it.taskId }
+                .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
+            var changed = false
+            var nextState = state
+            val updatedIssues = state.issues.map { issue ->
+                if (issue.companyId != companyId || issue.status != IssueStatus.BLOCKED) {
+                    return@map issue
+                }
+                val latestTask = state.tasks
+                    .filter { it.issueId == issue.id }
+                    .maxByOrNull { it.updatedAt }
+                    ?: return@map issue
+                val latestRun = latestRunsByTaskId[latestTask.id]
+                if (!isGitHubPrCreateApprovalRequired(latestTask, latestRun)) {
+                    return@map issue
+                }
+                changed = true
+                normalized += 1
+                val reason = providerBlockReasonForIssue(IssueStatus.WAITING_FOR_APPROVAL, latestRun)
+                    ?: "Capability GITHUB_PR_CREATE requires approval for git.publish."
+                val updatedIssue = issue.copy(
+                    status = IssueStatus.WAITING_FOR_APPROVAL,
+                    blockedBy = emptyList(),
+                    providerBlockReason = reason,
+                    transitionReason = "PR creation is waiting for explicit approval before Cotor publishes this branch.",
+                    updatedAt = now
+                )
+                traceEvents += buildCompanyAutomationTraceEvent(
+                    issue = issue,
+                    goal = issue.goalId?.let(goalsById::get),
+                    oldStatus = issue.status,
+                    newStatus = updatedIssue.status,
+                    source = "normalizePublishApprovalRequiredIssues",
+                    reason = "PR creation requires explicit approval before Cotor can publish this branch.",
+                    latestTask = latestTask,
+                    latestRun = latestRun
+                )
+                updatedIssue
+            }
+            if (!changed) {
+                return@withLock
+            }
+            nextState = nextState.copy(issues = updatedIssues)
+            traceEvents.forEach { trace ->
+                nextState = nextState.recordCompanyActivity(
+                    companyId = trace.companyId,
+                    projectContextId = trace.projectContextId,
+                    goalId = trace.goalId,
+                    issueId = trace.issueId,
+                    source = trace.source,
+                    title = "Waiting for PR approval",
+                    detail = "${trace.issueTitle}: ${trace.reason}",
+                    severity = "warning"
+                )
+            }
+            stateStore.save(nextState.withDerivedMetrics())
+        }
+        traceEvents.forEach(::appendCompanyAutomationTrace)
+        return normalized
+    }
+
     private fun failureSignals(task: AgentTask, run: AgentRun?): List<String> {
         if (task.status != DesktopTaskStatus.FAILED && task.status != DesktopTaskStatus.PARTIAL) {
             return emptyList()
@@ -6208,6 +6786,15 @@ class DesktopAppService(
         }.mapNotNull { signal ->
             signal?.trim()?.takeIf { it.isNotBlank() }
         }
+    }
+
+    private fun isGitHubPrCreateApprovalRequired(task: AgentTask, run: AgentRun?): Boolean =
+        failureSignals(task, run).any(::isGitHubPrCreateApprovalRequiredMessage)
+
+    private fun isGitHubPrCreateApprovalRequiredMessage(message: String): Boolean {
+        val lower = message.lowercase()
+        return lower.contains("capability github_pr_create requires approval") &&
+            lower.contains("git.publish")
     }
 
     private fun isTransientGitHubPublishFailure(message: String): Boolean =
@@ -6239,8 +6826,12 @@ class DesktopAppService(
             ) ||
             message.contains("githubcopilot.com/.well-known/oauth-protected-resource/mcp/")
 
+    private fun isOpenCodePromptFileArgumentOrderFailure(message: String): Boolean =
+        message.contains("file not found: execute the instructions in the attached prompt file", ignoreCase = true)
+
     private fun isRecoverableOpenCodeCliFailure(message: String): Boolean =
         message.contains("provider returned error") ||
+            isOpenCodePromptFileArgumentOrderFailure(message) ||
             (
                 message.contains("decimalerror") &&
                     message.contains("invalid argument: [object object]")
@@ -6289,6 +6880,8 @@ class DesktopAppService(
                 message.contains("no run found") ||
                 message.contains("execution timeout after") ||
                 message.contains("exited before cotor recorded a final result") ||
+                message.contains("capability git_write requires approval") ||
+                message.contains("capability shell_exec requires approval") ||
                 message.contains(INTERRUPTED_RUN_ERROR.lowercase()) ||
                 (message.contains("pull request create failed") && isTransientGitHubPublishFailure(message)) ||
                 message.contains("submitted too quickly") ||
@@ -6304,7 +6897,8 @@ class DesktopAppService(
         }
         return failureSignals(task, run).any { message ->
             message.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) ||
-                CodexDefaults.isRetiredModelAliasFailure(message)
+                CodexDefaults.isRetiredModelAliasFailure(message) ||
+                isOpenCodePromptFileArgumentOrderFailure(message)
         }
     }
 
@@ -7879,7 +8473,8 @@ class DesktopAppService(
     fun settings(): DesktopSettings {
         val state = runBlocking { stateStore.load() }
         val githubPublishStatus = runBlocking { computeGitHubPublishStatus(state = state) }
-        val availableAgentModels = mapOf("opencode" to availableAgentModels("opencode"))
+        val availableAgentModels = listOf("opencode", "gemma4", "ollama", "lmstudio")
+            .associateWith(::availableAgentModels)
             .filterValues { it.isNotEmpty() }
         return DesktopSettings(
             appHome = stateStore.appHome().toString(),
@@ -7904,9 +8499,67 @@ class DesktopAppService(
         val normalizedAgent = agent.trim().lowercase()
         return when (normalizedAgent) {
             "opencode" -> discoverOpenCodeModelsCached()
+            "gemma4" -> discoverGemma4ModelsCached()
+            "ollama" -> discoverOllamaModelsCached()
+            "lmstudio" -> discoverLmStudioModelsCached()
             else -> emptyList()
         }
     }
+
+    private fun discoverGemma4ModelsCached(): List<String> =
+        LocalModelDefaults.installedGemma4Models(discoverOllamaModelsCached() + discoverLmStudioModelsCached())
+
+    private fun discoverOllamaModelsCached(): List<String> =
+        discoverLocalModelsCached("ollama") {
+            val body = getLocalModelJson("${LocalModelDefaults.OLLAMA_BASE_URL}/api/tags") ?: return@discoverLocalModelsCached emptyList()
+            backendJson.parseToJsonElement(body).jsonObject["models"]?.jsonArray
+                ?.mapNotNull { model -> model.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() } }
+                ?.distinct()
+                ?: emptyList()
+        }
+
+    private fun discoverLmStudioModelsCached(): List<String> =
+        discoverLocalModelsCached("lmstudio") {
+            val baseRoot = LocalModelDefaults.LM_STUDIO_BASE_URL.removeSuffix("/v1")
+            val body = getLocalModelJson("$baseRoot/api/v0/models")
+                ?: getLocalModelJson("${LocalModelDefaults.LM_STUDIO_BASE_URL}/models")
+                ?: return@discoverLocalModelsCached emptyList()
+            val parsed = backendJson.parseToJsonElement(body).jsonObject
+            parsed["data"]?.jsonArray
+                ?.mapNotNull { model ->
+                    val obj = model.jsonObject
+                    val state = obj["state"]?.jsonPrimitive?.contentOrNull
+                    val type = obj["type"]?.jsonPrimitive?.contentOrNull
+                    val loadedEnough = state == null || state.equals("loaded", ignoreCase = true)
+                    val modelEnough = type == null || type.equals("llm", ignoreCase = true) || type.equals("vlm", ignoreCase = true)
+                    if (loadedEnough && modelEnough) {
+                        obj["id"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+                    } else {
+                        null
+                    }
+                }
+                ?.distinct()
+                ?: emptyList()
+        }
+
+    private fun discoverLocalModelsCached(cacheKey: String, discover: () -> List<String>): List<String> {
+        val now = System.currentTimeMillis()
+        recentAgentModelDiscoveries[cacheKey]
+            ?.takeIf { now - it.discoveredAt < 5 * 60_000L }
+            ?.let { return it.models }
+        val models = runCatching(discover).getOrDefault(emptyList())
+        recentAgentModelDiscoveries[cacheKey] = CachedAgentModels(now, models)
+        return models
+    }
+
+    private fun getLocalModelJson(url: String): String? = runCatching {
+        val request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+            .timeout(java.time.Duration.ofSeconds(2))
+            .GET()
+            .build()
+        val response = localModelHttpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+        response.body().takeIf { response.statusCode() in 200..299 }
+    }.getOrNull()
 
     private fun discoverOpenCodeModelsCached(): List<String> {
         val now = System.currentTimeMillis()
@@ -7930,7 +8583,7 @@ class DesktopAppService(
             } else {
                 process.inputStream.bufferedReader().useLines { lines ->
                     lines.map { it.trim() }
-                        .filter { it.startsWith("opencode/") }
+                        .filter(OpenCodeDefaults::isSelectableModel)
                         .distinct()
                         .toList()
                 }
@@ -7948,6 +8601,7 @@ class DesktopAppService(
         if (opencodeDefinitions.isEmpty()) return
         val availableModels = availableAgentModels("opencode")
         val legacyModels = setOf(
+            "opencode/nemotron-3-super-free",
             "opencode/minimax-m2.5-free",
             "opencode/qwen3.6-plus-free"
         )
@@ -8558,9 +9212,10 @@ class DesktopAppService(
         return when (agentCli.trim().lowercase()) {
             "codex", "codex-exec", "codex-oauth" -> {
                 val normalized = CodexDefaults.normalizeModel(trimmed)
-                if (normalized?.startsWith("opencode/") == true) CodexDefaults.DEFAULT_MODEL else normalized
+                if (normalized?.let(OpenCodeDefaults::isSelectableModel) == true) CodexDefaults.DEFAULT_MODEL else normalized
             }
             "opencode" -> OpenCodeDefaults.normalizeModel(trimmed)
+            "gemma4", "ollama", "lmstudio" -> LocalModelDefaults.normalizeModel(trimmed)
             else -> if (BuiltinAgentCatalog.get(agentCli)?.parameters?.containsKey("model") == true) trimmed else null
         }
     }
@@ -9473,7 +10128,7 @@ class DesktopAppService(
 
     private suspend fun runTaskIfPresent(taskId: String): AgentTask? {
         val task = getTask(taskId) ?: return null
-        activeTaskJobs[task.id] = serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+        val job = serviceScope.launch(start = CoroutineStart.LAZY) {
             // Long-running agent execution is detached from the request lifecycle.
             try {
                 executeTask(task.id)
@@ -9487,6 +10142,8 @@ class DesktopAppService(
                 intentionallyInterruptedTaskIds.remove(task.id)
             }
         }
+        activeTaskJobs[task.id] = job
+        job.start()
         return task
     }
 
@@ -11171,6 +11828,7 @@ class DesktopAppService(
                     appendLine("- Work as a direct implementer. Start editing immediately and do not plan, delegate, or do broad repo exploration.")
                     appendLine("- Do not create placeholder diffs, marker comments, README-only edits, or validation-only artifacts.")
                     appendLine("- Keep the result coherent and shippable when opened directly by a user.")
+                    appendLine("- ${graphifyKnowledgeGuidance()}")
                     if (userFacingDesignWork) {
                         appendLine("- Design: Berkeley Mono, warm dark surfaces, crisp borders, restrained accents, flat hierarchy, strong spacing rhythm.")
                     }
@@ -11384,6 +12042,7 @@ class DesktopAppService(
                 )
             }.trim(),
             workflowMemory = buildString {
+                appendLine(graphifyKnowledgeGuidance())
                 projectContext?.let { appendLine("projectContext=${it.name}") }
                 goal?.let {
                     appendLine("goal=${it.title}")
@@ -11453,6 +12112,9 @@ class DesktopAppService(
         issue: CompanyIssue,
         profile: OrgAgentProfile
     ): CompanyMemorySnapshot = buildCompanyMemorySnapshot(state, company, projectContext, goal, issue, profile)
+
+    private fun graphifyKnowledgeGuidance(): String =
+        "graphify=Use graphify for repository structure, dependencies, and cross-module questions. Prefer `graphify query`, `graphify explain`, or `graphify path` from the company root before broad manual search; the workspace map reads local graph data when present."
 
     internal fun buildExecutionMemoryBundleForTesting(
         state: DesktopAppState,
@@ -11609,11 +12271,11 @@ class DesktopAppService(
 
     private fun seedCompanyAgentDefinitions(companyId: String, now: Long): List<CompanyAgentDefinition> {
         val builtins = BuiltinAgentCatalog.names()
-        val preferredAgent = listOf("opencode", "qwen", "codex-oauth", "codex", "claude", "gemini")
-            .firstOrNull { candidate ->
-                builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate)
-            }
-            ?: builtins.firstOrNull { it.equals("opencode", ignoreCase = true) }
+        val preferredAgent = builtins.firstOrNull { it.equals("opencode", ignoreCase = true) }
+            ?: listOf("gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "claude", "gemini")
+                .firstOrNull { candidate ->
+                    builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate)
+                }
             ?: builtins.firstOrNull { it.equals("qwen", ignoreCase = true) }
             ?: builtins.firstOrNull { it.equals("codex-oauth", ignoreCase = true) }
             ?: builtins.firstOrNull { it.equals("codex", ignoreCase = true) }
@@ -11716,6 +12378,51 @@ class DesktopAppService(
         }
     }
 
+    private fun seedCompanyAgentCapabilityProfiles(
+        company: Company,
+        definitions: List<CompanyAgentDefinition>,
+        now: Long
+    ): List<AgentCapabilityProfile> =
+        definitions.map { definition ->
+            seedCompanyAgentCapabilityProfile(company, definition, now)
+        }
+
+    private fun seedCompanyAgentCapabilityProfile(
+        company: Company,
+        definition: CompanyAgentDefinition,
+        now: Long
+    ): AgentCapabilityProfile =
+        AgentCapabilityProfile(
+            companyId = company.id,
+            agentId = definition.id,
+            settings = repositoryScopedCompanyAgentCapabilitySettings(company.rootPath),
+            updatedAt = now
+        )
+
+    private fun repositoryScopedCompanyAgentCapabilitySettings(rootPath: String): Map<CapabilityKey, AgentCapabilitySetting> {
+        val repositoryRoot = Path.of(rootPath).toAbsolutePath().normalize().toString()
+        val localExecutionNotes =
+            "Seeded company agents may run local execution and git worktree setup only inside this repository. Publishing, PR updates, merges, browser actions, package installs, and external API calls keep their stricter defaults."
+        return defaultAgentCapabilitySettings() + mapOf(
+            CapabilityKey.SHELL_EXEC to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                pathAllowlist = listOf(repositoryRoot),
+                requiresEvidence = true,
+                requiresReview = true,
+                notes = localExecutionNotes
+            ),
+            CapabilityKey.GIT_WRITE to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                pathAllowlist = listOf(repositoryRoot),
+                requiresEvidence = true,
+                requiresReview = true,
+                notes = localExecutionNotes
+            )
+        )
+    }
+
     private fun suggestProfileForIssue(
         issue: CompanyIssue,
         profiles: List<OrgAgentProfile>
@@ -11811,12 +12518,15 @@ class DesktopAppService(
         if (command.equals("echo", ignoreCase = true)) {
             return true
         }
+        if (command.equals("gemma4", ignoreCase = true) || command.equals("ollama", ignoreCase = true) || command.equals("lmstudio", ignoreCase = true)) {
+            return true
+        }
         return commandAvailability(resolveBuiltinExecutableAlias(command))
     }
 
     private fun preferredExecutableAgent(): String {
         val builtins = BuiltinAgentCatalog.names()
-        return listOf("opencode", "qwen", "codex-oauth", "codex", "claude", "gemini")
+        return listOf("opencode", "gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "claude", "gemini")
             .firstOrNull { candidate -> builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate) }
             ?: builtins.firstOrNull { isExecutableAvailable(it) }
             ?: builtins.firstOrNull()
@@ -12292,15 +13002,68 @@ class DesktopAppService(
                     pullRequestRequired &&
                     hasPublishMetadata &&
                     primaryRun?.publish?.mergeability.equals("DIRTY", ignoreCase = true)
+            val publishApprovalRequired = isGitHubPrCreateApprovalRequired(task, primaryRun)
             val nextIssueStatus = when {
                 publishMergeConflict -> IssueStatus.PLANNED
+                publishApprovalRequired -> IssueStatus.WAITING_FOR_APPROVAL
                 finalStatus == DesktopTaskStatus.COMPLETED && pullRequestRequired && hasPublishMetadata -> IssueStatus.IN_REVIEW
                 finalStatus == DesktopTaskStatus.COMPLETED && !requiresCodePublish(currentIssue) -> IssueStatus.DONE
                 finalStatus == DesktopTaskStatus.COMPLETED && !pullRequestRequired -> IssueStatus.DONE
                 finalStatus == DesktopTaskStatus.COMPLETED -> IssueStatus.BLOCKED
                 else -> IssueStatus.BLOCKED
             }
+            val missingRequiredPublishFailure =
+                finalStatus == DesktopTaskStatus.COMPLETED &&
+                    pullRequestRequired &&
+                    !hasPublishMetadata &&
+                    primaryRun != null
+            val missingRequiredPublishError = if (missingRequiredPublishFailure) {
+                primaryRun?.publish?.error?.takeIf { it.isNotBlank() }
+                    ?: currentIssue.providerBlockReason?.takeIf { it.isNotBlank() }
+                    ?: primaryRun?.error?.takeIf { it.isNotBlank() }
+                    ?: "GitHub pull request was not created for required code work."
+            } else {
+                null
+            }
+            val runsWithMissingRequiredPublishFailure = if (missingRequiredPublishFailure && missingRequiredPublishError != null) {
+                state.runs.map { run ->
+                    if (run.id == primaryRun?.id) {
+                        run.copy(
+                            status = AgentRunStatus.FAILED,
+                            error = missingRequiredPublishError,
+                            publish = run.publish ?: PublishMetadata(
+                                pushedBranch = run.branchName,
+                                error = missingRequiredPublishError
+                            ),
+                            updatedAt = now
+                        )
+                    } else {
+                        run
+                    }
+                }
+            } else {
+                state.runs
+            }
+            val tasksWithMissingRequiredPublishFailure = if (missingRequiredPublishFailure) {
+                state.tasks.map { existingTask ->
+                    if (existingTask.id == task.id) {
+                        existingTask.copy(status = DesktopTaskStatus.FAILED, updatedAt = now)
+                    } else {
+                        existingTask
+                    }
+                }
+            } else {
+                state.tasks
+            }
             if (nextIssueStatus == currentIssue.status && !hasPublishMetadata) {
+                if (runsWithMissingRequiredPublishFailure != state.runs || tasksWithMissingRequiredPublishFailure != state.tasks) {
+                    stateStore.save(
+                        state.copy(
+                            tasks = tasksWithMissingRequiredPublishFailure,
+                            runs = runsWithMissingRequiredPublishFailure
+                        ).withDerivedMetrics()
+                    )
+                }
                 return@withLock
             }
             val updatedIssue = currentIssue.copy(
@@ -12331,6 +13094,8 @@ class DesktopAppService(
                 transitionReason = when {
                     publishMergeConflict ->
                         "Execution completed on branch ${primaryRun?.branchName}, but PR ${primaryRun?.publish?.pullRequestUrl ?: primaryRun?.publish?.pullRequestNumber} does not merge cleanly with the latest base branch. Re-running on a refreshed base."
+                    publishApprovalRequired ->
+                        "Execution reached PR creation, but creating the pull request requires explicit approval."
                     finalStatus == DesktopTaskStatus.COMPLETED && pullRequestRequired && hasPublishMetadata ->
                         "Execution completed on branch ${primaryRun?.branchName} and opened PR ${primaryRun?.publish?.pullRequestUrl ?: primaryRun?.publish?.pullRequestNumber}."
                     finalStatus == DesktopTaskStatus.COMPLETED && !requiresCodePublish(currentIssue) ->
@@ -12348,6 +13113,7 @@ class DesktopAppService(
             if (updatedIssue.status != currentIssue.status) {
                 val reason = when {
                     publishMergeConflict -> "Task completed, but GitHub reported that the published PR no longer merges cleanly with the base branch."
+                    publishApprovalRequired -> "Task reached PR creation and is waiting for explicit approval before publishing."
                     finalStatus == DesktopTaskStatus.COMPLETED && pullRequestRequired && hasPublishMetadata -> "Task completed and published a pull request."
                     finalStatus == DesktopTaskStatus.COMPLETED && !requiresCodePublish(currentIssue) -> "Task completed without a required publish step."
                     finalStatus == DesktopTaskStatus.COMPLETED && !pullRequestRequired -> "Task completed and local git publishing is allowed by settings."
@@ -12602,6 +13368,8 @@ class DesktopAppService(
                 }
             }
             val nextState = state.copy(
+                tasks = tasksWithMissingRequiredPublishFailure,
+                runs = runsWithMissingRequiredPublishFailure,
                 issues = state.issues
                     .filterNot { existing -> existing.id == currentIssue.id || existing.id in staleWorkflowIssueIds }
                     .plus(updatedIssue)
@@ -12619,7 +13387,7 @@ class DesktopAppService(
                     append("${updatedIssue.title} -> ${updatedIssue.status}")
                     traceEvents.firstOrNull()?.reason?.let { append(" ($it)") }
                 },
-                severity = if (updatedIssue.status == IssueStatus.BLOCKED) "warning" else "info"
+                severity = issueAttentionSeverity(updatedIssue.status)
             ).recordCompanyActivity(
                 companyId = updatedIssue.companyId,
                 projectContextId = updatedIssue.projectContextId,
@@ -12644,7 +13412,7 @@ class DesktopAppService(
                 projectContextId = updatedIssue.projectContextId,
                 goalId = updatedIssue.goalId,
                 issueId = updatedIssue.id,
-                severity = if (updatedIssue.status == IssueStatus.BLOCKED) "warning" else "info"
+                severity = issueAttentionSeverity(updatedIssue.status)
             ).withDerivedMetrics()
             stateStore.save(nextState)
             val runtime = nextState.companyRuntimes.firstOrNull { it.companyId == updatedIssue.companyId }
@@ -12659,7 +13427,15 @@ class DesktopAppService(
                 gitWorkspaceService.closePullRequest(
                     worktreePath = Path.of(worktreePath),
                     pullRequestNumber = pullRequestNumber,
-                    comment = comment
+                    comment = comment,
+                    subject = ActionSubject(
+                        companyId = issue.companyId,
+                        goalId = issue.goalId,
+                        issueId = issue.id,
+                        taskId = task.id,
+                        agentName = primaryRun?.agentName ?: primaryRun?.agentId ?: task.agents.firstOrNull()
+                    ),
+                    approval = "task-run-cleanup"
                 )
             }.onFailure { error ->
                 if (error is CancellationException) {
@@ -12984,13 +13760,29 @@ class DesktopAppService(
                 gitWorkspaceService.commentOnPullRequest(
                     worktreePath = Path.of(worktreePath),
                     pullRequestNumber = prNumber,
-                    body = reviewBody
+                    body = reviewBody,
+                    subject = ActionSubject(
+                        companyId = item.companyId,
+                        goalId = issue.goalId,
+                        issueId = issue.id,
+                        taskId = task.id,
+                        agentName = primaryRun?.agentName ?: primaryRun?.agentId ?: "qa-cli"
+                    ),
+                    approval = "qa-review"
                 )
                 gitWorkspaceService.submitPullRequestReview(
                     worktreePath = Path.of(worktreePath),
                     pullRequestNumber = prNumber,
                     verdict = reviewVerdict,
-                    body = reviewBody
+                    body = reviewBody,
+                    subject = ActionSubject(
+                        companyId = item.companyId,
+                        goalId = issue.goalId,
+                        issueId = issue.id,
+                        taskId = task.id,
+                        agentName = primaryRun?.agentName ?: primaryRun?.agentId ?: "qa-cli"
+                    ),
+                    approval = "qa-review"
                 )
             }
         }
@@ -13223,13 +14015,29 @@ class DesktopAppService(
                 gitWorkspaceService.commentOnPullRequest(
                     worktreePath = Path.of(worktreePath),
                     pullRequestNumber = prNumber,
-                    body = reviewBody
+                    body = reviewBody,
+                    subject = ActionSubject(
+                        companyId = item.companyId,
+                        goalId = issue.goalId,
+                        issueId = issue.id,
+                        taskId = task.id,
+                        agentName = primaryRun?.agentName ?: primaryRun?.agentId ?: "ceo-cli"
+                    ),
+                    approval = "ceo-approval"
                 )
                 gitWorkspaceService.submitPullRequestReview(
                     worktreePath = Path.of(worktreePath),
                     pullRequestNumber = prNumber,
                     verdict = reviewVerdict,
-                    body = reviewBody
+                    body = reviewBody,
+                    subject = ActionSubject(
+                        companyId = item.companyId,
+                        goalId = issue.goalId,
+                        issueId = issue.id,
+                        taskId = task.id,
+                        agentName = primaryRun?.agentName ?: primaryRun?.agentId ?: "ceo-cli"
+                    ),
+                    approval = "ceo-approval"
                 )
             }
         }
