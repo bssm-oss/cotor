@@ -1327,6 +1327,32 @@ private struct SidebarView: View {
                         (l("Checked repo", "확인한 저장소"), status.repositoryPath ?? company.rootPath),
                     ])
 
+                    TextField(l("https://github.com/owner/repo.git", "https://github.com/owner/repo.git"), text: $store.companyGitHubOriginInput)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1)
+
+                    HStack(spacing: 8) {
+                        Button {
+                            store.openGitHubLoginTerminal()
+                        } label: {
+                            Label(l("Sign in", "로그인"), systemImage: "person.crop.circle.badge.checkmark")
+                                .frame(maxWidth: .infinity)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+                        .disabled(!status.ghInstalled)
+
+                        Button {
+                            Task { await store.saveSelectedCompanyGitHubOrigin() }
+                        } label: {
+                            Label(l("Connect origin", "origin 연결"), systemImage: "link.badge.plus")
+                                .frame(maxWidth: .infinity)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+                        .disabled(store.companyGitHubOriginInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
                     HStack(spacing: 8) {
                         Button {
                             Task { await store.refreshSelectedCompanyGitHubStatus() }

@@ -1219,7 +1219,7 @@ struct MockSeed {
                 ghAuthenticated: true,
                 originConfigured: true,
                 originUrl: "https://github.com/heodongun/cotor.git",
-                bootstrapAvailable: true,
+                bootstrapAvailable: false,
                 repositoryPath: "/Users/demo/cotor",
                 companyId: "company-demo",
                 companyName: "Cotor",

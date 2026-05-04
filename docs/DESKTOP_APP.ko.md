@@ -202,6 +202,7 @@ cotor delete
 - 압축형 회사 요약 배너에서 런타임 건강도, CEO 승인/차단/리뷰 주의, 최근 런타임 신호 조회
 - 회사 콘솔 안에서 추정 비용을 확인하고 일/월 비용 상한을 조정
 - GitHub PR 발행이 필요한데 `gh`/`origin` 준비가 안 된 저장소는 회사 생성 시 경고
+- `origin`이 없는 경우 GitHub 저장소를 자동 생성하지 않고, GitHub 설정 패널에서 기존 저장소 URL을 연결
 - 로컬 런타임 루프의 시작/중지/상태 확인
 - active autonomous goal이 남아 있어도, 수동으로 중지한 회사 런타임은 사용자가 다시 시작할 때까지 유지
 - active task/run이 남아 있으면 빠른 monitoring cadence를 유지해서 stale `RUNNING` 상태를 더 빨리 정리

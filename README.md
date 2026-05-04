@@ -175,7 +175,8 @@ Current desktop model:
 The current build includes a working local operations layer:
 
 - create multiple companies, each bound to one working folder
-- surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing
+- surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing; Cotor does not create GitHub repositories automatically when no origin exists
+- connect an existing GitHub repository from the desktop app by signing in with `gh` and saving the repository URL as `origin`
 - define company agents with only title, CLI, and role summary
 - optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents when Ollama or LM Studio is running locally with installed models
 - use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory

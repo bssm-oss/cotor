@@ -54,6 +54,13 @@ struct DesktopAPI {
         try await get(path: "api/app/companies/\(companyId)/github/status")
     }
 
+    func configureCompanyGitHubOrigin(companyId: String, remoteURL: String) async throws -> GitHubPublishStatusPayload {
+        try await post(
+            path: "api/app/companies/\(companyId)/github/origin",
+            body: ConfigureGitHubOriginPayload(remoteUrl: remoteURL)
+        )
+    }
+
     func health() async throws -> Bool {
         struct HealthPayload: Decodable {
             let status: String?
@@ -661,6 +668,10 @@ struct DesktopAPI {
 }
 
 private struct EmptyPayload: Codable {}
+
+private struct ConfigureGitHubOriginPayload: Codable {
+    let remoteUrl: String
+}
 
 private struct UpdateBackendSettingsPayload: Codable {
     let defaultBackendKind: String
