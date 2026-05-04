@@ -59,6 +59,36 @@ func parseCodexArguments(_ raw: String) -> [String] {
     return args
 }
 
+func isExpectedCompanyEventStreamInterruption(_ error: Error) -> Bool {
+    if error is CancellationError {
+        return true
+    }
+    if let urlError = error as? URLError {
+        switch urlError.code {
+        case .cancelled, .networkConnectionLost, .timedOut:
+            return true
+        default:
+            return false
+        }
+    }
+    let nsError = error as NSError
+    if nsError.domain == NSURLErrorDomain {
+        switch nsError.code {
+        case NSURLErrorCancelled, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut:
+            return true
+        default:
+            return false
+        }
+    }
+    let message = error.localizedDescription
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+    return message == "cancelled"
+        || message == "canceled"
+        || message.contains("network connection was lost")
+        || message.contains("request timed out")
+}
+
 /// Tracks the high-level backend/runtime state shown in the shell header.
 ///
 /// The visible text is derived later through the active app language so the same
@@ -2976,10 +3006,15 @@ final class DesktopStore: ObservableObject {
                 }
             } catch is CancellationError {
             } catch {
-                AppLogger.error("Company event stream failed: \(error.localizedDescription)")
+                let expectedInterruption = isExpectedCompanyEventStreamInterruption(error)
+                if expectedInterruption {
+                    AppLogger.info("Company event stream reconnecting after expected interruption: \(error.localizedDescription)")
+                } else {
+                    AppLogger.error("Company event stream failed: \(error.localizedDescription)")
+                }
                 let shouldRetry = await MainActor.run { () -> Bool in
                     guard self.selectedCompanyID == companyID, self.shellMode == .company else { return false }
-                    self.companyStreamStatusMessage = self.companyStreamRecoveryMessage()
+                    self.companyStreamStatusMessage = expectedInterruption ? nil : self.companyStreamRecoveryMessage()
                     self.errorMessage = nil
                     return true
                 }

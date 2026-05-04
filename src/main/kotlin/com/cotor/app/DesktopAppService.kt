@@ -11956,6 +11956,7 @@ class DesktopAppService(
                     appendLine("- Deliver this issue with a real repository change: ${issue.title}")
                     appendLine("- Scope: ${summarizeForPrompt(issue.description, 160)}")
                     appendLine("- Work as a direct implementer. Start editing immediately and do not plan, delegate, or do broad repo exploration.")
+                    appendLine("- Only read or write files reachable from the current working directory. Never write to absolute paths, parent directories, or unrelated repository checkouts.")
                     appendLine("- Do not create placeholder diffs, marker comments, README-only edits, or validation-only artifacts.")
                     appendLine("- Keep the result coherent and shippable when opened directly by a user.")
                     appendLine("- ${graphifyKnowledgeGuidance()}")

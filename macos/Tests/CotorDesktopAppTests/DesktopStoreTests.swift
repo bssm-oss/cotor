@@ -1,8 +1,17 @@
+import Foundation
 import Testing
 @testable import CotorDesktopApp
 
 @MainActor
 struct DesktopStoreTests {
+    @Test
+    func expectedCompanyEventStreamInterruptionsDoNotRepresentOfflineState() {
+        #expect(isExpectedCompanyEventStreamInterruption(URLError(.networkConnectionLost)))
+        #expect(isExpectedCompanyEventStreamInterruption(URLError(.timedOut)))
+        #expect(isExpectedCompanyEventStreamInterruption(URLError(.cancelled)))
+        #expect(!isExpectedCompanyEventStreamInterruption(URLError(.cannotConnectToHost)))
+    }
+
     @Test
     func orgProfileShiftSelectionAndClearWorkAcrossRanges() {
         let store = DesktopStore()
