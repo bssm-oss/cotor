@@ -37,6 +37,7 @@ import io.kotest.matchers.string.shouldNotContain
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -1409,6 +1410,8 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>()
         val agentExecutor = mockk<AgentExecutor>()
+        val executionStarted = CompletableDeferred<Unit>()
+        val finishExecution = CompletableDeferred<Unit>()
         val service = DesktopAppService(
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
@@ -1426,7 +1429,8 @@ class DesktopAppServiceTest : FunSpec({
             worktreePath = worktreeRoot
         )
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } coAnswers {
-            delay(150)
+            executionStarted.complete(Unit)
+            finishExecution.await()
             AgentResult(
                 agentName = "codex",
                 isSuccess = true,
@@ -1464,13 +1468,22 @@ class DesktopAppServiceTest : FunSpec({
         )
 
         service.runTask(task.id)
-        delay(90)
+        withTimeout(5_000) {
+            executionStarted.await()
+        }
+        val initialRun = stateStore.load().runs.first { it.taskId == task.id }
+        withTimeout(5_000) {
+            while (stateStore.load().runs.first { it.taskId == task.id }.updatedAt <= initialRun.updatedAt) {
+                delay(25)
+            }
+        }
         service.runCompanyRuntimeTick(company.id)
 
         val runningRun = stateStore.load().runs.first { it.taskId == task.id }
         runningRun.status shouldBe AgentRunStatus.RUNNING
         runningRun.error shouldBe null
 
+        finishExecution.complete(Unit)
         awaitTaskCompletion(stateStore, task.id)
         val completedRun = stateStore.load().runs.first { it.taskId == task.id }
         completedRun.status shouldBe AgentRunStatus.COMPLETED
