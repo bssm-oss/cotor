@@ -81,6 +81,25 @@ class SecurityValidatorTest : FunSpec({
         }
     }
 
+    test("command validation accepts allowlisted executable through allowed symlink target directory") {
+        val targetDir = Files.createTempDirectory("cotor-homebrew-cellar")
+        val binDir = Files.createTempDirectory("cotor-homebrew-bin")
+        val executable = targetDir.resolve("git").toFile()
+        executable.writeText("#!/bin/sh\nexit 0\n")
+        executable.setExecutable(true)
+        val link = binDir.resolve("git")
+        link.createSymbolicLinkPointingTo(executable.toPath())
+        val validator = DefaultSecurityValidator(
+            SecurityConfig(
+                allowedExecutables = setOf("git"),
+                allowedDirectories = listOf(binDir, targetDir)
+            ),
+            LoggerFactory.getLogger("SecurityValidatorTest")
+        )
+
+        validator.validateCommand(listOf(link.toString(), "status"))
+    }
+
     test("path validation rejects symbolic link cycles") {
         val allowedDir = Files.createTempDirectory("cotor-symlink-cycle")
         val link = allowedDir.resolve("self")
