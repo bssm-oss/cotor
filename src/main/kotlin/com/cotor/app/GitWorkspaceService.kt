@@ -504,12 +504,7 @@ class GitWorkspaceService(
                     )
                 }
 
-                val hasRemote = if (hasOriginRemote(worktreePath)) {
-                    true
-                } else {
-                    ensureGitHubOrigin(worktreePath, baseBranch)
-                }
-                if (!hasRemote) {
+                if (!hasOriginRemote(worktreePath)) {
                     return@run PublishMetadata(
                         commitSha = commitSha,
                         error = "No GitHub remote configured; kept local commit only"
@@ -632,39 +627,10 @@ class GitWorkspaceService(
             )
         }
 
-        val authReady = runCommand(
-            worktreePath,
-            listOf("gh", "auth", "status"),
-            failOnError = false
-        ).isSuccess
-        if (!authReady) {
-            return GitHubPublishReadiness(
-                ready = false,
-                error = "GitHub publishing requires an authenticated gh CLI session."
-            )
-        }
-
-        val hasRemote = ensureGitHubOrigin(worktreePath, baseBranch)
-        return if (hasRemote) {
-            val originUrl = originRemoteUrl(worktreePath)
-            val sharedHistoryError = ensureSharedHistoryWithRemoteBase(worktreePath, baseBranch, originUrl)
-            if (sharedHistoryError != null) {
-                return GitHubPublishReadiness(
-                    ready = false,
-                    originUrl = originUrl,
-                    error = sharedHistoryError
-                )
-            }
-            GitHubPublishReadiness(
-                ready = true,
-                originUrl = originUrl
-            )
-        } else {
-            GitHubPublishReadiness(
-                ready = false,
-                error = "GitHub publishing requires an origin remote or repo bootstrap."
-            )
-        }
+        return GitHubPublishReadiness(
+            ready = false,
+            error = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work."
+        )
     }
 
     private suspend fun actionSubjectForTask(taskId: String, agentName: String): ActionSubject {
@@ -705,13 +671,12 @@ class GitWorkspaceService(
         ).isSuccess
         val originConfigured = normalizedRoot?.let { hasOriginRemote(it) } ?: false
         val originUrl = normalizedRoot?.let { originRemoteUrl(it) }
-        val bootstrapAvailable = normalizedRoot != null && baseBranch != null && ghInstalled && ghAuthenticated
         val message = when {
             normalizedRoot == null -> "Open a repository or select a company to inspect GitHub publishing readiness."
             originConfigured -> "Origin remote is configured for this repository."
             !ghInstalled -> "GitHub PR mode requires the gh CLI."
             !ghAuthenticated -> "GitHub PR mode requires an authenticated gh CLI session."
-            bootstrapAvailable -> "Cotor can bootstrap an origin remote for this repository."
+            baseBranch != null -> "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically."
             else -> "GitHub publishing is not ready for this repository."
         }
         return GitHubPublishEnvironment(
@@ -720,9 +685,20 @@ class GitWorkspaceService(
             originConfigured = originConfigured,
             originUrl = originUrl,
             repositoryPath = normalizedRoot?.toString(),
-            bootstrapAvailable = bootstrapAvailable,
+            bootstrapAvailable = false,
             message = message
         )
+    }
+
+    suspend fun configureOriginRemote(repositoryRoot: Path, remoteUrl: String): String {
+        val normalizedRoot = repositoryRoot.toAbsolutePath().normalize()
+        val normalizedUrl = normalizeGitHubRemoteUrl(remoteUrl)
+        if (hasOriginRemote(normalizedRoot)) {
+            runGit(normalizedRoot, "remote", "set-url", "origin", normalizedUrl)
+        } else {
+            runGit(normalizedRoot, "remote", "add", "origin", normalizedUrl)
+        }
+        return normalizedUrl
     }
 
     suspend fun submitPullRequestReview(
@@ -1271,6 +1247,38 @@ class GitWorkspaceService(
         return raw.replace(Regex("://[^/@\\s]+@"), "://")
     }
 
+    private fun normalizeGitHubRemoteUrl(remoteUrl: String): String {
+        val normalized = remoteUrl.trim()
+        require(normalized.isNotBlank()) { "GitHub repository URL is required." }
+        require(normalized.none { it.isWhitespace() }) { "GitHub repository URL cannot contain whitespace." }
+
+        val scpStyle = Regex("""^git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$""")
+        if (scpStyle.matches(normalized)) {
+            return normalized
+        }
+
+        val uri = runCatching { URI(normalized) }.getOrNull()
+            ?: throw IllegalArgumentException("Use an existing GitHub repository URL, for example https://github.com/owner/repo.git")
+        val scheme = uri.scheme?.lowercase()
+        val host = uri.host?.lowercase()
+        val pathParts = uri.path
+            ?.trim('/')
+            ?.split("/")
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+        val repoName = pathParts.getOrNull(1)?.removeSuffix(".git").orEmpty()
+        val validPath = pathParts.size == 2 &&
+            pathParts[0].matches(Regex("""[A-Za-z0-9_.-]+""")) &&
+            repoName.matches(Regex("""[A-Za-z0-9_.-]+"""))
+
+        val isHttpsGitHub = scheme == "https" && host == "github.com" && uri.rawUserInfo == null
+        val isSshGitHub = scheme == "ssh" && host == "github.com" && uri.userInfo == "git"
+        require((isHttpsGitHub || isSshGitHub) && validPath && uri.query == null && uri.fragment == null) {
+            "Use an existing GitHub repository URL without credentials, for example https://github.com/owner/repo.git"
+        }
+        return normalized
+    }
+
     private fun githubActionMetadata(
         pullRequestNumber: Int,
         extras: Map<String, String> = emptyMap(),
@@ -1570,41 +1578,6 @@ class GitWorkspaceService(
             path == ".DS_Store"
     }
 
-    private suspend fun ensureGitHubOrigin(worktreePath: Path, baseBranch: String): Boolean {
-        val authReady = runCommand(
-            worktreePath,
-            listOf("gh", "auth", "status"),
-            failOnError = false,
-            timeoutMs = 10_000
-        ).isSuccess
-        if (!authReady) {
-            return false
-        }
-
-        val repositoryRoot = repositoryCommonRoot(worktreePath)
-        val repoName = chooseGitHubRepositoryName(worktreePath, repositoryRoot)
-        val createResult = runCommand(
-            worktreePath,
-            listOf("gh", "repo", "create", repoName, "--private", "--source", ".", "--remote", "origin"),
-            failOnError = false,
-            timeoutMs = 30_000
-        )
-        if (!createResult.isSuccess && !hasOriginRemote(worktreePath)) {
-            return false
-        }
-
-        runGit(
-            worktreePath,
-            "push",
-            "--set-upstream",
-            "origin",
-            "refs/heads/$baseBranch:refs/heads/$baseBranch",
-            failOnError = false,
-            timeoutMs = 30_000
-        )
-        return hasOriginRemote(worktreePath)
-    }
-
     private suspend fun repositoryCommonRoot(worktreePath: Path): Path {
         val commonDirRaw = gitOutput(worktreePath, "rev-parse", "--git-common-dir").trim()
         val commonDir = Path.of(commonDirRaw).let {
@@ -1612,28 +1585,6 @@ class GitWorkspaceService(
         }
         return commonDir.parent?.toAbsolutePath()?.normalize()
             ?: worktreePath.toAbsolutePath().normalize()
-    }
-
-    private suspend fun chooseGitHubRepositoryName(worktreePath: Path, repositoryRoot: Path): String {
-        val baseName = slugify(repositoryRoot.fileName?.toString().orEmpty()).ifBlank { "cotor-company" }
-        val attempts = buildList {
-            add(baseName)
-            add("$baseName-${System.currentTimeMillis().toString().takeLast(6)}")
-            add("$baseName-${worktreePath.fileName?.toString().orEmpty().take(8)}")
-        }.distinct()
-
-        attempts.forEach { candidate ->
-            val probe = runCommand(
-                worktreePath,
-                listOf("gh", "repo", "view", candidate, "--json", "name"),
-                failOnError = false,
-                timeoutMs = 10_000
-            )
-            if (!probe.isSuccess) {
-                return candidate
-            }
-        }
-        return attempts.last()
     }
 
     /**

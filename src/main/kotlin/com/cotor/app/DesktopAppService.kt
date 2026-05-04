@@ -8767,6 +8767,30 @@ class DesktopAppService(
         return computeGitHubPublishStatus(state = state, company = company)
     }
 
+    suspend fun configureGitHubOrigin(companyId: String, remoteUrl: String): GitHubPublishStatus {
+        val state = stateStore.load()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val repository = state.repositories.firstOrNull { it.id == company.repositoryId }
+            ?: throw IllegalStateException("Company repository is not available.")
+        val normalizedUrl = gitWorkspaceService.configureOriginRemote(Path.of(repository.localPath), remoteUrl)
+        stateMutex.withLock {
+            val current = stateStore.load()
+            stateStore.save(
+                current.copy(
+                    repositories = current.repositories.map {
+                        if (it.id == repository.id) {
+                            it.copy(remoteUrl = normalizedUrl, updatedAt = System.currentTimeMillis())
+                        } else {
+                            it
+                        }
+                    }
+                )
+            )
+        }
+        return githubPublishStatus(companyId)
+    }
+
     private suspend fun computeGitHubPublishStatus(
         state: DesktopAppState,
         company: Company? = null

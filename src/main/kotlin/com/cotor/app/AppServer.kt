@@ -1135,6 +1135,16 @@ internal fun Application.cotorAppModule(
                     }
                 }
 
+                post("/{companyId}/github/origin") {
+                    if (!requireToken(token)) return@post
+                    val companyId = call.parameters["companyId"]
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    val request = call.receive<ConfigureGitHubOriginRequest>()
+                    respondDesktopRequest {
+                        desktopService.configureGitHubOrigin(companyId, request.remoteUrl)
+                    }
+                }
+
                 patch("/{companyId}") {
                     if (!requireToken(token)) return@patch
                     val companyId = call.parameters["companyId"]

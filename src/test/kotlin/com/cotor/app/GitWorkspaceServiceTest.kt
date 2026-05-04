@@ -362,6 +362,26 @@ class GitWorkspaceServiceTest : FunSpec({
         processManager.remainingSteps() shouldBe 0
     }
 
+    test("ensureGitHubPublishReady does not create a GitHub repository when origin is missing") {
+        val repositoryRoot = Files.createTempDirectory("git-workspace-no-origin-ready")
+        val processManager = FakeProcessManager(
+            listOf(
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(1, "", "", false)
+                )
+            )
+        )
+        val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
+
+        val readiness = service.ensureGitHubPublishReady(repositoryRoot, "master")
+
+        readiness.ready shouldBe false
+        readiness.originUrl.shouldBeNull()
+        readiness.error shouldBe "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work."
+        processManager.remainingSteps() shouldBe 0
+    }
+
     test("ensureGitHubPublishReady repairs a bootstrap-only base branch by aligning it to origin") {
         val repositoryRoot = Files.createTempDirectory("git-workspace-bootstrap-repair")
         val processManager = FakeProcessManager(
@@ -457,6 +477,75 @@ class GitWorkspaceServiceTest : FunSpec({
         val environment = service.inspectGitHubPublishEnvironment(repositoryRoot, "master")
 
         environment.originUrl shouldBe "https://github.com/heodongun/cotor.git"
+        processManager.remainingSteps() shouldBe 0
+    }
+
+    test("inspectGitHubPublishEnvironment reports missing origin without bootstrap availability") {
+        val repositoryRoot = Files.createTempDirectory("git-workspace-no-origin-environment")
+        val processManager = FakeProcessManager(
+            listOf(
+                FakeProcessManager.Step(
+                    listOf("gh", "--version"),
+                    ProcessResult(0, "gh version 2.0.0\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("gh", "auth", "status"),
+                    ProcessResult(0, "Logged in\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(1, "", "", false)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(1, "", "", false)
+                )
+            )
+        )
+        val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
+
+        val environment = service.inspectGitHubPublishEnvironment(repositoryRoot, "master")
+
+        environment.ghInstalled shouldBe true
+        environment.ghAuthenticated shouldBe true
+        environment.originConfigured shouldBe false
+        environment.bootstrapAvailable shouldBe false
+        environment.message shouldBe "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically."
+        processManager.remainingSteps() shouldBe 0
+    }
+
+    test("configureOriginRemote adds an existing GitHub repository as origin without creating a repo") {
+        val repositoryRoot = Files.createTempDirectory("git-workspace-configure-origin")
+        val remoteUrl = "https://github.com/heodongun/cotor.git"
+        val processManager = FakeProcessManager(
+            listOf(
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(1, "", "", false)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "remote", "add", "origin", remoteUrl),
+                    ProcessResult(0, "", "", true)
+                )
+            )
+        )
+        val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
+
+        service.configureOriginRemote(repositoryRoot, remoteUrl) shouldBe remoteUrl
+
+        processManager.remainingSteps() shouldBe 0
+    }
+
+    test("configureOriginRemote rejects credential-bearing GitHub URLs") {
+        val repositoryRoot = Files.createTempDirectory("git-workspace-configure-origin-credentials")
+        val processManager = FakeProcessManager(emptyList())
+        val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
+
+        val error = shouldThrow<IllegalArgumentException> {
+            service.configureOriginRemote(repositoryRoot, "https://user:secret@github.com/heodongun/cotor.git")
+        }
+
+        error.message shouldContain "without credentials"
         processManager.remainingSteps() shouldBe 0
     }
 
@@ -1071,8 +1160,7 @@ class GitWorkspaceServiceTest : FunSpec({
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Local-only execution (codex)"), ProcessResult(0, "[branch abc1234] Local-only execution\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(1, "", "", false)),
-                FakeProcessManager.Step(listOf("gh", "auth", "status"), ProcessResult(1, "", "not logged in", false))
+                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(1, "", "", false))
             )
         )
         val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
@@ -1101,34 +1189,16 @@ class GitWorkspaceServiceTest : FunSpec({
         processManager.remainingSteps() shouldBe 0
     }
 
-    test("publishRun creates a GitHub remote when origin is missing and gh is available") {
-        val worktree = Files.createTempDirectory("git-workspace-service-auto-github")
-        val repoName = worktree.fileName.toString()
+    test("publishRun does not create a GitHub remote when origin is missing and gh is available") {
+        val worktree = Files.createTempDirectory("git-workspace-service-no-auto-github")
         val processManager = FakeProcessManager(
             listOf(
                 FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, " M README.md\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "add", "-A"), ProcessResult(0, "", "", true)),
-                FakeProcessManager.Step(listOf("git", "commit", "-m", "Auto publish to GitHub (codex)"), ProcessResult(0, "[branch abc1234] Auto publish to GitHub\n", "", true)),
+                FakeProcessManager.Step(listOf("git", "commit", "-m", "Do not auto publish to GitHub (codex)"), ProcessResult(0, "[branch abc1234] Do not auto publish to GitHub\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(1, "", "", false)),
-                FakeProcessManager.Step(listOf("gh", "auth", "status"), ProcessResult(0, "logged in", "", true)),
-                FakeProcessManager.Step(listOf("git", "rev-parse", "--git-common-dir"), ProcessResult(0, ".git\n", "", true)),
-                FakeProcessManager.Step(listOf("gh", "repo", "view", repoName, "--json", "name"), ProcessResult(1, "", "not found", false)),
-                FakeProcessManager.Step(listOf("gh", "repo", "create", repoName, "--private", "--source", ".", "--remote", "origin"), ProcessResult(0, "created", "", true)),
-                FakeProcessManager.Step(listOf("git", "push", "--set-upstream", "origin", "refs/heads/master:refs/heads/master"), ProcessResult(0, "", "", true)),
-                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(0, "https://github.com/heodongun/$repoName.git\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "ls-remote", "--heads", "origin", "master"), ProcessResult(0, "abc123\trefs/heads/master\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(0, "https://github.com/heodongun/$repoName.git\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "ls-remote", "--heads", "origin", "master"), ProcessResult(0, "abc123\trefs/heads/master\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "fetch", "--no-tags", "origin", "refs/heads/master:refs/remotes/origin/master"), ProcessResult(0, "", "", true)),
-                FakeProcessManager.Step(listOf("git", "rebase", "refs/remotes/origin/master"), ProcessResult(0, "Current branch codex/cotor/auto-publish/codex is up to date.\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "rev-list", "--count", "refs/remotes/origin/master..HEAD"), ProcessResult(0, "1\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "push", "--force-with-lease", "--set-upstream", "origin", "HEAD:codex/cotor/auto-publish/codex"), ProcessResult(0, "", "", true)),
-                FakeProcessManager.Step(listOf("gh", "pr", "list", "--head", "codex/cotor/auto-publish/codex", "--state", "open", "--json", "number,url,state,reviewDecision,mergeStateStatus,mergeable,statusCheckRollup,autoMergeRequest,baseRefName,headRefName,updatedAt"), ProcessResult(0, "[]", "", true)),
-                FakeProcessManager.Step(listOf("gh", "pr", "create", "--base", "master", "--head", "codex/cotor/auto-publish/codex", "--title", "[codex] Auto publish to GitHub", "--body", expectedPullRequestBody("Auto publish to GitHub", "Ship this change to GitHub.", "codex/cotor/auto-publish/codex")), ProcessResult(0, "https://github.com/heodongun/cotor/pull/124\n", "", true)),
-                FakeProcessManager.Step(listOf("gh", "pr", "view", "codex/cotor/auto-publish/codex", "--json", "number,url,state,reviewDecision,mergeStateStatus,mergeable,statusCheckRollup,autoMergeRequest,baseRefName,headRefName,updatedAt"), ProcessResult(0, """{"number":124,"url":"https://github.com/heodongun/cotor/pull/124","state":"OPEN","reviewDecision":"REVIEW_REQUIRED","mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","statusCheckRollup":null,"autoMergeRequest":null,"baseRefName":"master","headRefName":"codex/cotor/auto-publish/codex","updatedAt":"2026-04-14T00:00:00Z"}""", "", true))
+                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(1, "", "", false))
             )
         )
         val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
@@ -1137,7 +1207,7 @@ class GitWorkspaceServiceTest : FunSpec({
             task = AgentTask(
                 id = "task-4",
                 workspaceId = "ws-1",
-                title = "Auto publish to GitHub",
+                title = "Do not auto publish to GitHub",
                 prompt = "Ship this change to GitHub.",
                 agents = listOf("codex"),
                 status = DesktopTaskStatus.RUNNING,
@@ -1146,15 +1216,14 @@ class GitWorkspaceServiceTest : FunSpec({
             ),
             agentName = "codex",
             worktreePath = worktree,
-            branchName = "codex/cotor/auto-publish/codex",
+            branchName = "codex/cotor/no-auto-publish/codex",
             baseBranch = "master"
         )
 
         publish.commitSha shouldBe "abc1234567890"
-        publish.pushedBranch shouldBe "codex/cotor/auto-publish/codex"
-        publish.pullRequestNumber shouldBe 124
-        publish.pullRequestUrl shouldBe "https://github.com/heodongun/cotor/pull/124"
-        publish.error.shouldBeNull()
+        publish.pushedBranch.shouldBeNull()
+        publish.pullRequestUrl.shouldBeNull()
+        publish.error shouldBe "No GitHub remote configured; kept local commit only"
         processManager.remainingSteps() shouldBe 0
     }
 

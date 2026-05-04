@@ -196,6 +196,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect runtime health, CEO approval/blocked/review attention, and the latest runtime signal from the compact company summary banner
 - inspect estimated spend and adjust daily/monthly cost guardrails without leaving the company console
 - warn during company creation when GitHub PR publishing is required but the repository is not ready for `gh`/`origin` publishing
+- connect an existing GitHub repository from the GitHub settings panel without auto-creating a remote repository when `origin` is missing
 - start, stop, and inspect the local runtime loop
 - keep an explicit company stop sticky until the user presses Start again, even if active autonomous goals still exist
 - keep active company work on a fast monitoring cadence so stale `RUNNING` tasks/runs are reconciled sooner

@@ -622,6 +622,45 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("company github origin route connects an existing remote when authorized") {
+        coEvery {
+            desktopService.configureGitHubOrigin("company-1", "https://github.com/example/cotor.git")
+        } returns GitHubPublishStatus(
+            policy = CodePublishMode.REQUIRE_GITHUB_PR,
+            ghInstalled = true,
+            ghAuthenticated = true,
+            originConfigured = true,
+            originUrl = "https://github.com/example/cotor.git",
+            repositoryPath = "/tmp/cotor",
+            companyId = "company-1",
+            companyName = "Example Co",
+            message = "Origin remote is configured for this repository."
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/companies/company-1/github/origin") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"remoteUrl":"https://github.com/example/cotor.git"}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"originConfigured\":true"
+            response.bodyAsText() shouldContain "https://github.com/example/cotor.git"
+            coVerify(exactly = 1) {
+                desktopService.configureGitHubOrigin("company-1", "https://github.com/example/cotor.git")
+            }
+        }
+    }
+
     test("evidence files route rejects blank path") {
         testApplication {
             application {
