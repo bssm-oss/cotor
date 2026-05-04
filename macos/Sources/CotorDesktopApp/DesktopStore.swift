@@ -473,7 +473,7 @@ final class DesktopStore: ObservableObject {
     }
 
     var selectedIssue: IssueRecord? {
-        dashboard.issues.first { $0.id == selectedIssueID }
+        issues.first { $0.id == selectedIssueID }
     }
 
     var issueComposerCompany: CompanyRecord? {
@@ -492,7 +492,7 @@ final class DesktopStore: ObservableObject {
     }
 
     var selectedReviewQueueItem: ReviewQueueItemRecord? {
-        guard let selectedIssueID else { return nil }
+        guard let selectedIssueID = selectedIssue?.id else { return nil }
         return dashboard.reviewQueue
             .filter { $0.issueId == selectedIssueID }
             .sorted { lhs, rhs in lhs.updatedAt > rhs.updatedAt }
@@ -518,17 +518,34 @@ final class DesktopStore: ObservableObject {
             activeGitHubPublishStatus.originConfigured
     }
 
+    func scopedOpsMetrics(companyID: String?) -> OpsMetricSnapshotRecord {
+        let scopedGoals = dashboard.goals.filter { companyID == nil || $0.companyId == companyID }
+        let scopedIssues = dashboard.issues.filter { companyID == nil || $0.companyId == companyID }
+        let scopedReviewQueue = dashboard.reviewQueue.filter { companyID == nil || $0.companyId == companyID }
+
+        return OpsMetricSnapshotRecord(
+            openGoals: scopedGoals.count { $0.status != "COMPLETED" },
+            activeIssues: scopedIssues.count {
+                ["PLANNED", "DELEGATED", "IN_PROGRESS", "IN_REVIEW", "READY_FOR_CEO"].contains($0.status)
+            },
+            blockedIssues: scopedIssues.count { $0.status == "BLOCKED" },
+            readyToMergeCount: scopedReviewQueue.count { $0.status == "READY_FOR_CEO" || $0.status == "READY_TO_MERGE" },
+            mergedCount: scopedReviewQueue.count { $0.status == "MERGED" },
+            lastUpdatedAt: dashboard.opsMetrics.lastUpdatedAt
+        )
+    }
+
     var currentWorkspaceBaseBranch: String {
         selectedWorkspace?.baseBranch ?? selectedCompany?.defaultBaseBranch ?? selectedRepository?.defaultBranch ?? pendingWorkspaceBaseBranch
     }
 
     var selectedTask: TaskRecord? {
         if let selectedTaskID,
-           let explicit = dashboard.tasks.first(where: { $0.id == selectedTaskID }) {
+           let explicit = tasks.first(where: { $0.id == selectedTaskID }) {
             return explicit
         }
         if let selectedIssueID {
-            return dashboard.tasks
+            return tasks
                 .filter { $0.issueId == selectedIssueID }
                 .sorted { lhs, rhs in lhs.updatedAt > rhs.updatedAt }
                 .first
@@ -1265,11 +1282,11 @@ final class DesktopStore: ObservableObject {
             return
         }
 
-        if let issueId = selectedIssueID {
+        if let issueId = selectedIssue?.id {
             do {
                 let fetchedIssueExecutionDetails = try await api.issueExecutionDetails(issueId: issueId)
                     .sorted { lhs, rhs in lhs.updatedAt > rhs.updatedAt }
-                guard selectedIssueID == issueId else { return }
+                guard selectedIssue?.id == issueId else { return }
                 issueExecutionDetails = fetchedIssueExecutionDetails
             } catch {
                 issueExecutionDetails = []
@@ -2053,7 +2070,7 @@ final class DesktopStore: ObservableObject {
             return
         }
 
-        let issueId = selectedIssueID
+        let issueId = selectedIssue?.id
         do {
             let snapshot = try await runWithEmbeddedBackendRecovery {
                 try await api.companyMemorySnapshot(
@@ -2062,7 +2079,7 @@ final class DesktopStore: ObservableObject {
                     agentProfileId: nil
                 )
             }
-            guard (selectedCompanyID ?? selectedCompany?.id) == companyId, selectedIssueID == issueId else { return }
+            guard (selectedCompanyID ?? selectedCompany?.id) == companyId, selectedIssue?.id == issueId else { return }
             companyMemorySnapshot = snapshot
         } catch is CancellationError {
             return
