@@ -41,6 +41,12 @@ cd macos && swift build
 | `plugin` | repo checkout | `./gradlew run --args='plugin --help'` | help 출력 | automated |
 | `agent` | repo checkout | `./gradlew run --args='agent --help'` | help 출력 | automated |
 | `app-server` | repo checkout | `./gradlew run --args='app-server --help'` | help 출력 | automated |
+| `capability` | repo checkout | `./gradlew run --args='capability list'` | capability 카탈로그 출력 | automated |
+| `provider` | repo checkout | `./gradlew run --args='provider list'` | 네트워크 호출 없이 provider 카탈로그 출력 | automated |
+| `skill` | repo checkout | `./gradlew run --args='skill list'` | 내장 skill 카탈로그 출력 | automated |
+| `browser` | sandbox company + agent | `cotor browser smoke --company <id> --agent <id> --url http://127.0.0.1:3000` | backend gate 결과가 `READY` 또는 capability denial로 출력 | manual |
+| `video` | sandbox company + agent | `cotor video plan --company <id> --agent <id>` | backend gate 결과가 `READY` 또는 capability denial로 출력 | manual |
+| `evidence` | local provenance data | `cotor evidence pr <number>` | 토큰 누출 없이 PR evidence bundle 출력 | manual |
 
 실패를 기록할 때는 다음을 남깁니다.
 
@@ -64,6 +70,9 @@ cd macos && swift build
 | board/canvas 전환 | 선택 이슈를 잃지 않고 보드 전환 |
 | session card 클릭 | 카드 어느 곳이든 클릭 시 선택 전환 |
 | base branch 업데이트 | backend workspace 갱신 후 TUI 세션 재시작 |
+| Meeting Room 지도 | 저장소 `지도`가 기술적인 그래프 파일 경로를 노출하지 않고 렌더링되며, missing/empty 상태가 읽기 쉬움 |
+| GitHub readiness card | company settings가 `gh`/auth/origin 상태를 표시하고 credential 포함 remote URL을 redaction |
+| capability/provider controls | secret 값을 저장하지 않고 backend capability/provider payload 표시 |
 
 ## 4. 자율 Company 검증 매트릭스
 
@@ -80,9 +89,12 @@ cd macos && swift build
 | 활동 피드 | 회사 활동이 표시됨 | live |
 | 런타임 상태 | status/start/stop 응답 | live |
 | ready-to-merge 루프 | `READY_TO_MERGE` 항목 머지 가능 | live |
+| GitHub mutation capability gate | PR comment/review/close/merge가 company+agent subject와 설정된 capability/기록된 approval을 요구 | live |
+| browser/video planning gates | 외부 browser domain과 video render/transcode/remote generation은 capability 허용 전 기본 거부 | live |
+| provenance evidence | action success hook이 반환한 PR/file/branch evidence가 local evidence graph에 기록 | live |
 | 다중 회사 분리 | A 회사 상태가 B 회사로 새지 않음 | live in state model |
 | 후속 이슈 생성 | n/a | 미구현 |
-| 정책 엔진 | n/a | 미구현 |
+| 정책 엔진 | action-level allow/deny/approval simulation 및 enforcement | live v1 |
 | 외부 Linear sync | n/a | 현재 빌드 미구현 |
 
 ## 5. 이슈 로그 템플릿

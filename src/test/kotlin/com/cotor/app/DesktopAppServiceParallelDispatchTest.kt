@@ -69,7 +69,7 @@ class DesktopAppServiceParallelDispatchTest : FunSpec({
                 companyId = company.id,
                 agentIds = seededAgents.take(2).map { it.id },
                 agentCli = "opencode",
-                model = "opencode/nemotron-3-super-free"
+                model = "opencode-go/deepseek-v4-flash"
             )
 
             val state = stateStore.load()

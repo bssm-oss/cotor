@@ -19,11 +19,21 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.time.Duration
 
 /**
  * Claude AI Plugin (Anthropic)
@@ -458,8 +468,140 @@ class CursorPlugin : AgentPlugin {
 }
 
 /**
+ * Local model plugin for Ollama and LM Studio/OpenAI-compatible servers.
+ */
+class LocalModelPlugin : AgentPlugin {
+    override val metadata = AgentMetadata(
+        name = "local-model",
+        version = "1.0.0",
+        description = "Local Gemma/Ollama/LM Studio model connection",
+        author = "Cotor Team",
+        supportedFormats = listOf(DataFormat.JSON, DataFormat.TEXT)
+    )
+
+    override val parameterSchema = AgentParameterSchema(
+        parameters = listOf(
+            AgentParameter(
+                name = "provider",
+                type = ParameterType.STRING,
+                required = false,
+                description = "Local model provider: ollama or lmstudio.",
+                defaultValue = "ollama"
+            ),
+            AgentParameter(
+                name = "baseUrl",
+                type = ParameterType.STRING,
+                required = false,
+                description = "Provider base URL.",
+                defaultValue = LocalModelDefaults.OLLAMA_BASE_URL
+            ),
+            AgentParameter(
+                name = "model",
+                type = ParameterType.STRING,
+                required = false,
+                description = "Local model name.",
+                defaultValue = LocalModelDefaults.GEMMA4_MODEL
+            )
+        )
+    )
+
+    private val json = Json { ignoreUnknownKeys = true }
+    private val client = HttpClient.newBuilder().build()
+
+    override suspend fun execute(
+        context: ExecutionContext,
+        processManager: ProcessManager
+    ): PluginExecutionOutput {
+        val prompt = context.input ?: throw IllegalArgumentException("Input prompt is required for local model")
+        val provider = normalizeProvider(context.parameters["provider"] ?: context.agentName)
+        val model = LocalModelDefaults.normalizeModel(context.parameters["model"]) ?: LocalModelDefaults.GEMMA4_MODEL
+        val baseUrl = when (provider) {
+            "lmstudio" -> LocalModelDefaults.normalizeBaseUrl(context.parameters["baseUrl"], LocalModelDefaults.LM_STUDIO_BASE_URL)
+            else -> LocalModelDefaults.normalizeBaseUrl(context.parameters["baseUrl"], LocalModelDefaults.OLLAMA_BASE_URL)
+        }
+        return when (provider) {
+            "lmstudio" -> executeLmStudio(baseUrl, model, prompt, context.timeout)
+            else -> executeOllama(baseUrl, model, prompt, context.timeout)
+        }
+    }
+
+    override fun validateInput(input: String?): ValidationResult {
+        if (input.isNullOrBlank()) {
+            return ValidationResult.Failure(listOf("Input prompt is required for local model"))
+        }
+        return ValidationResult.Success
+    }
+
+    private fun normalizeProvider(raw: String): String =
+        when (raw.trim().lowercase()) {
+            "lmstudio", "lm-studio", "lm_studio", "lm studio" -> "lmstudio"
+            else -> "ollama"
+        }
+
+    private fun executeOllama(baseUrl: String, model: String, prompt: String, timeoutMs: Long): PluginExecutionOutput {
+        val body = buildJsonObject {
+            put("model", model)
+            put("stream", false)
+            put(
+                "messages",
+                buildJsonArray {
+                    addMessage("user", prompt)
+                }
+            )
+        }.toString()
+        val response = postJson("$baseUrl/api/chat", body, timeoutMs)
+        val parsed = json.parseToJsonElement(response.body()).jsonObject
+        val text = parsed["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+            ?: parsed["response"]?.jsonPrimitive?.contentOrNull
+            ?: response.body()
+        return PluginExecutionOutput(text)
+    }
+
+    private fun executeLmStudio(baseUrl: String, model: String, prompt: String, timeoutMs: Long): PluginExecutionOutput {
+        val body = buildJsonObject {
+            put("model", model)
+            put("stream", false)
+            put(
+                "messages",
+                buildJsonArray {
+                    addMessage("user", prompt)
+                }
+            )
+        }.toString()
+        val response = postJson("$baseUrl/chat/completions", body, timeoutMs)
+        val parsed = json.parseToJsonElement(response.body()).jsonObject
+        val text = parsed["choices"]?.jsonArray?.firstOrNull()
+            ?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+            ?: response.body()
+        return PluginExecutionOutput(text)
+    }
+
+    private fun postJson(url: String, body: String, timeoutMs: Long): HttpResponse<String> {
+        val request = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofMillis(timeoutMs.coerceAtLeast(1_000L)))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build()
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() !in 200..299) {
+            throw AgentExecutionException("Local model request failed (${response.statusCode()}): ${response.body()}")
+        }
+        return response
+    }
+
+    private fun kotlinx.serialization.json.JsonArrayBuilder.addMessage(role: String, content: String) {
+        add(
+            buildJsonObject {
+                put("role", role)
+                put("content", content)
+            }
+        )
+    }
+}
+
+/**
  * OpenCode Agent Plugin
- * Executes: opencode run --format json <prompt>
+ * Executes: opencode run --format json --file <prompt-file> <instruction>
  * Default permission: "allow" for all methods (configured in opencode.json)
  */
 class OpenCodePlugin : AgentPlugin {
@@ -537,7 +679,19 @@ class OpenCodePlugin : AgentPlugin {
         // instead of launching an interactive TUI. Events include step_start, text,
         // step_finish, etc. We parse text events to extract the response content.
         // Default permission is "allow" for all methods (configured via opencode yolo mode).
-        // Command: opencode run --model <model> --format json <prompt>
+        // Keep the full task prompt out of process arguments; it may contain repo
+        // context or user text that should not be visible via `ps`.
+        val promptFile = withContext(Dispatchers.IO) {
+            Files.createTempFile("cotor-opencode-prompt-", ".md").also { path ->
+                runCatching {
+                    Files.setPosixFilePermissions(
+                        path,
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")
+                    )
+                }
+                Files.writeString(path, prompt)
+            }
+        }
         val command = buildList {
             add("opencode")
             add("run")
@@ -547,17 +701,24 @@ class OpenCodePlugin : AgentPlugin {
             }
             add("--format")
             add("json")
-            add(prompt)
+            add("Execute the instructions in the attached prompt file.")
+            add("--file=$promptFile")
         }
 
-        return processManager.executeProcess(
-            command = command,
-            input = null,
-            environment = context.environment,
-            timeout = context.timeout,
-            workingDirectory = context.workingDirectory,
-            onStart = context.onProcessStarted
-        )
+        return try {
+            processManager.executeProcess(
+                command = command,
+                input = null,
+                environment = context.environment,
+                timeout = context.timeout,
+                workingDirectory = context.workingDirectory,
+                onStart = context.onProcessStarted
+            )
+        } finally {
+            withContext(Dispatchers.IO) {
+                runCatching { Files.deleteIfExists(promptFile) }
+            }
+        }
     }
 
     private suspend fun discoverFallbackOpenCodeModel(
@@ -598,7 +759,7 @@ class OpenCodePlugin : AgentPlugin {
         if (!result.isSuccess) return emptyList()
         return result.stdout.lineSequence()
             .map { it.trim() }
-            .filter { it.startsWith("opencode/") }
+            .filter(OpenCodeDefaults::isSelectableModel)
             .toList()
     }
 

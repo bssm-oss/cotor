@@ -144,14 +144,20 @@ struct DesktopStoreTests {
                 appHome: baseSettings.appHome,
                 managedReposRoot: baseSettings.managedReposRoot,
                 availableAgents: ["opencode", "codex"],
-                availableCliAgents: ["opencode", "codex"],
+                availableCliAgents: ["opencode", "codex", "gemma4", "ollama", "lmstudio"],
                 availableAgentModels: [
-                    "opencode": ["opencode/big-pickle", "opencode/nemotron-3-super-free"],
-                    "codex": ["openai/gpt-5.5"]
+                    "opencode": ["opencode/big-pickle", "opencode-go/deepseek-v4-flash"],
+                    "codex": ["openai/gpt-5.5"],
+                    "gemma4": ["gemma4:e2b"],
+                    "ollama": ["gemma4:e2b"],
+                    "lmstudio": ["gemma4:e2b"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "opencode/nemotron-3-super-free",
-                    "codex": "openai/gpt-5.5"
+                    "opencode": "opencode-go/deepseek-v4-flash",
+                    "codex": "openai/gpt-5.5",
+                    "gemma4": "gemma4:e2b",
+                    "ollama": "gemma4:e2b",
+                    "lmstudio": "gemma4:e2b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -180,10 +186,190 @@ struct DesktopStoreTests {
         )
 
         store.selectNewCompanyAgentCli("opencode")
-        #expect(store.newCompanyAgentModel == "opencode/nemotron-3-super-free")
+        #expect(store.newCompanyAgentModel == "opencode-go/deepseek-v4-flash")
 
         store.selectNewCompanyAgentCli("codex")
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
+
+        store.selectNewCompanyAgentCli("gemma4")
+        #expect(store.newCompanyAgentModel == "gemma4:e2b")
+
+        store.selectNewCompanyAgentCli("lmstudio")
+        #expect(store.newCompanyAgentModel == "gemma4:e2b")
+    }
+
+    @Test
+    func localAgentSelectionDoesNotAutoFillUndiscoveredDefaultModel() {
+        let store = DesktopStore()
+        let baseSettings = DashboardPayload.empty.settings
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DesktopSettingsPayload(
+                appHome: baseSettings.appHome,
+                managedReposRoot: baseSettings.managedReposRoot,
+                availableAgents: ["codex", "gemma4", "lmstudio"],
+                availableCliAgents: ["codex", "gemma4", "lmstudio"],
+                availableAgentModels: [
+                    "codex": ["openai/gpt-5.5"]
+                ],
+                defaultAgentModels: [
+                    "codex": "openai/gpt-5.5",
+                    "gemma4": "gemma4:e2b",
+                    "lmstudio": "gemma4:e2b"
+                ],
+                recentCompanies: baseSettings.recentCompanies,
+                defaultLaunchMode: baseSettings.defaultLaunchMode,
+                backendSettings: baseSettings.backendSettings,
+                githubPublishStatus: baseSettings.githubPublishStatus,
+                linearSettings: baseSettings.linearSettings,
+                backendStatuses: baseSettings.backendStatuses,
+                shortcuts: baseSettings.shortcuts
+            ),
+            companies: [],
+            companyAgentDefinitions: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: []
+        )
+
+        store.selectNewCompanyAgentCli("codex")
+        #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
+
+        store.selectNewCompanyAgentCli("gemma4")
+        #expect(store.newCompanyAgentModel == "")
+
+        store.selectNewCompanyAgentCli("lmstudio")
+        #expect(store.newCompanyAgentModel == "")
+    }
+
+    @Test
+    func localAgentSelectionUsesDiscoveredGemmaModelWhenDefaultIsNotInstalled() {
+        let store = DesktopStore()
+        let baseSettings = DashboardPayload.empty.settings
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DesktopSettingsPayload(
+                appHome: baseSettings.appHome,
+                managedReposRoot: baseSettings.managedReposRoot,
+                availableAgents: ["gemma4"],
+                availableCliAgents: ["gemma4"],
+                availableAgentModels: [
+                    "gemma4": ["google/gemma-4-31b-it"]
+                ],
+                defaultAgentModels: [
+                    "gemma4": "gemma4:e2b"
+                ],
+                recentCompanies: baseSettings.recentCompanies,
+                defaultLaunchMode: baseSettings.defaultLaunchMode,
+                backendSettings: baseSettings.backendSettings,
+                githubPublishStatus: baseSettings.githubPublishStatus,
+                linearSettings: baseSettings.linearSettings,
+                backendStatuses: baseSettings.backendStatuses,
+                shortcuts: baseSettings.shortcuts
+            ),
+            companies: [],
+            companyAgentDefinitions: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: []
+        )
+
+        store.selectNewCompanyAgentCli("gemma4")
+        #expect(store.newCompanyAgentModel == "google/gemma-4-31b-it")
+    }
+
+    @Test
+    func activeGitHubConnectionReadyRequiresGhAndOrigin() {
+        let store = DesktopStore()
+        let baseSettings = DashboardPayload.empty.settings
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DesktopSettingsPayload(
+                appHome: baseSettings.appHome,
+                managedReposRoot: baseSettings.managedReposRoot,
+                availableAgents: baseSettings.availableAgents,
+                availableCliAgents: baseSettings.availableCliAgents,
+                recentCompanies: baseSettings.recentCompanies,
+                defaultLaunchMode: baseSettings.defaultLaunchMode,
+                backendSettings: baseSettings.backendSettings,
+                githubPublishStatus: GitHubPublishStatusPayload(
+                    policy: "REQUIRE_GITHUB_PR",
+                    ghInstalled: true,
+                    ghAuthenticated: true,
+                    originConfigured: false,
+                    originUrl: nil,
+                    bootstrapAvailable: false,
+                    repositoryPath: "/tmp/cotor",
+                    companyId: "company",
+                    companyName: "Test Company",
+                    message: "origin missing"
+                ),
+                linearSettings: baseSettings.linearSettings,
+                backendStatuses: baseSettings.backendStatuses,
+                shortcuts: baseSettings.shortcuts
+            ),
+            companies: [],
+            companyAgentDefinitions: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: []
+        )
+
+        #expect(store.activeGitHubConnectionReady == false)
+
+        store.selectedCompanyGitHubStatus = GitHubPublishStatusPayload(
+            policy: "REQUIRE_GITHUB_PR",
+            ghInstalled: true,
+            ghAuthenticated: true,
+            originConfigured: true,
+            originUrl: "https://github.com/example/cotor.git",
+            bootstrapAvailable: false,
+            repositoryPath: "/tmp/cotor",
+            companyId: "company",
+            companyName: "Test Company",
+            message: "ready"
+        )
+
+        #expect(store.activeGitHubConnectionReady == true)
     }
 
     @Test
@@ -205,13 +391,13 @@ struct DesktopStoreTests {
     func batchEditPayloadKeepsExplicitModelAndCapabilities() {
         let payload = OrgProfileBatchEditPayloadDraft.build(
             batchAgent: "opencode",
-            batchModel: " opencode/nemotron-3-super-free ",
+            batchModel: " opencode-go/deepseek-v4-flash ",
             batchCapabilities: "qa, review, , deploy",
             batchEnabled: false
         )
 
         #expect(payload.agentCli == "opencode")
-        #expect(payload.model == "opencode/nemotron-3-super-free")
+        #expect(payload.model == "opencode-go/deepseek-v4-flash")
         #expect(payload.specialties == ["qa", "review", "deploy"])
         #expect(payload.enabled == false)
     }

@@ -50,6 +50,10 @@ struct DesktopAPI {
         return try await get(path: "api/app/companies/\(companyId)/memory-snapshot", query: query)
     }
 
+    func companyGitHubStatus(companyId: String) async throws -> GitHubPublishStatusPayload {
+        try await get(path: "api/app/companies/\(companyId)/github/status")
+    }
+
     func health() async throws -> Bool {
         struct HealthPayload: Decodable {
             let status: String?

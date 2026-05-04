@@ -1025,7 +1025,7 @@ struct MeetingRoomView: View {
         case .agentWorking:
             return language("working", "작업")
         case .a2aMessage:
-            return "A2A"
+            return language("note", "메모")
         case .agentToReview:
             return language("review", "리뷰")
         case .reviewToMerge:
@@ -1699,15 +1699,15 @@ private struct MeetingRoomProjectionZoneSheet: View {
         case .planningBoard:
             return language("Planning board", "기획 보드")
         case .reviewDesk:
-            return language("Review desk", "리뷰 데스크")
+            return language("Reviews", "리뷰")
         case .blockerZone:
             return language("Blocker zone", "차단 구역")
         case .costPanel:
             return language("Cost panel", "비용 패널")
         case .activityWall:
-            return language("Activity wall", "활동 월")
+            return language("Activity", "활동")
         case .mergeLane:
-            return language("Merge lane", "머지 레인")
+            return language("Merge", "머지")
         }
     }
 

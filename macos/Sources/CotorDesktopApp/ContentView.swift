@@ -95,6 +95,20 @@ private enum CompanyOverviewSurface: CaseIterable, Identifiable {
     }
 }
 
+private enum MeetingRoomSurface: CaseIterable, Identifiable {
+    case floor
+    case map
+
+    var id: String {
+        switch self {
+        case .floor:
+            return "floor"
+        case .map:
+            return "map"
+        }
+    }
+}
+
 struct CompanySidebarDisclosureState {
     var isCompanyDraftExpanded = false
     var isAdvancedSettingsExpanded = false
@@ -568,7 +582,7 @@ private struct DesktopTopBar: View {
     private var topBarSubtitle: String {
         switch store.shellMode {
         case .company:
-            return store.selectedGoal?.title ?? store.selectedCompany?.name ?? l("Autonomous company console", "자율 운영 컴퍼니 콘솔")
+            return store.selectedGoal?.title ?? store.selectedCompany?.name ?? l("Autonomous company console", "자율 운영 회사 콘솔")
         case .tui:
             return store.selectedWorkspace?.name ?? store.selectedRepository?.name ?? l("Workspace TUI", "워크스페이스 TUI")
         }
@@ -743,14 +757,14 @@ private struct SidebarView: View {
                 companyNavButton(
                     .room,
                     title: l("Meeting Room", "미팅룸"),
-                    subtitle: l("Live wall, seats, and review desk", "라이브 월, 좌석, 리뷰 데스크"),
+                    subtitle: l("Live status and map", "실시간 현황과 지도"),
                     systemImage: "person.2.wave.2",
                     badge: "\(store.dashboard.runningAgentSessions.count)"
                 )
                 companyNavButton(
                     .chat,
                     title: l("Chat Control", "채팅 컨트롤"),
-                    subtitle: l("Agent traffic and confirmed actions", "에이전트 대화와 확인 액션"),
+                    subtitle: l("Agent chat and approvals", "에이전트 대화와 승인"),
                     systemImage: "bubble.left.and.text.bubble.right",
                     badge: "\(store.dashboard.agentMessages.count)"
                 )
@@ -763,8 +777,8 @@ private struct SidebarView: View {
                 )
                 companyNavButton(
                     .agents,
-                    title: l("Organization", "조직도"),
-                    subtitle: l("Org chart and assigned work", "조직도와 담당 이슈"),
+                    title: l("Team", "팀"),
+                    subtitle: l("Team and assigned work", "팀과 담당 이슈"),
                     systemImage: "person.3.sequence",
                     badge: "\(store.companyAgentDefinitions.count)"
                 )
@@ -831,6 +845,9 @@ private struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("company-nav-\(surface.id)")
     }
 
     private var tuiSidebarHeader: some View {
@@ -985,7 +1002,7 @@ private struct SidebarView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle(
                 title: l("Companies", "회사 목록"),
-                subtitle: l("Choose the company you want to operate first. Drafting and advanced setup stay folded until needed.", "운영할 회사를 먼저 고르고, 생성 초안과 고급 설정은 필요할 때만 펼쳐 보이게 합니다.")
+                subtitle: l("Choose a company first. Extra settings stay tucked away.", "먼저 회사를 고르세요. 추가 설정은 필요할 때만 열면 됩니다.")
             )
 
             HStack(spacing: 8) {
@@ -1031,10 +1048,10 @@ private struct SidebarView: View {
             } label: {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(l("New Company Draft", "새 회사 초안"))
+                        Text(l("New Company", "새 회사"))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(ShellPalette.text)
-                        Text(l("Keep company creation inputs tucked away until you actually want to stage a new company.", "새 회사를 실제로 준비할 때만 생성 입력을 펼쳐 보이게 합니다."))
+                        Text(l("Keep creation options out of the way until you need them.", "새 회사를 만들 때만 입력 항목을 열어봅니다."))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(ShellPalette.muted)
                             .lineLimit(2)
@@ -1210,10 +1227,10 @@ private struct SidebarView: View {
             } label: {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(l("Advanced Company Settings", "고급 회사 설정"))
+                        Text(l("More Settings", "추가 설정"))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(ShellPalette.text)
-                        Text(l("Hide backend, budget, and Linear controls until you need them.", "필요할 때만 백엔드, 예산, Linear 제어를 펼쳐 보이도록 숨깁니다."))
+                        Text(l("Keep backend, budget, and sync options out of the way.", "백엔드, 예산, 동기화 옵션은 필요할 때만 봅니다."))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(ShellPalette.muted)
                             .lineLimit(2)
@@ -1239,6 +1256,7 @@ private struct SidebarView: View {
             if companySidebarDisclosureState.isAdvancedSettingsExpanded {
                 VStack(alignment: .leading, spacing: 10) {
                     companyBackendSettingsPanel
+                    companyGitHubSettingsPanel
                     companyBudgetSettingsPanel
                     companyLinearSettingsPanel
                 }
@@ -1270,6 +1288,69 @@ private struct SidebarView: View {
                     .pickerStyle(.menu)
                 } else {
                     Text(l("Select a company to adjust its backend.", "백엔드를 조정할 회사를 먼저 선택하세요."))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                }
+            }
+        }
+    }
+
+    private var companyGitHubSettingsPanel: some View {
+        companySubpanel {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    panelHeading(
+                        title: l("Git & GitHub Connection", "Git 및 GitHub 연결"),
+                        subtitle: l("Bind the selected company to its repository, origin remote, gh auth, and PR publish policy.", "선택한 회사를 저장소, origin remote, gh 인증, PR 배포 정책과 연결합니다.")
+                    )
+                    Spacer(minLength: 8)
+                    ShellStatusPill(
+                        text: store.activeGitHubConnectionReady ? l("Ready", "준비됨") : l("Needs setup", "설정 필요"),
+                        tint: store.activeGitHubConnectionReady ? ShellPalette.success : ShellPalette.warning
+                    )
+                }
+
+                if let company = store.selectedCompany {
+                    let status = store.activeGitHubPublishStatus
+                    valueGrid([
+                        (l("Company", "회사"), company.name),
+                        (l("Root", "루트"), company.rootPath),
+                        (l("Base branch", "기준 브랜치"), company.defaultBaseBranch),
+                        (l("Publish policy", "배포 정책"), status.policy == "REQUIRE_GITHUB_PR" ? l("Require GitHub PR", "GitHub PR 필수") : l("Allow local git", "로컬 git 허용")),
+                        (l("gh CLI", "gh CLI"), status.ghInstalled ? l("Installed", "설치됨") : l("Missing", "없음")),
+                        (l("gh auth", "gh 인증"), status.ghAuthenticated ? l("Authenticated", "인증됨") : l("Not authenticated", "인증 안 됨")),
+                        (l("origin", "origin"), status.originConfigured ? (status.originUrl ?? l("Configured", "설정됨")) : l("Not configured", "설정 안 됨")),
+                        (l("Checked repo", "확인한 저장소"), status.repositoryPath ?? company.rootPath),
+                    ])
+
+                    HStack(spacing: 8) {
+                        Button {
+                            Task { await store.refreshSelectedCompanyGitHubStatus() }
+                        } label: {
+                            Label(l("Check GitHub", "GitHub 확인"), systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+
+                        Button {
+                            Task { await store.openRepositoryPicker() }
+                        } label: {
+                            Label(l("Choose Git Folder", "Git 폴더 선택"), systemImage: "folder.badge.gearshape")
+                                .frame(maxWidth: .infinity)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+                    }
+
+                    if let message = store.companyGitHubStatusMessage, !message.isEmpty {
+                        Text(message)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(store.activeGitHubConnectionReady ? ShellPalette.muted : ShellPalette.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text(l("Select a company to inspect its Git folder, origin remote, and GitHub PR readiness.", "Git 폴더, origin remote, GitHub PR 준비 상태를 확인하려면 회사를 먼저 선택하세요."))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(ShellPalette.muted)
                 }
@@ -1465,6 +1546,33 @@ private struct SidebarView: View {
             .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
     }
 
+    private func valueGrid(_ rows: [(String, String)]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.0.uppercased())
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(ShellPalette.faint)
+                    Text(row.1)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(ShellPalette.text)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(ShellPalette.panelDeeper)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(ShellPalette.line, lineWidth: 1)
+                )
+            }
+        }
+    }
+
     private var goalSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle(
@@ -1552,8 +1660,8 @@ private struct SidebarView: View {
     private var rosterSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle(
-                title: l("Derived Roster", "파생 조직도"),
-                subtitle: l("Hierarchy and routing are inferred from the agents you defined.", "정의한 에이전트 정보를 바탕으로 hierarchy와 라우팅을 추론합니다.")
+                title: l("Team Roster", "팀 구성"),
+                subtitle: l("Roles and handoff flow are built from the agents you defined.", "정의한 에이전트 정보를 바탕으로 역할과 담당 흐름을 정리합니다.")
             )
 
             VStack(spacing: 8) {
@@ -1605,7 +1713,7 @@ private struct SidebarView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle(
                 title: store.editingCompanyAgentID == nil ? l("Add Agent", "에이전트 추가") : l("Edit Agent", "에이전트 수정"),
-                subtitle: l("Define one agent once, then let the CEO route work and handoffs dynamically.", "에이전트를 한 번 정의하면 CEO가 그 정의를 바탕으로 동적으로 handoff와 라우팅을 만듭니다.")
+                subtitle: l("Define an agent once, then let the company route work automatically.", "에이전트를 한 번 정하면 회사가 자동으로 일을 배정합니다.")
             )
 
             companySubpanel {
@@ -1618,17 +1726,17 @@ private struct SidebarView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 10) {
                         agentFieldBlock(
                             title: l("Title", "직함"),
-                            helper: l("Human-facing role name shown in the roster.", "조직도와 목록에 표시되는 사람 친화적 역할 이름입니다.")
+                            helper: l("Human-facing role name shown in the team list.", "팀 목록에 표시되는 사람 친화적 역할 이름입니다.")
                         ) {
                             TextField(l("Title", "직함"), text: $store.newCompanyAgentTitle)
                                 .textFieldStyle(.roundedBorder)
                         }
 
                         agentFieldBlock(
-                            title: l("AI CLI", "AI CLI"),
-                            helper: l("Which CLI executes this agent's work.", "이 에이전트의 작업을 실제로 실행할 CLI입니다.")
+                            title: l("Execution Tool", "실행 도구"),
+                            helper: l("Which local tool runs this agent's work.", "이 에이전트가 사용할 로컬 실행 도구입니다.")
                         ) {
-                            Picker(l("AI CLI", "AI CLI"), selection: Binding(
+                            Picker(l("Execution Tool", "실행 도구"), selection: Binding(
                                 get: {
                                     if store.newCompanyAgentCli.isEmpty {
                                         return store.preferredCliAgent
@@ -1646,8 +1754,8 @@ private struct SidebarView: View {
                         }
 
                         agentFieldBlock(
-                            title: l("Model Override", "모델 override"),
-                            helper: l("Optional provider model for this role only.", "이 역할에만 적용할 선택형 provider 모델입니다.")
+                            title: l("Model", "모델"),
+                            helper: l("Optional model for this role. Keep Default if unsure.", "잘 모르겠으면 기본값으로 두세요. 필요할 때만 이 역할의 모델을 고릅니다.")
                         ) {
                             let modelOptions = store.newCompanyAgentModelOptions
                             if modelOptions.isEmpty {
@@ -1667,7 +1775,7 @@ private struct SidebarView: View {
 
                     agentFieldBlock(
                         title: l("Role Summary", "역할 설명"),
-                        helper: l("Short assignment guidance the CEO uses when routing work.", "CEO가 작업을 배정할 때 참고하는 짧은 역할 설명입니다.")
+                        helper: l("Short guidance the CEO uses when assigning work.", "CEO가 작업을 배정할 때 참고하는 짧은 역할 설명입니다.")
                     ) {
                         TextField(l("Role summary", "역할 설명"), text: $store.newCompanyAgentRole)
                             .textFieldStyle(.roundedBorder)
@@ -1675,7 +1783,7 @@ private struct SidebarView: View {
 
                     agentFieldBlock(
                         title: l("Specialties", "전문 분야"),
-                        helper: l("Comma-separated strengths surfaced in roster and routing views.", "조직도와 라우팅에서 보일 강점을 쉼표로 구분해 적습니다.")
+                        helper: l("Comma-separated strengths shown in team and assignment views.", "팀 구성과 배정 화면에 보일 강점을 쉼표로 구분해 적습니다.")
                     ) {
                         TextField(l("Specialties (comma separated)", "전문 분야 (쉼표로 구분)"), text: $store.newCompanyAgentSpecialties)
                             .textFieldStyle(.roundedBorder)
@@ -1763,10 +1871,10 @@ private struct SidebarView: View {
                 } label: {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(l("Advanced Routing & Handoffs", "고급 라우팅 및 handoff"))
+                            Text(l("Assignment Options", "배정 옵션"))
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(ShellPalette.text)
-                            Text(l("Hide internal routing, A2A handoff notes, and collaborator tuning until you need them.", "필요할 때만 내부 라우팅, A2A handoff 메모, 협업 튜닝을 펼쳐 보이도록 숨깁니다."))
+                            Text(l("Keep extra assignment notes hidden until you need them.", "추가 배정 메모는 필요할 때만 열어봅니다."))
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(ShellPalette.muted)
                                 .lineLimit(2)
@@ -1793,8 +1901,8 @@ private struct SidebarView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         companySubpanel {
                             agentTextEditorBlock(
-                                title: l("A2A Handoff Notes", "A2A handoff 메모"),
-                                helper: l("Internal guidance for when this role should hand work to another agent or ask for help.", "이 역할이 다른 에이전트로 작업을 넘기거나 도움을 요청해야 하는 시점을 위한 내부 가이드입니다."),
+                                title: l("Notes For This Role", "역할 메모"),
+                                helper: l("When should this role ask another agent for help?", "이 역할이 언제 다른 에이전트에게 도움을 요청해야 하는지 적습니다."),
                                 text: $store.newCompanyAgentCollaborationNotes
                             )
                         }
@@ -1804,7 +1912,7 @@ private struct SidebarView: View {
                                 VStack(alignment: .leading, spacing: 10) {
                                     panelHeading(
                                         title: l("Preferred Collaborators", "선호 협업 에이전트"),
-                                        subtitle: l("Bias internal routing toward specific peers without removing any manual choice.", "수동 선택 기능은 유지한 채 내부 라우팅이 특정 동료를 더 우선하도록 조정합니다.")
+                                        subtitle: l("Prefer these teammates when assigning work.", "일을 배정할 때 이 동료들을 우선 참고합니다.")
                                     )
 
                                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
@@ -1998,7 +2106,7 @@ private struct SidebarView: View {
             )
 
             if !store.availableCliAgents.isEmpty {
-                Picker(l("Preferred AI CLI", "선호 AI CLI"), selection: Binding(
+                Picker(l("Preferred agent tool", "선호 실행 도구"), selection: Binding(
                     get: { store.workflowLeadAgent },
                     set: { store.setWorkflowLeadAgent($0) }
                 )) {
@@ -2721,7 +2829,7 @@ private enum LocalProposalKind {
         case .issue:
             return language("Looks like an issue-level action draft.", "이슈 수준 액션 초안으로 보입니다.")
         case .delegation:
-            return language("Looks like a request to route the selected issue to the company roster.", "선택한 이슈를 회사 roster로 라우팅하라는 요청으로 보입니다.")
+            return language("Looks like a request to assign the selected issue to the team.", "선택한 이슈를 팀에 배정하라는 요청으로 보입니다.")
         case .execution:
             return language("Looks like a request to run the selected issue.", "선택한 이슈를 실행하라는 요청으로 보입니다.")
         case .qa:
@@ -2995,7 +3103,7 @@ private struct CompanyChatControlRail: View {
 
     private var selectedWorkerAgentLabel: String {
         let workers = Array(store.agentSelection.subtracting([selectedLeadAgentLabel])).sorted()
-        return workers.isEmpty ? l("No extra workers", "추가 워커 없음") : workers.joined(separator: ", ")
+        return workers.isEmpty ? l("No helpers selected", "선택된 도움 에이전트 없음") : workers.joined(separator: ", ")
     }
 
     private var routingParticipants: [(String, String, Color)] {
@@ -3061,7 +3169,7 @@ private struct CompanyChatControlRail: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(l("Chat Agent Routing", "채팅 에이전트 라우팅"))
+                Text(l("Chat Team Assignment", "채팅 팀 배정"))
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .tracking(0.7)
                     .foregroundStyle(ShellPalette.faint)
@@ -3281,12 +3389,12 @@ private struct CompanyChatControlRail: View {
                 }
 
                 proposalSummaryRow(
-                    label: l("Lead AI", "리더 AI"),
+                    label: l("Main agent", "대표 에이전트"),
                     value: selectedLeadAgentLabel,
                     tint: ShellPalette.accent
                 )
                 proposalSummaryRow(
-                    label: l("Worker roster", "워커 roster"),
+                    label: l("Helper agents", "도움 에이전트"),
                     value: selectedWorkerAgentLabel,
                     tint: ShellPalette.success
                 )
@@ -3338,7 +3446,7 @@ private struct CompanyChatControlRail: View {
                 if let delegationProposal = stagedDelegationProposal {
                     proposalSummaryRow(
                         label: l("Delegation action", "위임 액션"),
-                        value: l("Route the selected issue into the company roster", "선택한 이슈를 회사 roster로 라우팅"),
+                        value: l("Assign the selected issue to the company team", "선택한 이슈를 회사 팀에 배정"),
                         tint: ShellPalette.accentWarm
                     )
                     proposalSummaryRow(
@@ -3439,8 +3547,8 @@ private struct CompanyChatControlRail: View {
                         )
                         : stagedDelegationProposal != nil
                         ? l(
-                            "Delegation proposals are live for the selected issue. Confirmation still gates routing so chat cannot silently reassign work to the roster.",
-                            "위임 제안은 선택된 이슈에서 실제로 동작합니다. 채팅이 작업을 조용히 roster로 재배치하지 않도록 위임도 여전히 확인을 거칩니다."
+                            "Delegation proposals are live for the selected issue. Confirmation still gates assignment so chat cannot silently reassign work to the team.",
+                            "위임 제안은 선택된 이슈에서 실제로 동작합니다. 채팅이 작업을 조용히 팀에 다시 배정하지 않도록 위임도 여전히 확인을 거칩니다."
                         )
                         : stagedMergeProposal != nil
                         ? l(
@@ -3454,8 +3562,8 @@ private struct CompanyChatControlRail: View {
                         )
                         : stagedAgentProposal != nil
                         ? l(
-                            "Agent proposals are live for the selected company. Confirmation still gates staffing changes so chat drafts cannot silently rewrite the company roster.",
-                            "에이전트 제안은 선택된 회사에서 실제로 동작합니다. 채팅 초안이 회사 roster를 조용히 바꾸지 않도록 인원 변경도 여전히 확인을 거칩니다."
+                            "Agent proposals are live for the selected company. Confirmation still gates team changes so chat drafts cannot silently rewrite the company team.",
+                            "에이전트 제안은 선택된 회사에서 실제로 동작합니다. 채팅 초안이 회사 팀 구성을 조용히 바꾸지 않도록 인원 변경도 여전히 확인을 거칩니다."
                         )
                         : stagedBackendProposal != nil
                         ? l(
@@ -3760,7 +3868,7 @@ private struct CompanyChatControlRail: View {
             }
         case .delegation:
             if let issue = store.selectedIssue {
-                return l("Selected issue routing · \(issue.title)", "선택한 이슈 라우팅 · \(issue.title)")
+                return l("Selected issue assignment · \(issue.title)", "선택한 이슈 배정 · \(issue.title)")
             }
         case .execution:
             if let issue = store.selectedIssue {
@@ -3786,7 +3894,7 @@ private struct CompanyChatControlRail: View {
             }
         case .agent:
             if let company = store.selectedCompany {
-                return l("Selected company roster · \(company.name)", "선택한 회사 roster · \(company.name)")
+                return l("Selected company team · \(company.name)", "선택한 회사 팀 · \(company.name)")
             }
         case .backend:
             if let company = store.selectedCompany {
@@ -3832,8 +3940,8 @@ private struct CompanyChatControlRail: View {
             )
         case .delegation:
             return l(
-                "This reads like a delegation request. The rail can now route the selected issue through the company roster after explicit confirmation.",
-                "이 내용은 위임 요청처럼 읽힙니다. 이제 이 레일은 명시적 확인 뒤에 선택한 이슈를 회사 roster로 라우팅할 수 있습니다."
+                "This reads like a delegation request. The rail can now assign the selected issue to the company team after explicit confirmation.",
+                "이 내용은 위임 요청처럼 읽힙니다. 이제 이 레일은 명시적 확인 뒤에 선택한 이슈를 회사 팀에 배정할 수 있습니다."
             )
         case .execution:
             return l(
@@ -3892,7 +4000,7 @@ private struct CompanyChatControlRail: View {
         case .runtime:
             return l("Medium · changes whether the selected company loop is running.", "중간 · 선택한 회사 루프의 실행 여부를 바꿉니다.")
         case .agent:
-            return l("Medium · changes the selected company staffing roster.", "중간 · 선택한 회사의 인력 구성을 바꿉니다.")
+            return l("Medium · changes the selected company team.", "중간 · 선택한 회사의 인력 구성을 바꿉니다.")
         case .backend:
             return l("Medium · changes the selected company backend process state.", "중간 · 선택한 회사 백엔드 프로세스 상태를 바꿉니다.")
         case .generalNote:
@@ -3911,7 +4019,7 @@ private struct CompanyChatControlRail: View {
         case .issue:
             return l("Preview an issue draft, then create one real issue only after explicit confirmation.", "이슈 초안을 미리 보고, 명시적 확인 뒤에만 실제 이슈 하나를 생성합니다.")
         case .delegation:
-            return l("Preview a delegation action, then route the selected issue only after explicit confirmation.", "위임 액션을 미리 보고, 명시적 확인 뒤에만 선택한 이슈를 라우팅합니다.")
+            return l("Preview a delegation action, then assign the selected issue only after explicit confirmation.", "위임 액션을 미리 보고, 명시적 확인 뒤에만 선택한 이슈를 배정합니다.")
         case .execution:
             return l("Preview an execution action, then run the selected issue only after explicit confirmation.", "실행 액션을 미리 보고, 명시적 확인 뒤에만 선택한 이슈를 실행합니다.")
         case .qa:
@@ -4025,11 +4133,11 @@ private struct GoalDetailSheet: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(language("Derived Issues", "파생 이슈"))
+                        Text(language("Created Issues", "생성된 이슈"))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(ShellPalette.text)
                         if issues.isEmpty {
-                            Text(language("No derived issues yet.", "아직 파생된 이슈가 없습니다."))
+                            Text(language("No issues created yet.", "아직 생성된 이슈가 없습니다."))
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(ShellPalette.muted)
                         } else {
@@ -4293,6 +4401,7 @@ private struct CenterPaneView: View {
     var scrollsInternally: Bool = true
     @State private var goalSurface: GoalSurface = .board
     @State private var companyOverviewSurface: CompanyOverviewSurface = .summary
+    @State private var meetingRoomSurface: MeetingRoomSurface = .map
     @State private var detailDrawerOpen = false
     @State private var issueComposerExpanded = false
     @State private var presentedGoal: GoalRecord?
@@ -4551,7 +4660,7 @@ private struct CenterPaneView: View {
 
     private var meetingRoomNextActionLabel: String {
         if let review = meetingRoomReviewItems.first {
-            return l("Review desk is waiting on \(l.status(review.status)).", "리뷰 데스크가 \(l.status(review.status)) 상태를 기다리고 있습니다.")
+            return l("Review is waiting on \(l.status(review.status)).", "리뷰가 \(l.status(review.status)) 상태를 기다리고 있습니다.")
         }
         if let session = runningSessions.first {
             return l("\(session.roleName ?? session.agentName) is currently \(l.status(session.status)).", "\(session.roleName ?? session.agentName)이(가) 현재 \(l.status(session.status)) 상태입니다.")
@@ -4653,8 +4762,8 @@ private struct CenterPaneView: View {
     private var companyMeetingRoomPage: some View {
         VStack(alignment: .leading, spacing: 12) {
             companyPageHeader(
-                title: l("Meeting Room", "미팅룸"),
-                subtitle: l("Watch the live company floor map with wall events, active seats, and review load in one place.", "이벤트 월, 실행 좌석, 리뷰 부담을 한 곳에서 보는 실시간 회사 플로어 맵입니다.")
+                title: l("Status Room", "상황실"),
+                subtitle: l("Watch the company map, live activity, and review load in one place.", "회사 지도, 실시간 활동, 리뷰 현황을 한 곳에서 봅니다.")
             )
             companyMeetingRoomPanel
         }
@@ -4780,14 +4889,18 @@ private struct CenterPaneView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(ShellTopBarButtonStyle(prominent: companyOverviewSurface == .summary))
+                .accessibilityLabel(l("Summary", "요약"))
+                .accessibilityIdentifier("company-overview-summary")
 
                 Button {
                     companyOverviewSurface = .meetingRoom
                 } label: {
-                    Text(l("Meeting Room", "미팅룸"))
+                    Text(l("Status Room", "상황실"))
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(ShellTopBarButtonStyle(prominent: companyOverviewSurface == .meetingRoom))
+                .accessibilityLabel(l("Status Room", "상황실"))
+                .accessibilityIdentifier("company-overview-status-room")
             }
 
             if companyOverviewSurface == .meetingRoom {
@@ -4840,6 +4953,11 @@ private struct CenterPaneView: View {
         if let runtime = store.selectedRuntime {
             let selectedCompany = store.selectedCompany
             let companyID = store.selectedCompany?.id
+            let approvalNeededCount = store.dashboard.issues.filter { issue in
+                issue.companyId == companyID &&
+                    issue.status == "WAITING_FOR_APPROVAL" &&
+                    ["execution", "review", "approval"].contains(issue.kind.lowercased())
+            }.count
             let blockedWorkflowCount = store.dashboard.issues.filter { issue in
                 issue.companyId == companyID &&
                     issue.status == "BLOCKED" &&
@@ -4861,6 +4979,12 @@ private struct CenterPaneView: View {
                             )
                         }
                         StatusSummaryPill(text: runtime.backendHealth.uppercased(), tint: companyRuntimeHealthTint(runtime.backendHealth))
+                        if approvalNeededCount > 0 {
+                            ShellTag(
+                                text: "\(approvalNeededCount) \(l("PR approvals needed", "PR 승인 필요"))",
+                                tint: ShellPalette.accentWarm
+                            )
+                        }
                         if blockedWorkflowCount > 0 {
                             ShellTag(
                                 text: "\(blockedWorkflowCount) \(l("workflow issues blocked", "워크플로우 차단"))",
@@ -4927,6 +5051,16 @@ private struct CenterPaneView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(ShellPalette.warning)
                     .lineLimit(2)
+                } else if runtimeHealthy && approvalNeededCount > 0 {
+                    Text(
+                        l(
+                            "Runtime is healthy. Pull request creation is waiting for approval.",
+                            "런타임은 정상입니다. PR 생성이 승인 대기 중입니다."
+                        )
+                    )
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .lineLimit(1)
                 } else if runtimeHealthy && (blockedWorkflowCount > 0 || reviewAttentionCount > 0) {
                     Text(
                         l(
@@ -4974,15 +5108,15 @@ private struct CenterPaneView: View {
     private var organizationOverviewPage: some View {
         VStack(alignment: .leading, spacing: 12) {
             companyPageHeader(
-                title: l("Organization", "조직도"),
-                subtitle: l("See the inferred org chart and what each agent is working on.", "파생된 조직도와 각 에이전트가 맡은 이슈를 함께 봅니다.")
+                title: l("Team", "팀"),
+                subtitle: l("See the team structure and what each agent is working on.", "팀 구성과 각 에이전트가 맡은 이슈를 함께 봅니다.")
             )
 
             if store.orgProfiles.isEmpty {
                 EmptyStateView(
                     image: "person.3.sequence",
-                    title: l("No org chart yet", "아직 조직도가 없습니다"),
-                    subtitle: l("Add agents on the left and Cotor will derive the company structure.", "왼쪽에서 에이전트를 추가하면 Cotor가 회사 구조를 파생합니다.")
+                    title: l("No team yet", "아직 팀이 없습니다"),
+                    subtitle: l("Add agents on the left and Cotor will show the company team.", "왼쪽에서 에이전트를 추가하면 Cotor가 회사 팀을 보여줍니다.")
                 )
                 .frame(minHeight: 240)
                 .shellInset()
@@ -5238,12 +5372,12 @@ private struct CenterPaneView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(l("Derived Issues", "파생 이슈"))
+                        Text(l("Created Issues", "생성된 이슈"))
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(ShellPalette.text)
 
                         if selectedGoalIssues.isEmpty {
-                            Text(l("No derived issues yet.", "아직 파생된 이슈가 없습니다."))
+                            Text(l("No issues created yet.", "아직 생성된 이슈가 없습니다."))
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(ShellPalette.muted)
                         } else {
@@ -5412,15 +5546,64 @@ private struct CenterPaneView: View {
 
     private var companyMeetingRoomPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            MeetingRoomView(
-                projection: meetingRoomProjection,
-                language: store.language,
-                inboxCount: meetingRoomReviewItems.count + meetingRoomMessages.count,
-                isCompact: layoutMode == .compact
-            )
+            HStack(spacing: 8) {
+                meetingRoomSurfaceButton(
+                    surface: .floor,
+                    title: l("Floor", "플로어"),
+                    systemImage: "person.2.wave.2"
+                )
+                meetingRoomSurfaceButton(
+                    surface: .map,
+                    title: l("Map", "지도"),
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                )
+                Spacer(minLength: 0)
+            }
+
+            if meetingRoomSurface == .map {
+                MeetingRoomBrainGraphPane(
+                    rootPath: store.selectedCompany?.rootPath,
+                    language: store.language,
+                    isCompact: layoutMode == .compact
+                )
+            } else {
+                MeetingRoomView(
+                    projection: meetingRoomProjection,
+                    language: store.language,
+                    inboxCount: meetingRoomReviewItems.count + meetingRoomMessages.count,
+                    isCompact: layoutMode == .compact
+                )
+            }
         }
         .padding(12)
         .shellInset()
+    }
+
+    private func meetingRoomSurfaceButton(surface: MeetingRoomSurface, title: String, systemImage: String) -> some View {
+        let isSelected = meetingRoomSurface == surface
+        return Button {
+            meetingRoomSurface = surface
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(isSelected ? ShellPalette.text : ShellPalette.muted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(isSelected ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+            .overlay(
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .stroke(isSelected ? ShellPalette.accent.opacity(0.42) : ShellPalette.line, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("meeting-room-surface-\(surface.id)")
     }
 
     @ViewBuilder
@@ -5503,7 +5686,7 @@ private struct CenterPaneView: View {
     private var meetingRoomCenterTableZone: some View {
         MeetingRoomZoneCard(
             title: l("Center Table", "중앙 테이블"),
-            subtitle: l("Live agent seats and the latest handoff traffic.", "실행 중인 에이전트 좌석과 최근 handoff 흐름입니다."),
+            subtitle: l("Live agents and recent activity.", "실행 중인 에이전트와 최근 활동입니다."),
             tint: ShellPalette.accentWarm
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -5550,7 +5733,7 @@ private struct CenterPaneView: View {
                                             .foregroundStyle(ShellPalette.muted)
                                             .lineLimit(2)
                                     } else {
-                                        Text("\(runningSessions.count) \(l("live seats", "실행 좌석"))")
+                                        Text("\(runningSessions.count) \(l("live agents", "실행 에이전트"))")
                                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                             .foregroundStyle(ShellPalette.text)
                                         Text(meetingRoomTableHeadline)
@@ -5571,7 +5754,7 @@ private struct CenterPaneView: View {
                 .frame(height: 184)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(l("Latest Handoff", "최근 Handoff"))
+                    Text(l("Latest Updates", "최근 업데이트"))
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .tracking(0.8)
                         .foregroundStyle(ShellPalette.faint)
@@ -5579,7 +5762,7 @@ private struct CenterPaneView: View {
                     if meetingRoomLatestMessages.isEmpty {
                         meetingRoomEmptyState(
                             title: l("No agent messages yet", "아직 에이전트 메시지가 없습니다"),
-                            detail: l("A2A updates will appear here once agents start coordinating in the company loop.", "에이전트들이 회사 루프에서 조율을 시작하면 A2A 업데이트가 여기에 표시됩니다.")
+                            detail: l("Updates will appear here once agents start coordinating.", "에이전트들이 함께 움직이기 시작하면 업데이트가 여기에 표시됩니다.")
                         )
                     } else {
                         ForEach(meetingRoomLatestMessages) { message in
@@ -5599,15 +5782,15 @@ private struct CenterPaneView: View {
 
     private var meetingRoomReviewDeskZone: some View {
         MeetingRoomZoneCard(
-            title: l("Review Desk", "리뷰 데스크"),
+            title: l("Reviews", "리뷰"),
             subtitle: l("What QA and CEO need to look at next.", "QA와 CEO가 다음에 봐야 할 대상을 보여줍니다."),
             tint: ShellPalette.warning
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 if meetingRoomReviewDeskItems.isEmpty {
                     meetingRoomEmptyState(
-                        title: l("Desk is clear", "데스크가 비어 있습니다"),
-                        detail: l("Review queue items will park here when a change is ready for QA or CEO attention.", "변경이 QA 또는 CEO 확인 준비가 되면 리뷰 큐 항목이 여기에 머뭅니다.")
+                        title: l("No reviews waiting", "대기 중인 리뷰가 없습니다"),
+                        detail: l("Review items will appear here when a change is ready for QA or CEO attention.", "변경이 QA 또는 CEO 확인 준비가 되면 리뷰 항목이 여기에 표시됩니다.")
                     )
                 } else {
                     ForEach(meetingRoomReviewDeskItems) { item in
@@ -5743,7 +5926,7 @@ private struct CenterPaneView: View {
                 orgSelectionToolbar
             }
 
-            Text(l("Org Chart", "조직도"))
+            Text(l("Team", "팀"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(ShellPalette.text)
 
@@ -5937,7 +6120,7 @@ private struct CenterPaneView: View {
 
                         if !selectedIssueContextEntries.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(l("A2A Handoffs", "A2A handoff"))
+                                Text(l("Shared Notes", "공유 메모"))
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(ShellPalette.text)
                                 ForEach(Array(selectedIssueContextEntries.prefix(5))) { entry in
@@ -5964,7 +6147,7 @@ private struct CenterPaneView: View {
 
                         if !selectedIssueMessages.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(l("A2A Thread", "A2A 대화"))
+                                Text(l("Conversation", "대화"))
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(ShellPalette.text)
                                 ForEach(Array(selectedIssueMessages.prefix(5))) { message in
@@ -6089,7 +6272,14 @@ private struct CenterPaneView: View {
     }
 
     private var operationsBanner: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let companyID = store.selectedCompany?.id
+        let scopedIssues = store.dashboard.issues.filter { issue in
+            companyID == nil || issue.companyId == companyID
+        }
+        let approvalNeededCount = scopedIssues.filter { $0.status == "WAITING_FOR_APPROVAL" }.count
+        let blockedIssueCount = scopedIssues.filter { $0.status == "BLOCKED" }.count
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(store.selectedGoal?.title ?? l("Choose a goal", "목표를 선택하세요"))
@@ -6135,14 +6325,17 @@ private struct CenterPaneView: View {
             HStack(spacing: 8) {
                 ShellTag(text: "\(l("Goals", "목표")) \(store.dashboard.opsMetrics.openGoals)", tint: ShellPalette.accentWarm)
                 ShellTag(text: "\(l("Active Issues", "활성 이슈")) \(store.dashboard.opsMetrics.activeIssues)", tint: ShellPalette.accent)
-                ShellTag(text: "\(l("Blocked", "차단")) \(store.dashboard.opsMetrics.blockedIssues)", tint: ShellPalette.warning)
+                if approvalNeededCount > 0 {
+                    ShellTag(text: "\(l("Approval Needed", "승인 필요")) \(approvalNeededCount)", tint: ShellPalette.accentWarm)
+                }
+                ShellTag(text: "\(l("Blocked", "차단")) \(blockedIssueCount)", tint: ShellPalette.warning)
                 ShellTag(text: "\(l("Merge", "병합")) \(store.dashboard.opsMetrics.readyToMergeCount)", tint: ShellPalette.success)
                 Spacer()
             }
 
             HStack(spacing: 8) {
-                ShellTag(text: "\(l("Lead AI", "리더 AI")): \(workflowLeader)", tint: ShellPalette.accent)
-                ShellTag(text: "\(l("Workers", "워커")): \(workerAgents.count)", tint: ShellPalette.success)
+                ShellTag(text: "\(l("Main agent", "대표 에이전트")): \(workflowLeader)", tint: ShellPalette.accent)
+                ShellTag(text: "\(l("Helpers", "도움")): \(workerAgents.count)", tint: ShellPalette.success)
                 Spacer()
             }
         }
@@ -6334,11 +6527,11 @@ private struct CenterPaneView: View {
 
     private var composerActions: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(l("Lead And Worker Agents", "리더와 워커 에이전트"))
+            Text(l("Main And Helper Agents", "대표 에이전트와 도움 에이전트"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(ShellPalette.muted)
 
-            Picker(l("Lead AI", "리더 AI"), selection: Binding(
+            Picker(l("Main Agent", "대표 에이전트"), selection: Binding(
                 get: { workflowLeader },
                 set: { store.setWorkflowLeadAgent($0) }
             )) {
@@ -6353,26 +6546,26 @@ private struct CenterPaneView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(l("Orchestration Model", "오케스트레이션 모델"))
+                Text(l("How Work Flows", "일이 진행되는 방식"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(ShellPalette.text)
 
-                Text(l("The lead AI receives the workflow from the TUI and delegates work to the selected worker agents. Each worker still runs in its own branch and worktree.", "리더 AI가 TUI로부터 워크플로우를 받고, 선택된 워커 에이전트에게 작업을 분배합니다. 각 워커는 여전히 자신의 브랜치와 워크트리에서 실행됩니다."))
+                Text(l("The main agent receives the request and shares work with the selected helper agents. Each helper works in an isolated workspace.", "대표 에이전트가 요청을 받고 선택한 도움 에이전트와 일을 나눕니다. 각 도움 에이전트는 분리된 작업공간에서 안전하게 실행됩니다."))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(ShellPalette.muted)
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 8) {
-                    ShellTag(text: "\(l("Lead", "리드")): \(workflowLeader)", tint: ShellPalette.accent)
+                    ShellTag(text: "\(l("Main", "대표")): \(workflowLeader)", tint: ShellPalette.accent)
                     if workerAgents.isEmpty {
-                        ShellTag(text: l("No workers selected", "선택된 워커 없음"), tint: ShellPalette.warning)
+                        ShellTag(text: l("No helpers selected", "선택된 도움 에이전트 없음"), tint: ShellPalette.warning)
                     } else {
                         ShellTag(text: workerAgents.joined(separator: " · "), tint: ShellPalette.accentWarm)
                     }
                 }
             }
 
-            Text(l("Use Test Run only as a local preview. The product's primary execution path is still TUI -> leader AI -> worker orchestration.", "테스트 실행은 로컬 미리보기 용도입니다. 제품의 주 실행 경로는 여전히 TUI -> 리더 AI -> 워커 오케스트레이션입니다."))
+            Text(l("Use Test Run only as a local preview. The main company path starts from a goal and lets agents keep working from there.", "테스트 실행은 로컬 미리보기 용도입니다. 회사의 기본 흐름은 목표를 입력하면 에이전트들이 이어서 일하는 방식입니다."))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(ShellPalette.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -7666,7 +7859,7 @@ private struct IssueExecutionDetailCard: View {
             return ShellPalette.accent
         case "COMPLETED", "DONE", "MERGED", "READY_FOR_CEO", "READY_TO_MERGE", "PASS", "APPROVE":
             return ShellPalette.success
-        case "FAILED", "BLOCKED", "CHANGES_REQUESTED", "FAILED_CHECKS":
+        case "FAILED", "BLOCKED", "WAITING_FOR_APPROVAL", "CHANGES_REQUESTED", "FAILED_CHECKS":
             return ShellPalette.warning
         default:
             return ShellPalette.accentSoft
@@ -8076,7 +8269,7 @@ private func statusTint(for status: String) -> Color {
         return ShellPalette.success
     case "FAILED", "ERROR", "BLOCKED", "FAILED_CHECKS", "CHANGES_REQUESTED":
         return ShellPalette.danger
-    case "RUNNING", "QUEUED", "PLANNED", "BACKLOG", "DELEGATED", "IN_PROGRESS", "IN_REVIEW", "AWAITING_QA", "AWAITING_REVIEW", "READY_TO_MERGE", "STARTING":
+    case "RUNNING", "QUEUED", "PLANNED", "BACKLOG", "DELEGATED", "IN_PROGRESS", "IN_REVIEW", "AWAITING_QA", "AWAITING_REVIEW", "READY_TO_MERGE", "WAITING_FOR_APPROVAL", "STARTING":
         return ShellPalette.warning
     default:
         return ShellPalette.accent

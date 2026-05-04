@@ -39,6 +39,7 @@ class AppServerPlatformRoutesTest : FunSpec({
             )
         )
         coEvery { desktopService.evidenceForRun("run-1") } returns EvidenceBundle(query = "run:run-1")
+        coEvery { desktopService.evidenceForPullRequest(12) } returns EvidenceBundle(query = "pr:12")
         coEvery { desktopService.listGitHubPullRequests("company-1") } returns listOf(
             PullRequestSnapshot(number = 12, state = "OPEN", companyId = "company-1")
         )
@@ -82,6 +83,10 @@ class AppServerPlatformRoutesTest : FunSpec({
             client.get("/api/app/evidence/runs/run-1") {
                 header("Authorization", "Bearer secret-token")
             }.bodyAsText().contains("run:run-1") shouldBe true
+
+            client.get("/api/app/evidence/pull-requests/12") {
+                header("Authorization", "Bearer secret-token")
+            }.bodyAsText().contains("pr:12") shouldBe true
 
             client.get("/api/app/github/pull-requests?companyId=company-1") {
                 header("Authorization", "Bearer secret-token")

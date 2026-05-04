@@ -16,6 +16,7 @@ import com.cotor.model.ProcessResult
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import java.nio.file.Files
 import java.nio.file.Path
 
 /**
@@ -47,13 +48,15 @@ class OpenCodePluginTest : FunSpec({
                             isSuccess = true
                         )
                     }
-                    listOf("opencode", "run", "--model", "opencode/qwen3.6-plus-free", "--format", "json", "hello") -> ProcessResult(
-                        exitCode = 0,
-                        stdout = "",
-                        stderr = "",
-                        isSuccess = true
-                    )
-                    else -> error("unexpected command: $command")
+                    else -> {
+                        assertOpenCodeRunCommand(command, "opencode/qwen3.6-plus-free", "hello")
+                        ProcessResult(
+                            exitCode = 0,
+                            stdout = "",
+                            stderr = "",
+                            isSuccess = true
+                        )
+                    }
                 }
             }
         }
@@ -90,13 +93,15 @@ class OpenCodePluginTest : FunSpec({
                         stderr = "models lookup unavailable",
                         isSuccess = false
                     )
-                    listOf("opencode", "run", "--model", OpenCodeDefaults.DEFAULT_MODEL, "--format", "json", "hello") -> ProcessResult(
-                        exitCode = 2,
-                        stdout = "partial output",
-                        stderr = "cli error",
-                        isSuccess = false
-                    )
-                    else -> error("unexpected command: $command")
+                    else -> {
+                        assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                        ProcessResult(
+                            exitCode = 2,
+                            stdout = "partial output",
+                            stderr = "cli error",
+                            isSuccess = false
+                        )
+                    }
                 }
             }
         }
@@ -139,18 +144,20 @@ class OpenCodePluginTest : FunSpec({
                     stderr = "models lookup unavailable",
                     isSuccess = false
                 )
-                listOf("opencode", "run", "--model", OpenCodeDefaults.DEFAULT_MODEL, "--format", "json", "hello") -> ProcessResult(
-                    exitCode = 0,
-                    stdout = """
-                        {"type":"step_start","timestamp":1,"sessionID":"session-1"}
-                        {"type":"text","text":"QA_VERDICT: PASS"}
-                        {"type":"text","text":"The PR is ready to merge after QA review."}
-                        {"type":"tool_use","tool":"bash","state":{"output":"{\"huge\":true}"}}
-                    """.trimIndent(),
-                    stderr = "",
-                    isSuccess = true
-                )
-                else -> error("unexpected command: $command")
+                else -> {
+                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    ProcessResult(
+                        exitCode = 0,
+                        stdout = """
+                            {"type":"step_start","timestamp":1,"sessionID":"session-1"}
+                            {"type":"text","text":"QA_VERDICT: PASS"}
+                            {"type":"text","text":"The PR is ready to merge after QA review."}
+                            {"type":"tool_use","tool":"bash","state":{"output":"{\"huge\":true}"}}
+                        """.trimIndent(),
+                        stderr = "",
+                        isSuccess = true
+                    )
+                }
             }
         }
 
@@ -191,7 +198,7 @@ class OpenCodePluginTest : FunSpec({
                         runCount += 1
                         when (runCount) {
                             1 -> {
-                                command shouldBe listOf("opencode", "run", "--model", "opencode/minimax-m2.5-free", "--format", "json", "hello")
+                                assertOpenCodeRunCommand(command, "opencode/minimax-m2.5-free", "hello")
                                 ProcessResult(
                                     exitCode = 0,
                                     stdout = """{"type":"text","text":"fixed"}""",
@@ -244,14 +251,16 @@ class OpenCodePluginTest : FunSpec({
                         stderr = "",
                         isSuccess = true
                     )
-                    listOf("opencode", "run", "--model", "opencode/minimax-m2.5-free", "--format", "json", "hello") -> ProcessResult(
-                        exitCode = 0,
-                        stdout = """{"type":"text","text":"fixed"}""",
-                        stderr = "",
-                        isSuccess = true,
-                        processId = 101L
-                    )
-                    else -> error("unexpected command: $command")
+                    else -> {
+                        assertOpenCodeRunCommand(command, "opencode/minimax-m2.5-free", "hello")
+                        ProcessResult(
+                            exitCode = 0,
+                            stdout = """{"type":"text","text":"fixed"}""",
+                            stderr = "",
+                            isSuccess = true,
+                            processId = 101L
+                        )
+                    }
                 }
             }
         }
@@ -267,11 +276,24 @@ class OpenCodePluginTest : FunSpec({
             processManager
         )
 
-        commands shouldBe listOf(
-            listOf("opencode", "models"),
-            listOf("opencode", "run", "--model", "opencode/minimax-m2.5-free", "--format", "json", "hello")
-        )
+        commands.size shouldBe 2
+        commands[0] shouldBe listOf("opencode", "models")
         result.output shouldBe "fixed"
         result.processId shouldBe 101L
     }
 })
+
+private const val OPENCODE_PROMPT_INSTRUCTION = "Execute the instructions in the attached prompt file."
+
+private fun assertOpenCodeRunCommand(command: List<String>, model: String, expectedPrompt: String) {
+    command.size shouldBe 8
+    command[0] shouldBe "opencode"
+    command[1] shouldBe "run"
+    command[2] shouldBe "--model"
+    command[3] shouldBe model
+    command[4] shouldBe "--format"
+    command[5] shouldBe "json"
+    command[6] shouldBe OPENCODE_PROMPT_INSTRUCTION
+    command[7].startsWith("--file=") shouldBe true
+    Files.readString(Path.of(command[7].removePrefix("--file="))) shouldBe expectedPrompt
+}

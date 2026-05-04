@@ -34,13 +34,25 @@ Cotor는 하나의 Kotlin 코어 위에 세 가지 운영 표면을 제공합니
 
 현재 최상위 명령:
 
-`init`, `run`, `dash`, `interactive`, `validate`, `test`, `template`, `resume`, `checkpoint`, `stats`, `doctor`, `status`, `list`, `web`, `app-server`, `lint`, `explain`, `plugin`, `agent`, `version`, `completion`
+`init`, `run`, `dash`, `interactive`, `validate`, `test`, `template`, `resume`, `checkpoint`, `stats`, `doctor`, `status`, `list`, `web`, `app-server`, `lint`, `explain`, `plugin`, `agent`, `company`, `auth`, `policy`, `capability`, `provider`, `skill`, `browser`, `video`, `evidence`, `github`, `knowledge`, `mcp`, `version`, `completion`
 
 현재 서브커맨드:
 
 - `agent add`, `agent list`
+- `auth codex-oauth login|status|logout`
+- `company ...`: 회사, 에이전트, 목표, 이슈, 리뷰, 런타임, 백엔드, 컨텍스트 운영
 - `plugin init`
 - `checkpoint gc`
+- `policy validate`, `policy simulate`
+- `capability list`, `capability inspect`, `capability simulate`
+- `provider list`, `provider scan`, `provider test`
+- `skill list`, `skill inspect`, `skill validate`, `skill run`
+- `browser smoke`: backend capability gate를 통과한 브라우저 스모크 계획
+- `video plan`, `video render`, `video transcode`, `video generate-remote`: backend capability gate를 통과한 비디오 작업 계획
+- `evidence run`, `evidence file`, `evidence pr`
+- `github sync`, `github inspect-pr`, `github list`, `github events`
+- `knowledge inspect`
+- `mcp serve --readonly`
 
 현재 템플릿 종류:
 
@@ -60,6 +72,7 @@ Cotor는 하나의 Kotlin 코어 위에 세 가지 운영 표면을 제공합니
 - `plugin`은 현재 `plugin init`만 실제 명령입니다.
 - 보드는 `Linear 같은` UI이지만 외부 Linear 실동기화는 현재 빌드 범위가 아닙니다.
 - 자율 런타임은 최소 루프 수준이며 정책 엔진과 풍부한 후속 이슈 자동화는 아직 구현되지 않았습니다.
+- capability/provider/skill/browser/video 표면은 backend 정책과 증거 기록을 확인하기 위한 안전한 계획/검사 계층입니다. 실제 외부 브라우저 조작, 원격 비디오 생성, GitHub merge 실행은 기본값으로 켜지지 않습니다.
 
 ## 참고 문서
 

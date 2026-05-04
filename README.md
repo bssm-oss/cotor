@@ -40,7 +40,12 @@ Current subcommand support:
 - `plugin init`
 - `checkpoint gc`
 - `policy validate`, `policy simulate`
-- `evidence run`, `evidence file`
+- `capability list`, `capability inspect`, `capability simulate`
+- `provider list`, `provider scan`, `provider test`
+- `skill list`, `skill inspect`, `skill validate`, `skill run`
+- `browser smoke` for backend-gated browser smoke planning
+- `video plan`, `video render`, `video transcode`, `video generate-remote` for backend-gated video work planning
+- `evidence run`, `evidence file`, `evidence pr`
 - `github sync`, `github inspect-pr`, `github list`, `github events`
 - `knowledge inspect`
 - `verification inspect`
@@ -141,18 +146,18 @@ From a source checkout, the same commands still rebuild the desktop app locally 
 Current desktop model:
 
 - top-level `Company` and `TUI` shell modes
-- `Company` mode for multi-company operations, agent roster, goals, issue board/canvas, activity feed, runtime controls, and a dedicated `Meeting Room` surface
-- dedicated `Chat Control` navigation surface with live conversation/context, backend memory snapshot, confirmation-first proposal flow, and lightweight lead/worker agent routing
+- `Company` mode for multi-company operations, agent team, goals, issue board/canvas, activity feed, runtime controls, and a dedicated `Meeting Room` surface
+- dedicated `Chat Control` navigation surface with live conversation/context, backend memory snapshot, confirmation-first proposal flow, and lightweight main/helper assignment controls
 - `Company` summary keeps runtime health, blocked workflow count, review attention, and the latest error/action inside the main summary banner instead of a separate tall status card
 - `Company` summary now also shows estimated spend plus daily/monthly cost guardrails for the selected company runtime
 - `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
 - desktop backend launch, health checks, shutdown, and client requests use the same `COTOR_APP_TOKEN` source so token-protected local sessions stay aligned
-- `Meeting Room` now exposes a dedicated live floor map with a synthesized wall feed, seat-based agent table, and review desk summary instead of hiding that view below the summary fold
+- `Meeting Room` now opens to a plain repository `Map` by default, keeping technical graph files hidden while the live floor map stays available beside it
 - company issue execution details now surface agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary instead of only change metadata
 - `cotor company issue run <issue-id>` waits for a settled issue state by default so local CLI-launched agent work is not orphaned; use `--async` only when an already-running app-server should own the background work
 - company runtime now wakes immediately on issue/task/review transitions and can dispatch multiple runnable issues in parallel even when different roles share the same execution CLI
 - CEO merge only marks local workflow state as merged after GitHub refresh confirms the PR is actually `MERGED`
-- company agent definitions now support an optional per-agent model override for providers like Codex and OpenCode
+- company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, Ollama, LM Studio, and installed local Gemma 4 models
 - stale Cotor-managed retry PRs are reconciled and closed in batches so repeated review loops do not keep hundreds of obsolete open PRs around
 - legacy CEO merge-conflict blockers are pushed back into execution so the company can rebase, republish, and continue instead of staying stuck in a blocked approval lane
 - if the live company stream drops, the desktop shell keeps the current company snapshot on screen and shows a company-specific re-sync message instead of a generic decode error
@@ -171,21 +176,22 @@ The current build includes a working local operations layer:
 - create multiple companies, each bound to one working folder
 - surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing
 - define company agents with only title, CLI, and role summary
-- optionally pin a provider model per company agent definition
+- optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents when Ollama or LM Studio is running locally with installed models
+- use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory
 - create company goals
 - decompose goals into issues
 - delegate and run issues
 - inspect completed company issue runs through `cotor resume inspect <run-id>` without enabling the experimental pipeline replay flag
 - populate and merge ready review queue items
-- inspect the dedicated Meeting Room page with synthesized runtime/backend/review/session wall events and animated seat-based agent presence
+- inspect the dedicated Meeting Room page with a default repository `Map`, plus synthesized runtime/backend/review/session wall events and animated agent presence in the floor view
 - use the Chat Control surface to preview and explicitly confirm real goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
-- choose the lead AI and worker roster directly from Chat Control before staging a confirmed company request
+- choose the main agent and helper team directly from Chat Control before staging a confirmed company request
 - inspect compact runtime status, blocked/review attention, and recent company activity from the company summary page
 - inspect estimated company spend and adjust daily/monthly runtime guardrails without leaving the company console
 - start and stop a local autonomous runtime loop per company
 - let the CEO reopen planning after one wave finishes so active goals can generate the next wave instead of freezing after the first batch of issues
 - bias autonomous continuous-improvement goals toward multi-issue portfolios and parallel branchable slices instead of a single narrow follow-up
-- enrich short high-level goal descriptions into a broader execution portfolio so larger rosters do not collapse into only one or two issues
+- enrich short high-level goal descriptions into a broader execution portfolio so larger teams do not collapse into only one or two issues
 - keep an explicit company stop sticky across app restarts, dashboard reads, and live reconnects until the user presses Start again
 - keep the company runtime in a fast monitoring cadence while active tasks/runs still exist, so dead or stale `RUNNING` runs reconcile sooner instead of looking idle for a long backoff window
 - when the app-server shuts down during active company work, current builds re-queue interrupted issues instead of leaving them permanently blocked by a generic process-exit failure
