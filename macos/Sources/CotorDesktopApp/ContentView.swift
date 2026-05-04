@@ -1008,8 +1008,9 @@ private struct SidebarView: View {
             HStack(spacing: 8) {
                 ShellTag(text: "\(store.goals.count) \(l("goals", "목표"))", tint: ShellPalette.accent)
                 ShellTag(text: "\(store.issues.count) \(l("issues", "이슈"))", tint: ShellPalette.accentWarm)
-                if store.dashboard.opsMetrics.readyToMergeCount > 0 {
-                    ShellTag(text: "\(store.dashboard.opsMetrics.readyToMergeCount) \(l("ready", "병합대기"))", tint: ShellPalette.success)
+                let scopedMetrics = store.scopedOpsMetrics(companyID: store.selectedCompanyID)
+                if scopedMetrics.readyToMergeCount > 0 {
+                    ShellTag(text: "\(scopedMetrics.readyToMergeCount) \(l("ready", "병합대기"))", tint: ShellPalette.success)
                 }
             }
 
@@ -2871,7 +2872,7 @@ private struct CompanyChatControlRail: View {
 
     private var scopedMessages: [AgentMessageRecord] {
         let companyID = store.selectedCompanyID
-        if let issueID = store.selectedIssueID {
+        if let issueID = store.selectedIssue?.id {
             return store.dashboard.agentMessages
                 .filter { (companyID == nil || $0.companyId == companyID) && $0.issueId == issueID }
                 .sorted { $0.createdAt > $1.createdAt }
@@ -2884,7 +2885,7 @@ private struct CompanyChatControlRail: View {
 
     private var scopedContextEntries: [AgentContextEntryRecord] {
         let companyID = store.selectedCompanyID
-        if let issueID = store.selectedIssueID {
+        if let issueID = store.selectedIssue?.id {
             return store.dashboard.agentContextEntries
                 .filter { (companyID == nil || $0.companyId == companyID) && ($0.issueId == issueID || $0.visibility == "company") }
                 .sorted { $0.createdAt > $1.createdAt }
@@ -4468,12 +4469,12 @@ private struct CenterPaneView: View {
         if let run = selectedIssueRuns.first, let error = run.error, !error.isEmpty {
             return error
         }
-        if let issueId = store.selectedIssueID,
+        if let issueId = store.selectedIssue?.id,
            let liveSnippet = runningSessions.first(where: { $0.issueId == issueId })?.outputSnippet,
            !liveSnippet.isEmpty {
             return liveSnippet
         }
-        if let issueId = store.selectedIssueID,
+        if let issueId = store.selectedIssue?.id,
            let recentDetail = visibleActivity.first(where: { $0.issueId == issueId })?.detail,
            !recentDetail.isEmpty {
             return recentDetail
@@ -4490,16 +4491,18 @@ private struct CenterPaneView: View {
     }
 
     private var selectedIssueMessages: [AgentMessageRecord] {
-        guard let issueID = store.selectedIssueID else { return [] }
+        let companyID = store.selectedCompanyID
+        guard let issueID = store.selectedIssue?.id else { return [] }
         return store.dashboard.agentMessages
-            .filter { $0.issueId == issueID }
+            .filter { (companyID == nil || $0.companyId == companyID) && $0.issueId == issueID }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
     private var selectedIssueContextEntries: [AgentContextEntryRecord] {
-        guard let issueID = store.selectedIssueID else { return [] }
+        let companyID = store.selectedCompanyID
+        guard let issueID = store.selectedIssue?.id else { return [] }
         return store.dashboard.agentContextEntries
-            .filter { $0.issueId == issueID || $0.visibility == "company" }
+            .filter { (companyID == nil || $0.companyId == companyID) && ($0.issueId == issueID || $0.visibility == "company") }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -6273,6 +6276,7 @@ private struct CenterPaneView: View {
 
     private var operationsBanner: some View {
         let companyID = store.selectedCompany?.id
+        let scopedMetrics = store.scopedOpsMetrics(companyID: companyID)
         let scopedIssues = store.dashboard.issues.filter { issue in
             companyID == nil || issue.companyId == companyID
         }
@@ -6323,13 +6327,13 @@ private struct CenterPaneView: View {
             companyRuntimeSummaryStrip
 
             HStack(spacing: 8) {
-                ShellTag(text: "\(l("Goals", "목표")) \(store.dashboard.opsMetrics.openGoals)", tint: ShellPalette.accentWarm)
-                ShellTag(text: "\(l("Active Issues", "활성 이슈")) \(store.dashboard.opsMetrics.activeIssues)", tint: ShellPalette.accent)
+                ShellTag(text: "\(l("Goals", "목표")) \(scopedMetrics.openGoals)", tint: ShellPalette.accentWarm)
+                ShellTag(text: "\(l("Active Issues", "활성 이슈")) \(scopedMetrics.activeIssues)", tint: ShellPalette.accent)
                 if approvalNeededCount > 0 {
                     ShellTag(text: "\(l("Approval Needed", "승인 필요")) \(approvalNeededCount)", tint: ShellPalette.accentWarm)
                 }
                 ShellTag(text: "\(l("Blocked", "차단")) \(blockedIssueCount)", tint: ShellPalette.warning)
-                ShellTag(text: "\(l("Merge", "병합")) \(store.dashboard.opsMetrics.readyToMergeCount)", tint: ShellPalette.success)
+                ShellTag(text: "\(l("Merge", "병합")) \(scopedMetrics.readyToMergeCount)", tint: ShellPalette.success)
                 Spacer()
             }
 
