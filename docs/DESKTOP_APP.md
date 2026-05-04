@@ -111,7 +111,7 @@ The current macOS shell has two top-level modes.
 - `Company`
   - company selector
   - company creation bound to one root folder
-  - direct `Meeting Room` navigation that opens to a plain repository `Map`, with the technical graph files hidden and the live company floor map available as the adjacent view
+  - direct `Meeting Room` navigation that opens to a plain repository `Map`, falls back to a simple folder map when prepared graph data is missing, and exposes `Agent Meeting` plus live floor views without showing technical graph paths
   - agent-definition composer
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app

@@ -31,6 +31,28 @@ struct MeetingRoomBrainGraphTests {
         #expect(url.path == "/tmp/cotor-company/graphify-out/graph.json")
     }
 
+    @Test
+    func loadFallsBackToPlainFolderMapWhenGraphifyOutputIsMissing() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cotor-map-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try "# Test workspace".write(to: root.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        let sourceDirectory = root.appendingPathComponent("src", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try "fun main() = Unit".write(to: sourceDirectory.appendingPathComponent("Main.kt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("dist", isDirectory: true), withIntermediateDirectories: true)
+
+        let graph = try MeetingRoomBrainGraph.load(rootPath: root.path)
+
+        #expect(graph.isFallback)
+        #expect(graph.nodes.contains { $0.displaySourceName == "README.md" })
+        #expect(graph.nodes.contains { $0.displaySourceName == "src" })
+        #expect(!graph.nodes.contains { $0.displaySourceName == "dist" })
+        #expect(graph.links.contains { $0.source == "workspace-root" })
+    }
+
     private func sampleGraphData() throws -> Data {
         let json = """
         {
