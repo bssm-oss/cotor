@@ -8,7 +8,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.createDirectories
-import kotlin.io.path.readText
+import kotlin.io.path.exists
 import kotlin.io.path.writeText
 
 class LocalPlaywrightMarketingBrowserRunner(
@@ -21,8 +21,8 @@ class LocalPlaywrightMarketingBrowserRunner(
     }
 
     override suspend fun execute(command: MarketingBrowserCommand): MarketingBrowserResult = withContext(Dispatchers.IO) {
-        require(commandAvailability("npx")) {
-            "Marketing browser execution requires npx so Playwright can be launched without storing browser credentials in Cotor."
+        require(commandAvailability("node") && commandAvailability("npm")) {
+            "Marketing browser execution requires node and npm so Playwright can run without storing browser credentials in Cotor."
         }
         withTimeout(command.maxRuntimeSeconds.coerceAtLeast(15) * 1_000L) {
             val runtimeDir = appHomeProvider()
@@ -32,18 +32,20 @@ class LocalPlaywrightMarketingBrowserRunner(
             val scriptPath = runtimeDir.resolve("marketing-runner.js")
             runtimeDir.createDirectories()
             inputDir.createDirectories()
+            ensurePlaywrightDependency(runtimeDir, command.maxRuntimeSeconds.coerceAtLeast(15))
             scriptPath.writeText(playwrightRunnerScript)
             val inputPath = Files.createTempFile(inputDir, "marketing-command-", ".json")
             inputPath.writeText(json.encodeToString(MarketingBrowserCommand.serializer(), command))
             val process = ProcessBuilder(
-                "npx",
-                "--yes",
-                "--package=playwright",
                 "node",
                 scriptPath.toString(),
                 inputPath.toString()
             )
+                .directory(runtimeDir.toFile())
                 .redirectErrorStream(true)
+                .also { builder ->
+                    builder.environment()["NODE_PATH"] = runtimeDir.resolve("node_modules").toString()
+                }
                 .start()
             val finished = process.waitFor(command.maxRuntimeSeconds.coerceAtLeast(15).toLong(), TimeUnit.SECONDS)
             val output = process.inputStream.bufferedReader().readText().trim()
@@ -61,6 +63,35 @@ class LocalPlaywrightMarketingBrowserRunner(
                     "Marketing browser execution did not return a valid result: ${error.message}. Output: $output"
                 )
             }
+        }
+    }
+
+    private fun ensurePlaywrightDependency(runtimeDir: Path, timeoutSeconds: Int) {
+        val packageDir = runtimeDir.resolve("node_modules").resolve("playwright")
+        if (packageDir.exists()) {
+            return
+        }
+        val process = ProcessBuilder(
+            "npm",
+            "install",
+            "--silent",
+            "--no-audit",
+            "--no-fund",
+            "--prefix",
+            runtimeDir.toString(),
+            "playwright"
+        )
+            .redirectErrorStream(true)
+            .start()
+        val installTimeoutSeconds = timeoutSeconds.coerceAtLeast(120).toLong()
+        val finished = process.waitFor(installTimeoutSeconds, TimeUnit.SECONDS)
+        val output = process.inputStream.bufferedReader().readText().trim()
+        if (!finished) {
+            process.destroyForcibly()
+            error("Playwright dependency install timed out after ${installTimeoutSeconds}s.")
+        }
+        if (process.exitValue() != 0) {
+            error(output.ifBlank { "Playwright dependency install failed with exit ${process.exitValue()}." })
         }
     }
 
