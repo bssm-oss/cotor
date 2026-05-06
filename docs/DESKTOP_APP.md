@@ -119,6 +119,9 @@ The current macOS shell has two top-level modes.
   - Linear-style issue board/canvas inside the app
   - dedicated `Company Operator` navigation surface with an operations chat, automation mode control, runtime/approval status, command result cards, and internal senior-agent approval routing
   - dedicated `Reports` surface for previous-day morning reports covering completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
+  - dedicated `Performance` surface for derived per-agent execution scores, success rates, QA pass rates, retries, duration, and known estimated cost without storing separate evaluation history
+  - company memory snapshot cards show company, project, team, and agent memory; `workflowMemory` remains in the backend contract for older clients
+  - autonomous discovery scans internal quality signals before synthesizing CEO triage goals, and persisted problem signals are available through the app-server and CLI
   - CEO chat intake: a vague chat request can be confirmed into one CEO-owned goal, a clarified brief, and assigned downstream issues without creating a GitHub repository
 - company activity feed with live event-driven updates
 - live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event
@@ -163,6 +166,7 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/agents`
 - `POST /api/app/companies/{companyId}/agents`
 - `PATCH /api/app/companies/{companyId}/agents/{agentId}`
+- `GET /api/app/companies/{companyId}/agents/performance`
 - `GET /api/app/companies/{companyId}/projects`
 - `GET /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/goals`
@@ -175,6 +179,9 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/reports`
 - `GET /api/app/companies/{companyId}/reports/{date}`
 - `POST /api/app/companies/{companyId}/reports/generate`
+- `GET /api/app/companies/{companyId}/memory-snapshot`
+- `GET /api/app/companies/{companyId}/problem-signals`
+- `POST /api/app/companies/{companyId}/autonomy/discovery-scan`
 - `GET /api/app/companies/{companyId}/contexts`
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
@@ -203,8 +210,12 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - create a company goal
 - auto-decompose that goal into issues
 - delegate and run issues
+- inject A2A run bridge metadata and `COTOR_A2A_*` environment variables into issue-linked agent runs, then use bridge/context artifacts as canonical collaboration evidence
+- block direct execution completion when collaboration evidence or verification evidence is missing, recording the reason in issue verification/runtime fields instead of treating it as a generic run failure
+- scan internal quality signals into `CompanyProblemSignal` records and convert only actionable, deduped, cooldown-safe signals into CEO triage goals
 - mirror company issues and progress to Linear when company-scoped Linear sync is enabled
 - inspect linked tasks and runs
+- inspect derived per-agent performance from existing issues, runs, reviews, org profiles, and company agent definitions, with insufficient-data agents called out separately
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to a plain repository `Map`, with synthesized runtime/backend/review/session wall events and floor-view summaries
 - use the Company Operator surface to ask for status, bulk switch selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
