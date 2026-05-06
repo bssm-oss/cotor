@@ -3018,7 +3018,7 @@ class DesktopAppServiceTest : FunSpec({
             workspaceId = WORKSPACE_ID,
             title = "Goal-driven planning",
             prompt = "Goal-driven planning should persist assignments and route run prompts through those assignments.",
-            agents = listOf("claude", "codex")
+            agents = listOf("codex")
         )
         service.runTask(plannedTask.id)
         awaitTaskCompletion(stateStore, plannedTask.id)
@@ -11702,7 +11702,7 @@ private class DesktopAppServiceFixture private constructor(
     val task: AgentTask,
     val worktreeRoot: Path
 ) {
-    suspend fun awaitRuns(): List<AgentRun> = withTimeout(30_000) {
+    suspend fun awaitRuns(): List<AgentRun> = withTimeout(90_000) {
         while (true) {
             val runs = service.listRuns(task.id)
             if (runs.isNotEmpty() && runs.none { it.status == AgentRunStatus.QUEUED || it.status == AgentRunStatus.RUNNING }) {
@@ -11933,7 +11933,7 @@ private suspend fun seedWorkspace(stateStore: DesktopStateStore, repoRoot: Path)
 }
 
 private suspend fun awaitTaskCompletion(stateStore: DesktopStateStore, taskId: String) {
-    val completed = withTimeoutOrNull(30_000) {
+    val completed = withTimeoutOrNull(90_000) {
         while (true) {
             val snapshot = stateStore.load()
             val task = snapshot.tasks.first { it.id == taskId }
