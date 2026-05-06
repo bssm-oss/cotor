@@ -1115,6 +1115,50 @@ internal fun Application.cotorAppModule(
                     call.respond(desktopService.companyDashboardReadOnly(companyId).redactedForApi())
                 }
 
+                get("/{companyId}/agents/performance") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    call.respond(desktopService.agentPerformance(companyId))
+                }
+
+                get("/{companyId}/reports") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    if (desktopService.getCompany(companyId) == null) {
+                        return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Company not found: $companyId"))
+                    }
+                    call.respond(desktopService.listMorningReports(companyId))
+                }
+
+                get("/{companyId}/reports/{date}") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    val date = call.parameters["date"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "date is required"))
+                    if (desktopService.getCompany(companyId) == null) {
+                        return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Company not found: $companyId"))
+                    }
+                    respondDesktopRequest {
+                        desktopService.morningReport(companyId, date)
+                    }
+                }
+
+                post("/{companyId}/reports/generate") {
+                    if (!requireToken(token)) return@post
+                    val companyId = call.parameters["companyId"]
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    val date = call.request.queryParameters["date"]
+                    if (desktopService.getCompany(companyId) == null) {
+                        return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "Company not found: $companyId"))
+                    }
+                    respondDesktopRequest {
+                        desktopService.generateMorningReport(companyId, date)
+                    }
+                }
+
                 get("/{companyId}/memory-snapshot") {
                     if (!requireToken(token)) return@get
                     val companyId = call.parameters["companyId"]
@@ -1123,6 +1167,24 @@ internal fun Application.cotorAppModule(
                     val agentProfileId = call.request.queryParameters["agentProfileId"]
                     respondDesktopRequest {
                         desktopService.companyMemorySnapshot(companyId, issueId, agentProfileId)
+                    }
+                }
+
+                get("/{companyId}/problem-signals") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    respondDesktopRequest {
+                        desktopService.listProblemSignals(companyId)
+                    }
+                }
+
+                post("/{companyId}/autonomy/discovery-scan") {
+                    if (!requireToken(token)) return@post
+                    val companyId = call.parameters["companyId"]
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    respondDesktopRequest {
+                        desktopService.runAutonomyDiscoveryScan(companyId)
                     }
                 }
 
