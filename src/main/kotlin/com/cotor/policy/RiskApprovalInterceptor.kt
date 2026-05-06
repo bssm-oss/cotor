@@ -56,6 +56,9 @@ class RiskApprovalInterceptor(
             ActionKind.BROWSER_RECORD,
             ActionKind.BROWSER_EXTERNAL_DOMAIN,
             ActionKind.BROWSER_LOGIN_FLOW -> signals += RiskSignal("browser-automation", 80, "Browser automation can expose private state or mutate remote pages.")
+            ActionKind.WEB_PUBLISH,
+            ActionKind.SOCIAL_POST_CREATE -> signals += RiskSignal("marketing-publish", 85, "Marketing publishing mutates owned or social channel state.")
+            ActionKind.MARKETING_ANALYTICS_READ -> signals += RiskSignal("marketing-analytics", 35, "Marketing analytics may expose external account data.")
             ActionKind.VIDEO_GENERATE_REMOTE,
             ActionKind.VIDEO_UPLOAD -> signals += RiskSignal("remote-media", 85, "Remote media generation or upload can spend money or publish artifacts externally.")
             ActionKind.VIDEO_RENDER_LOCAL,

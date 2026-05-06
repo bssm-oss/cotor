@@ -230,6 +230,8 @@ class DesktopStateStore(
             companyActivity = decodeList("companyActivity", CompanyActivityItem.serializer()),
             agentContextEntries = decodeList("agentContextEntries", AgentContextEntry.serializer()),
             agentMessages = decodeList("agentMessages", AgentMessage.serializer()),
+            marketingDelegationPolicies = decodeList("marketingDelegationPolicies", MarketingDelegationPolicy.serializer()),
+            marketingRuns = decodeList("marketingRuns", MarketingRunRecord.serializer()),
             opsMetrics = decodeObject("opsMetrics", OpsMetricSnapshot.serializer(), OpsMetricSnapshot()),
             signals = decodeList("signals", OpsSignal.serializer()),
             backendSettings = decodeObject("backendSettings", DesktopBackendSettings.serializer(), DesktopBackendSettings()),

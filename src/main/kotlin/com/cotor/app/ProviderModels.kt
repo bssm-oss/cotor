@@ -27,7 +27,18 @@ fun providerCatalog(): List<ProviderCatalogEntry> = listOf(
     ProviderCatalogEntry("lm-studio", "LM Studio CLI", "lms", listOf(CapabilityKey.EXTERNAL_API_CALL)),
     ProviderCatalogEntry("gh", "GitHub CLI", "gh", listOf(CapabilityKey.GITHUB_READ, CapabilityKey.GITHUB_PR_CREATE, CapabilityKey.GITHUB_PR_UPDATE)),
     ProviderCatalogEntry("git", "Git", "git", listOf(CapabilityKey.GIT_READ, CapabilityKey.GIT_WRITE)),
-    ProviderCatalogEntry("playwright", "Playwright", "playwright-cli", listOf(CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_INTERACT)),
+    ProviderCatalogEntry(
+        "playwright",
+        "Playwright",
+        "playwright-cli",
+        listOf(
+            CapabilityKey.BROWSER_READ,
+            CapabilityKey.BROWSER_INTERACT,
+            CapabilityKey.BROWSER_SCREENSHOT,
+            CapabilityKey.BROWSER_EXTERNAL_DOMAIN,
+            CapabilityKey.BROWSER_LOGIN_FLOW
+        )
+    ),
     ProviderCatalogEntry("ffmpeg", "FFmpeg", "ffmpeg", listOf(CapabilityKey.VIDEO_TRANSCODE, CapabilityKey.VIDEO_RENDER_LOCAL)),
     ProviderCatalogEntry("remotion", "Remotion", "remotion", listOf(CapabilityKey.VIDEO_SCRIPT_WRITE, CapabilityKey.VIDEO_RENDER_LOCAL)),
     ProviderCatalogEntry("manim", "Manim", "manim", listOf(CapabilityKey.VIDEO_SCRIPT_WRITE, CapabilityKey.VIDEO_RENDER_LOCAL)),

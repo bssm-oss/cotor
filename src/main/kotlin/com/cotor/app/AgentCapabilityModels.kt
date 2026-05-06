@@ -24,6 +24,9 @@ enum class CapabilityKey {
     BROWSER_RECORD,
     BROWSER_EXTERNAL_DOMAIN,
     BROWSER_LOGIN_FLOW,
+    WEB_PUBLISH,
+    SOCIAL_POST_CREATE,
+    MARKETING_ANALYTICS_READ,
     VIDEO_SCRIPT_WRITE,
     VIDEO_RENDER_LOCAL,
     VIDEO_GENERATE_REMOTE,
@@ -69,6 +72,7 @@ data class AgentCapabilitySetting(
     val costLimitMonthly: Int? = null,
     val maxRuntimeSeconds: Int? = null,
     val domainAllowlist: List<String> = emptyList(),
+    val channelAllowlist: List<String> = emptyList(),
     val pathAllowlist: List<String> = emptyList(),
     val skillAllowlist: List<String> = emptyList(),
     val secretRefs: List<String> = emptyList(),
@@ -101,7 +105,8 @@ data class CapabilitySimulationRequest(
     val path: String? = null,
     val networkTarget: String? = null,
     val command: String? = null,
-    val skill: String? = null
+    val skill: String? = null,
+    val channel: String? = null
 )
 
 @Serializable
@@ -150,6 +155,9 @@ fun capabilityCatalog(): List<CapabilityCatalogEntry> = listOf(
     CapabilityCatalogEntry(CapabilityKey.BROWSER_RECORD, CapabilityMode.DISABLED, "Record browser sessions.", dangerous = true),
     CapabilityCatalogEntry(CapabilityKey.BROWSER_EXTERNAL_DOMAIN, CapabilityMode.DISABLED, "Use a browser against external domains.", dangerous = true, requiresReview = true),
     CapabilityCatalogEntry(CapabilityKey.BROWSER_LOGIN_FLOW, CapabilityMode.DISABLED, "Drive login or authenticated browser flows.", dangerous = true, requiresReview = true),
+    CapabilityCatalogEntry(CapabilityKey.WEB_PUBLISH, CapabilityMode.DISABLED, "Publish content to owned web or CMS surfaces.", dangerous = true, requiresReview = true),
+    CapabilityCatalogEntry(CapabilityKey.SOCIAL_POST_CREATE, CapabilityMode.DISABLED, "Create organic social posts through delegated channel accounts.", dangerous = true, requiresReview = true),
+    CapabilityCatalogEntry(CapabilityKey.MARKETING_ANALYTICS_READ, CapabilityMode.DISABLED, "Read marketing analytics from delegated owned or social channels.", dangerous = true),
     CapabilityCatalogEntry(CapabilityKey.VIDEO_SCRIPT_WRITE, CapabilityMode.APPROVAL_REQUIRED, "Write video generation scripts.", dangerous = true, requiresReview = true),
     CapabilityCatalogEntry(CapabilityKey.VIDEO_RENDER_LOCAL, CapabilityMode.DISABLED, "Render videos locally.", dangerous = true, requiresReview = true),
     CapabilityCatalogEntry(CapabilityKey.VIDEO_GENERATE_REMOTE, CapabilityMode.DISABLED, "Call remote video generation APIs.", dangerous = true, requiresReview = true),

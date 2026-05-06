@@ -1219,6 +1219,8 @@ data class DesktopAppState(
     val workflowPipelines: List<WorkflowPipelineDefinition> = emptyList(),
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
     val agentMessages: List<AgentMessage> = emptyList(),
+    val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
+    val marketingRuns: List<MarketingRunRecord> = emptyList(),
     val problemSignals: List<CompanyProblemSignal> = emptyList()
 )
 
