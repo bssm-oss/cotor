@@ -117,10 +117,10 @@ class DesktopAppServiceRequeueOrphanedTest : FunSpec({
                     )
                 )
             )
+            service.prepareCompanyAutomationStateForTesting(company.id)
 
             val settledState = withTimeout(30_000) {
                 while (true) {
-                    service.companyDashboardPrepared(company.id)
                     val current = stateStore.load()
                     val currentIssue = current.issues.first { it.id == issue.id }
                     val issueTasks = current.tasks.filter { it.issueId == issue.id }
