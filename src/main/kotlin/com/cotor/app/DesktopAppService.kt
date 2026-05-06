@@ -2327,7 +2327,7 @@ class DesktopAppService(
         error = reason
     )
 
-    private fun validateMarketingRunPolicy(
+    private suspend fun validateMarketingRunPolicy(
         policy: MarketingDelegationPolicy,
         run: MarketingRunRecord
     ): String? {
@@ -2343,10 +2343,24 @@ class DesktopAppService(
             return "Channels are outside the MarketingDelegationPolicy: ${outsideChannels.joinToString(", ")}"
         }
         marketingPolicyTextViolation(policy, run.objective)?.let { return it }
-        val state = runBlocking { stateStore.load() }
+        val state = stateStore.load()
         val usedToday = marketingPostCountToday(state, policy, System.currentTimeMillis())
-        if (usedToday + run.channels.size > policy.dailyPostLimit.coerceAtLeast(0)) {
-            return "MarketingDelegationPolicy daily post limit would be exceeded: used=$usedToday requested=${run.channels.size} limit=${policy.dailyPostLimit}."
+        val newPostCount = run.channels.count { channel ->
+            val account = policy.channelAccounts.firstOrNull { it.channel.equals(channel, ignoreCase = true) }
+            val targetUrl = account?.let { marketingTargetUrl(policy, it) }
+            val browserTarget = targetUrl?.let(::browserNetworkTarget)
+            if (browserTarget == null) {
+                true
+            } else {
+                val key = marketingIdempotencyKey(policy, run.objective, channel, browserTarget.hostWithPort)
+                state.marketingRuns
+                    .asSequence()
+                    .flatMap { it.actions.asSequence() }
+                    .none { it.idempotencyKey == key && it.status == MarketingActionStatus.SUCCEEDED }
+            }
+        }
+        if (usedToday + newPostCount > policy.dailyPostLimit.coerceAtLeast(0)) {
+            return "MarketingDelegationPolicy daily post limit would be exceeded: used=$usedToday requested=$newPostCount limit=${policy.dailyPostLimit}."
         }
         return null
     }
@@ -14443,6 +14457,13 @@ class DesktopAppService(
                 preferredCollaborators = listOf("CEO", "UX Builder", "Engineering Lead")
             ),
             SeededRole(
+                title = "Marketing Operator",
+                roleSummary = "operate delegated owned web, CMS, organic social, and marketing analytics workflows under policy",
+                specialties = listOf("marketing", "content", "social", "analytics"),
+                collaborationInstructions = "Use browser-driven marketing actions only inside an explicit MarketingDelegationPolicy; deny and re-scope anything outside it.",
+                preferredCollaborators = listOf("CEO", "Product Strategist", "Release Manager")
+            ),
+            SeededRole(
                 title = "Engineering Lead",
                 roleSummary = "coordinate architecture, implementation direction, integration planning, and technical delegation",
                 specialties = listOf("architecture", "integration", "backend", "frontend"),
@@ -14566,12 +14587,34 @@ class DesktopAppService(
         definition: CompanyAgentDefinition
     ): Map<CapabilityKey, AgentCapabilitySetting> {
         val base = repositoryScopedCompanyAgentCapabilitySettings(company.rootPath)
-        return if (isChiefAgentDefinition(definition)) {
-            base + chiefAgentApprovalSettings()
-        } else {
-            base
+        return when {
+            isChiefAgentDefinition(definition) -> base + chiefAgentApprovalSettings()
+            isMarketingOperatorDefinition(definition) -> base + marketingOperatorSkillSettings()
+            else -> base
         }
     }
+
+    private fun isMarketingOperatorDefinition(definition: CompanyAgentDefinition): Boolean =
+        definition.title.equals("Marketing Operator", ignoreCase = true) ||
+            definition.specialties.any { it.equals("marketing", ignoreCase = true) }
+
+    private fun marketingOperatorSkillSettings(): Map<CapabilityKey, AgentCapabilitySetting> =
+        mapOf(
+            CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                skillAllowlist = listOf(
+                    "marketing-operator",
+                    "audience-scout",
+                    "content-publisher",
+                    "social-publisher",
+                    "analytics-reporter"
+                ),
+                requiresEvidence = true,
+                requiresReview = false,
+                notes = "Marketing skill execution is available, but browser publishing still requires a MarketingDelegationPolicy."
+            )
+        )
 
     private fun repositoryScopedCompanyAgentCapabilitySettings(rootPath: String): Map<CapabilityKey, AgentCapabilitySetting> {
         val repositoryRoot = Path.of(rootPath).toAbsolutePath().normalize().toString()
