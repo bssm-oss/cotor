@@ -245,6 +245,15 @@ final class DesktopStore: ObservableObject {
     @Published var newCompanyAgentMemoryNotes = ""
     @Published var newCompanyAgentPreferredCollaboratorIDs: Set<String> = []
     @Published var newCompanyAgentSkillIDs: Set<String> = []
+    @Published var marketingPolicyAllowedDomains = ""
+    @Published var marketingPolicyChannels = "web"
+    @Published var marketingPolicyDailyPostLimit = "1"
+    @Published var marketingPolicyForbiddenTerms = ""
+    @Published var marketingPolicyBrandTone = ""
+    @Published var marketingPolicyProhibitedActions = "paid-ad, budget-change, bulk-email, direct-message, payment, credential-storage"
+    @Published var marketingPolicySecretRefs = ""
+    @Published var marketingPolicyBrowserSessionRef = ""
+    @Published var marketingPolicyMaxRuntimeSeconds = "900"
     @Published var newCompanyAgentEnabled = true
     @Published var editingCompanyAgentID: String?
     @Published var editingCompanyAgentCompanyID: String?
@@ -295,6 +304,10 @@ final class DesktopStore: ObservableObject {
     @Published var showingHelpGuide = false
     @Published var helpGuide: HelpGuidePayload?
     @Published var availableSkills: [SkillCatalogEntryRecord] = []
+    @Published var marketingDelegationPolicies: [MarketingDelegationPolicyRecord] = []
+    @Published var marketingRuns: [MarketingRunRecord] = []
+    @Published var operatorCommandDraft = ""
+    @Published var operatorCommandResponses: [OperatorCommandResponsePayload] = []
 
     let api = DesktopAPI()
     private var statusState: StatusState = .connecting
@@ -566,6 +579,10 @@ final class DesktopStore: ObservableObject {
         activeGitHubPublishStatus.policy == "REQUIRE_GITHUB_PR" && !activeGitHubConnectionReady
     }
 
+    var selectedOperatorAutomationMode: String {
+        selectedCompany?.operatorAutomationMode ?? "AGENT_APPROVED"
+    }
+
     func scopedOpsMetrics(companyID: String?) -> OpsMetricSnapshotRecord {
         let scopedGoals = dashboard.goals.filter { companyID == nil || $0.companyId == companyID }
         let scopedIssues = dashboard.issues.filter { companyID == nil || $0.companyId == companyID }
@@ -732,7 +749,31 @@ final class DesktopStore: ObservableObject {
     }
 
     var defaultCompanyAgentSkillIDs: Set<String> {
-        Set(availableSkills.map(\.name))
+        Set(availableSkills.filter { !isMarketingSkill($0.name) }.map(\.name))
+    }
+
+    var isMarketingOperatorSelected: Bool {
+        newCompanyAgentSkillIDs.contains("marketing-operator")
+    }
+
+    var recentMarketingRunsForEditedAgent: [MarketingRunRecord] {
+        guard let companyId = editingCompanyAgentCompanyID ?? selectedCompanyID else { return [] }
+        let agentId = editingCompanyAgentID
+        return marketingRuns
+            .filter { $0.companyId == companyId && (agentId == nil || $0.agentId == agentId) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    var marketingPolicyConnectionSummary: String {
+        let domains = splitAgentMeta(marketingPolicyAllowedDomains)
+        let channels = splitAgentMeta(marketingPolicyChannels)
+        if domains.isEmpty || channels.isEmpty {
+            return language("Add at least one domain and channel before saving.", "저장하기 전에 도메인과 채널을 하나 이상 추가하세요.")
+        }
+        let secretState = splitAgentMeta(marketingPolicySecretRefs).isEmpty && marketingPolicyBrowserSessionRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? language("No session reference", "세션 참조 없음")
+            : language("Session/secret refs configured", "세션/secret 참조 설정됨")
+        return "\(channels.joined(separator: ", ")) · \(domains.joined(separator: ", ")) · \(secretState)"
     }
 
     func selectedSkills(for agent: CompanyAgentDefinitionRecord) -> [SkillCatalogEntryRecord] {
@@ -764,6 +805,10 @@ final class DesktopStore: ObservableObject {
         dashboard.agentCapabilityProfiles
             .first { $0.companyId == companyId && $0.agentId == agentId }?
             .settings["SKILL_RUN"] ?? AgentCapabilitySettingRecord()
+    }
+
+    private func isMarketingSkill(_ skillID: String) -> Bool {
+        ["marketing-operator", "audience-scout", "content-publisher", "social-publisher", "analytics-reporter"].contains(skillID)
     }
 
     /// Toggle or range-select org chart profiles for multi-selection.
@@ -897,6 +942,7 @@ final class DesktopStore: ObservableObject {
             }
             dashboard = fresh
             availableSkills = skillCatalog
+            await refreshMarketingState()
             syncDefaultCompanyAgentSkillsIfNeeded()
             errorMessage = nil
             isOffline = false
@@ -970,6 +1016,7 @@ final class DesktopStore: ObservableObject {
             }
             applyCompanyDashboard(fresh, companyId: companyID)
             availableSkills = skillCatalog
+            await refreshMarketingState(companyId: companyID)
             syncDefaultCompanyAgentSkillsIfNeeded()
             errorMessage = nil
             isOffline = false
@@ -1070,6 +1117,30 @@ final class DesktopStore: ObservableObject {
     private func syncDefaultCompanyAgentSkillsIfNeeded() {
         guard editingCompanyAgentID == nil, newCompanyAgentSkillIDs.isEmpty else { return }
         newCompanyAgentSkillIDs = defaultCompanyAgentSkillIDs
+    }
+
+    private func refreshMarketingState(companyId: String? = nil) async {
+        let scopedCompanyId = companyId ?? selectedCompanyID
+        do {
+            let policies = try await runWithEmbeddedBackendRecovery {
+                try await api.marketingPolicies(companyId: scopedCompanyId)
+            }
+            let runs = try await runWithEmbeddedBackendRecovery {
+                try await api.marketingRuns(companyId: scopedCompanyId)
+            }
+            if let scopedCompanyId {
+                marketingDelegationPolicies = marketingDelegationPolicies.filter { $0.companyId != scopedCompanyId } + policies
+                marketingRuns = marketingRuns.filter { $0.companyId != scopedCompanyId } + runs
+            } else {
+                marketingDelegationPolicies = policies
+                marketingRuns = runs
+            }
+            if let editingCompanyAgentID {
+                syncMarketingPolicyForm(forAgentId: editingCompanyAgentID)
+            }
+        } catch {
+            AppLogger.error("Marketing state refresh failed: \(error.localizedDescription)")
+        }
     }
 
     /// Repair selection state after a dashboard refresh so every pane still points
@@ -2600,13 +2671,75 @@ final class DesktopStore: ObservableObject {
         let skillIDs = Array(newCompanyAgentSkillIDs).sorted()
         let currentSetting = skillRunSetting(companyId: companyId, agentId: agentId)
         let nextSetting = currentSetting.withSkillAllowlist(skillIDs)
+        var capabilitySettings: [String: AgentCapabilitySettingRecord] = ["SKILL_RUN": nextSetting]
+        if !isMarketingOperatorSelected {
+            capabilitySettings.merge(disabledMarketingCapabilitySettings()) { _, new in new }
+        }
+        let finalCapabilitySettings = capabilitySettings
         _ = try await runWithEmbeddedBackendRecovery {
             try await api.updateAgentCapabilities(
                 companyId: companyId,
                 agentId: agentId,
-                settings: ["SKILL_RUN": nextSetting]
+                settings: finalCapabilitySettings
             )
         }
+        if isMarketingOperatorSelected {
+            try await syncMarketingDelegationPolicy(companyId: companyId, agentId: agentId)
+        }
+    }
+
+    private func syncMarketingDelegationPolicy(companyId: String, agentId: String) async throws {
+        let domains = splitAgentMeta(marketingPolicyAllowedDomains)
+        let channels = splitAgentMeta(marketingPolicyChannels)
+        guard !domains.isEmpty, !channels.isEmpty else {
+            throw NSError(
+                domain: "CotorDesktopApp.MarketingPolicy",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: language("Marketing policy requires at least one domain and channel.", "마케팅 정책에는 도메인과 채널이 하나 이상 필요합니다.")]
+            )
+        }
+        let existingPolicy = marketingDelegationPolicies.first { $0.companyId == companyId && $0.agentId == agentId }
+        let channelAccounts = channels.map { channel in
+            MarketingChannelAccountRecord(
+                channel: channel,
+                accountRef: channel,
+                allowedDomains: domains,
+                secretRefs: splitAgentMeta(marketingPolicySecretRefs)
+            )
+        }
+        let policy = try await runWithEmbeddedBackendRecovery {
+            try await api.upsertMarketingPolicy(
+                UpsertMarketingDelegationPolicyPayload(
+                    id: existingPolicy?.id,
+                    companyId: companyId,
+                    agentId: agentId,
+                    name: "Owned+Social",
+                    allowedDomains: domains,
+                    channelAccounts: channelAccounts,
+                    dailyPostLimit: Int(marketingPolicyDailyPostLimit.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
+                    forbiddenTerms: splitAgentMeta(marketingPolicyForbiddenTerms),
+                    brandTone: trimmedOptional(marketingPolicyBrandTone),
+                    prohibitedActions: splitAgentMeta(marketingPolicyProhibitedActions),
+                    secretRefs: splitAgentMeta(marketingPolicySecretRefs),
+                    browserSessionRef: trimmedOptional(marketingPolicyBrowserSessionRef),
+                    maxRuntimeSeconds: Int(marketingPolicyMaxRuntimeSeconds.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 900
+                )
+            )
+        }
+        marketingDelegationPolicies = marketingDelegationPolicies.filter { $0.id != policy.id } + [policy]
+    }
+
+    private func disabledMarketingCapabilitySettings() -> [String: AgentCapabilitySettingRecord] {
+        let disabled = AgentCapabilitySettingRecord(enabled: false, mode: "DISABLED")
+        return [
+            "BROWSER_READ": disabled,
+            "BROWSER_INTERACT": disabled,
+            "BROWSER_EXTERNAL_DOMAIN": disabled,
+            "BROWSER_LOGIN_FLOW": disabled,
+            "WEB_PUBLISH": disabled,
+            "SOCIAL_POST_CREATE": disabled,
+            "MARKETING_ANALYTICS_READ": disabled,
+        ]
     }
 
     func batchUpdateSelectedCompanyAgents(
@@ -2664,11 +2797,54 @@ final class DesktopStore: ObservableObject {
         newCompanyAgentMemoryNotes = agent.memoryNotes ?? ""
         newCompanyAgentPreferredCollaboratorIDs = Set(agent.preferredCollaboratorIds)
         newCompanyAgentSkillIDs = skillIDs(for: agent)
+        syncMarketingPolicyForm(forAgentId: agent.id)
         newCompanyAgentEnabled = agent.enabled
     }
 
     func cancelEditingCompanyAgent() {
         resetCompanyAgentComposer()
+    }
+
+    func runCompanyOperatorCommand(
+        message: String,
+        automationMode: String? = nil,
+        confirmFullAuto: Bool = false
+    ) async -> OperatorCommandResponsePayload? {
+        guard let company = selectedCompany else { return nil }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            actionErrorMessage = nil
+            errorMessage = nil
+            let response = try await runWithEmbeddedBackendRecovery {
+                try await api.runOperatorCommand(
+                    companyId: company.id,
+                    message: trimmed,
+                    automationMode: automationMode,
+                    confirmFullAuto: confirmFullAuto
+                )
+            }
+            operatorCommandResponses.insert(response, at: 0)
+            await refreshDashboard(restartEventStream: false)
+            await loadSelectedCompanyMemorySnapshot()
+            return response
+        } catch {
+            actionErrorMessage = error.localizedDescription
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func setSelectedCompanyOperatorAutomationMode(_ mode: String, confirmFullAuto: Bool = false) async {
+        guard let company = selectedCompany else { return }
+        let response = await runCompanyOperatorCommand(
+            message: "Set Company Operator automation mode to \(mode).",
+            automationMode: mode,
+            confirmFullAuto: confirmFullAuto
+        )
+        if response == nil {
+            selectedCompanyID = company.id
+        }
     }
 
     func startSelectedCompanyRuntime() async {
@@ -2785,7 +2961,36 @@ final class DesktopStore: ObservableObject {
         newCompanyAgentMemoryNotes = ""
         newCompanyAgentPreferredCollaboratorIDs = []
         newCompanyAgentSkillIDs = defaultCompanyAgentSkillIDs
+        resetMarketingPolicyForm()
         newCompanyAgentEnabled = true
+    }
+
+    private func syncMarketingPolicyForm(forAgentId agentId: String) {
+        guard let policy = marketingDelegationPolicies.first(where: { $0.agentId == agentId }) else {
+            resetMarketingPolicyForm()
+            return
+        }
+        marketingPolicyAllowedDomains = policy.allowedDomains.joined(separator: ", ")
+        marketingPolicyChannels = policy.channelAccounts.map(\.channel).joined(separator: ", ")
+        marketingPolicyDailyPostLimit = "\(policy.dailyPostLimit)"
+        marketingPolicyForbiddenTerms = policy.forbiddenTerms.joined(separator: ", ")
+        marketingPolicyBrandTone = policy.brandTone ?? ""
+        marketingPolicyProhibitedActions = policy.prohibitedActions.joined(separator: ", ")
+        marketingPolicySecretRefs = policy.secretRefs.joined(separator: ", ")
+        marketingPolicyBrowserSessionRef = policy.browserSessionRef ?? ""
+        marketingPolicyMaxRuntimeSeconds = "\(policy.maxRuntimeSeconds)"
+    }
+
+    private func resetMarketingPolicyForm() {
+        marketingPolicyAllowedDomains = ""
+        marketingPolicyChannels = "web"
+        marketingPolicyDailyPostLimit = "1"
+        marketingPolicyForbiddenTerms = ""
+        marketingPolicyBrandTone = ""
+        marketingPolicyProhibitedActions = "paid-ad, budget-change, bulk-email, direct-message, payment, credential-storage"
+        marketingPolicySecretRefs = ""
+        marketingPolicyBrowserSessionRef = ""
+        marketingPolicyMaxRuntimeSeconds = "900"
     }
 
     private func splitAgentMeta(_ raw: String) -> [String] {
@@ -2984,6 +3189,8 @@ final class DesktopStore: ObservableObject {
         selectedCompanyID = company.id
         newIssueCompanyID = company.id
         selectedRepositoryID = company.repositoryId
+        operatorCommandResponses = []
+        operatorCommandDraft = ""
         resetCompanyAgentComposer()
         selectedWorkspaceID = dashboard.workspaces.first(where: { $0.repositoryId == company.repositoryId && $0.baseBranch == company.defaultBaseBranch })?.id
         selectedGoalID = goals.first?.id
