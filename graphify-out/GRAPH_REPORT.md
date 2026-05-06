@@ -1,7 +1,7 @@
 # Graph Report - cotor  (2026-05-06)
 
 ## Corpus Check
-- 340 files · ~539,638 words
+- 340 files · ~540,704 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -961,11 +961,11 @@ Nodes (1): PipelineOrchestratorPropertyTest
 
 ### Community 159 - "Community 159"
 Cohesion: 0.5
-Nodes (2): ProviderCatalogEntry, ProviderScanResult
+Nodes (1): LocalPlaywrightMarketingBrowserRunner
 
 ### Community 160 - "Community 160"
 Cohesion: 0.5
-Nodes (1): LocalPlaywrightMarketingBrowserRunner
+Nodes (2): ProviderCatalogEntry, ProviderScanResult
 
 ### Community 161 - "Community 161"
 Cohesion: 0.5
@@ -1644,9 +1644,9 @@ Nodes (1): RealtimeEvent
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 158`** (4 nodes): `PipelineOrchestratorPropertyTest`, `.`MAP mode should preserve fanout cardinality for arbitrary item lists`()`, `.`MAP mode should reject arbitrary fanout stage counts other than one`()`, `PipelineOrchestratorPropertyTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 159`** (4 nodes): `providerCatalog()`, `ProviderCatalogEntry`, `ProviderScanResult`, `ProviderModels.kt`
+- **Thin community `Community 159`** (4 nodes): `LocalPlaywrightMarketingBrowserRunner`, `.execute()`, `marketingCommandAvailable()`, `LocalPlaywrightMarketingBrowserRunner.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 160`** (4 nodes): `LocalPlaywrightMarketingBrowserRunner`, `.execute()`, `marketingCommandAvailable()`, `MarketingBrowserRunner.kt`
+- **Thin community `Community 160`** (4 nodes): `providerCatalog()`, `ProviderCatalogEntry`, `ProviderScanResult`, `ProviderModels.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 162`** (4 nodes): `BoundCompanyRuntime`, `CompanyRuntimeBindingService`, `.bind()`, `CompanyRuntimeBindingService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
