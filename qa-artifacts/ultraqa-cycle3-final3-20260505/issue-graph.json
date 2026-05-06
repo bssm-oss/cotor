@@ -1,0 +1,41 @@
+{
+  "nodes": [
+    {
+      "id": "f0e98854-339e-4a07-94c3-3c1f03d10a98",
+      "title": "CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\"",
+      "status": "DELEGATED",
+      "kind": "planning",
+      "assignee": "CEO",
+      "goalId": "8a9cf750-bd46-4f76-90e5-702d46d70a66",
+      "dependsOn": [],
+      "pullRequestUrl": null,
+      "qaVerdict": null,
+      "ceoVerdict": null
+    },
+    {
+      "id": "a96a62f1-5fdc-4f35-aa13-0207dd079b2a",
+      "title": "GitHub 없는 코드 작업 E2E 차단 유지",
+      "status": "BLOCKED",
+      "kind": "code",
+      "assignee": "CEO",
+      "goalId": "8a9cf750-bd46-4f76-90e5-702d46d70a66",
+      "dependsOn": [],
+      "pullRequestUrl": null,
+      "qaVerdict": null,
+      "ceoVerdict": null
+    },
+    {
+      "id": "bb99f823-fa32-40bf-a1bd-3f76b666e5fa",
+      "title": "Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지",
+      "status": "PLANNED",
+      "kind": "infra",
+      "assignee": "unassigned",
+      "goalId": "8a9cf750-bd46-4f76-90e5-702d46d70a66",
+      "dependsOn": [],
+      "pullRequestUrl": null,
+      "qaVerdict": null,
+      "ceoVerdict": null
+    }
+  ],
+  "edges": []
+}

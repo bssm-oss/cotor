@@ -1,0 +1,226 @@
+[
+  {
+    "id": "437b44ea-eac1-45ff-aa7d-c26a08e634f3",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "CEO",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "lead strategy, planning, triage, staffing decisions, and final merge approval",
+    "specialties": [
+      "strategy",
+      "triage",
+      "merge",
+      "escalation"
+    ],
+    "collaborationInstructions": "Review company state first, then assign execution and review work to the rest of the organization.",
+    "preferredCollaboratorIds": [
+      "5e73cfb2-1183-4abe-98d9-ba323dc0d9ae",
+      "48bf958c-4b1f-42f1-a7bf-4267b9f04af9",
+      "85730308-6c45-4219-b719-2b42b271b2bc"
+    ],
+    "memoryNotes": "You are the top-level owner. Keep the company moving and decide the next cycle.",
+    "enabled": true,
+    "displayOrder": 0,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "5e73cfb2-1183-4abe-98d9-ba323dc0d9ae",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "Product Strategist",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "translate company goals into scoped work, requirements, and prioritization guidance",
+    "specialties": [
+      "product",
+      "requirements",
+      "roadmap",
+      "discovery"
+    ],
+    "collaborationInstructions": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+    "preferredCollaboratorIds": [
+      "437b44ea-eac1-45ff-aa7d-c26a08e634f3",
+      "ef6555a6-9a32-44d5-84d8-4ae2579c177e",
+      "48bf958c-4b1f-42f1-a7bf-4267b9f04af9"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 1,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "48bf958c-4b1f-42f1-a7bf-4267b9f04af9",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "Engineering Lead",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "coordinate architecture, implementation direction, integration planning, and technical delegation",
+    "specialties": [
+      "architecture",
+      "integration",
+      "backend",
+      "frontend"
+    ],
+    "collaborationInstructions": "Split technical work across builders and surface integration risks early.",
+    "preferredCollaboratorIds": [
+      "437b44ea-eac1-45ff-aa7d-c26a08e634f3",
+      "d3550019-8389-45fa-aa87-345318c2e93f",
+      "9eb9d624-b4ab-4d58-ab8e-fcdfcb88f14b",
+      "4aefba86-4fd9-4cf0-9e79-dd77347ae856"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 2,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "ef6555a6-9a32-44d5-84d8-4ae2579c177e",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "UX Builder",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "shape product flows, usability, interaction clarity, and user-facing experience",
+    "specialties": [
+      "ux",
+      "research",
+      "flows",
+      "usability"
+    ],
+    "collaborationInstructions": "Turn product requirements into clearer flows before UI polish begins.",
+    "preferredCollaboratorIds": [
+      "5e73cfb2-1183-4abe-98d9-ba323dc0d9ae",
+      "bdb806ad-fce2-45d7-bd5d-2f58d1ce630d",
+      "d3550019-8389-45fa-aa87-345318c2e93f"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 3,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "bdb806ad-fce2-45d7-bd5d-2f58d1ce630d",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "UI Builder",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "craft visual interface details, component polish, layout quality, and design fidelity",
+    "specialties": [
+      "ui",
+      "design",
+      "components",
+      "visual polish"
+    ],
+    "collaborationInstructions": "Convert UX intent into concrete screens and hand implementation-ready guidance to frontend.",
+    "preferredCollaboratorIds": [
+      "ef6555a6-9a32-44d5-84d8-4ae2579c177e",
+      "d3550019-8389-45fa-aa87-345318c2e93f"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 4,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "d3550019-8389-45fa-aa87-345318c2e93f",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "Builder",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "implement assigned product slices, integrate changes, and deliver reviewable work",
+    "specialties": [
+      "implementation",
+      "integration",
+      "delivery"
+    ],
+    "collaborationInstructions": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+    "preferredCollaboratorIds": [
+      "bdb806ad-fce2-45d7-bd5d-2f58d1ce630d",
+      "ef6555a6-9a32-44d5-84d8-4ae2579c177e",
+      "9eb9d624-b4ab-4d58-ab8e-fcdfcb88f14b"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 5,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "9eb9d624-b4ab-4d58-ab8e-fcdfcb88f14b",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "Backend Builder",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "implement backend behavior, orchestration logic, APIs, and integration reliability",
+    "specialties": [
+      "backend",
+      "api",
+      "kotlin",
+      "orchestration"
+    ],
+    "collaborationInstructions": "Own service and runtime changes, then hand integration notes to QA and release.",
+    "preferredCollaboratorIds": [
+      "48bf958c-4b1f-42f1-a7bf-4267b9f04af9",
+      "d3550019-8389-45fa-aa87-345318c2e93f",
+      "85730308-6c45-4219-b719-2b42b271b2bc"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 6,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "85730308-6c45-4219-b719-2b42b271b2bc",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "QA",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "review completed work, verify behavior, run qa checks, and summarize residual risk",
+    "specialties": [
+      "qa",
+      "review",
+      "verification",
+      "testing"
+    ],
+    "collaborationInstructions": "Review every completed slice and decide whether more remediation is needed before release.",
+    "preferredCollaboratorIds": [
+      "9eb9d624-b4ab-4d58-ab8e-fcdfcb88f14b",
+      "d3550019-8389-45fa-aa87-345318c2e93f",
+      "4aefba86-4fd9-4cf0-9e79-dd77347ae856"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 7,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  },
+  {
+    "id": "4aefba86-4fd9-4cf0-9e79-dd77347ae856",
+    "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+    "title": "Release Manager",
+    "agentCli": "opencode",
+    "model": "opencode-go/deepseek-v4-flash",
+    "roleSummary": "coordinate release readiness, final integration checks, operational notes, and delivery handoff",
+    "specialties": [
+      "release",
+      "ops",
+      "integration",
+      "delivery"
+    ],
+    "collaborationInstructions": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+    "preferredCollaboratorIds": [
+      "85730308-6c45-4219-b719-2b42b271b2bc",
+      "48bf958c-4b1f-42f1-a7bf-4267b9f04af9",
+      "437b44ea-eac1-45ff-aa7d-c26a08e634f3"
+    ],
+    "memoryNotes": null,
+    "enabled": true,
+    "displayOrder": 8,
+    "createdAt": 1777921415337,
+    "updatedAt": 1777921415337
+  }
+]

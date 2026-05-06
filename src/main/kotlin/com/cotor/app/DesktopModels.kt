@@ -417,6 +417,34 @@ enum class IssueStatus {
     CANCELED
 }
 
+@Serializable
+enum class BlockedReasonCode {
+    AUTH_MISSING,
+    CAPABILITY_APPROVAL_REQUIRED,
+    GITHUB_NOT_READY,
+    MERGE_CONFLICT,
+    CI_FAILED,
+    TEST_FAILED,
+    NO_CHANGES,
+    TOOL_UNAVAILABLE,
+    PROVIDER_ERROR,
+    BUDGET_LIMIT,
+    DEPENDENCY_BLOCKED,
+    QA_CHANGES_REQUESTED,
+    CEO_REJECTED,
+    RUNTIME_INTERRUPTED,
+    UNKNOWN
+}
+
+@Serializable
+data class BlockedReasonSnapshot(
+    val code: BlockedReasonCode,
+    val summary: String,
+    val detail: String? = null,
+    val source: String,
+    val retryable: Boolean
+)
+
 /**
  * Review-queue status attached to issue-linked pull requests.
  */

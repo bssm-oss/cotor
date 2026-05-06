@@ -1,0 +1,858 @@
+{
+  "checksPassed": true,
+  "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+  "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+  "issueId": "7c367b1b-ff87-4adb-8324-692c56f38fc5",
+  "root": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-cycle3-final2-20260505",
+  "artifactDir": "qa-artifacts/ultraqa-cycle3-final2-20260505",
+  "appHome": "/tmp/cotor-ultraqa-cycle3-final2-app-home",
+  "gitRemoteCount": 0,
+  "github": {
+    "policy": "REQUIRE_GITHUB_PR",
+    "ghInstalled": true,
+    "ghAuthenticated": true,
+    "originConfigured": false,
+    "originUrl": null,
+    "bootstrapAvailable": false,
+    "repositoryPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-cycle3-final2-20260505",
+    "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+    "companyName": "UltraQA Cycle 3 Final2 Co",
+    "message": "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically."
+  },
+  "run": {
+    "status": "BLOCKED",
+    "blockedBy": [
+      "92ce4dcf-74fe-4fc5-96c5-a60d6e26a298"
+    ],
+    "statusReason": null
+  },
+  "blockedCounts": [
+    1,
+    1,
+    1
+  ],
+  "agentClis": [
+    "opencode"
+  ],
+  "agentModels": [
+    "opencode-go/deepseek-v4-flash"
+  ],
+  "globalAgents": [
+    "claude",
+    "codex",
+    "codex-exec",
+    "codex-oauth",
+    "copilot",
+    "cursor",
+    "echo",
+    "gemini",
+    "gemma4",
+    "graphify",
+    "lmstudio",
+    "ollama",
+    "opencode",
+    "qwen"
+  ],
+  "modelLookup": {
+    "opencode": [
+      "opencode/big-pickle",
+      "opencode/gpt-5-nano",
+      "opencode/hy3-preview-free",
+      "opencode/minimax-m2.5-free",
+      "opencode/nemotron-3-super-free",
+      "opencode-go/deepseek-v4-flash",
+      "opencode-go/deepseek-v4-pro",
+      "opencode-go/glm-5",
+      "opencode-go/glm-5.1",
+      "opencode-go/kimi-k2.5",
+      "opencode-go/kimi-k2.6",
+      "opencode-go/mimo-v2-omni",
+      "opencode-go/mimo-v2-pro",
+      "opencode-go/mimo-v2.5",
+      "opencode-go/mimo-v2.5-pro",
+      "opencode-go/minimax-m2.5",
+      "opencode-go/minimax-m2.7",
+      "opencode-go/qwen3.5-plus",
+      "opencode-go/qwen3.6-plus",
+      "deepseek/deepseek-chat",
+      "deepseek/deepseek-reasoner",
+      "deepseek/deepseek-v4-flash",
+      "deepseek/deepseek-v4-pro"
+    ],
+    "gemma4": [
+      "gemma3:4b"
+    ]
+  },
+  "counts": {
+    "agents": 9,
+    "activity": 11,
+    "reviewQueue": 0,
+    "messages": 1,
+    "contexts": 1,
+    "pipelines": 1,
+    "repositories": 1,
+    "workspaces": 1
+  },
+  "runtime": {
+    "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+    "status": "RUNNING",
+    "tickIntervalSeconds": 60,
+    "activeGoalCount": 1,
+    "activeIssueCount": 2,
+    "autonomyEnabledGoalCount": 1,
+    "lastStartedAt": 1777927276928,
+    "lastStoppedAt": null,
+    "manuallyStoppedAt": null,
+    "lastTickAt": 1777927277843,
+    "lastAction": "tick-started",
+    "lastError": null,
+    "backendKind": "LOCAL_COTOR",
+    "backendHealth": "healthy",
+    "backendMessage": "Using local Cotor app-server and CLI execution.",
+    "backendLifecycleState": "RUNNING",
+    "backendPid": 80952,
+    "backendPort": 8904,
+    "consecutiveFailures": 0,
+    "adaptiveTickMs": 15000,
+    "todaySpentCents": 0,
+    "monthSpentCents": 0,
+    "budgetPausedAt": null,
+    "budgetResetDate": null,
+    "resumableRunCount": 0,
+    "waitingApprovalCount": 0,
+    "blockedByPolicyCount": 0,
+    "blockedByCiCount": 0,
+    "quarantinedRunCount": 0,
+    "resumableRunIds": [],
+    "pendingApprovalRunIds": [],
+    "pendingIssueIds": [
+      "a389de3e-aa3d-49cd-a6c6-ab11cc6c9d6a",
+      "92ce4dcf-74fe-4fc5-96c5-a60d6e26a298"
+    ],
+    "blockedIssueIds": [],
+    "reviewQueueAttentionIds": [],
+    "lastReconciliationAt": 1777927277850
+  },
+  "checks": [
+    {
+      "name": "health ok",
+      "passed": true,
+      "detail": {
+        "ok": true,
+        "service": "cotor-app-server"
+      }
+    },
+    {
+      "name": "company root stable",
+      "passed": true,
+      "detail": {
+        "id": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+        "name": "UltraQA Cycle 3 Final2 Co",
+        "rootPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-cycle3-final2-20260505",
+        "repositoryId": "71c4e832-88c6-46b9-b2d8-f9226e90c544",
+        "defaultBaseBranch": "main",
+        "backendKind": "LOCAL_COTOR",
+        "backendConfigOverride": null,
+        "linearSyncEnabled": false,
+        "linearConfigOverride": null,
+        "autonomyEnabled": true,
+        "defaultPipelineId": null,
+        "dailyBudgetCents": 100,
+        "monthlyBudgetCents": 300,
+        "createdAt": 1777927275331,
+        "updatedAt": 1777927275331
+      }
+    },
+    {
+      "name": "no git origin created",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "GitHub status origin false",
+      "passed": true,
+      "detail": {
+        "policy": "REQUIRE_GITHUB_PR",
+        "ghInstalled": true,
+        "ghAuthenticated": true,
+        "originConfigured": false,
+        "originUrl": null,
+        "bootstrapAvailable": false,
+        "repositoryPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-cycle3-final2-20260505",
+        "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+        "companyName": "UltraQA Cycle 3 Final2 Co",
+        "message": "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically."
+      }
+    },
+    {
+      "name": "GitHub message says no repo creation",
+      "passed": true,
+      "detail": {
+        "policy": "REQUIRE_GITHUB_PR",
+        "ghInstalled": true,
+        "ghAuthenticated": true,
+        "originConfigured": false,
+        "originUrl": null,
+        "bootstrapAvailable": false,
+        "repositoryPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-cycle3-final2-20260505",
+        "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+        "companyName": "UltraQA Cycle 3 Final2 Co",
+        "message": "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically."
+      }
+    },
+    {
+      "name": "opencode agent exists",
+      "passed": true,
+      "detail": [
+        "opencode"
+      ]
+    },
+    {
+      "name": "deepseek flash default exists",
+      "passed": true,
+      "detail": [
+        "opencode-go/deepseek-v4-flash"
+      ]
+    },
+    {
+      "name": "gemma4 lookup works",
+      "passed": true,
+      "detail": {
+        "opencode": [
+          "opencode/big-pickle",
+          "opencode/gpt-5-nano",
+          "opencode/hy3-preview-free",
+          "opencode/minimax-m2.5-free",
+          "opencode/nemotron-3-super-free",
+          "opencode-go/deepseek-v4-flash",
+          "opencode-go/deepseek-v4-pro",
+          "opencode-go/glm-5",
+          "opencode-go/glm-5.1",
+          "opencode-go/kimi-k2.5",
+          "opencode-go/kimi-k2.6",
+          "opencode-go/mimo-v2-omni",
+          "opencode-go/mimo-v2-pro",
+          "opencode-go/mimo-v2.5",
+          "opencode-go/mimo-v2.5-pro",
+          "opencode-go/minimax-m2.5",
+          "opencode-go/minimax-m2.7",
+          "opencode-go/qwen3.5-plus",
+          "opencode-go/qwen3.6-plus",
+          "deepseek/deepseek-chat",
+          "deepseek/deepseek-reasoner",
+          "deepseek/deepseek-v4-flash",
+          "deepseek/deepseek-v4-pro"
+        ],
+        "gemma4": [
+          "gemma3:4b"
+        ]
+      }
+    },
+    {
+      "name": "run blocked without origin",
+      "passed": true,
+      "detail": {
+        "id": "7c367b1b-ff87-4adb-8324-692c56f38fc5",
+        "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+        "projectContextId": "4cd175c1-c184-4e6c-8628-cfede4f76de0",
+        "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+        "workspaceId": "29ede953-9073-4277-b56f-394af9b4f761",
+        "title": "GitHub 없는 코드 작업 E2E 차단 유지",
+        "description": "PR 모드에서 origin이 없으면 자동 repo 생성 없이 친절한 연결 안내로 멈춰야 한다.",
+        "status": "BLOCKED",
+        "priority": 1,
+        "kind": "code",
+        "assigneeProfileId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+        "linearIssueId": null,
+        "linearIssueIdentifier": null,
+        "linearIssueUrl": null,
+        "lastLinearSyncAt": null,
+        "blockedBy": [
+          "92ce4dcf-74fe-4fc5-96c5-a60d6e26a298"
+        ],
+        "dependsOn": [],
+        "acceptanceCriteria": [],
+        "riskLevel": "medium",
+        "codeProducing": null,
+        "executionIntent": null,
+        "branchName": null,
+        "worktreePath": null,
+        "pullRequestNumber": null,
+        "pullRequestUrl": null,
+        "pullRequestState": null,
+        "qaVerdict": null,
+        "qaFeedback": null,
+        "ceoVerdict": null,
+        "ceoFeedback": null,
+        "mergeResult": null,
+        "transitionReason": "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+        "sourceSignal": "manual",
+        "pipelineId": null,
+        "currentStageId": null,
+        "durableRunId": null,
+        "approvalPauseId": null,
+        "providerBlockReason": null,
+        "verificationStatus": null,
+        "verificationSummary": null,
+        "lastVerifiedAt": null,
+        "runtimeDisposition": null,
+        "createdAt": 1777927276938,
+        "updatedAt": 1777927276971,
+        "workflowLineage": null
+      }
+    },
+    {
+      "name": "issue remains blocked",
+      "passed": true,
+      "detail": {
+        "id": "7c367b1b-ff87-4adb-8324-692c56f38fc5",
+        "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+        "projectContextId": "4cd175c1-c184-4e6c-8628-cfede4f76de0",
+        "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+        "workspaceId": "29ede953-9073-4277-b56f-394af9b4f761",
+        "title": "GitHub 없는 코드 작업 E2E 차단 유지",
+        "description": "PR 모드에서 origin이 없으면 자동 repo 생성 없이 친절한 연결 안내로 멈춰야 한다.",
+        "status": "BLOCKED",
+        "priority": 1,
+        "kind": "code",
+        "assigneeProfileId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+        "linearIssueId": null,
+        "linearIssueIdentifier": null,
+        "linearIssueUrl": null,
+        "lastLinearSyncAt": null,
+        "blockedBy": [
+          "92ce4dcf-74fe-4fc5-96c5-a60d6e26a298"
+        ],
+        "dependsOn": [],
+        "acceptanceCriteria": [],
+        "riskLevel": "medium",
+        "codeProducing": null,
+        "executionIntent": null,
+        "branchName": null,
+        "worktreePath": null,
+        "pullRequestNumber": null,
+        "pullRequestUrl": null,
+        "pullRequestState": null,
+        "qaVerdict": null,
+        "qaFeedback": null,
+        "ceoVerdict": null,
+        "ceoFeedback": null,
+        "mergeResult": null,
+        "transitionReason": "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+        "sourceSignal": "manual",
+        "pipelineId": null,
+        "currentStageId": null,
+        "durableRunId": null,
+        "approvalPauseId": null,
+        "providerBlockReason": null,
+        "verificationStatus": null,
+        "verificationSummary": null,
+        "lastVerifiedAt": null,
+        "runtimeDisposition": "TERMINAL",
+        "createdAt": 1777927276938,
+        "updatedAt": 1777927276991,
+        "workflowLineage": null
+      }
+    },
+    {
+      "name": "explicit blocker exists",
+      "passed": true,
+      "detail": {
+        "id": "7c367b1b-ff87-4adb-8324-692c56f38fc5",
+        "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+        "projectContextId": "4cd175c1-c184-4e6c-8628-cfede4f76de0",
+        "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+        "workspaceId": "29ede953-9073-4277-b56f-394af9b4f761",
+        "title": "GitHub 없는 코드 작업 E2E 차단 유지",
+        "description": "PR 모드에서 origin이 없으면 자동 repo 생성 없이 친절한 연결 안내로 멈춰야 한다.",
+        "status": "BLOCKED",
+        "priority": 1,
+        "kind": "code",
+        "assigneeProfileId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+        "linearIssueId": null,
+        "linearIssueIdentifier": null,
+        "linearIssueUrl": null,
+        "lastLinearSyncAt": null,
+        "blockedBy": [
+          "92ce4dcf-74fe-4fc5-96c5-a60d6e26a298"
+        ],
+        "dependsOn": [],
+        "acceptanceCriteria": [],
+        "riskLevel": "medium",
+        "codeProducing": null,
+        "executionIntent": null,
+        "branchName": null,
+        "worktreePath": null,
+        "pullRequestNumber": null,
+        "pullRequestUrl": null,
+        "pullRequestState": null,
+        "qaVerdict": null,
+        "qaFeedback": null,
+        "ceoVerdict": null,
+        "ceoFeedback": null,
+        "mergeResult": null,
+        "transitionReason": "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+        "sourceSignal": "manual",
+        "pipelineId": null,
+        "currentStageId": null,
+        "durableRunId": null,
+        "approvalPauseId": null,
+        "providerBlockReason": null,
+        "verificationStatus": null,
+        "verificationSummary": null,
+        "lastVerifiedAt": null,
+        "runtimeDisposition": "TERMINAL",
+        "createdAt": 1777927276938,
+        "updatedAt": 1777927276991,
+        "workflowLineage": null
+      }
+    },
+    {
+      "name": "dashboard blocked count stable",
+      "passed": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "dashboard issue blocked",
+      "passed": true,
+      "detail": [
+        [
+          "CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\"",
+          "DELEGATED"
+        ],
+        [
+          "GitHub 없는 코드 작업 E2E 차단 유지",
+          "BLOCKED"
+        ],
+        [
+          "Restore GitHub publishing for GitHub 없는 코드 작업 E2E 차단 유지",
+          "PLANNED"
+        ],
+        [
+          "CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\"",
+          "DELEGATED"
+        ],
+        [
+          "GitHub 없는 코드 작업 E2E 차단 유지",
+          "BLOCKED"
+        ],
+        [
+          "Restore GitHub publishing for GitHub 없는 코드 작업 E2E 차단 유지",
+          "PLANNED"
+        ],
+        [
+          "CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\"",
+          "DELEGATED"
+        ],
+        [
+          "GitHub 없는 코드 작업 E2E 차단 유지",
+          "BLOCKED"
+        ],
+        [
+          "Restore GitHub publishing for GitHub 없는 코드 작업 E2E 차단 유지",
+          "PLANNED"
+        ]
+      ]
+    },
+    {
+      "name": "company execution details route works",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "execution details routes agree",
+      "passed": true,
+      "detail": {
+        "company": [],
+        "global": []
+      }
+    },
+    {
+      "name": "memory snapshot available",
+      "passed": true,
+      "detail": {
+        "companyMemory": "company=UltraQA Cycle 3 Final2 Co\nworkspace=ultraqa-cycle3-final2-20260505\ndefaultBaseBranch=main\nactiveGoals=로컬-only Cotor 회사 운영 검증\nrecentActivity=Reopened infra issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically. | Delegated issue: CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\" -> CEO | Created connection issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically.",
+        "workflowMemory": "projectContext=UltraQA Cycle 3 Final2 Co\ngoal=로컬-only Cotor 회사 운영 검증\ngoalDescription=GitHub 원격 없이 회사 생성, 이슈 차단 유지, 회의실/채팅/팀 데이터를 검증한다.\nissue=GitHub 없는 코드 작업 E2E 차단 유지\nissueStatus=BLOCKED\ngoalIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지 [PLANNED]| CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\" [DELEGATED]\nrecentDecisions=",
+        "agentMemory": "role=CEO\nagentCli=opencode\ncapabilities=planning, triage, goal-decomposition, review, integration\nroleSummary=lead strategy, planning, triage, staffing decisions, and final merge approval\nmemoryNotes=You are the top-level owner. Keep the company moving and decide the next cycle.\nassignedIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\" [DELEGATED]\npreferredCollaborators=Product Strategist, Engineering Lead, QA"
+      }
+    },
+    {
+      "name": "memory hides raw Restore title",
+      "passed": true,
+      "detail": "{\"companyMemory\": \"company=UltraQA Cycle 3 Final2 Co\\nworkspace=ultraqa-cycle3-final2-20260505\\ndefaultBaseBranch=main\\nactiveGoals=로컬-only Cotor 회사 운영 검증\\nrecentActivity=Reopened infra issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically. | Delegated issue: CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" -> CEO | Created connection issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically.\", \"workflowMemory\": \"projectContext=UltraQA Cycle 3 Final2 Co\\ngoal=로컬-only Cotor 회사 운영 검증\\ngoalDescription=GitHub 원격 없이 회사 생성, 이슈 차단 유지, 회의실/채팅/팀 데이터를 검증한다.\\nissue=GitHub 없는 코드 작업 E2E 차단 유지\\nissueStatus=BLOCKED\\ngoalIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지 [PLANNED]| CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\nrecentDecisions=\", \"agentMemory\": \"role=CEO\\nagentCli=opencode\\ncapabilities=planning, triage, goal-decomposition, review, integration\\nroleSummary=lead strategy, planning, triage, staffing decisions, and final merge approval\\nmemoryNotes=You are the top-level owner. Keep the company moving and decide the next cycle.\\nassignedIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\npreferredCollaborators=Product Strategist, Engineering Lead, QA\"}"
+    },
+    {
+      "name": "memory hides raw GitHub error",
+      "passed": true,
+      "detail": "{\"companyMemory\": \"company=UltraQA Cycle 3 Final2 Co\\nworkspace=ultraqa-cycle3-final2-20260505\\ndefaultBaseBranch=main\\nactiveGoals=로컬-only Cotor 회사 운영 검증\\nrecentActivity=Reopened infra issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically. | Delegated issue: CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" -> CEO | Created connection issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically.\", \"workflowMemory\": \"projectContext=UltraQA Cycle 3 Final2 Co\\ngoal=로컬-only Cotor 회사 운영 검증\\ngoalDescription=GitHub 원격 없이 회사 생성, 이슈 차단 유지, 회의실/채팅/팀 데이터를 검증한다.\\nissue=GitHub 없는 코드 작업 E2E 차단 유지\\nissueStatus=BLOCKED\\ngoalIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지 [PLANNED]| CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\nrecentDecisions=\", \"agentMemory\": \"role=CEO\\nagentCli=opencode\\ncapabilities=planning, triage, goal-decomposition, review, integration\\nroleSummary=lead strategy, planning, triage, staffing decisions, and final merge approval\\nmemoryNotes=You are the top-level owner. Keep the company moving and decide the next cycle.\\nassignedIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\npreferredCollaborators=Product Strategist, Engineering Lead, QA\"}"
+    },
+    {
+      "name": "memory hides graphify guidance",
+      "passed": true,
+      "detail": "{\"companyMemory\": \"company=UltraQA Cycle 3 Final2 Co\\nworkspace=ultraqa-cycle3-final2-20260505\\ndefaultBaseBranch=main\\nactiveGoals=로컬-only Cotor 회사 운영 검증\\nrecentActivity=Reopened infra issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically. | Delegated issue: CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" -> CEO | Created connection issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically.\", \"workflowMemory\": \"projectContext=UltraQA Cycle 3 Final2 Co\\ngoal=로컬-only Cotor 회사 운영 검증\\ngoalDescription=GitHub 원격 없이 회사 생성, 이슈 차단 유지, 회의실/채팅/팀 데이터를 검증한다.\\nissue=GitHub 없는 코드 작업 E2E 차단 유지\\nissueStatus=BLOCKED\\ngoalIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지 [PLANNED]| CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\nrecentDecisions=\", \"agentMemory\": \"role=CEO\\nagentCli=opencode\\ncapabilities=planning, triage, goal-decomposition, review, integration\\nroleSummary=lead strategy, planning, triage, staffing decisions, and final merge approval\\nmemoryNotes=You are the top-level owner. Keep the company moving and decide the next cycle.\\nassignedIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\npreferredCollaborators=Product Strategist, Engineering Lead, QA\"}"
+    },
+    {
+      "name": "memory simplifies root path",
+      "passed": true,
+      "detail": "{\"companyMemory\": \"company=UltraQA Cycle 3 Final2 Co\\nworkspace=ultraqa-cycle3-final2-20260505\\ndefaultBaseBranch=main\\nactiveGoals=로컬-only Cotor 회사 운영 검증\\nrecentActivity=Reopened infra issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically. | Delegated issue: CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" -> CEO | Created connection issue: Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지| Code work is waiting: Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically.\", \"workflowMemory\": \"projectContext=UltraQA Cycle 3 Final2 Co\\ngoal=로컬-only Cotor 회사 운영 검증\\ngoalDescription=GitHub 원격 없이 회사 생성, 이슈 차단 유지, 회의실/채팅/팀 데이터를 검증한다.\\nissue=GitHub 없는 코드 작업 E2E 차단 유지\\nissueStatus=BLOCKED\\ngoalIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | Connect GitHub for GitHub 없는 코드 작업 E2E 차단 유지 [PLANNED]| CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\nrecentDecisions=\", \"agentMemory\": \"role=CEO\\nagentCli=opencode\\ncapabilities=planning, triage, goal-decomposition, review, integration\\nroleSummary=lead strategy, planning, triage, staffing decisions, and final merge approval\\nmemoryNotes=You are the top-level owner. Keep the company moving and decide the next cycle.\\nassignedIssues=GitHub 없는 코드 작업 E2E 차단 유지 [BLOCKED] | CEO plan and delegate \\\"로컬-only Cotor 회사 운영 검증\\\" [DELEGATED]\\npreferredCollaborators=Product Strategist, Engineering Lead, QA\"}"
+    },
+    {
+      "name": "activity available",
+      "passed": true,
+      "detail": 11
+    },
+    {
+      "name": "topology available",
+      "passed": true,
+      "detail": [
+        {
+          "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+          "agents": [
+            "CEO",
+            "Product Strategist",
+            "Engineering Lead",
+            "UX Builder",
+            "UI Builder",
+            "Builder",
+            "Backend Builder",
+            "QA",
+            "Release Manager"
+          ],
+          "edges": [
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+              "toAgentId": "a43e6ddb-2c80-4b3e-9f38-9498480713f9",
+              "reason": "Review company state first, then assign execution and review work to the rest of the organization.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+              "toAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "reason": "Review company state first, then assign execution and review work to the rest of the organization.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+              "toAgentId": "57d4fd40-0017-4015-a9a5-0b4f97f60b97",
+              "reason": "Review company state first, then assign execution and review work to the rest of the organization.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "a43e6ddb-2c80-4b3e-9f38-9498480713f9",
+              "toAgentId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+              "reason": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "a43e6ddb-2c80-4b3e-9f38-9498480713f9",
+              "toAgentId": "19f87244-3033-42b6-9e70-b8a115caa703",
+              "reason": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "a43e6ddb-2c80-4b3e-9f38-9498480713f9",
+              "toAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "reason": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "toAgentId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+              "reason": "Split technical work across builders and surface integration risks early.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "toAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "reason": "Split technical work across builders and surface integration risks early.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "toAgentId": "4693004e-0a51-47e2-a9f9-0dfe7272ac56",
+              "reason": "Split technical work across builders and surface integration risks early.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "toAgentId": "a75ef8ea-9ded-4f06-8521-8aa2da778562",
+              "reason": "Split technical work across builders and surface integration risks early.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "19f87244-3033-42b6-9e70-b8a115caa703",
+              "toAgentId": "a43e6ddb-2c80-4b3e-9f38-9498480713f9",
+              "reason": "Turn product requirements into clearer flows before UI polish begins.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "19f87244-3033-42b6-9e70-b8a115caa703",
+              "toAgentId": "1b11693a-da66-4005-8fb4-6912c6afaf2a",
+              "reason": "Turn product requirements into clearer flows before UI polish begins.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "19f87244-3033-42b6-9e70-b8a115caa703",
+              "toAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "reason": "Turn product requirements into clearer flows before UI polish begins.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "1b11693a-da66-4005-8fb4-6912c6afaf2a",
+              "toAgentId": "19f87244-3033-42b6-9e70-b8a115caa703",
+              "reason": "Convert UX intent into concrete screens and hand implementation-ready guidance to frontend.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "1b11693a-da66-4005-8fb4-6912c6afaf2a",
+              "toAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "reason": "Convert UX intent into concrete screens and hand implementation-ready guidance to frontend.",
+              "handoffType": "planning"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "toAgentId": "1b11693a-da66-4005-8fb4-6912c6afaf2a",
+              "reason": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+              "handoffType": "review"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "toAgentId": "19f87244-3033-42b6-9e70-b8a115caa703",
+              "reason": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+              "handoffType": "review"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "toAgentId": "4693004e-0a51-47e2-a9f9-0dfe7272ac56",
+              "reason": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+              "handoffType": "review"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "4693004e-0a51-47e2-a9f9-0dfe7272ac56",
+              "toAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "reason": "Own service and runtime changes, then hand integration notes to QA and release.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "4693004e-0a51-47e2-a9f9-0dfe7272ac56",
+              "toAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "reason": "Own service and runtime changes, then hand integration notes to QA and release.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "4693004e-0a51-47e2-a9f9-0dfe7272ac56",
+              "toAgentId": "57d4fd40-0017-4015-a9a5-0b4f97f60b97",
+              "reason": "Own service and runtime changes, then hand integration notes to QA and release.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "57d4fd40-0017-4015-a9a5-0b4f97f60b97",
+              "toAgentId": "4693004e-0a51-47e2-a9f9-0dfe7272ac56",
+              "reason": "Review every completed slice and decide whether more remediation is needed before release.",
+              "handoffType": "review"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "57d4fd40-0017-4015-a9a5-0b4f97f60b97",
+              "toAgentId": "30d79fab-15b9-44b1-9dc2-6791cde8af74",
+              "reason": "Review every completed slice and decide whether more remediation is needed before release.",
+              "handoffType": "review"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "57d4fd40-0017-4015-a9a5-0b4f97f60b97",
+              "toAgentId": "a75ef8ea-9ded-4f06-8521-8aa2da778562",
+              "reason": "Review every completed slice and decide whether more remediation is needed before release.",
+              "handoffType": "review"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "a75ef8ea-9ded-4f06-8521-8aa2da778562",
+              "toAgentId": "57d4fd40-0017-4015-a9a5-0b4f97f60b97",
+              "reason": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "a75ef8ea-9ded-4f06-8521-8aa2da778562",
+              "toAgentId": "f0812e8f-8166-458d-8068-9387d0c8c0f4",
+              "reason": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+              "handoffType": "execution"
+            },
+            {
+              "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+              "fromAgentId": "a75ef8ea-9ded-4f06-8521-8aa2da778562",
+              "toAgentId": "d42ec8f4-5909-4cf3-817d-9df11bb29d80",
+              "reason": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+              "handoffType": "execution"
+            }
+          ],
+          "activeLoops": [
+            "planning:delegated",
+            "code:blocked",
+            "infra:planned"
+          ],
+          "updatedAt": 1777927277840
+        }
+      ]
+    },
+    {
+      "name": "issue graph available",
+      "passed": true,
+      "detail": {
+        "nodes": [
+          {
+            "id": "a389de3e-aa3d-49cd-a6c6-ab11cc6c9d6a",
+            "title": "CEO plan and delegate \"로컬-only Cotor 회사 운영 검증\"",
+            "status": "DELEGATED",
+            "kind": "planning",
+            "assignee": "CEO",
+            "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+            "dependsOn": [],
+            "pullRequestUrl": null,
+            "qaVerdict": null,
+            "ceoVerdict": null
+          },
+          {
+            "id": "7c367b1b-ff87-4adb-8324-692c56f38fc5",
+            "title": "GitHub 없는 코드 작업 E2E 차단 유지",
+            "status": "BLOCKED",
+            "kind": "code",
+            "assignee": "CEO",
+            "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+            "dependsOn": [],
+            "pullRequestUrl": null,
+            "qaVerdict": null,
+            "ceoVerdict": null
+          },
+          {
+            "id": "92ce4dcf-74fe-4fc5-96c5-a60d6e26a298",
+            "title": "Restore GitHub publishing for GitHub 없는 코드 작업 E2E 차단 유지",
+            "status": "PLANNED",
+            "kind": "infra",
+            "assignee": "unassigned",
+            "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+            "dependsOn": [],
+            "pullRequestUrl": null,
+            "qaVerdict": null,
+            "ceoVerdict": null
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "name": "budget reflects limits",
+      "passed": true,
+      "detail": {
+        "dailyBudgetCents": 100,
+        "monthlyBudgetCents": 300,
+        "todaySpentCents": 0,
+        "monthSpentCents": 0,
+        "budgetPaused": false
+      }
+    },
+    {
+      "name": "context listed",
+      "passed": true,
+      "detail": [
+        {
+          "id": "0efb6979-4168-49a9-9f47-76f7ed111a5e",
+          "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+          "issueId": "7c367b1b-ff87-4adb-8324-692c56f38fc5",
+          "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+          "agentName": "CEO",
+          "kind": "qa-note",
+          "title": "UltraQA 확인 메모",
+          "content": "회의실, 채팅, 팀 화면에서 이 상태를 쉽게 이해할 수 있어야 한다.",
+          "visibility": "company",
+          "createdAt": 1777927278322
+        }
+      ]
+    },
+    {
+      "name": "message listed",
+      "passed": true,
+      "detail": [
+        {
+          "id": "7cb3a1ea-7c45-4650-89e6-9cadc4d3ca67",
+          "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+          "fromAgentName": "CEO",
+          "toAgentName": "QA",
+          "issueId": "7c367b1b-ff87-4adb-8324-692c56f38fc5",
+          "goalId": "6d6f1ae5-d786-40bd-9559-2749fbc5aecb",
+          "kind": "status",
+          "subject": "UltraQA 상태 공유",
+          "body": "GitHub 연결 전 코드 작업은 차단 유지가 맞습니다.",
+          "status": "unread",
+          "parentMessageId": null,
+          "createdAt": 1777927278329
+        }
+      ]
+    },
+    {
+      "name": "custom pipeline listed",
+      "passed": true,
+      "detail": [
+        {
+          "id": "c03ef73a-6394-4a58-8398-28f2787242a0",
+          "companyId": "d78393a3-0e09-4bc9-b783-1f4f6dc31aa0",
+          "name": "UltraQA Review Flow",
+          "stages": [
+            {
+              "id": "ceo",
+              "kind": "approval",
+              "title": "CEO 확인",
+              "assigneeRoleName": "CEO",
+              "verdictKey": null,
+              "verdictPassValue": "PASS",
+              "verdictFailValue": "CHANGES_REQUESTED",
+              "skipWhen": null,
+              "order": 0
+            },
+            {
+              "id": "qa",
+              "kind": "review",
+              "title": "QA 검증",
+              "assigneeRoleName": "QA",
+              "verdictKey": "qa",
+              "verdictPassValue": "PASS",
+              "verdictFailValue": "CHANGES_REQUESTED",
+              "skipWhen": null,
+              "order": 1
+            }
+          ],
+          "isDefault": false,
+          "createdAt": 1777927278342,
+          "updatedAt": 1777927278342
+        }
+      ]
+    }
+  ]
+}

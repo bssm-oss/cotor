@@ -1,0 +1,15 @@
+{
+  "remoteBefore": 0,
+  "remoteAfter": 0,
+  "noOriginPreserved": true,
+  "issueCount": 4,
+  "planningStatus": "DONE",
+  "hasAssignments": true,
+  "issueTitles": [
+    "Clarify the user-facing outcome, missing requirements, and success criteria.",
+    "Design the simplest chat-only flow that lets the user start work without knowing internal concepts.",
+    "Implement the backend and app UI path needed for that flow.",
+    "Verify the flow end to end and record remaining risks for CEO review."
+  ],
+  "noMetadataIssues": true
+}

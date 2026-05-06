@@ -1,0 +1,19 @@
+{
+  "id": "d0937d15-f1d2-4bd8-adcb-9e5170c1065b",
+  "companyId": "7ae963c5-9341-44ac-b28b-bf65ab8fa099",
+  "projectContextId": "33b4a4c9-5c7e-4bd9-a438-241f979651b4",
+  "title": "샌드박스 앱을 더 편하게 만들기",
+  "description": "복잡한 내부 용어를 줄이고 사용자가 바로 이해하는 화면을 검증한다.",
+  "status": "ACTIVE",
+  "priority": 2,
+  "successMetrics": [
+    "회사 생성 가능",
+    "이슈 생성 가능",
+    "회의실 데이터 표시 가능"
+  ],
+  "operatingPolicy": null,
+  "followUpContext": null,
+  "autonomyEnabled": false,
+  "createdAt": 1777921502717,
+  "updatedAt": 1777921502717
+}

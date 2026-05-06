@@ -1,0 +1,27 @@
+{
+  "companyId": "21639397-b76a-4950-bee4-861367b254e3",
+  "goalTitle": "대충 앱이 채팅만으로 다 되게 해줘. CEO가 알아서 생각하고 팀원들에게 일을 나눠서 최상의 결과를 만들게 해줘.",
+  "issueCount": 6,
+  "previewCount": 6,
+  "planningStatus": "DONE",
+  "hasCeoBrief": true,
+  "hasUserToCeoMessage": true,
+  "hasCeoPlanMessage": true,
+  "issueTitles": [
+    "Outcome: 대충 앱이 채팅만으로 다 되게 해줘. CEO가 알아서 생각하고 팀원들에게 일을 나눠서 최상의 결과를 만들게 해줘.",
+    "Source: user chat request",
+    "Company: Chat Intake E2E",
+    "Clarify the vague request into a goal and success criteria.",
+    "Split the work into branchable slices.",
+    "Assign slices to the best-fit agents in the company roster."
+  ],
+  "assignees": [
+    "Product Strategist",
+    "Release Manager",
+    "UX Builder",
+    "Backend Builder",
+    "UI Builder",
+    "Engineering Lead"
+  ],
+  "githubRemoteCount": 0
+}

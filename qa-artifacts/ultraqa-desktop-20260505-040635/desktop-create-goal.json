@@ -1,0 +1,20 @@
+{
+  "id": "c01bc6b3-80ac-4de4-9ef0-3f964a09caea",
+  "companyId": "ad4d1a94-acd0-4786-a762-f8d752db1bb5",
+  "projectContextId": "c5b70146-24ff-46b4-a79d-fc89d092f84f",
+  "title": "앱 화면 전체 검증",
+  "description": "실제 데스크톱 앱에서 회사 화면, 상황실, 회의, 지도, GitHub 안내, 닫기 동작을 확인한다.",
+  "status": "ACTIVE",
+  "priority": 2,
+  "successMetrics": [
+    "회사 대시보드 표시",
+    "회의실 표시",
+    "업무 지도 표시",
+    "GitHub 안내 닫기 가능"
+  ],
+  "operatingPolicy": null,
+  "followUpContext": null,
+  "autonomyEnabled": false,
+  "createdAt": 1777921598131,
+  "updatedAt": 1777921598131
+}

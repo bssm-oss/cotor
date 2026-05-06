@@ -1,0 +1,14 @@
+{
+  "id": "bcdc9e89-32ef-4adf-b89e-b2401d3e5a63",
+  "companyId": "73256cb8-fb3e-405e-adbd-8b223dda4aaa",
+  "fromAgentName": "CEO",
+  "toAgentName": "QA",
+  "issueId": "f4716987-a092-4e7e-a7e6-6a538bc0ae94",
+  "goalId": "e8a3dc23-831b-42d2-b4d4-ec4f5abfde42",
+  "kind": "meeting",
+  "subject": "수정 확인 회의",
+  "body": "초기 런타임 이벤트가 56년 전처럼 표시되면 안 된다.",
+  "status": "unread",
+  "parentMessageId": null,
+  "createdAt": 1777922306375
+}

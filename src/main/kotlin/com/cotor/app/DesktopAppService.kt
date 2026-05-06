@@ -123,7 +123,11 @@ private data class CompanyAutomationTraceEvent(
     val latestRunStatus: String? = null,
     val latestRunUpdatedAt: Long? = null,
     val retryEligible: Boolean? = null,
-    val runErrorSnippet: String? = null
+    val runErrorSnippet: String? = null,
+    val blockedReasonCode: BlockedReasonCode? = null,
+    val blockedReasonSummary: String? = null,
+    val blockedReasonDetail: String? = null,
+    val blockedRetryable: Boolean? = null
 )
 
 @kotlinx.serialization.Serializable

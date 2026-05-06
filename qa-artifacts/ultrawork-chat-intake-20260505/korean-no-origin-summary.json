@@ -1,0 +1,23 @@
+{
+  "remoteBefore": 0,
+  "remoteAfter": 0,
+  "noOriginPreserved": true,
+  "githubMessage": "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically.",
+  "goalTitle": "대충 채팅만으로 앱 기능 하나 만들어줘. CEO가 한번 더 생각하고 팀에게 나눠서 최상의 결과로 만들어줘.",
+  "planningStatus": "DONE",
+  "issueCount": 4,
+  "issueTitles": [
+    "사용자가 원하는 결과와 성공 기준을 정리한다.",
+    "내부 용어 없이 채팅만으로 시작되는 흐름을 설계한다.",
+    "채팅 요청을 앱 기능으로 연결하는 처리 경로를 구현한다.",
+    "채팅 요청 흐름을 실제로 검증하고 남은 위험을 기록한다."
+  ],
+  "assigneeRoles": [
+    "Product Strategist",
+    "UX Builder",
+    "Backend Builder",
+    "QA"
+  ],
+  "noMetadataIssues": true,
+  "koreanIssueTitles": true
+}

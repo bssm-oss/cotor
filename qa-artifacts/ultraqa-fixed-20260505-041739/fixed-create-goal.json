@@ -1,0 +1,18 @@
+{
+  "id": "e8a3dc23-831b-42d2-b4d4-ec4f5abfde42",
+  "companyId": "73256cb8-fb3e-405e-adbd-8b223dda4aaa",
+  "projectContextId": "7fec76ea-1303-4eb4-9c58-3d115bd9cf1d",
+  "title": "회의실 시간 표시 수정 확인",
+  "description": "초기 런타임 상태가 오래된 1970년 상대시간으로 보이지 않아야 한다.",
+  "status": "ACTIVE",
+  "priority": 2,
+  "successMetrics": [
+    "상황실 회의 표시",
+    "타임라인에 56 yr 없음"
+  ],
+  "operatingPolicy": null,
+  "followUpContext": null,
+  "autonomyEnabled": false,
+  "createdAt": 1777922306308,
+  "updatedAt": 1777922306308
+}

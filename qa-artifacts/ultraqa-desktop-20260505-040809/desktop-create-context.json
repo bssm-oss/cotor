@@ -1,0 +1,12 @@
+{
+  "id": "ac796dd1-33e8-47c0-b950-9eb8f6938314",
+  "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+  "issueId": "13682a22-067e-4e70-8532-93a37555f18f",
+  "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+  "agentName": "QA",
+  "kind": "finding",
+  "title": "데스크톱 수동 QA 대상",
+  "content": "회사, 회의실, 업무 지도, GitHub 연결 UI, 모달 닫기 동작을 실제 화면에서 확인한다.",
+  "visibility": "company",
+  "createdAt": 1777921691687
+}

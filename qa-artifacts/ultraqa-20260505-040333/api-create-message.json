@@ -1,0 +1,14 @@
+{
+  "id": "53194211-7875-4b86-9a37-09acba49ff0e",
+  "companyId": "adee3a7c-0cf7-4ee3-afb8-47e9e5231419",
+  "fromAgentName": "CEO",
+  "toAgentName": "QA",
+  "issueId": "3f66e9ac-fc0e-484d-b0db-386fd3201664",
+  "goalId": "04c8f18d-5dc4-413a-864e-c27ed0e3fd86",
+  "kind": "qa_note",
+  "subject": "UltraQA 검증 요청",
+  "body": "회의실과 지도 화면의 빈 상태/긴 텍스트/닫기 동작을 확인한다.",
+  "status": "unread",
+  "parentMessageId": null,
+  "createdAt": 1777921416639
+}

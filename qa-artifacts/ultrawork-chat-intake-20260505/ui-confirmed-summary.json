@@ -1,0 +1,10 @@
+{
+  "remoteAfterUi": 0,
+  "goalCount": 2,
+  "goalTitles": [
+    "대충 알아서 새 기능 하나 더 만들어줘. CEO가 생각해서 팀에 나눠줘.",
+    "대충 채팅만으로 앱 기능 하나 만들어줘. CEO가 한번 더 생각하고 팀에게 나눠서 최상의 결과로 만들어줘."
+  ],
+  "uiRequestCreated": true,
+  "koreanIssueCount": 8
+}

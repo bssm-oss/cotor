@@ -1,0 +1,1111 @@
+{
+  "companies": [
+    {
+      "id": "1da84623-00de-4b93-a796-4b397b03636e",
+      "name": "UltraQA 데스크톱 회사",
+      "rootPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-desktop-20260505-040809",
+      "repositoryId": "0e7c93d2-e28f-44ba-a6c7-48d865e27265",
+      "defaultBaseBranch": "main",
+      "backendKind": "LOCAL_COTOR",
+      "backendConfigOverride": null,
+      "linearSyncEnabled": false,
+      "linearConfigOverride": null,
+      "autonomyEnabled": false,
+      "defaultPipelineId": null,
+      "dailyBudgetCents": 100,
+      "monthlyBudgetCents": 300,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    }
+  ],
+  "companyAgentDefinitions": [
+    {
+      "id": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "CEO",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "lead strategy, planning, triage, staffing decisions, and final merge approval",
+      "specialties": [
+        "strategy",
+        "triage",
+        "merge",
+        "escalation"
+      ],
+      "collaborationInstructions": "Review company state first, then assign execution and review work to the rest of the organization.",
+      "preferredCollaboratorIds": [
+        "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+        "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+        "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4"
+      ],
+      "memoryNotes": "You are the top-level owner. Keep the company moving and decide the next cycle.",
+      "enabled": true,
+      "displayOrder": 0,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "Product Strategist",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "translate company goals into scoped work, requirements, and prioritization guidance",
+      "specialties": [
+        "product",
+        "requirements",
+        "roadmap",
+        "discovery"
+      ],
+      "collaborationInstructions": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+      "preferredCollaboratorIds": [
+        "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+        "ccd332b4-783f-431d-8e26-12849cd74157",
+        "5bf35f79-ec11-4e89-81bf-e8d250655a59"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 1,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "Engineering Lead",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "coordinate architecture, implementation direction, integration planning, and technical delegation",
+      "specialties": [
+        "architecture",
+        "integration",
+        "backend",
+        "frontend"
+      ],
+      "collaborationInstructions": "Split technical work across builders and surface integration risks early.",
+      "preferredCollaboratorIds": [
+        "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+        "4712b009-7502-4b64-92db-fa792b2c1013",
+        "f03c9820-531b-4f45-acf6-9e941b57086d",
+        "79d97848-65a2-481c-a15d-1394d1de592c"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 2,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "ccd332b4-783f-431d-8e26-12849cd74157",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "UX Builder",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "shape product flows, usability, interaction clarity, and user-facing experience",
+      "specialties": [
+        "ux",
+        "research",
+        "flows",
+        "usability"
+      ],
+      "collaborationInstructions": "Turn product requirements into clearer flows before UI polish begins.",
+      "preferredCollaboratorIds": [
+        "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+        "42ad1141-c519-4a64-af07-6658a7ad161a",
+        "4712b009-7502-4b64-92db-fa792b2c1013"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 3,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "42ad1141-c519-4a64-af07-6658a7ad161a",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "UI Builder",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "craft visual interface details, component polish, layout quality, and design fidelity",
+      "specialties": [
+        "ui",
+        "design",
+        "components",
+        "visual polish"
+      ],
+      "collaborationInstructions": "Convert UX intent into concrete screens and hand implementation-ready guidance to frontend.",
+      "preferredCollaboratorIds": [
+        "ccd332b4-783f-431d-8e26-12849cd74157",
+        "4712b009-7502-4b64-92db-fa792b2c1013"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 4,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "4712b009-7502-4b64-92db-fa792b2c1013",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "Builder",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "implement assigned product slices, integrate changes, and deliver reviewable work",
+      "specialties": [
+        "implementation",
+        "integration",
+        "delivery"
+      ],
+      "collaborationInstructions": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+      "preferredCollaboratorIds": [
+        "42ad1141-c519-4a64-af07-6658a7ad161a",
+        "ccd332b4-783f-431d-8e26-12849cd74157",
+        "f03c9820-531b-4f45-acf6-9e941b57086d"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 5,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "f03c9820-531b-4f45-acf6-9e941b57086d",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "Backend Builder",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "implement backend behavior, orchestration logic, APIs, and integration reliability",
+      "specialties": [
+        "backend",
+        "api",
+        "kotlin",
+        "orchestration"
+      ],
+      "collaborationInstructions": "Own service and runtime changes, then hand integration notes to QA and release.",
+      "preferredCollaboratorIds": [
+        "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+        "4712b009-7502-4b64-92db-fa792b2c1013",
+        "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 6,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "QA",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "review completed work, verify behavior, run qa checks, and summarize residual risk",
+      "specialties": [
+        "qa",
+        "review",
+        "verification",
+        "testing"
+      ],
+      "collaborationInstructions": "Review every completed slice and decide whether more remediation is needed before release.",
+      "preferredCollaboratorIds": [
+        "f03c9820-531b-4f45-acf6-9e941b57086d",
+        "4712b009-7502-4b64-92db-fa792b2c1013",
+        "79d97848-65a2-481c-a15d-1394d1de592c"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 7,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    },
+    {
+      "id": "79d97848-65a2-481c-a15d-1394d1de592c",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "title": "Release Manager",
+      "agentCli": "opencode",
+      "model": "opencode-go/deepseek-v4-flash",
+      "roleSummary": "coordinate release readiness, final integration checks, operational notes, and delivery handoff",
+      "specialties": [
+        "release",
+        "ops",
+        "integration",
+        "delivery"
+      ],
+      "collaborationInstructions": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+      "preferredCollaboratorIds": [
+        "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+        "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+        "46545a89-f36b-4ac6-81f0-2e00aee4c19f"
+      ],
+      "memoryNotes": null,
+      "enabled": true,
+      "displayOrder": 8,
+      "createdAt": 1777921690719,
+      "updatedAt": 1777921690719
+    }
+  ],
+  "projectContexts": [
+    {
+      "id": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "name": "UltraQA 데스크톱 회사",
+      "slug": "ultraqa",
+      "status": "ACTIVE",
+      "contextDocPath": "/tmp/cotor-desktop-live-20260505-040809/app-home/.cotor/companies/ultraqa/projects/default.md",
+      "lastUpdatedAt": 1777921690719
+    }
+  ],
+  "goals": [
+    {
+      "id": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "title": "앱 화면 전체 검증",
+      "description": "실제 데스크톱 앱에서 회사 화면, 상황실, 회의, 지도, GitHub 안내, 닫기 동작을 확인한다.",
+      "status": "ACTIVE",
+      "priority": 2,
+      "successMetrics": [
+        "회사 대시보드 표시",
+        "회의실 표시",
+        "업무 지도 표시",
+        "GitHub 안내 닫기 가능"
+      ],
+      "operatingPolicy": null,
+      "followUpContext": null,
+      "autonomyEnabled": false,
+      "createdAt": 1777921691621,
+      "updatedAt": 1777921691621
+    }
+  ],
+  "issues": [
+    {
+      "id": "c7b047c2-d5e5-4341-8c52-3a3089be6ade",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "workspaceId": "3632bebf-937f-4f18-99c3-abba24d4e39d",
+      "title": "CEO plan and delegate \"앱 화면 전체 검증\"",
+      "description": "CEO planning issue for the company goal.\n\nCompany: UltraQA 데스크톱 회사\nGoal: 앱 화면 전체 검증\nDescription:\n실제 데스크톱 앱에서 회사 화면, 상황실, 회의, 지도, GitHub 안내, 닫기 동작을 확인한다.\n\nRoster:\n- CEO: lead strategy, planning, triage, staffing decisions, and final merge approval\n  specialties: strategy, triage, merge, escalation\n  capabilities: planning, triage, goal-decomposition, review, integration\n- Product Strategist: translate company goals into scoped work, requirements, and prioritization guidance\n  specialties: product, requirements, roadmap, discovery\n  capabilities: goal-decomposition\n- Engineering Lead: coordinate architecture, implementation direction, integration planning, and technical delegation\n  specialties: architecture, integration, backend, frontend\n  capabilities: planning, goal-decomposition, implementation, backend, frontend, integration\n- UX Builder: shape product flows, usability, interaction clarity, and user-facing experience\n  specialties: ux, research, flows, usability\n  capabilities: goal-decomposition, implementation, frontend\n- UI Builder: craft visual interface details, component polish, layout quality, and design fidelity\n  specialties: ui, design, components, visual polish\n  capabilities: implementation, frontend\n- Builder: implement assigned product slices, integrate changes, and deliver reviewable work\n  specialties: implementation, integration, delivery\n  capabilities: triage, goal-decomposition, review, implementation, integration\n- Backend Builder: implement backend behavior, orchestration logic, APIs, and integration reliability\n  specialties: backend, api, kotlin, orchestration\n  capabilities: triage, implementation, backend, integration\n- QA: review completed work, verify behavior, run qa checks, and summarize residual risk\n  specialties: qa, review, verification, testing\n  capabilities: review, qa\n- Release Manager: coordinate release readiness, final integration checks, operational notes, and delivery handoff\n  specialties: release, ops, integration, delivery\n  capabilities: planning, implementation, integration\n\nResponsibilities:\n- Break the goal into explicit downstream issues.\n- Assign each issue to the best-fit role in the roster.\n- Decide dependency order and whether each issue should produce code and a PR.\n- Keep review and final CEO approval as separate downstream gates.",
+      "status": "DONE",
+      "priority": 1,
+      "kind": "planning",
+      "assigneeProfileId": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+      "linearIssueId": null,
+      "linearIssueIdentifier": null,
+      "linearIssueUrl": null,
+      "lastLinearSyncAt": null,
+      "blockedBy": [],
+      "dependsOn": [],
+      "acceptanceCriteria": [
+        "Produce a structured plan with explicit issues, assignees, dependencies, and PR expectations.",
+        "Use the current company roster and goal context when assigning work."
+      ],
+      "riskLevel": "medium",
+      "codeProducing": false,
+      "executionIntent": null,
+      "branchName": null,
+      "worktreePath": null,
+      "pullRequestNumber": null,
+      "pullRequestUrl": null,
+      "pullRequestState": null,
+      "qaVerdict": null,
+      "qaFeedback": null,
+      "ceoVerdict": null,
+      "ceoFeedback": null,
+      "mergeResult": null,
+      "transitionReason": "Autonomous CEO planning is disabled, so Cotor used the deterministic fallback planner.",
+      "sourceSignal": "ceo-planning",
+      "pipelineId": null,
+      "currentStageId": null,
+      "durableRunId": null,
+      "approvalPauseId": null,
+      "providerBlockReason": null,
+      "verificationStatus": null,
+      "verificationSummary": null,
+      "lastVerifiedAt": null,
+      "runtimeDisposition": "TERMINAL",
+      "createdAt": 1777921691635,
+      "updatedAt": 1777921691645,
+      "workflowLineage": null
+    },
+    {
+      "id": "dd88c7d9-f7d7-4ddc-82b4-3847d65f021c",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "workspaceId": "3632bebf-937f-4f18-99c3-abba24d4e39d",
+      "title": "Deliver the first implementation slice for \"앱 화면 전체 검증\"",
+      "description": "Goal: 앱 화면 전체 검증\n\nRole: Backend Builder\nPhase: execution\nFocus: backend behavior, correctness, and integration reliability\n\nOwned subtasks:\n- Deliver the first implementation slice for \"앱 화면 전체 검증\": Own this slice in your branch with extra attention to backend behavior, correctness, and integration reliability.\n- Validate the assigned branch outcome: Run targeted checks for your implementation, note regressions, and summarize residual risks.\n\nShared checklist:\n- Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.\n- Validate the changed behavior before finishing and call out any residual risk.\n\nQuality bar:\n- Treat the result as something an end user could actually open and judge, not as a placeholder diff.\n- Do not satisfy the issue with marker comments, README-only edits, or validation-only artifacts unless the issue explicitly asks for that.\n- If this is user-facing UI/web work, deliver a visually coherent result with strong hierarchy, spacing, interaction clarity, and polished states.",
+      "status": "PLANNED",
+      "priority": 2,
+      "kind": "execution",
+      "assigneeProfileId": "f03c9820-531b-4f45-acf6-9e941b57086d",
+      "linearIssueId": null,
+      "linearIssueIdentifier": null,
+      "linearIssueUrl": null,
+      "lastLinearSyncAt": null,
+      "blockedBy": [],
+      "dependsOn": [],
+      "acceptanceCriteria": [
+        "Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.",
+        "Validate the changed behavior before finishing and call out any residual risk.",
+        "Deliver the first implementation slice for \"앱 화면 전체 검증\"",
+        "Validate the assigned branch outcome"
+      ],
+      "riskLevel": "medium",
+      "codeProducing": true,
+      "executionIntent": "CODE_CHANGE",
+      "branchName": null,
+      "worktreePath": null,
+      "pullRequestNumber": null,
+      "pullRequestUrl": null,
+      "pullRequestState": null,
+      "qaVerdict": null,
+      "qaFeedback": null,
+      "ceoVerdict": null,
+      "ceoFeedback": null,
+      "mergeResult": null,
+      "transitionReason": "Fallback planner assigned this issue to Backend Builder.",
+      "sourceSignal": "ceo-planning:25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "pipelineId": null,
+      "currentStageId": null,
+      "durableRunId": null,
+      "approvalPauseId": null,
+      "providerBlockReason": null,
+      "verificationStatus": null,
+      "verificationSummary": null,
+      "lastVerifiedAt": null,
+      "runtimeDisposition": "RUNNABLE",
+      "createdAt": 1777921691645,
+      "updatedAt": 1777921691645,
+      "workflowLineage": null
+    },
+    {
+      "id": "72c8359a-0a6e-4286-b7b2-2bfcadabec55",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "workspaceId": "3632bebf-937f-4f18-99c3-abba24d4e39d",
+      "title": "Advance a second branchable improvement slice for \"앱 화면 전체 검증\"",
+      "description": "Goal: 앱 화면 전체 검증\n\nRole: Engineering Lead\nPhase: execution\nFocus: planning, prioritization, and company orchestration\n\nOwned subtasks:\n- Advance a second branchable improvement slice for \"앱 화면 전체 검증\": Own this slice in your branch with extra attention to planning, prioritization, and company orchestration.\n- Validate the assigned branch outcome: Run targeted checks for your implementation, note regressions, and summarize residual risks.\n\nShared checklist:\n- Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.\n- Validate the changed behavior before finishing and call out any residual risk.\n\nQuality bar:\n- Treat the result as something an end user could actually open and judge, not as a placeholder diff.\n- Do not satisfy the issue with marker comments, README-only edits, or validation-only artifacts unless the issue explicitly asks for that.\n- If this is user-facing UI/web work, deliver a visually coherent result with strong hierarchy, spacing, interaction clarity, and polished states.",
+      "status": "PLANNED",
+      "priority": 2,
+      "kind": "execution",
+      "assigneeProfileId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+      "linearIssueId": null,
+      "linearIssueIdentifier": null,
+      "linearIssueUrl": null,
+      "lastLinearSyncAt": null,
+      "blockedBy": [],
+      "dependsOn": [],
+      "acceptanceCriteria": [
+        "Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.",
+        "Validate the changed behavior before finishing and call out any residual risk.",
+        "Advance a second branchable improvement slice for \"앱 화면 전체 검증\"",
+        "Validate the assigned branch outcome"
+      ],
+      "riskLevel": "medium",
+      "codeProducing": true,
+      "executionIntent": "CODE_CHANGE",
+      "branchName": null,
+      "worktreePath": null,
+      "pullRequestNumber": null,
+      "pullRequestUrl": null,
+      "pullRequestState": null,
+      "qaVerdict": null,
+      "qaFeedback": null,
+      "ceoVerdict": null,
+      "ceoFeedback": null,
+      "mergeResult": null,
+      "transitionReason": "Fallback planner assigned this issue to Engineering Lead.",
+      "sourceSignal": "ceo-planning:25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "pipelineId": null,
+      "currentStageId": null,
+      "durableRunId": null,
+      "approvalPauseId": null,
+      "providerBlockReason": null,
+      "verificationStatus": null,
+      "verificationSummary": null,
+      "lastVerifiedAt": null,
+      "runtimeDisposition": "RUNNABLE",
+      "createdAt": 1777921691646,
+      "updatedAt": 1777921691646,
+      "workflowLineage": null
+    },
+    {
+      "id": "aa4e3425-57a8-4bd2-8b8c-75abe81061c2",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "workspaceId": "3632bebf-937f-4f18-99c3-abba24d4e39d",
+      "title": "Harden the integration and failure-handling path for \"앱 화면 전체 검증\"",
+      "description": "Goal: 앱 화면 전체 검증\n\nRole: Release Manager\nPhase: execution\nFocus: planning, prioritization, and company orchestration\n\nOwned subtasks:\n- Harden the integration and failure-handling path for \"앱 화면 전체 검증\": Own this slice in your branch with extra attention to planning, prioritization, and company orchestration.\n- Validate the assigned branch outcome: Run targeted checks for your implementation, note regressions, and summarize residual risks.\n\nShared checklist:\n- Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.\n- Validate the changed behavior before finishing and call out any residual risk.\n\nQuality bar:\n- Treat the result as something an end user could actually open and judge, not as a placeholder diff.\n- Do not satisfy the issue with marker comments, README-only edits, or validation-only artifacts unless the issue explicitly asks for that.\n- If this is user-facing UI/web work, deliver a visually coherent result with strong hierarchy, spacing, interaction clarity, and polished states.",
+      "status": "PLANNED",
+      "priority": 2,
+      "kind": "execution",
+      "assigneeProfileId": "79d97848-65a2-481c-a15d-1394d1de592c",
+      "linearIssueId": null,
+      "linearIssueIdentifier": null,
+      "linearIssueUrl": null,
+      "lastLinearSyncAt": null,
+      "blockedBy": [],
+      "dependsOn": [],
+      "acceptanceCriteria": [
+        "Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.",
+        "Validate the changed behavior before finishing and call out any residual risk.",
+        "Harden the integration and failure-handling path for \"앱 화면 전체 검증\"",
+        "Validate the assigned branch outcome"
+      ],
+      "riskLevel": "medium",
+      "codeProducing": true,
+      "executionIntent": "CODE_CHANGE",
+      "branchName": null,
+      "worktreePath": null,
+      "pullRequestNumber": null,
+      "pullRequestUrl": null,
+      "pullRequestState": null,
+      "qaVerdict": null,
+      "qaFeedback": null,
+      "ceoVerdict": null,
+      "ceoFeedback": null,
+      "mergeResult": null,
+      "transitionReason": "Fallback planner assigned this issue to Release Manager.",
+      "sourceSignal": "ceo-planning:25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "pipelineId": null,
+      "currentStageId": null,
+      "durableRunId": null,
+      "approvalPauseId": null,
+      "providerBlockReason": null,
+      "verificationStatus": null,
+      "verificationSummary": null,
+      "lastVerifiedAt": null,
+      "runtimeDisposition": "RUNNABLE",
+      "createdAt": 1777921691647,
+      "updatedAt": 1777921691647,
+      "workflowLineage": null
+    },
+    {
+      "id": "da3f115d-50b3-434d-a947-63124f17a6c3",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "workspaceId": "3632bebf-937f-4f18-99c3-abba24d4e39d",
+      "title": "Prepare validation evidence and residual-risk callouts for \"앱 화면 전체 검증\"",
+      "description": "Goal: 앱 화면 전체 검증\n\nRole: UX Builder\nPhase: execution\nFocus: front-end behavior, interaction quality, and visual completeness\n\nOwned subtasks:\n- Prepare validation evidence and residual-risk callouts for \"앱 화면 전체 검증\": Own this slice in your branch with extra attention to front-end behavior, interaction quality, and visual completeness.\n- Validate the assigned branch outcome: Run targeted checks for your implementation, note regressions, and summarize residual risks.\n\nShared checklist:\n- Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.\n- Validate the changed behavior before finishing and call out any residual risk.\n\nQuality bar:\n- Treat the result as something an end user could actually open and judge, not as a placeholder diff.\n- Do not satisfy the issue with marker comments, README-only edits, or validation-only artifacts unless the issue explicitly asks for that.\n- If this is user-facing UI/web work, deliver a visually coherent result with strong hierarchy, spacing, interaction clarity, and polished states.",
+      "status": "PLANNED",
+      "priority": 2,
+      "kind": "execution",
+      "assigneeProfileId": "ccd332b4-783f-431d-8e26-12849cd74157",
+      "linearIssueId": null,
+      "linearIssueIdentifier": null,
+      "linearIssueUrl": null,
+      "lastLinearSyncAt": null,
+      "blockedBy": [],
+      "dependsOn": [],
+      "acceptanceCriteria": [
+        "Keep the branch scoped to the assigned focus while still delivering a usable end-to-end result.",
+        "Validate the changed behavior before finishing and call out any residual risk.",
+        "Prepare validation evidence and residual-risk callouts for \"앱 화면 전체 검증\"",
+        "Validate the assigned branch outcome"
+      ],
+      "riskLevel": "low",
+      "codeProducing": false,
+      "executionIntent": "PR_REUSE_HANDOFF",
+      "branchName": null,
+      "worktreePath": null,
+      "pullRequestNumber": null,
+      "pullRequestUrl": null,
+      "pullRequestState": null,
+      "qaVerdict": null,
+      "qaFeedback": null,
+      "ceoVerdict": null,
+      "ceoFeedback": null,
+      "mergeResult": null,
+      "transitionReason": "Fallback planner assigned this issue to UX Builder.",
+      "sourceSignal": "ceo-planning:25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "pipelineId": null,
+      "currentStageId": null,
+      "durableRunId": null,
+      "approvalPauseId": null,
+      "providerBlockReason": null,
+      "verificationStatus": null,
+      "verificationSummary": null,
+      "lastVerifiedAt": null,
+      "runtimeDisposition": "RUNNABLE",
+      "createdAt": 1777921691648,
+      "updatedAt": 1777921691648,
+      "workflowLineage": null
+    },
+    {
+      "id": "13682a22-067e-4e70-8532-93a37555f18f",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "workspaceId": "3632bebf-937f-4f18-99c3-abba24d4e39d",
+      "title": "상황실 회의와 업무 지도 UX 확인",
+      "description": "상황실에서 에이전트 회의와 업무 지도가 빈 화면 없이 읽히는지 검증한다.",
+      "status": "DELEGATED",
+      "priority": 2,
+      "kind": "qa",
+      "assigneeProfileId": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+      "linearIssueId": null,
+      "linearIssueIdentifier": null,
+      "linearIssueUrl": null,
+      "lastLinearSyncAt": null,
+      "blockedBy": [],
+      "dependsOn": [],
+      "acceptanceCriteria": [],
+      "riskLevel": "medium",
+      "codeProducing": null,
+      "executionIntent": null,
+      "branchName": null,
+      "worktreePath": null,
+      "pullRequestNumber": null,
+      "pullRequestUrl": null,
+      "pullRequestState": null,
+      "qaVerdict": null,
+      "qaFeedback": null,
+      "ceoVerdict": null,
+      "ceoFeedback": null,
+      "mergeResult": null,
+      "transitionReason": null,
+      "sourceSignal": "manual",
+      "pipelineId": null,
+      "currentStageId": null,
+      "durableRunId": null,
+      "approvalPauseId": null,
+      "providerBlockReason": null,
+      "verificationStatus": null,
+      "verificationSummary": null,
+      "lastVerifiedAt": null,
+      "runtimeDisposition": "RUNNABLE",
+      "createdAt": 1777921691663,
+      "updatedAt": 1777921691663,
+      "workflowLineage": null
+    }
+  ],
+  "tasks": [],
+  "issueDependencies": [],
+  "reviewQueue": [],
+  "orgProfiles": [
+    {
+      "id": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "CEO",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "planning",
+        "triage",
+        "goal-decomposition",
+        "review",
+        "integration"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": "review-queue",
+      "mergeAuthority": true,
+      "enabled": true
+    },
+    {
+      "id": "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "Product Strategist",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "goal-decomposition"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": null,
+      "mergeAuthority": false,
+      "enabled": true
+    },
+    {
+      "id": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "Engineering Lead",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "planning",
+        "goal-decomposition",
+        "implementation",
+        "backend",
+        "frontend",
+        "integration"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": null,
+      "mergeAuthority": false,
+      "enabled": true
+    },
+    {
+      "id": "ccd332b4-783f-431d-8e26-12849cd74157",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "UX Builder",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "goal-decomposition",
+        "implementation",
+        "frontend"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": null,
+      "mergeAuthority": false,
+      "enabled": true
+    },
+    {
+      "id": "42ad1141-c519-4a64-af07-6658a7ad161a",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "UI Builder",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "implementation",
+        "frontend"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": null,
+      "mergeAuthority": false,
+      "enabled": true
+    },
+    {
+      "id": "4712b009-7502-4b64-92db-fa792b2c1013",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "Builder",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "triage",
+        "goal-decomposition",
+        "review",
+        "implementation",
+        "integration"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": "review-queue",
+      "mergeAuthority": false,
+      "enabled": true
+    },
+    {
+      "id": "f03c9820-531b-4f45-acf6-9e941b57086d",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "Backend Builder",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "triage",
+        "implementation",
+        "backend",
+        "integration"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": null,
+      "mergeAuthority": false,
+      "enabled": true
+    },
+    {
+      "id": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "QA",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "review",
+        "qa"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": "review-queue",
+      "mergeAuthority": false,
+      "enabled": true
+    },
+    {
+      "id": "79d97848-65a2-481c-a15d-1394d1de592c",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "roleName": "Release Manager",
+      "executionAgentName": "opencode",
+      "capabilities": [
+        "planning",
+        "implementation",
+        "integration"
+      ],
+      "linearAssigneeId": null,
+      "reviewerPolicy": null,
+      "mergeAuthority": false,
+      "enabled": true
+    }
+  ],
+  "workflowTopologies": [
+    {
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "agents": [
+        "CEO",
+        "Product Strategist",
+        "Engineering Lead",
+        "UX Builder",
+        "UI Builder",
+        "Builder",
+        "Backend Builder",
+        "QA",
+        "Release Manager"
+      ],
+      "edges": [
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+          "toAgentId": "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+          "reason": "Review company state first, then assign execution and review work to the rest of the organization.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+          "toAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "reason": "Review company state first, then assign execution and review work to the rest of the organization.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+          "toAgentId": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+          "reason": "Review company state first, then assign execution and review work to the rest of the organization.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+          "toAgentId": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+          "reason": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+          "toAgentId": "ccd332b4-783f-431d-8e26-12849cd74157",
+          "reason": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+          "toAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "reason": "Clarify the next slice before builders start, and hand planning context back to the CEO.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "toAgentId": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+          "reason": "Split technical work across builders and surface integration risks early.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "toAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "reason": "Split technical work across builders and surface integration risks early.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "toAgentId": "f03c9820-531b-4f45-acf6-9e941b57086d",
+          "reason": "Split technical work across builders and surface integration risks early.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "toAgentId": "79d97848-65a2-481c-a15d-1394d1de592c",
+          "reason": "Split technical work across builders and surface integration risks early.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "ccd332b4-783f-431d-8e26-12849cd74157",
+          "toAgentId": "8dc2bf79-9fd6-42c1-a240-0b03b1ff7d85",
+          "reason": "Turn product requirements into clearer flows before UI polish begins.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "ccd332b4-783f-431d-8e26-12849cd74157",
+          "toAgentId": "42ad1141-c519-4a64-af07-6658a7ad161a",
+          "reason": "Turn product requirements into clearer flows before UI polish begins.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "ccd332b4-783f-431d-8e26-12849cd74157",
+          "toAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "reason": "Turn product requirements into clearer flows before UI polish begins.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "42ad1141-c519-4a64-af07-6658a7ad161a",
+          "toAgentId": "ccd332b4-783f-431d-8e26-12849cd74157",
+          "reason": "Convert UX intent into concrete screens and hand implementation-ready guidance to frontend.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "42ad1141-c519-4a64-af07-6658a7ad161a",
+          "toAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "reason": "Convert UX intent into concrete screens and hand implementation-ready guidance to frontend.",
+          "handoffType": "planning"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "toAgentId": "42ad1141-c519-4a64-af07-6658a7ad161a",
+          "reason": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+          "handoffType": "review"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "toAgentId": "ccd332b4-783f-431d-8e26-12849cd74157",
+          "reason": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+          "handoffType": "review"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "toAgentId": "f03c9820-531b-4f45-acf6-9e941b57086d",
+          "reason": "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
+          "handoffType": "review"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "f03c9820-531b-4f45-acf6-9e941b57086d",
+          "toAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "reason": "Own service and runtime changes, then hand integration notes to QA and release.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "f03c9820-531b-4f45-acf6-9e941b57086d",
+          "toAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "reason": "Own service and runtime changes, then hand integration notes to QA and release.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "f03c9820-531b-4f45-acf6-9e941b57086d",
+          "toAgentId": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+          "reason": "Own service and runtime changes, then hand integration notes to QA and release.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+          "toAgentId": "f03c9820-531b-4f45-acf6-9e941b57086d",
+          "reason": "Review every completed slice and decide whether more remediation is needed before release.",
+          "handoffType": "review"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+          "toAgentId": "4712b009-7502-4b64-92db-fa792b2c1013",
+          "reason": "Review every completed slice and decide whether more remediation is needed before release.",
+          "handoffType": "review"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+          "toAgentId": "79d97848-65a2-481c-a15d-1394d1de592c",
+          "reason": "Review every completed slice and decide whether more remediation is needed before release.",
+          "handoffType": "review"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "79d97848-65a2-481c-a15d-1394d1de592c",
+          "toAgentId": "0d247aa3-a7ed-4246-bfe6-eb04e3ec5ff4",
+          "reason": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "79d97848-65a2-481c-a15d-1394d1de592c",
+          "toAgentId": "5bf35f79-ec11-4e89-81bf-e8d250655a59",
+          "reason": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+          "handoffType": "execution"
+        },
+        {
+          "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+          "fromAgentId": "79d97848-65a2-481c-a15d-1394d1de592c",
+          "toAgentId": "46545a89-f36b-4ac6-81f0-2e00aee4c19f",
+          "reason": "Prepare the final slice for CEO approval and call out any operational or release blockers.",
+          "handoffType": "execution"
+        }
+      ],
+      "activeLoops": [
+        "execution:planned",
+        "qa:delegated"
+      ],
+      "updatedAt": 1777921691694
+    }
+  ],
+  "goalDecisions": [],
+  "runningAgentSessions": [],
+  "backendStatuses": [
+    {
+      "kind": "LOCAL_COTOR",
+      "displayName": "Local Cotor",
+      "health": "healthy",
+      "message": "Using local Cotor app-server and CLI execution.",
+      "lifecycleState": "RUNNING",
+      "managed": false,
+      "pid": null,
+      "port": null,
+      "lastError": null,
+      "config": {
+        "kind": "LOCAL_COTOR",
+        "launchMode": "ATTACHED",
+        "command": "cotor",
+        "args": [],
+        "workingDirectory": null,
+        "port": null,
+        "startupTimeoutSeconds": 15,
+        "baseUrl": "http://127.0.0.1:8787",
+        "healthCheckPath": "/api/app/health",
+        "authMode": "bearer",
+        "token": null,
+        "timeoutSeconds": 30,
+        "enabled": true
+      },
+      "capabilities": {
+        "canStreamEvents": true,
+        "canResumeRuns": true,
+        "canSpawnParallelAgents": true,
+        "canPublishPullRequests": true
+      }
+    }
+  ],
+  "opsMetrics": {
+    "openGoals": 1,
+    "activeIssues": 5,
+    "blockedIssues": 0,
+    "readyToMergeCount": 0,
+    "mergedCount": 0,
+    "lastUpdatedAt": 1777921691694
+  },
+  "runtime": {
+    "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+    "status": "STOPPED",
+    "tickIntervalSeconds": 60,
+    "activeGoalCount": 1,
+    "activeIssueCount": 5,
+    "autonomyEnabledGoalCount": 0,
+    "lastStartedAt": null,
+    "lastStoppedAt": null,
+    "manuallyStoppedAt": null,
+    "lastTickAt": null,
+    "lastAction": null,
+    "lastError": null,
+    "backendKind": "LOCAL_COTOR",
+    "backendHealth": "stopped",
+    "backendMessage": "Using local Cotor app-server and CLI execution.",
+    "backendLifecycleState": "STOPPED",
+    "backendPid": 73496,
+    "backendPort": 56916,
+    "consecutiveFailures": 0,
+    "adaptiveTickMs": 60000,
+    "todaySpentCents": 0,
+    "monthSpentCents": 0,
+    "budgetPausedAt": null,
+    "budgetResetDate": null,
+    "resumableRunCount": 0,
+    "waitingApprovalCount": 0,
+    "blockedByPolicyCount": 0,
+    "blockedByCiCount": 0,
+    "quarantinedRunCount": 0,
+    "resumableRunIds": [],
+    "pendingApprovalRunIds": [],
+    "pendingIssueIds": [
+      "dd88c7d9-f7d7-4ddc-82b4-3847d65f021c",
+      "72c8359a-0a6e-4286-b7b2-2bfcadabec55",
+      "aa4e3425-57a8-4bd2-8b8c-75abe81061c2",
+      "da3f115d-50b3-434d-a947-63124f17a6c3",
+      "13682a22-067e-4e70-8532-93a37555f18f"
+    ],
+    "blockedIssueIds": [],
+    "reviewQueueAttentionIds": [],
+    "lastReconciliationAt": 1777921691694
+  },
+  "signals": [],
+  "activity": [
+    {
+      "id": "48741028-9a2e-42dc-9dea-a6543bdbf1bd",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "issueId": "13682a22-067e-4e70-8532-93a37555f18f",
+      "source": "issue",
+      "title": "Created issue",
+      "detail": "상황실 회의와 업무 지도 UX 확인",
+      "severity": "info",
+      "createdAt": 1777921691663
+    },
+    {
+      "id": "1ce1b6a0-d48f-454b-8b9b-89b50bd254ac",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "issueId": "c7b047c2-d5e5-4341-8c52-3a3089be6ade",
+      "source": "goal-decomposition",
+      "title": "Created CEO planning issue",
+      "detail": "CEO plan and delegate \"앱 화면 전체 검증\"",
+      "severity": "info",
+      "createdAt": 1777921691636
+    },
+    {
+      "id": "4cb910aa-be67-4571-8886-163ad87a99fd",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "issueId": null,
+      "source": "goal",
+      "title": "Created goal",
+      "detail": "앱 화면 전체 검증",
+      "severity": "info",
+      "createdAt": 1777921691622
+    },
+    {
+      "id": "6eff8b00-485d-4b38-9ffb-962a0c4cf489",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "projectContextId": "2f1587b4-d7a9-487d-a268-8673d93b9d5a",
+      "goalId": null,
+      "issueId": null,
+      "source": "company",
+      "title": "Created company",
+      "detail": "UltraQA 데스크톱 회사",
+      "severity": "info",
+      "createdAt": 1777921690802
+    }
+  ],
+  "agentContextEntries": [
+    {
+      "id": "ac796dd1-33e8-47c0-b950-9eb8f6938314",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "issueId": "13682a22-067e-4e70-8532-93a37555f18f",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "agentName": "QA",
+      "kind": "finding",
+      "title": "데스크톱 수동 QA 대상",
+      "content": "회사, 회의실, 업무 지도, GitHub 연결 UI, 모달 닫기 동작을 실제 화면에서 확인한다.",
+      "visibility": "company",
+      "createdAt": 1777921691687
+    }
+  ],
+  "agentMessages": [
+    {
+      "id": "00aa2299-ad14-480b-80e7-e0be0df8440c",
+      "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+      "fromAgentName": "CEO",
+      "toAgentName": "QA",
+      "issueId": "13682a22-067e-4e70-8532-93a37555f18f",
+      "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+      "kind": "meeting",
+      "subject": "상황실 UX 회의",
+      "body": "사용자가 내부 파일명이나 복잡한 그래프 용어 없이 현재 일을 이해할 수 있어야 한다.",
+      "status": "unread",
+      "parentMessageId": null,
+      "createdAt": 1777921691676
+    }
+  ]
+}

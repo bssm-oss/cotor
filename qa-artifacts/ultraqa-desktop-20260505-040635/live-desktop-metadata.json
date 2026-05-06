@@ -1,0 +1,9 @@
+{
+  "artifactDir": "/Users/Projects/bssm-oss/cotor-organization/cotor/qa-artifacts/ultraqa-desktop-20260505-040635",
+  "serverPid": 72093,
+  "appPid": 72147,
+  "port": 56840,
+  "token": "[redacted-after-qa]",
+  "appHome": "/tmp/cotor-desktop-live-20260505-040635/app-home",
+  "rootPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-desktop-20260505-040635"
+}

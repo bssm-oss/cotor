@@ -1,0 +1,14 @@
+{
+  "id": "00aa2299-ad14-480b-80e7-e0be0df8440c",
+  "companyId": "1da84623-00de-4b93-a796-4b397b03636e",
+  "fromAgentName": "CEO",
+  "toAgentName": "QA",
+  "issueId": "13682a22-067e-4e70-8532-93a37555f18f",
+  "goalId": "25f237a1-69cc-4b7c-a645-37e424b845fd",
+  "kind": "meeting",
+  "subject": "상황실 UX 회의",
+  "body": "사용자가 내부 파일명이나 복잡한 그래프 용어 없이 현재 일을 이해할 수 있어야 한다.",
+  "status": "unread",
+  "parentMessageId": null,
+  "createdAt": 1777921691676
+}

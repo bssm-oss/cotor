@@ -1,0 +1,31 @@
+{
+  "company": {
+    "id": "ad4d1a94-acd0-4786-a762-f8d752db1bb5",
+    "name": "UltraQA 데스크톱 회사",
+    "rootPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-desktop-20260505-040635",
+    "repositoryId": "ceb59ccf-bd0e-4dec-b7ae-8f332bc6bc25",
+    "defaultBaseBranch": "main",
+    "backendKind": "LOCAL_COTOR",
+    "backendConfigOverride": null,
+    "linearSyncEnabled": false,
+    "linearConfigOverride": null,
+    "autonomyEnabled": false,
+    "defaultPipelineId": null,
+    "dailyBudgetCents": 100,
+    "monthlyBudgetCents": 300,
+    "createdAt": 1777921597187,
+    "updatedAt": 1777921597187
+  },
+  "githubPublishStatus": {
+    "policy": "REQUIRE_GITHUB_PR",
+    "ghInstalled": true,
+    "ghAuthenticated": true,
+    "originConfigured": false,
+    "originUrl": null,
+    "bootstrapAvailable": false,
+    "repositoryPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-desktop-20260505-040635",
+    "companyId": "ad4d1a94-acd0-4786-a762-f8d752db1bb5",
+    "companyName": "UltraQA 데스크톱 회사",
+    "message": "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically."
+  }
+}

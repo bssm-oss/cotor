@@ -1,0 +1,5 @@
+CEO plan and delegate "앱을 더 쉽게 쓰게 만들기"
+Build the first working change for "앱을 더 쉽게 쓰게 만들기"
+Improve another small part of "앱을 더 쉽게 쓰게 만들기"
+Make "앱을 더 쉽게 쓰게 만들기" more reliable
+Check the result and write down any remaining risks for "앱을 더 쉽게 쓰게 만들기"

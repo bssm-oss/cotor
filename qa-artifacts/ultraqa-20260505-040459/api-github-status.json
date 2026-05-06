@@ -1,0 +1,12 @@
+{
+  "policy": "REQUIRE_GITHUB_PR",
+  "ghInstalled": true,
+  "ghAuthenticated": true,
+  "originConfigured": false,
+  "originUrl": null,
+  "bootstrapAvailable": false,
+  "repositoryPath": "/Users/Projects/bssm-oss/cotor-organization/cotor-test/ultraqa-api-20260505-040459",
+  "companyId": "7ae963c5-9341-44ac-b28b-bf65ab8fa099",
+  "companyName": "UltraQA API 회사",
+  "message": "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "6f0f8222-9974-45c6-8e3e-5d341d3a9c0c",
+  "companyId": "73256cb8-fb3e-405e-adbd-8b223dda4aaa",
+  "issueId": "f4716987-a092-4e7e-a7e6-6a538bc0ae94",
+  "goalId": "e8a3dc23-831b-42d2-b4d4-ec4f5abfde42",
+  "agentName": "QA",
+  "kind": "finding",
+  "title": "수정 후 수동 QA",
+  "content": "상황실 에이전트 회의 화면에서 timestamp-less runtime event 노출 여부를 확인한다.",
+  "visibility": "company",
+  "createdAt": 1777922306386
+}

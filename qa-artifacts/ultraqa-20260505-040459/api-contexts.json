@@ -1,0 +1,14 @@
+[
+  {
+    "id": "24d314ba-b2b6-4b51-a76e-2867a7b0f830",
+    "companyId": "7ae963c5-9341-44ac-b28b-bf65ab8fa099",
+    "issueId": "c08171b7-7150-43e8-a3e5-d68c7808587c",
+    "goalId": "d0937d15-f1d2-4bd8-adcb-9e5170c1065b",
+    "agentName": "QA",
+    "kind": "finding",
+    "title": "UltraQA API 계약 확인",
+    "content": "회사, 목표, 이슈, 메시지, 컨텍스트 API가 정상 응답했다.",
+    "visibility": "company",
+    "createdAt": 1777921502772
+  }
+]
