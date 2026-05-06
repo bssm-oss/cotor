@@ -3492,8 +3492,8 @@ private struct CompanyChatControlRail: View {
         let companyValue = store.companyMemorySnapshot.map {
             userFacingCompanyMemory($0.companyMemory)
         } ?? (store.selectedCompany?.name ?? l("No company selected", "선택된 회사 없음"))
-        let workflowValue = store.companyMemorySnapshot.map {
-            userFacingWorkflowMemory($0.workflowMemory)
+        let projectValue = store.companyMemorySnapshot.map {
+            userFacingWorkflowMemory($0.projectMemory)
         } ?? {
             if let issue = store.selectedIssue {
                 return userFacingIssueTitle(issue.title, language: l) + " · " + l.status(issue.status)
@@ -3503,6 +3503,9 @@ private struct CompanyChatControlRail: View {
             }
             return l("No active goal or issue selected", "활성 목표/이슈 없음")
         }()
+        let teamValue = store.companyMemorySnapshot.map {
+            userFacingTeamMemory($0.teamMemory)
+        } ?? l("No recent handoff", "최근 인수인계 없음")
         let agentValue = store.companyMemorySnapshot.map {
             userFacingAgentMemory($0.agentMemory)
         } ?? {
@@ -3512,7 +3515,8 @@ private struct CompanyChatControlRail: View {
         }()
         return [
             (l("Company memory", "회사 메모리"), companyValue, ShellPalette.accent),
-            (l("Workflow memory", "워크플로 메모리"), workflowValue, ShellPalette.warning),
+            (l("Project memory", "프로젝트 메모리"), projectValue, ShellPalette.warning),
+            (l("Team memory", "팀 메모리"), teamValue, ShellPalette.success),
             (l("Agent memory", "에이전트 메모리"), agentValue, ShellPalette.accentWarm)
         ]
     }
@@ -3543,6 +3547,15 @@ private struct CompanyChatControlRail: View {
         appendMemoryRow(&rows, label: l("Tool", "도구"), value: fields["agentCli"])
         appendMemoryRow(&rows, label: l("Assigned", "맡은 일"), value: friendlyMemoryList(fields["assignedIssues"], language: l))
         appendMemoryRow(&rows, label: l("Recent message", "최근 메시지"), value: friendlyMemoryList(fields["recentMessages"], language: l))
+        return rows.isEmpty ? redactedMemoryFallback(raw) : rows.joined(separator: "\n")
+    }
+
+    private func userFacingTeamMemory(_ raw: String) -> String {
+        let fields = memoryFields(from: raw)
+        var rows: [String] = []
+        appendMemoryRow(&rows, label: l("Decisions", "결정"), value: friendlyMemoryList(fields["recentDecisions"], language: l))
+        appendMemoryRow(&rows, label: l("Handoffs", "인수인계"), value: friendlyMemoryList(fields["handoffs"], language: l))
+        appendMemoryRow(&rows, label: l("Messages", "메시지"), value: friendlyMemoryList(fields["recentMessages"], language: l))
         return rows.isEmpty ? redactedMemoryFallback(raw) : rows.joined(separator: "\n")
     }
 

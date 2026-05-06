@@ -225,6 +225,7 @@ final class DesktopStore: ObservableObject {
     @Published var ports: [PortEntryPayload] = []
     @Published var browserURL: URL?
     @Published var companyMemorySnapshot: CompanyMemorySnapshotPayload?
+    @Published var companyProblemSignals: [CompanyProblemSignalRecord] = []
     @Published var selectedCompanyGitHubStatus: GitHubPublishStatusPayload?
     @Published var language: AppLanguage
     @Published var theme: AppTheme
@@ -987,6 +988,7 @@ final class DesktopStore: ObservableObject {
             syncIssueComposerState()
             syncBackendFormState()
             await refreshCompanyReports()
+            await refreshCompanyProblemSignals()
             await refreshAvailableBranches()
             await refreshTaskDetails()
             await refreshTuiSessionList()
@@ -1050,6 +1052,7 @@ final class DesktopStore: ObservableObject {
             availableSkills = skillCatalog
             await refreshMarketingState(companyId: companyID)
             await refreshCompanyReports(companyId: companyID)
+            await refreshCompanyProblemSignals(companyId: companyID)
             syncDefaultCompanyAgentSkillsIfNeeded()
             errorMessage = nil
             isOffline = false
@@ -2435,6 +2438,43 @@ final class DesktopStore: ObservableObject {
             if companyMemorySnapshot == nil {
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    func refreshCompanyProblemSignals(companyId explicitCompanyId: String? = nil) async {
+        guard let companyId = explicitCompanyId ?? selectedCompanyID ?? selectedCompany?.id else {
+            companyProblemSignals = []
+            return
+        }
+
+        do {
+            let signals = try await runWithEmbeddedBackendRecovery {
+                try await api.companyProblemSignals(companyId: companyId)
+            }
+            guard (explicitCompanyId != nil) || (selectedCompanyID ?? selectedCompany?.id) == companyId else { return }
+            companyProblemSignals = signals
+        } catch is CancellationError {
+            return
+        } catch {
+            AppLogger.error("Company problem signal refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    func runSelectedCompanyDiscoveryScan() async {
+        guard let companyId = selectedCompanyID ?? selectedCompany?.id else { return }
+
+        do {
+            let signals = try await runWithEmbeddedBackendRecovery {
+                try await api.runCompanyDiscoveryScan(companyId: companyId)
+            }
+            guard (selectedCompanyID ?? selectedCompany?.id) == companyId else { return }
+            companyProblemSignals = signals
+            await refreshDashboard()
+        } catch is CancellationError {
+            return
+        } catch {
+            actionErrorMessage = error.localizedDescription
+            errorMessage = error.localizedDescription
         }
     }
 

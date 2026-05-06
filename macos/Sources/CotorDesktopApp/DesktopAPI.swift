@@ -66,6 +66,14 @@ struct DesktopAPI {
         return try await get(path: "api/app/companies/\(companyId)/memory-snapshot", query: query)
     }
 
+    func companyProblemSignals(companyId: String) async throws -> [CompanyProblemSignalRecord] {
+        try await get(path: "api/app/companies/\(companyId)/problem-signals")
+    }
+
+    func runCompanyDiscoveryScan(companyId: String) async throws -> [CompanyProblemSignalRecord] {
+        try await post(path: "api/app/companies/\(companyId)/autonomy/discovery-scan", body: EmptyPayload())
+    }
+
     func companyGitHubStatus(companyId: String) async throws -> GitHubPublishStatusPayload {
         try await get(path: "api/app/companies/\(companyId)/github/status")
     }
