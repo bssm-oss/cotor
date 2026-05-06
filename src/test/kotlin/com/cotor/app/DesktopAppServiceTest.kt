@@ -1131,6 +1131,7 @@ class DesktopAppServiceTest : FunSpec({
         run.executionMode shouldBe OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
         @Suppress("UNCHECKED_CAST")
         val executionLogTasks = service.executionLog(company.id).first { it["issueId"] == issue.id }["tasks"] as List<Map<String, Any?>>
+
         @Suppress("UNCHECKED_CAST")
         val executionLogRuns = executionLogTasks.first { it["taskId"] == task.id }["runs"] as List<Map<String, Any?>>
         val executionLogRun = executionLogRuns.single()
