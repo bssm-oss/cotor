@@ -97,6 +97,42 @@ data class ChatIntakeResponse(
 )
 
 @Serializable
+data class OperatorCommandRequest(
+    val message: String,
+    val automationMode: OperatorAutomationMode? = null,
+    val confirmFullAuto: Boolean = false
+)
+
+@Serializable
+data class OperatorCommandAction(
+    val type: String,
+    val title: String,
+    val detail: String,
+    val status: String
+)
+
+@Serializable
+data class OperatorCompanySummary(
+    val runtimeStatus: String,
+    val backendHealth: String,
+    val activeAgentCount: Int,
+    val blockedIssueCount: Int,
+    val reviewQueueCount: Int,
+    val pendingApprovalCount: Int,
+    val budgetPaused: Boolean
+)
+
+@Serializable
+data class OperatorCommandResponse(
+    val message: String,
+    val automationMode: OperatorAutomationMode,
+    val actions: List<OperatorCommandAction> = emptyList(),
+    val pendingApprovals: List<OperatorCommandAction> = emptyList(),
+    val blockedActions: List<OperatorCommandAction> = emptyList(),
+    val summary: OperatorCompanySummary? = null
+)
+
+@Serializable
 data class UpdateGoalRequest(
     val title: String? = null,
     val description: String? = null,
@@ -295,7 +331,9 @@ data class CompanyDashboardResponse(
     val signals: List<OpsSignal> = emptyList(),
     val activity: List<CompanyActivityItem> = emptyList(),
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
-    val agentMessages: List<AgentMessage> = emptyList()
+    val agentMessages: List<AgentMessage> = emptyList(),
+    val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
+    val marketingRuns: List<MarketingRunRecord> = emptyList()
 )
 
 internal fun BackendConnectionConfig.redactedForApi(): BackendConnectionConfig = copy(token = null)
@@ -351,7 +389,9 @@ data class DashboardResponse(
     val activity: List<CompanyActivityItem> = emptyList(),
     val companyRuntimes: List<CompanyRuntimeSnapshot> = emptyList(),
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
-    val agentMessages: List<AgentMessage> = emptyList()
+    val agentMessages: List<AgentMessage> = emptyList(),
+    val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
+    val marketingRuns: List<MarketingRunRecord> = emptyList()
 )
 
 internal fun DashboardResponse.redactedForApi(): DashboardResponse = copy(
