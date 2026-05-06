@@ -1442,6 +1442,22 @@ internal fun Application.cotorAppModule(
                     }
                 }
 
+                route("/{companyId}/chat-intake") {
+                    post {
+                        if (!requireToken(token)) return@post
+                        val companyId = call.parameters["companyId"]
+                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                        val request = call.receive<ChatIntakeRequest>()
+                        respondDesktopRequest {
+                            desktopService.createChatIntake(
+                                companyId = companyId,
+                                message = request.message,
+                                startRuntime = request.startRuntime
+                            )
+                        }
+                    }
+                }
+
                 route("/{companyId}/issues") {
                     get {
                         if (!requireToken(token)) return@get
@@ -1477,6 +1493,17 @@ internal fun Application.cotorAppModule(
                         val issue = desktopService.getIssueProjected(issueId)?.takeIf { it.companyId == companyId }
                             ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Issue not found: $issueId"))
                         call.respond(issue)
+                    }
+
+                    get("/{issueId}/execution-details") {
+                        if (!requireToken(token)) return@get
+                        val companyId = call.parameters["companyId"]
+                            ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                        val issueId = call.parameters["issueId"]
+                            ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "issueId is required"))
+                        val issue = desktopService.getIssueProjected(issueId)?.takeIf { it.companyId == companyId }
+                            ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Issue not found: $issueId"))
+                        call.respond(desktopService.issueExecutionDetails(issue.id))
                     }
 
                     delete("/{issueId}") {
@@ -1716,7 +1743,7 @@ internal fun Application.cotorAppModule(
                         if (!requireToken(token)) return@get
                         val companyId = call.parameters["companyId"]
                             ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
-                        call.respond(desktopService.issueGraph(companyId))
+                        call.respond(desktopService.issueGraph(companyId).toJsonElement())
                     }
                 }
 

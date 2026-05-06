@@ -64,6 +64,178 @@ class DesktopAppServiceTest : FunSpec({
         BuiltinAgentCatalog.get("graphify")!!.parameters["argvJson"] shouldBe """["graphify","explain","{input}"]"""
     }
 
+    test("company memory snapshot hides internal GitHub readiness labels") {
+        val now = System.currentTimeMillis()
+        val appHome = Files.createTempDirectory("memory-snapshot-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = Company(
+            id = "company-1",
+            name = "Memory QA",
+            rootPath = "/Users/example/project",
+            repositoryId = "repo-1",
+            defaultBaseBranch = "main",
+            createdAt = now,
+            updatedAt = now
+        )
+        val project = CompanyProjectContext(
+            id = "project-1",
+            companyId = company.id,
+            name = "Memory QA",
+            slug = "memory-qa",
+            contextDocPath = "/Users/example/project/.cotor/context.md",
+            lastUpdatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-1",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Validate GitHub guidance",
+            description = "Keep user-facing memory readable.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "issue-1",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = "workspace-1",
+            title = "Code work",
+            description = "Needs GitHub readiness.",
+            status = IssueStatus.BLOCKED,
+            kind = "code",
+            assigneeProfileId = "ceo",
+            blockedBy = listOf("issue-2"),
+            transitionReason = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+            createdAt = now,
+            updatedAt = now
+        )
+        val infraIssue = CompanyIssue(
+            id = "issue-2",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = "workspace-1",
+            title = "Restore GitHub publishing for Code work",
+            description = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+            status = IssueStatus.PLANNED,
+            kind = "infra",
+            createdAt = now,
+            updatedAt = now
+        )
+        val profile = OrgAgentProfile(
+            id = "ceo",
+            companyId = company.id,
+            roleName = "CEO",
+            executionAgentName = "opencode",
+            capabilities = listOf("planning")
+        )
+        val agentDefinition = CompanyAgentDefinition(
+            id = profile.id,
+            companyId = company.id,
+            title = "CEO",
+            agentCli = "opencode",
+            roleSummary = "Own the company plan.",
+            createdAt = now,
+            updatedAt = now
+        )
+        val state = DesktopAppState(
+            companies = listOf(company),
+            companyAgentDefinitions = listOf(agentDefinition),
+            projectContexts = listOf(project),
+            goals = listOf(goal),
+            issues = listOf(issue, infraIssue),
+            orgProfiles = listOf(profile),
+            companyActivity = listOf(
+                CompanyActivityItem(
+                    id = "activity-1",
+                    companyId = company.id,
+                    projectContextId = project.id,
+                    goalId = goal.id,
+                    issueId = issue.id,
+                    source = "system",
+                    title = "Created infra issue",
+                    detail = "Restore GitHub publishing for Code work",
+                    createdAt = now
+                ),
+                CompanyActivityItem(
+                    id = "activity-2",
+                    companyId = company.id,
+                    projectContextId = project.id,
+                    goalId = goal.id,
+                    issueId = issue.id,
+                    source = "system",
+                    title = "Blocked code issue",
+                    detail = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+                    createdAt = now - 1
+                )
+            )
+        )
+
+        val snapshot = service.buildCompanyMemorySnapshotForTesting(state, company, project, goal, issue, profile)
+        val rendered = listOf(snapshot.companyMemory, snapshot.workflowMemory, snapshot.agentMemory).joinToString("\n")
+
+        rendered shouldNotContain "Restore GitHub publishing"
+        rendered shouldNotContain "GitHub is not connected"
+        rendered shouldNotContain "graphify="
+        snapshot.companyMemory shouldContain "workspace=project"
+        rendered shouldContain "Connect GitHub for Code work"
+        rendered shouldContain "Cotor will not create one automatically"
+
+        stateStore.save(state)
+        val issueGraph = service.issueGraph(company.id).toString()
+        issueGraph shouldNotContain "Restore GitHub publishing"
+        issueGraph shouldContain "Connect GitHub for Code work"
+    }
+
+    test("chat intake lets CEO clarify a vague request and create assigned issues") {
+        val appHome = Files.createTempDirectory("chat-intake-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(
+            name = "Chat Intake QA",
+            rootPath = appHome.toString()
+        )
+
+        val response = service.createChatIntake(
+            companyId = company.id,
+            message = "앱이 좀 알아서 다 잘되게 해줘\n채팅만으로 CEO가 생각하고 팀에 일을 나눠줘."
+        )
+
+        response.goal.companyId shouldBe company.id
+        response.goal.title shouldBe "앱이 좀 알아서 다 잘되게 해줘"
+        response.ceoBrief shouldContain "CEO interpretation"
+        response.issues.size shouldBeGreaterThanOrEqual 2
+        response.issues.map { it.title }.joinToString("\n") shouldNotContain "Source:"
+        response.issues.map { it.title }.joinToString("\n") shouldNotContain "Company:"
+        response.issues.map { it.title }.joinToString("\n") shouldContain "사용자가 원하는 결과와 성공 기준을 정리한다."
+        response.assignmentPreview shouldHaveSize response.issues.size
+        response.assignmentPreview.mapNotNull { it.assigneeRole }.shouldNotBeEmpty()
+        response.planningIssue?.status shouldBe IssueStatus.DONE
+
+        val state = stateStore.load()
+        state.agentMessages.any { it.kind == "chat-intake" && it.fromAgentName == "User" && it.toAgentName == "CEO" } shouldBe true
+        state.agentMessages.any { it.kind == "ceo-plan" && it.fromAgentName == "CEO" } shouldBe true
+        state.goalDecisions.any {
+            it.goalId == response.goal.id && it.title == "CEO planned chat request" && it.createdIssues.containsAll(response.issues.map { issue -> issue.id })
+        } shouldBe true
+        state.issues.filter { it.goalId == response.goal.id && !it.kind.equals("planning", ignoreCase = true) }
+            .map { it.transitionReason.orEmpty() }
+            .forEach { reason -> reason shouldContain "CEO planning run assigned" }
+    }
+
     test("skill manifest validation accepts minimal yaml and rejects invalid names") {
         val appHome = Files.createTempDirectory("skill-validation-home")
         val manifest = Files.createTempFile("cotor-skill", ".yaml")
@@ -7255,6 +7427,93 @@ class DesktopAppServiceTest : FunSpec({
                     it.title == "Restore GitHub publishing for ${issue.title}" &&
                     it.status == IssueStatus.PLANNED
             } shouldBe true
+        }
+    }
+
+    test("dashboard keeps GitHub readiness blocked issues blocked while infra blocker is open") {
+        val appHome = Files.createTempDirectory("desktop-app-service-github-readiness-sticky-block")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-app-service-github-readiness-sticky-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        coEvery { gitWorkspaceService.ensureGitHubPublishReady(any(), any()) } returns GitHubPublishReadiness(
+            ready = false,
+            error = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work."
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+
+        withDesktopServiceShutdown(service) {
+            val company = service.createCompany(
+                name = "Sticky GitHub Block Co",
+                rootPath = repoRoot.toString(),
+                defaultBaseBranch = "master"
+            )
+            val baseState = stateStore.load()
+            val workspace = baseState.workspaces.first { it.repositoryId == company.repositoryId }
+            val projectContext = baseState.projectContexts.first { it.companyId == company.id }
+            val now = System.currentTimeMillis()
+            val goal = CompanyGoal(
+                id = "goal-sticky-github-block",
+                companyId = company.id,
+                projectContextId = projectContext.id,
+                title = "Keep GitHub blockers visible",
+                description = "Blocked PR work should stay blocked until the connection issue is fixed.",
+                status = GoalStatus.ACTIVE,
+                autonomyEnabled = false,
+                createdAt = now,
+                updatedAt = now
+            )
+            val blockedIssue = CompanyIssue(
+                id = "issue-sticky-github-block",
+                companyId = company.id,
+                projectContextId = projectContext.id,
+                goalId = goal.id,
+                workspaceId = workspace.id,
+                title = "Ship PR-based work",
+                description = "This code issue needs GitHub before it can run.",
+                status = IssueStatus.BLOCKED,
+                kind = "code",
+                blockedBy = listOf("infra-sticky-github-block"),
+                transitionReason = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+                createdAt = now,
+                updatedAt = now
+            )
+            val infraIssue = CompanyIssue(
+                id = "infra-sticky-github-block",
+                companyId = company.id,
+                projectContextId = projectContext.id,
+                goalId = goal.id,
+                workspaceId = workspace.id,
+                title = "Restore GitHub publishing for ${blockedIssue.title}",
+                description = "GitHub publishing is required before this code issue can continue.",
+                status = IssueStatus.PLANNED,
+                priority = 1,
+                kind = "infra",
+                sourceSignal = "github-readiness",
+                createdAt = now,
+                updatedAt = now
+            )
+            stateStore.save(
+                baseState.copy(
+                    goals = baseState.goals + goal,
+                    issues = baseState.issues + blockedIssue + infraIssue
+                )
+            )
+
+            val dashboard = service.companyDashboardReadOnly(company.id)
+
+            val finalState = stateStore.load()
+            val finalBlockedIssue = finalState.issues.first { it.id == blockedIssue.id }
+            finalBlockedIssue.status shouldBe IssueStatus.BLOCKED
+            finalBlockedIssue.blockedBy shouldBe listOf(infraIssue.id)
+            finalBlockedIssue.transitionReason shouldContain "GitHub is not connected"
+            finalState.issues.first { it.id == infraIssue.id }.status shouldBe IssueStatus.PLANNED
+            dashboard.opsMetrics.blockedIssues shouldBe 1
         }
     }
 

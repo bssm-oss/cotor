@@ -251,13 +251,32 @@ start_managed_backend() {
     SERVER_PORT="$(find_free_port)"
     SERVER_TOKEN="$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')"
     SERVER_URL="http://127.0.0.1:$SERVER_PORT"
+    local java_home
+    java_home="$(cd "$(dirname "$java_bin")/.." && pwd)"
+    local backend_env=(
+        -i
+        "HOME=${HOME:-}"
+        "PATH=$PATH"
+        "JAVA_HOME=$java_home"
+        "COTOR_DESKTOP_APP_HOME=$APP_HOME"
+        "COTOR_APP_HOME=$APP_HOME"
+        "COTOR_APP_TOKEN=$SERVER_TOKEN"
+    )
+
+    [[ -n "${USER:-}" ]] && backend_env+=("USER=$USER")
+    [[ -n "${LOGNAME:-}" ]] && backend_env+=("LOGNAME=$LOGNAME")
+    [[ -n "${SHELL:-}" ]] && backend_env+=("SHELL=$SHELL")
+    [[ -n "${TMPDIR:-}" ]] && backend_env+=("TMPDIR=$TMPDIR")
+    [[ -n "${LANG:-}" ]] && backend_env+=("LANG=$LANG")
+    [[ -n "${LC_ALL:-}" ]] && backend_env+=("LC_ALL=$LC_ALL")
+    [[ -n "${LC_CTYPE:-}" ]] && backend_env+=("LC_CTYPE=$LC_CTYPE")
+    [[ -n "${TERM:-}" ]] && backend_env+=("TERM=$TERM")
+    [[ -n "${NO_COLOR:-}" ]] && backend_env+=("NO_COLOR=$NO_COLOR")
+    [[ -n "${CODEX_HOME:-}" ]] && backend_env+=("CODEX_HOME=$CODEX_HOME")
+    [[ -n "${COTOR_CODEX_OAUTH_HOME:-}" ]] && backend_env+=("COTOR_CODEX_OAUTH_HOME=$COTOR_CODEX_OAUTH_HOME")
 
     log_launcher "Launching bundled backend on port $SERVER_PORT."
-    env \
-        COTOR_DESKTOP_APP_HOME="$APP_HOME" \
-        COTOR_APP_HOME="$APP_HOME" \
-        COTOR_APP_TOKEN="$SERVER_TOKEN" \
-        "$java_bin" -jar "$BACKEND_RUNTIME_JAR" app-server --port "$SERVER_PORT" >>"$LOG_FILE" 2>&1 &
+    env "${backend_env[@]}" "$java_bin" -jar "$BACKEND_RUNTIME_JAR" app-server --port "$SERVER_PORT" >>"$LOG_FILE" 2>&1 &
     local backend_pid=$!
     MANAGED_BACKEND_PID="$backend_pid"
     MANAGED_BACKEND_STARTED=1

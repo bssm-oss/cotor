@@ -79,7 +79,7 @@ struct SettingsView: View {
         settingsCard(
             eyebrow: store.language("Appearance", "화면 모드"),
             title: store.language("Appearance", "화면 모드"),
-            subtitle: store.language("Choose system, light, or dark mode for the desktop shell.", "데스크톱 셸의 시스템/라이트/다크 모드를 선택합니다.")
+            subtitle: store.language("Set the desktop appearance mode.", "데스크톱 화면 모드를 설정합니다.")
         ) {
             Picker(store.language("Appearance", "화면 모드"), selection: Binding(
                 get: { store.theme },
@@ -109,8 +109,8 @@ struct SettingsView: View {
             eyebrow: store.language("Logs", "로그"),
             title: store.language("Runtime Logs", "런타임 로그"),
             subtitle: store.language(
-                "Use these files to debug company creation, goal execution, and backend recovery failures.",
-                "회사 생성, 목표 실행, 백엔드 복구 실패를 디버깅할 때 이 파일을 확인하세요."
+                "Log locations for desktop, backend, and recovery diagnostics.",
+                "데스크톱, 백엔드, 복구 진단 로그 경로입니다."
             )
         ) {
             valueRow(store.language("Desktop app log", "데스크톱 앱 로그"), AppLogger.path())
@@ -124,8 +124,8 @@ struct SettingsView: View {
             eyebrow: store.language("Execution Backend", "실행 백엔드"),
             title: store.language("Execution Backend", "실행 백엔드"),
             subtitle: store.language(
-                "Choose which runtime executes company agents and test Codex app server connectivity.",
-                "회사 에이전트를 어떤 런타임으로 실행할지 고르고 Codex app server 연결을 확인합니다."
+                "Select the default runtime and verify backend connectivity.",
+                "기본 실행 런타임을 선택하고 백엔드 연결을 확인합니다."
             )
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -150,12 +150,12 @@ struct SettingsView: View {
                     Text(
                         store.codePublishMode == "REQUIRE_GITHUB_PR"
                         ? store.language(
-                            "Code issues block when origin or gh auth is missing.",
-                            "origin 또는 gh auth가 없으면 코드 이슈를 막습니다."
+                            "Missing origin or gh auth blocks PR-based code work.",
+                            "origin 또는 gh 인증이 없으면 PR 기반 코드 작업이 차단됩니다."
                         )
                         : store.language(
-                            "If GitHub publish is unavailable, Cotor may complete code work with local git only.",
-                            "GitHub 배포가 안 되면 로컬 git만으로 코드 작업을 완료할 수 있습니다."
+                            "Code work can complete with local git when PR publishing is unavailable.",
+                            "PR 배포가 불가능하면 로컬 git으로 코드 작업을 완료할 수 있습니다."
                         )
                     )
                     .font(.system(size: 12, weight: .medium))

@@ -60,6 +60,8 @@ cotor video render --company <companyId> --agent <agentId> --project ./video --p
 cotor video transcode --company <companyId> --agent <agentId> --input ./input.mov --output ./output.mp4
 ```
 
+CLI/API에서는 내부 skill id를 안정적으로 유지합니다. 데스크톱 앱에서는 회사 에이전트를 설정할 때 `Repository Mapper`, `Browser Tester`, `Video Builder` 같은 더 친근한 배정 이름으로 표시합니다.
+
 Capability setting에는 provider/model 힌트, path/domain/skill allowlist, secret reference 이름, evidence/review 요구사항, notes를 넣을 수 있습니다. secret 값은 저장하지 말고 reference 이름만 저장하세요.
 
 ## App-Server API

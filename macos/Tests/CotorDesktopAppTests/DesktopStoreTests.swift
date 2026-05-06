@@ -22,6 +22,7 @@ struct DesktopStoreTests {
             settings: DashboardPayload.empty.settings,
             companies: [],
             companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
             projectContexts: [],
             goals: [],
             issues: [],
@@ -112,6 +113,7 @@ struct DesktopStoreTests {
                     updatedAt: 0
                 ),
             ],
+            agentCapabilityProfiles: [],
             projectContexts: [],
             goals: [],
             issues: [],
@@ -178,6 +180,7 @@ struct DesktopStoreTests {
             ),
             companies: [],
             companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
             projectContexts: [],
             goals: [],
             issues: [],
@@ -205,6 +208,58 @@ struct DesktopStoreTests {
 
         store.selectNewCompanyAgentCli("lmstudio")
         #expect(store.newCompanyAgentModel == "gemma4:e2b")
+    }
+
+    @Test
+    func emptyAgentDraftCliResolvesToVisiblePreferredCli() {
+        let store = DesktopStore()
+        let baseSettings = DashboardPayload.empty.settings
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DesktopSettingsPayload(
+                appHome: baseSettings.appHome,
+                managedReposRoot: baseSettings.managedReposRoot,
+                availableAgents: ["opencode"],
+                availableCliAgents: ["opencode"],
+                availableAgentModels: [
+                    "opencode": ["opencode-go/deepseek-v4-flash"]
+                ],
+                defaultAgentModels: [
+                    "opencode": "opencode-go/deepseek-v4-flash"
+                ],
+                recentCompanies: baseSettings.recentCompanies,
+                defaultLaunchMode: baseSettings.defaultLaunchMode,
+                backendSettings: baseSettings.backendSettings,
+                githubPublishStatus: baseSettings.githubPublishStatus,
+                linearSettings: baseSettings.linearSettings,
+                backendStatuses: baseSettings.backendStatuses,
+                shortcuts: baseSettings.shortcuts
+            ),
+            companies: [],
+            companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: []
+        )
+
+        store.newCompanyAgentCli = ""
+
+        #expect(store.resolvedNewCompanyAgentCli == "opencode")
+        #expect(store.newCompanyAgentModelOptions == ["opencode-go/deepseek-v4-flash"])
     }
 
     @Test
@@ -238,6 +293,7 @@ struct DesktopStoreTests {
             ),
             companies: [],
             companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
             projectContexts: [],
             goals: [],
             issues: [],
@@ -293,6 +349,7 @@ struct DesktopStoreTests {
             ),
             companies: [],
             companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
             projectContexts: [],
             goals: [],
             issues: [],
@@ -347,6 +404,7 @@ struct DesktopStoreTests {
             ),
             companies: [],
             companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
             projectContexts: [],
             goals: [],
             issues: [],
@@ -364,6 +422,7 @@ struct DesktopStoreTests {
         )
 
         #expect(store.activeGitHubConnectionReady == false)
+        #expect(store.activeGitHubConnectionNeedsSetup == true)
 
         store.selectedCompanyGitHubStatus = GitHubPublishStatusPayload(
             policy: "REQUIRE_GITHUB_PR",
@@ -379,6 +438,7 @@ struct DesktopStoreTests {
         )
 
         #expect(store.activeGitHubConnectionReady == true)
+        #expect(store.activeGitHubConnectionNeedsSetup == false)
     }
 
     @Test
@@ -460,6 +520,17 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func chatCompanyRequestProposalTurnsVagueDraftIntoCeoIntake() {
+        let store = DesktopStore()
+
+        let proposal = store.chatCompanyRequestProposal(from: "앱이 좀 알아서 다 잘되게 해줘\n채팅만으로 회사가 일을 나눠서 처리했으면 해.")
+
+        #expect(proposal?.title == "앱이 좀 알아서 다 잘되게 해줘")
+        #expect(proposal?.request.contains("채팅만으로 회사가 일을 나눠서 처리") == true)
+        #expect(proposal?.ceoBrief.contains("CEO") == true)
+    }
+
+    @Test
     func chatReviewProposalDefaultsQaDraftToPass() {
         let store = DesktopStore()
 
@@ -531,6 +602,7 @@ struct DesktopStoreTests {
             ),
             companies: DashboardPayload.empty.companies,
             companyAgentDefinitions: DashboardPayload.empty.companyAgentDefinitions,
+            agentCapabilityProfiles: DashboardPayload.empty.agentCapabilityProfiles,
             projectContexts: DashboardPayload.empty.projectContexts,
             goals: DashboardPayload.empty.goals,
             issues: DashboardPayload.empty.issues,
@@ -642,6 +714,7 @@ struct DesktopStoreTests {
                 company(id: "company-b", repositoryId: "repo-b", name: "Company B")
             ],
             companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
             projectContexts: [],
             goals: [
                 goal(id: "goal-a", companyId: "company-a", title: "Company A goal", status: "ACTIVE"),

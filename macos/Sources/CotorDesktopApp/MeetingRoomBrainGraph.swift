@@ -472,12 +472,12 @@ struct MeetingRoomBrainGraphPane: View {
                 Text(
                     graph.isFallback
                         ? language(
-                            "Key folders and files appear here even before a full map is prepared.",
-                            "전체 지도가 없어도 중요한 폴더와 파일을 먼저 보여줍니다."
+                            "Key project files are available while the full map is prepared.",
+                            "전체 지도를 준비하는 동안 주요 프로젝트 파일을 표시합니다."
                         )
                         : language(
-                            "Key files and concepts appear here so the team can understand the workspace faster.",
-                            "팀이 작업공간을 빠르게 이해하도록 중요한 파일과 개념을 보여줍니다."
+                            "Key files and concepts from the selected workspace.",
+                            "선택한 작업공간의 주요 파일과 개념입니다."
                         )
                 )
                     .font(.system(size: 10, weight: .medium, design: .monospaced))

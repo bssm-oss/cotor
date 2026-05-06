@@ -33,6 +33,27 @@ class GoalDrivenTaskPlannerTest {
     }
 
     @Test
+    fun `default work items avoid internal planning jargon`() {
+        val plan = planner.buildPlan(
+            title = "Improve desktop task orchestration",
+            prompt = "Improve desktop task orchestration.",
+            agents = listOf("claude", "codex")
+        )
+
+        val visibleText = plan.assignments
+            .flatMap { assignment -> assignment.subtasks.map { "${it.title} ${it.details}" } }
+            .joinToString(" ")
+            .lowercase()
+
+        assertTrue(visibleText.contains("working change"))
+        assertTrue(visibleText.contains("check the assigned branch result"))
+        assertTrue(!visibleText.contains("branchable"))
+        assertTrue(!visibleText.contains("residual-risk"))
+        assertTrue(!visibleText.contains("callouts"))
+        assertTrue(!visibleText.contains("own this slice"))
+    }
+
+    @Test
     fun `buildPlan preserves explicit checklist items when present`() {
         val prompt = """
             Ship the feature with the following scope:

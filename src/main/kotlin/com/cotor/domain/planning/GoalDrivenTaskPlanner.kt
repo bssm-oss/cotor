@@ -323,10 +323,10 @@ class GoalDrivenTaskPlanner {
     }
 
     private fun defaultWorkItems(goalSummary: String): List<String> = listOf(
-        "Deliver the first implementation slice for \"$goalSummary\"",
-        "Advance a second branchable improvement slice for \"$goalSummary\"",
-        "Harden the integration and failure-handling path for \"$goalSummary\"",
-        "Prepare validation evidence and residual-risk callouts for \"$goalSummary\""
+        "Build the first working change for \"$goalSummary\"",
+        "Improve another small part of \"$goalSummary\"",
+        "Make \"$goalSummary\" more reliable",
+        "Check the result and write down any remaining risks for \"$goalSummary\""
     )
 
     private fun enrichWorkItems(
@@ -354,7 +354,7 @@ class GoalDrivenTaskPlanner {
     }
 
     private fun fallbackWorkItem(goalSummary: String, focus: String): String =
-        "Advance \"$goalSummary\" with extra emphasis on $focus"
+        "Move \"$goalSummary\" forward with extra focus on $focus"
 
     private fun buildSubtasks(
         participant: PlanningParticipant,
@@ -365,13 +365,13 @@ class GoalDrivenTaskPlanner {
             TaskSubtask(
                 id = "${participant.participantId}-${index + 1}",
                 title = toSubtaskTitle(item),
-                details = "Own this slice in your branch with extra attention to $focus."
+                details = "Handle this part in your branch with extra attention to $focus."
             )
         }
         val validationSubtask = TaskSubtask(
             id = "${participant.participantId}-${primarySubtasks.size + 1}",
-            title = "Validate the assigned branch outcome",
-            details = "Run targeted checks for your implementation, note regressions, and summarize residual risks."
+            title = "Check the assigned branch result",
+            details = "Run focused checks, note anything that broke, and summarize remaining risks."
         )
         return primarySubtasks + validationSubtask
     }

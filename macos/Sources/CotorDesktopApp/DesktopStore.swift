@@ -113,6 +113,12 @@ struct ChatGoalProposal: Equatable {
     let description: String
 }
 
+struct ChatCompanyRequestProposal: Equatable {
+    let title: String
+    let request: String
+    let ceoBrief: String
+}
+
 struct ChatIssueProposal: Equatable {
     let goalId: String
     let title: String
@@ -238,6 +244,7 @@ final class DesktopStore: ObservableObject {
     @Published var newCompanyAgentCollaborationNotes = ""
     @Published var newCompanyAgentMemoryNotes = ""
     @Published var newCompanyAgentPreferredCollaboratorIDs: Set<String> = []
+    @Published var newCompanyAgentSkillIDs: Set<String> = []
     @Published var newCompanyAgentEnabled = true
     @Published var editingCompanyAgentID: String?
     @Published var editingCompanyAgentCompanyID: String?
@@ -287,6 +294,7 @@ final class DesktopStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var showingHelpGuide = false
     @Published var helpGuide: HelpGuidePayload?
+    @Published var availableSkills: [SkillCatalogEntryRecord] = []
 
     let api = DesktopAPI()
     private var statusState: StatusState = .connecting
@@ -349,6 +357,11 @@ final class DesktopStore: ObservableObject {
         preferredAgent(from: availableCliAgents) ?? preferredAgent(from: dashboard.settings.availableAgents) ?? ""
     }
 
+    var resolvedNewCompanyAgentCli: String {
+        let cli = newCompanyAgentCli.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cli.isEmpty ? preferredCliAgent : cli
+    }
+
     var availableAgentModels: [String: [String]] {
         dashboard.settings.availableAgentModels
     }
@@ -358,7 +371,7 @@ final class DesktopStore: ObservableObject {
     }
 
     var newCompanyAgentModelOptions: [String] {
-        modelOptions(for: newCompanyAgentCli.isEmpty ? preferredCliAgent : newCompanyAgentCli)
+        modelOptions(for: resolvedNewCompanyAgentCli)
     }
 
     func modelOptions(for agentCli: String) -> [String] {
@@ -549,6 +562,10 @@ final class DesktopStore: ObservableObject {
             activeGitHubPublishStatus.originConfigured
     }
 
+    var activeGitHubConnectionNeedsSetup: Bool {
+        activeGitHubPublishStatus.policy == "REQUIRE_GITHUB_PR" && !activeGitHubConnectionReady
+    }
+
     func scopedOpsMetrics(companyID: String?) -> OpsMetricSnapshotRecord {
         let scopedGoals = dashboard.goals.filter { companyID == nil || $0.companyId == companyID }
         let scopedIssues = dashboard.issues.filter { companyID == nil || $0.companyId == companyID }
@@ -714,6 +731,41 @@ final class DesktopStore: ObservableObject {
         return []
     }
 
+    var defaultCompanyAgentSkillIDs: Set<String> {
+        Set(availableSkills.map(\.name))
+    }
+
+    func selectedSkills(for agent: CompanyAgentDefinitionRecord) -> [SkillCatalogEntryRecord] {
+        let allowedIDs = skillIDs(for: agent)
+        guard !allowedIDs.isEmpty else { return [] }
+        return availableSkills.filter { allowedIDs.contains($0.name) }
+    }
+
+    func skillDisplayName(_ skillID: String) -> String {
+        if let displayName = availableSkills.first(where: { $0.name == skillID })?.displayName {
+            return displayName
+        }
+        return skillID
+            .split(separator: "-")
+            .map { $0.capitalized }
+            .joined(separator: " ")
+    }
+
+    private func skillIDs(for agent: CompanyAgentDefinitionRecord) -> Set<String> {
+        let setting = skillRunSetting(companyId: agent.companyId, agentId: agent.id)
+        guard setting.enabled, setting.mode != "DISABLED" else { return [] }
+        if setting.skillAllowlist.isEmpty {
+            return defaultCompanyAgentSkillIDs
+        }
+        return Set(setting.skillAllowlist)
+    }
+
+    private func skillRunSetting(companyId: String, agentId: String) -> AgentCapabilitySettingRecord {
+        dashboard.agentCapabilityProfiles
+            .first { $0.companyId == companyId && $0.agentId == agentId }?
+            .settings["SKILL_RUN"] ?? AgentCapabilitySettingRecord()
+    }
+
     /// Toggle or range-select org chart profiles for multi-selection.
     ///
     /// When shiftKey is true and a previous selection anchor exists, selects all
@@ -840,7 +892,12 @@ final class DesktopStore: ObservableObject {
             let fresh = try await runWithEmbeddedBackendRecovery {
                 try await api.dashboard()
             }
+            let skillCatalog = try await runWithEmbeddedBackendRecovery {
+                try await api.skills()
+            }
             dashboard = fresh
+            availableSkills = skillCatalog
+            syncDefaultCompanyAgentSkillsIfNeeded()
             errorMessage = nil
             isOffline = false
             statusState = .connected(api.baseURL.absoluteString)
@@ -908,7 +965,12 @@ final class DesktopStore: ObservableObject {
             let fresh = try await runWithEmbeddedBackendRecovery {
                 try await api.companyDashboard(companyId: companyID)
             }
+            let skillCatalog = try await runWithEmbeddedBackendRecovery {
+                try await api.skills()
+            }
             applyCompanyDashboard(fresh, companyId: companyID)
+            availableSkills = skillCatalog
+            syncDefaultCompanyAgentSkillsIfNeeded()
             errorMessage = nil
             isOffline = false
             statusState = .connected(api.baseURL.absoluteString)
@@ -946,6 +1008,7 @@ final class DesktopStore: ObservableObject {
             return !currentCompanyIssueIDs.contains(issueId)
         } + snapshot.tasks
         let mergedCompanyAgentDefinitions = dashboard.companyAgentDefinitions.filter { $0.companyId != companyId } + snapshot.companyAgentDefinitions
+        let mergedAgentCapabilityProfiles = dashboard.agentCapabilityProfiles.filter { $0.companyId != companyId } + snapshot.agentCapabilityProfiles
         let mergedProjectContexts = dashboard.projectContexts.filter { $0.companyId != companyId } + snapshot.projectContexts
         let mergedGoals = dashboard.goals.filter { $0.companyId != companyId } + snapshot.goals
         let mergedIssues = dashboard.issues.filter { $0.companyId != companyId } + snapshot.issues
@@ -972,6 +1035,7 @@ final class DesktopStore: ObservableObject {
                 }
                 return $0.displayOrder < $1.displayOrder
             },
+            agentCapabilityProfiles: mergedAgentCapabilityProfiles.sorted { $0.updatedAt > $1.updatedAt },
             projectContexts: mergedProjectContexts.sorted { $0.lastUpdatedAt > $1.lastUpdatedAt },
             goals: mergedGoals.sorted { $0.updatedAt > $1.updatedAt },
             issues: mergedIssues.sorted { $0.updatedAt > $1.updatedAt },
@@ -1001,6 +1065,11 @@ final class DesktopStore: ObservableObject {
         guard !incoming.isEmpty else { return current }
         let incomingKinds = Set(incoming.map(\.kind))
         return current.filter { !incomingKinds.contains($0.kind) } + incoming
+    }
+
+    private func syncDefaultCompanyAgentSkillsIfNeeded() {
+        guard editingCompanyAgentID == nil, newCompanyAgentSkillIDs.isEmpty else { return }
+        newCompanyAgentSkillIDs = defaultCompanyAgentSkillIDs
     }
 
     /// Repair selection state after a dashboard refresh so every pane still points
@@ -1542,6 +1611,40 @@ final class DesktopStore: ObservableObject {
         return ChatGoalProposal(title: title, description: trimmedDraft)
     }
 
+    func chatCompanyRequestProposal(from draft: String) -> ChatCompanyRequestProposal? {
+        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDraft.isEmpty else { return nil }
+        let firstLine = trimmedDraft
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        let rawTitle = firstLine ?? String(trimmedDraft.prefix(96))
+        let normalizedTitle = rawTitle
+            .replacingOccurrences(
+                of: #"^([\-*•]\s+|\d+[.)]\s+)"#,
+                with: "",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"^(goal|objective|request|ask|목표|요청|할일)\s*:\s*"#,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackTitle = trimmedDraft
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = normalizedTitle.isEmpty ? String(fallbackTitle.prefix(96)) : String(normalizedTitle.prefix(96))
+        guard !title.isEmpty else { return nil }
+
+        let companyName = selectedCompany?.name ?? language("selected company", "선택한 회사")
+        let ceoBrief = language(
+            "CEO will restate this as a clear outcome, create success criteria, split it into assigned issues, and keep QA/CEO review gates visible for \(companyName).",
+            "CEO가 이 요청을 명확한 결과물로 다시 정리하고, 성공 기준을 만들고, 담당 이슈로 나눈 뒤 \(companyName)의 QA/CEO 검토 단계를 보이게 유지합니다."
+        )
+        return ChatCompanyRequestProposal(title: title, request: trimmedDraft, ceoBrief: ceoBrief)
+    }
+
     func chatIssueProposal(from draft: String) -> ChatIssueProposal? {
         let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedDraft.isEmpty else { return nil }
@@ -1604,6 +1707,49 @@ final class DesktopStore: ObservableObject {
             return nil
         } catch {
             AppLogger.error("Apply chat goal proposal failed for company \(company.id): \(error.localizedDescription)")
+            actionErrorMessage = error.localizedDescription
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func applyChatCompanyRequestProposal(_ proposal: ChatCompanyRequestProposal) async -> ChatIntakeResponsePayload? {
+        guard let company = selectedCompany else {
+            actionErrorMessage = language(
+                "Select a company before asking the CEO to plan from chat.",
+                "채팅으로 CEO 계획을 요청하기 전에 회사를 선택하세요."
+            )
+            return nil
+        }
+
+        do {
+            actionErrorMessage = nil
+            errorMessage = nil
+            let response = try await runWithEmbeddedBackendRecovery {
+                try await api.createChatIntake(
+                    companyId: company.id,
+                    message: proposal.request,
+                    startRuntime: false
+                )
+            }
+            selectedCompanyID = response.goal.companyId
+            selectedGoalID = response.goal.id
+            if let firstIssue = response.issues.first {
+                selectedIssueID = firstIssue.id
+                selectedWorkspaceID = firstIssue.workspaceId
+            } else if let planningIssue = response.planningIssue {
+                selectedIssueID = planningIssue.id
+                selectedWorkspaceID = planningIssue.workspaceId
+            }
+            await refreshDashboard()
+            await refreshTaskDetails()
+            await loadSelectedCompanyMemorySnapshot()
+            return response
+        } catch is CancellationError {
+            actionErrorMessage = nil
+            errorMessage = nil
+            return nil
+        } catch {
             actionErrorMessage = error.localizedDescription
             errorMessage = error.localizedDescription
             return nil
@@ -2396,7 +2542,7 @@ final class DesktopStore: ObservableObject {
         guard let targetCompanyID,
               companies.contains(where: { $0.id == targetCompanyID }) else { return }
         let title = newCompanyAgentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cli = newCompanyAgentCli.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cli = resolvedNewCompanyAgentCli.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = trimmedOptional(newCompanyAgentModel)
         let role = newCompanyAgentRole.trimmingCharacters(in: .whitespacesAndNewlines)
         let specialties = splitAgentMeta(newCompanyAgentSpecialties)
@@ -2407,9 +2553,10 @@ final class DesktopStore: ObservableObject {
         do {
             actionErrorMessage = nil
             errorMessage = nil
+            let savedAgent: CompanyAgentDefinitionRecord
             if let agentId = editingCompanyAgentID,
                companyAgentDefinitions.contains(where: { $0.id == agentId && $0.companyId == targetCompanyID }) {
-                _ = try await runWithEmbeddedBackendRecovery {
+                savedAgent = try await runWithEmbeddedBackendRecovery {
                     try await api.updateCompanyAgent(
                         companyId: targetCompanyID,
                         agentId: agentId,
@@ -2425,7 +2572,7 @@ final class DesktopStore: ObservableObject {
                     )
                 }
             } else {
-                _ = try await runWithEmbeddedBackendRecovery {
+                savedAgent = try await runWithEmbeddedBackendRecovery {
                     try await api.createCompanyAgent(
                         companyId: targetCompanyID,
                         title: title,
@@ -2440,11 +2587,25 @@ final class DesktopStore: ObservableObject {
                     )
                 }
             }
+            try await syncCompanyAgentSkills(companyId: targetCompanyID, agentId: savedAgent.id)
             resetCompanyAgentComposer()
             await refreshDashboard()
         } catch {
             actionErrorMessage = error.localizedDescription
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func syncCompanyAgentSkills(companyId: String, agentId: String) async throws {
+        let skillIDs = Array(newCompanyAgentSkillIDs).sorted()
+        let currentSetting = skillRunSetting(companyId: companyId, agentId: agentId)
+        let nextSetting = currentSetting.withSkillAllowlist(skillIDs)
+        _ = try await runWithEmbeddedBackendRecovery {
+            try await api.updateAgentCapabilities(
+                companyId: companyId,
+                agentId: agentId,
+                settings: ["SKILL_RUN": nextSetting]
+            )
         }
     }
 
@@ -2502,6 +2663,7 @@ final class DesktopStore: ObservableObject {
         newCompanyAgentCollaborationNotes = agent.collaborationInstructions ?? ""
         newCompanyAgentMemoryNotes = agent.memoryNotes ?? ""
         newCompanyAgentPreferredCollaboratorIDs = Set(agent.preferredCollaboratorIds)
+        newCompanyAgentSkillIDs = skillIDs(for: agent)
         newCompanyAgentEnabled = agent.enabled
     }
 
@@ -2615,13 +2777,14 @@ final class DesktopStore: ObservableObject {
         editingCompanyAgentID = nil
         editingCompanyAgentCompanyID = nil
         newCompanyAgentTitle = ""
-        newCompanyAgentCli = preferredCliAgent
+        selectNewCompanyAgentCli(preferredCliAgent)
         newCompanyAgentModel = ""
         newCompanyAgentRole = ""
         newCompanyAgentSpecialties = ""
         newCompanyAgentCollaborationNotes = ""
         newCompanyAgentMemoryNotes = ""
         newCompanyAgentPreferredCollaboratorIDs = []
+        newCompanyAgentSkillIDs = defaultCompanyAgentSkillIDs
         newCompanyAgentEnabled = true
     }
 
@@ -2919,6 +3082,7 @@ final class DesktopStore: ObservableObject {
                 settings: settings,
                 companies: dashboard.companies,
                 companyAgentDefinitions: dashboard.companyAgentDefinitions,
+                agentCapabilityProfiles: dashboard.agentCapabilityProfiles,
                 projectContexts: dashboard.projectContexts,
                 goals: dashboard.goals,
                 issues: dashboard.issues,

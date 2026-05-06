@@ -49,6 +49,19 @@ class AppServerPlatformRoutesTest : FunSpec({
         coEvery { desktopService.issueKnowledge("issue-1") } returns listOf(
             KnowledgeRecord(subjectType = "issue", subjectId = "issue-1", kind = "mergeability", title = "test", content = "CLEAN")
         )
+        coEvery { desktopService.issueGraph("company-1") } returns mapOf(
+            "nodes" to listOf(
+                mapOf(
+                    "id" to "issue-1",
+                    "title" to "Issue",
+                    "status" to "DONE",
+                    "dependsOn" to listOf("issue-0")
+                )
+            ),
+            "edges" to listOf(
+                mapOf("from" to "issue-0", "to" to "issue-1", "relation" to "blocks")
+            )
+        )
         coEvery { desktopService.companyDashboard(any()) } returns CompanyDashboardResponse(
             companies = listOf(Company(id = "company-1", name = "Test", rootPath = ".", repositoryId = "repo", defaultBaseBranch = "main", createdAt = 1L, updatedAt = 1L))
         )
@@ -99,6 +112,12 @@ class AppServerPlatformRoutesTest : FunSpec({
             client.get("/api/app/knowledge/issues/issue-1") {
                 header("Authorization", "Bearer secret-token")
             }.bodyAsText().contains("mergeability") shouldBe true
+
+            val issueGraphResponse = client.get("/api/app/companies/company-1/issue-graph") {
+                header("Authorization", "Bearer secret-token")
+            }
+            issueGraphResponse.status shouldBe HttpStatusCode.OK
+            issueGraphResponse.bodyAsText().contains("\"dependsOn\":[\"issue-0\"]") shouldBe true
 
             client.get("/api/app/runtime/issues/issue-1/projection") {
                 header("Authorization", "Bearer secret-token")

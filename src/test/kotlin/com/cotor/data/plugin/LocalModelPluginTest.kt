@@ -3,6 +3,7 @@ package com.cotor.data.plugin
 import com.cotor.data.process.ProcessManager
 import com.cotor.model.ExecutionContext
 import com.cotor.model.ProcessResult
+import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -28,6 +29,42 @@ class LocalModelPluginTest : FunSpec({
         }
     }
 
+    test("retries Ollama with an installed Gemma model when the embedded default alias is missing") {
+        val server = localRoutingServer { exchange ->
+            when (exchange.requestURI.path) {
+                "/api/tags" -> exchange.respondJson(
+                    """
+                    {"models":[{"name":"gemma3:4b"},{"name":"qwen2.5:3b"}]}
+                    """.trimIndent()
+                )
+                "/api/chat" -> {
+                    val request = exchange.requestBody.bufferedReader().readText()
+                    if (request.contains("\"model\":\"gemma4:e2b\"")) {
+                        exchange.respondJson("""{"error":"model 'gemma4:e2b' not found"}""", status = 404)
+                    } else {
+                        request.contains("\"model\":\"gemma3:4b\"") shouldBe true
+                        exchange.respondJson("""{"message":{"content":"fallback gemma ok"}}""")
+                    }
+                }
+                else -> exchange.sendResponseHeaders(404, -1)
+            }
+        }
+        try {
+            val output = LocalModelPlugin().execute(
+                context = localModelContext(
+                    provider = "ollama",
+                    baseUrl = "http://127.0.0.1:${server.address.port}",
+                    model = "gemma4:e2b"
+                ),
+                processManager = unusedProcessManager()
+            )
+
+            output.output shouldBe "fallback gemma ok"
+        } finally {
+            server.stop(0)
+        }
+    }
+
     test("calls LM Studio chat completions endpoint with Gemma model") {
         val server = localJsonServer("/v1/chat/completions", """{"choices":[{"message":{"content":"lm studio ok"}}]}""")
         try {
@@ -48,15 +85,29 @@ class LocalModelPluginTest : FunSpec({
 })
 
 private fun localJsonServer(path: String, body: String): HttpServer {
+    return localRoutingServer { exchange ->
+        if (exchange.requestURI.path == path) {
+            exchange.respondJson(body)
+        } else {
+            exchange.sendResponseHeaders(404, -1)
+        }
+    }
+}
+
+private fun localRoutingServer(handler: (HttpExchange) -> Unit): HttpServer {
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-    server.createContext(path) { exchange ->
-        val bytes = body.toByteArray()
-        exchange.responseHeaders.add("Content-Type", "application/json")
-        exchange.sendResponseHeaders(200, bytes.size.toLong())
-        exchange.responseBody.use { it.write(bytes) }
+    server.createContext("/") { exchange ->
+        handler(exchange)
     }
     server.start()
     return server
+}
+
+private fun HttpExchange.respondJson(body: String, status: Int = 200) {
+    val bytes = body.toByteArray()
+    responseHeaders.add("Content-Type", "application/json")
+    sendResponseHeaders(status, bytes.size.toLong())
+    responseBody.use { it.write(bytes) }
 }
 
 private fun localModelContext(provider: String, baseUrl: String, model: String): ExecutionContext =

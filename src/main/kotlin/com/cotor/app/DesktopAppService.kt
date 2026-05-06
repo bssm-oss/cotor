@@ -143,6 +143,13 @@ private data class CeoPlannedIssue(
     val approvalRequired: Boolean = true
 )
 
+private data class CeoChatIntakeDraft(
+    val title: String,
+    val description: String,
+    val successMetrics: List<String>,
+    val ceoBrief: String
+)
+
 /**
  * High-level application service that owns the desktop-facing workflow.
  *
@@ -348,6 +355,8 @@ class DesktopAppService(
             companies = state.companies.sortedByDescending { it.updatedAt },
             companyAgentDefinitions = state.companyAgentDefinitions
                 .sortedWith(compareBy<CompanyAgentDefinition> { it.displayOrder }.thenBy { it.title.lowercase() }),
+            agentCapabilityProfiles = state.agentCapabilityProfiles
+                .sortedWith(compareBy<AgentCapabilityProfile> { it.companyId }.thenBy { it.agentId }),
             projectContexts = state.projectContexts.sortedByDescending { it.lastUpdatedAt },
             goals = state.goals.sortedByDescending { it.updatedAt },
             issues = state.issues
@@ -421,6 +430,9 @@ class DesktopAppService(
             companyAgentDefinitions = state.companyAgentDefinitions
                 .filter { companyId == null || it.companyId == companyId }
                 .sortedWith(compareBy<CompanyAgentDefinition> { it.displayOrder }.thenBy { it.title.lowercase() }),
+            agentCapabilityProfiles = state.agentCapabilityProfiles
+                .filter { companyId == null || it.companyId == companyId }
+                .sortedWith(compareBy<AgentCapabilityProfile> { it.companyId }.thenBy { it.agentId }),
             projectContexts = state.projectContexts
                 .filter { companyId == null || it.companyId == companyId }
                 .sortedByDescending { it.lastUpdatedAt },
@@ -3267,7 +3279,7 @@ class DesktopAppService(
             val assignee = issue.assigneeProfileId?.let { profiles[it] }
             mapOf(
                 "id" to issue.id,
-                "title" to issue.title,
+                "title" to sanitizeUserFacingMemoryLine(issue.title),
                 "status" to issue.status.name,
                 "kind" to issue.kind,
                 "assignee" to (assignee?.roleName ?: "unassigned"),
@@ -3329,6 +3341,45 @@ class DesktopAppService(
             issueId = issueId
         )
         message
+    }
+
+    suspend fun createChatIntake(
+        companyId: String,
+        message: String,
+        startRuntime: Boolean = false
+    ): ChatIntakeResponse {
+        val trimmedMessage = message.trim()
+        require(trimmedMessage.isNotBlank()) { "message is required" }
+        val draft = stateMutex.withLock {
+            val state = stateStore.load()
+            val company = state.companies.firstOrNull { it.id == companyId }
+                ?: throw IllegalArgumentException("Company not found: $companyId")
+            buildCeoChatIntakeDraft(company, trimmedMessage)
+        }
+        val goal = createGoal(
+            companyId = companyId,
+            title = draft.title,
+            description = draft.description,
+            successMetrics = draft.successMetrics,
+            autonomyEnabled = true,
+            operatingPolicy = "CEO chat intake: clarify vague requests, split work, and route to the company roster.",
+            startRuntimeIfNeeded = false
+        )
+        val response = materializeChatIntakePlan(goal.id, trimmedMessage, draft)
+        if (startRuntime) {
+            serviceScope.launch {
+                runCatching { startCompanyRuntime(companyId) }
+            }
+        }
+        publishCompanyEvent(
+            companyId = companyId,
+            type = "chat.intake.planned",
+            title = "CEO planned chat request",
+            detail = response.ceoBrief.take(200),
+            goalId = response.goal.id,
+            issueId = response.planningIssue?.id
+        )
+        return response
     }
 
     suspend fun createCompanyAgentDefinition(
@@ -6629,6 +6680,20 @@ class DesktopAppService(
                     .filter { it.issueId == issue.id }
                     .sortedByDescending { it.updatedAt }
                 if (issueTasks.isEmpty()) {
+                    val unresolvedBlockers = issue.blockedBy.filter { blockerId ->
+                        issuesById[blockerId]?.status !in setOf(IssueStatus.DONE, IssueStatus.CANCELED)
+                    }
+                    if (unresolvedBlockers.isNotEmpty()) {
+                        informationalTraceEvents += buildCompanyAutomationTraceEvent(
+                            issue = issue,
+                            goal = goal,
+                            oldStatus = issue.status,
+                            newStatus = issue.status,
+                            source = "requeueRecoverableBlockedIssues",
+                            reason = "Explicit blocker issues are still open, so the issue must stay blocked."
+                        )
+                        return@map issue
+                    }
                     val dependenciesSatisfied = issue.dependsOn.all { dependencyId ->
                         issuesById[dependencyId]?.status == IssueStatus.DONE
                     }
@@ -8615,7 +8680,7 @@ class DesktopAppService(
     }
 
     private fun discoverGemma4ModelsCached(): List<String> =
-        LocalModelDefaults.installedGemma4Models(discoverOllamaModelsCached() + discoverLmStudioModelsCached())
+        LocalModelDefaults.preferredInstalledGemmaModels(discoverOllamaModelsCached() + discoverLmStudioModelsCached())
 
     private fun discoverOllamaModelsCached(): List<String> =
         discoverLocalModelsCached("ollama") {
@@ -9353,7 +9418,13 @@ class DesktopAppService(
     }
 
     private fun defaultModelForAgentCli(agentCli: String): String? =
-        normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
+        when (agentCli.trim().lowercase()) {
+            "gemma4" -> availableAgentModels("gemma4").firstOrNull()
+                ?: normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
+            "ollama", "lmstudio" -> availableAgentModels(agentCli).firstOrNull { LocalModelDefaults.isGemmaFamilyModel(it) }
+                ?: normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
+            else -> normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
+        }
 
     private fun applyCompanyAgentExecutionOverrides(
         agent: AgentConfig,
@@ -10487,6 +10558,331 @@ class DesktopAppService(
             "review", "approval", "planning", "infra" -> false
             else -> true
         }
+    }
+
+    private fun buildCeoChatIntakeDraft(company: Company, rawMessage: String): CeoChatIntakeDraft {
+        val compactMessage = rawMessage
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+        val title = normalizeChatIntakeTitle(compactMessage, company.name)
+        val successMetrics = listOf(
+            "The CEO restates the user request as a clear outcome before execution starts.",
+            "The company creates concrete issues with owners, acceptance criteria, and review expectations.",
+            "Specialist agents receive work that matches their role instead of a raw vague chat message.",
+            "The final result is verified and any remaining risk is visible to the CEO."
+        )
+        val ceoBrief = buildString {
+            appendLine("CEO interpretation")
+            appendLine("- Outcome: $title")
+            appendLine("- Source: user chat request")
+            appendLine("- Company: ${company.name}")
+            appendLine()
+            appendLine("Execution approach")
+            appendLine("- Clarify the vague request into a goal and success criteria.")
+            appendLine("- Split the work into branchable slices.")
+            appendLine("- Assign slices to the best-fit agents in the company roster.")
+            appendLine("- Keep QA and CEO approval as separate checks before final delivery.")
+        }.trim()
+        val description = buildString {
+            appendLine("CEO clarified this from a chat-only request.")
+            appendLine()
+            appendLine("Original user request:")
+            appendLine(compactMessage)
+            appendLine()
+            appendLine(ceoBrief)
+            appendLine()
+            appendLine("Success criteria:")
+            successMetrics.forEach { metric -> appendLine("- $metric") }
+        }.trim()
+        return CeoChatIntakeDraft(
+            title = title,
+            description = description,
+            successMetrics = successMetrics,
+            ceoBrief = ceoBrief
+        )
+    }
+
+    private fun normalizeChatIntakeTitle(message: String, companyName: String): String {
+        val firstLine = message
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+        val cleaned = firstLine
+            .replace(Regex("""^([\-*•]\s+|\d+[.)]\s+)"""), "")
+            .replace(Regex("""^(goal|objective|request|ask|목표|요청|할일)\s*:\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+        val fallback = "Move ${companyName.ifBlank { "the company" }} forward from chat"
+        return cleaned
+            .ifBlank { fallback }
+            .take(96)
+            .trim()
+            .ifBlank { fallback }
+    }
+
+    private fun buildChatIntakePlannedIssues(draft: CeoChatIntakeDraft): List<CeoPlannedIssue> {
+        if (Regex("[가-힣]").containsMatchIn(draft.title)) {
+            return listOf(
+                CeoPlannedIssue(
+                    refId = "chat-1",
+                    title = "사용자가 원하는 결과와 성공 기준을 정리한다.",
+                    description = "대충 들어온 채팅 요청을 사용자가 실제로 원하는 결과, 빠진 요구사항, 성공 기준으로 정리한다.\n\nCEO가 이해한 목표: ${draft.title}",
+                    kind = "execution",
+                    assigneeRole = "Product Strategist",
+                    priority = 1,
+                    codeProducing = false,
+                    acceptanceCriteria = listOf(
+                        "원하는 결과와 범위가 짧게 정리되어 있다.",
+                        "빌더와 QA가 바로 확인할 수 있는 성공 기준이 있다."
+                    )
+                ),
+                CeoPlannedIssue(
+                    refId = "chat-2",
+                    title = "내부 용어 없이 채팅만으로 시작되는 흐름을 설계한다.",
+                    description = "사용자가 내부 파일 경로, 그래프 용어, 실행 세부 구조를 몰라도 채팅 화면에서 CEO의 해석, 작업 분배, 다음 상태를 이해할 수 있게 흐름을 다듬는다.",
+                    kind = "execution",
+                    assigneeRole = "UX Builder",
+                    priority = 2,
+                    codeProducing = false,
+                    dependsOn = listOf("chat-1"),
+                    acceptanceCriteria = listOf(
+                        "채팅 화면만 보고도 다음 동작을 이해할 수 있다.",
+                        "내부 개념은 필요한 곳 뒤로 숨겨져 있다."
+                    )
+                ),
+                CeoPlannedIssue(
+                    refId = "chat-3",
+                    title = "채팅 요청을 앱 기능으로 연결하는 처리 경로를 구현한다.",
+                    description = "확인된 CEO 계획을 목표와 담당자 있는 이슈로 만드는 서비스/API/앱 경로를 구현하고, GitHub 게시와 로컬 계획 생성을 분리한다.",
+                    kind = "execution",
+                    assigneeRole = "Backend Builder",
+                    priority = 2,
+                    codeProducing = true,
+                    dependsOn = listOf("chat-1", "chat-2"),
+                    acceptanceCriteria = listOf(
+                        "확정한 채팅 요청이 목표와 담당 이슈를 만든다.",
+                        "origin이 없을 때 GitHub 저장소를 자동 생성하지 않는다."
+                    )
+                ),
+                CeoPlannedIssue(
+                    refId = "chat-4",
+                    title = "채팅 요청 흐름을 실제로 검증하고 남은 위험을 기록한다.",
+                    description = "origin 없는 저장소와 데스크톱 화면에서 채팅 요청 흐름을 확인하고, CEO가 볼 수 있게 남은 위험을 기록한다.",
+                    kind = "execution",
+                    assigneeRole = "QA",
+                    priority = 2,
+                    codeProducing = false,
+                    dependsOn = listOf("chat-3"),
+                    acceptanceCriteria = listOf(
+                        "API와 데스크톱 확인으로 흐름이 동작함을 증명한다.",
+                        "남은 위험이 CEO 검토용으로 남아 있다."
+                    )
+                )
+            )
+        }
+        return listOf(
+            CeoPlannedIssue(
+                refId = "chat-1",
+                title = "Clarify the user-facing outcome, missing requirements, and success criteria.",
+                description = "Turn the chat request into clear user outcomes, scope boundaries, and success checks before implementation starts.\n\nCEO outcome: ${draft.title}",
+                kind = "execution",
+                assigneeRole = "Product Strategist",
+                priority = 1,
+                codeProducing = false,
+                acceptanceCriteria = listOf(
+                    "A concise outcome and scope summary exists.",
+                    "Success criteria are explicit enough for builders and QA."
+                )
+            ),
+            CeoPlannedIssue(
+                refId = "chat-2",
+                title = "Design the simplest chat-only flow that hides internal concepts.",
+                description = "Shape the app flow so a user can type a loose request and see the CEO interpretation, assignment plan, and next state without learning internal file paths or graph terms.",
+                kind = "execution",
+                assigneeRole = "UX Builder",
+                priority = 2,
+                codeProducing = false,
+                dependsOn = listOf("chat-1"),
+                acceptanceCriteria = listOf(
+                    "The flow is understandable from the chat screen alone.",
+                    "Internal concepts stay behind advanced or backend-only surfaces."
+                )
+            ),
+            CeoPlannedIssue(
+                refId = "chat-3",
+                title = "Implement the backend and app UI path needed for chat-only work intake.",
+                description = "Build the service/API/app changes needed for the confirmed CEO intake flow and keep GitHub publishing separate from local planning.",
+                kind = "execution",
+                assigneeRole = "Backend Builder",
+                priority = 2,
+                codeProducing = true,
+                dependsOn = listOf("chat-1", "chat-2"),
+                acceptanceCriteria = listOf(
+                    "A confirmed chat request creates a goal and assigned issues.",
+                    "No GitHub repository is created automatically when origin is missing."
+                )
+            ),
+            CeoPlannedIssue(
+                refId = "chat-4",
+                title = "Verify the chat intake flow end to end and record remaining risks.",
+                description = "Run API and app-level checks for the confirmed chat intake flow, including no-origin repository behavior and UI clarity.",
+                kind = "execution",
+                assigneeRole = "QA",
+                priority = 2,
+                codeProducing = false,
+                dependsOn = listOf("chat-3"),
+                acceptanceCriteria = listOf(
+                    "API and desktop checks prove the flow works.",
+                    "Residual risks are visible for CEO review."
+                )
+            )
+        )
+    }
+
+    private suspend fun materializeChatIntakePlan(
+        goalId: String,
+        rawMessage: String,
+        draft: CeoChatIntakeDraft
+    ): ChatIntakeResponse {
+        lateinit var response: ChatIntakeResponse
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val goal = state.goals.firstOrNull { it.id == goalId }
+                ?: throw IllegalArgumentException("Goal not found: $goalId")
+            val company = state.companies.firstOrNull { it.id == goal.companyId }
+                ?: throw IllegalArgumentException("Company not found for goal: ${goal.companyId}")
+            val workspace = state.workspaces.firstOrNull { workspace ->
+                state.repositories.firstOrNull { it.id == workspace.repositoryId }?.id == company.repositoryId
+            } ?: state.workspaces.maxByOrNull { it.updatedAt }
+                ?: throw IllegalStateException("Company workspace not found for ${company.id}")
+            val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+            val plannedPayload = CeoPlanningPayload(
+                goalSummary = draft.title,
+                issues = buildChatIntakePlannedIssues(draft)
+            )
+            val now = System.currentTimeMillis()
+            val planningIssue = state.issues
+                .filter { it.goalId == goal.id && it.kind.equals("planning", ignoreCase = true) }
+                .maxByOrNull { it.updatedAt }
+            val existingNonPlanning = state.issues.filter {
+                it.goalId == goal.id && !it.kind.equals("planning", ignoreCase = true)
+            }
+            val createdIssues = if (existingNonPlanning.isEmpty()) {
+                materializePlannedIssues(
+                    goal = goal,
+                    workspace = workspace,
+                    profiles = profiles,
+                    plan = plannedPayload,
+                    now = now,
+                    planningSource = "ceo"
+                )
+            } else {
+                existingNonPlanning
+            }
+            val dependencyRecords = if (existingNonPlanning.isEmpty()) {
+                createdIssues.flatMap { issue ->
+                    issue.dependsOn.map { dependencyId ->
+                        IssueDependency(
+                            id = UUID.randomUUID().toString(),
+                            issueId = issue.id,
+                            dependsOnIssueId = dependencyId
+                        )
+                    }
+                }
+            } else {
+                emptyList()
+            }
+            val updatedPlanningIssue = planningIssue?.copy(
+                status = IssueStatus.DONE,
+                transitionReason = "CEO clarified the chat request and delegated ${createdIssues.size} downstream issues.",
+                updatedAt = now
+            )
+            val profilesById = profiles.associateBy { it.id }
+            val assignmentPreview = createdIssues.map { issue ->
+                val assigneeRole = issue.assigneeProfileId?.let { profilesById[it]?.roleName }
+                ChatAssignmentPreview(
+                    issueId = issue.id,
+                    title = issue.title,
+                    assigneeRole = assigneeRole,
+                    phase = issue.kind,
+                    reason = issue.transitionReason ?: "CEO assigned this work from the chat intake."
+                )
+            }
+            val userMessage = AgentMessage(
+                id = UUID.randomUUID().toString(),
+                companyId = company.id,
+                fromAgentName = "User",
+                toAgentName = "CEO",
+                goalId = goal.id,
+                kind = "chat-intake",
+                subject = draft.title,
+                body = rawMessage,
+                createdAt = now
+            )
+            val ceoMessage = AgentMessage(
+                id = UUID.randomUUID().toString(),
+                companyId = company.id,
+                fromAgentName = "CEO",
+                toAgentName = null,
+                goalId = goal.id,
+                kind = "ceo-plan",
+                subject = "CEO clarified and delegated",
+                body = draft.ceoBrief,
+                createdAt = now + 1
+            )
+            val decision = GoalOrchestrationDecision(
+                id = UUID.randomUUID().toString(),
+                companyId = company.id,
+                goalId = goal.id,
+                issueId = updatedPlanningIssue?.id,
+                title = "CEO planned chat request",
+                summary = "CEO turned a chat request into ${createdIssues.size} assigned issues.",
+                createdIssues = createdIssues.map { it.id },
+                assignments = assignmentPreview.map { preview ->
+                    "${preview.title} -> ${preview.assigneeRole ?: "unassigned"}"
+                },
+                escalations = emptyList(),
+                createdAt = now
+            )
+            val nextIssues = if (existingNonPlanning.isEmpty()) {
+                state.issues.filterNot { it.id == planningIssue?.id } + listOfNotNull(updatedPlanningIssue) + createdIssues
+            } else if (updatedPlanningIssue != null) {
+                state.issues.map { issue -> if (issue.id == updatedPlanningIssue.id) updatedPlanningIssue else issue }
+            } else {
+                state.issues
+            }
+            val nextState = state.copy(
+                issues = nextIssues,
+                issueDependencies = state.issueDependencies + dependencyRecords,
+                goalDecisions = state.goalDecisions + decision,
+                agentMessages = state.agentMessages + userMessage + ceoMessage
+            ).recordCompanyActivity(
+                companyId = company.id,
+                projectContextId = goal.projectContextId,
+                goalId = goal.id,
+                issueId = updatedPlanningIssue?.id,
+                source = "chat-intake",
+                title = "CEO planned chat request",
+                detail = "Created ${createdIssues.size} assigned issues from chat.",
+                severity = "info"
+            ).withDerivedMetrics()
+            stateStore.save(nextState)
+            nextState.projectContexts.firstOrNull { it.id == goal.projectContextId }?.let { context ->
+                writeCompanyContextSnapshot(nextState, company, context)
+            }
+            response = ChatIntakeResponse(
+                goal = goal,
+                planningIssue = updatedPlanningIssue,
+                issues = createdIssues.sortedBy { it.createdAt },
+                ceoBrief = draft.ceoBrief,
+                assignmentPreview = assignmentPreview,
+                message = ceoMessage
+            )
+        }
+        return response
     }
 
     private fun isExistingPrNoDiffReuseCandidate(
@@ -12121,10 +12517,52 @@ class DesktopAppService(
     )
 
     private fun CompanyMemorySnapshot.toResponse(): CompanyMemorySnapshotResponse = CompanyMemorySnapshotResponse(
+        companyMemory = sanitizeUserFacingMemoryText(companyMemory),
+        workflowMemory = sanitizeUserFacingMemoryText(workflowMemory),
+        agentMemory = sanitizeUserFacingMemoryText(agentMemory)
+    )
+
+    private fun CompanyMemorySnapshot.toInternalResponse(): CompanyMemorySnapshotResponse = CompanyMemorySnapshotResponse(
         companyMemory = companyMemory,
         workflowMemory = workflowMemory,
         agentMemory = agentMemory
     )
+
+    private fun sanitizeUserFacingMemoryText(text: String): String =
+        text.lineSequence()
+            .mapNotNull { line ->
+                val trimmed = line.trim()
+                when {
+                    trimmed.startsWith("graphify=") -> null
+                    trimmed.startsWith("rootPath=") -> "workspace=${trimmed.substringAfterLast('/').ifBlank { trimmed.removePrefix("rootPath=") }}"
+                    else -> sanitizeUserFacingMemoryLine(line)
+                }
+            }
+            .joinToString("\n")
+
+    private fun sanitizeUserFacingMemoryLine(line: String): String {
+        var sanitized = line
+            .replace("Created infra issue:", "Created connection issue:")
+            .replace("Blocked code issue:", "Code work is waiting:")
+            .replace("Created CEO planning issue:", "Prepared CEO work plan:")
+            .replace("Reopened CEO planning issue:", "Reopened CEO work plan:")
+            .replace("Started CEO planning:", "CEO started planning:")
+            .replace(
+                "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+                "Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically."
+            )
+            .replace(
+                "GitHub PR mode requires an existing origin remote. Cotor will not create a GitHub repository automatically.",
+                "Connect an existing GitHub repository before starting PR-based code work. Cotor will not create one automatically."
+            )
+        val restorePattern = Regex("Restore GitHub publishing for ([^|\\n]+)")
+        while (restorePattern.containsMatchIn(sanitized)) {
+            sanitized = restorePattern.replace(sanitized) { match ->
+                "Connect GitHub for ${match.groupValues[1].trim()}"
+            }
+        }
+        return sanitized
+    }
 
     private fun renderMemorySections(memory: CompanyMemorySnapshot): String = buildString {
         appendLine("Company memory:")
@@ -12279,7 +12717,7 @@ class DesktopAppService(
         issue: CompanyIssue,
         profile: OrgAgentProfile
     ): CompanyMemorySnapshotResponse =
-        buildExecutionMemoryBundle(state, company, projectContext, goal, issue, profile).toResponse()
+        buildExecutionMemoryBundle(state, company, projectContext, goal, issue, profile).toInternalResponse()
 
     internal fun buildIssueExecutionPromptForTesting(
         state: DesktopAppState,

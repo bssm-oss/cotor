@@ -539,7 +539,22 @@ class LocalModelPlugin : AgentPlugin {
         }
 
     private fun executeOllama(baseUrl: String, model: String, prompt: String, timeoutMs: Long): PluginExecutionOutput {
-        val body = buildJsonObject {
+        ensureManagedOllamaServer(baseUrl)
+        val response = runCatching {
+            postJson("$baseUrl/api/chat", ollamaChatBody(model, prompt), timeoutMs)
+        }.recoverCatching { error ->
+            val fallbackModel = ollamaFallbackModel(baseUrl, requestedModel = model)
+            if (fallbackModel != null && isModelNotFound(error)) {
+                postJson("$baseUrl/api/chat", ollamaChatBody(fallbackModel, prompt), timeoutMs)
+            } else {
+                throw error
+            }
+        }.getOrThrow()
+        return PluginExecutionOutput(extractOllamaText(response.body()))
+    }
+
+    private fun ollamaChatBody(model: String, prompt: String): String =
+        buildJsonObject {
             put("model", model)
             put("stream", false)
             put(
@@ -549,13 +564,35 @@ class LocalModelPlugin : AgentPlugin {
                 }
             )
         }.toString()
-        val response = postJson("$baseUrl/api/chat", body, timeoutMs)
-        val parsed = json.parseToJsonElement(response.body()).jsonObject
-        val text = parsed["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+
+    private fun extractOllamaText(body: String): String {
+        val parsed = json.parseToJsonElement(body).jsonObject
+        return parsed["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
             ?: parsed["response"]?.jsonPrimitive?.contentOrNull
-            ?: response.body()
-        return PluginExecutionOutput(text)
+            ?: body
     }
+
+    private fun ollamaFallbackModel(baseUrl: String, requestedModel: String): String? {
+        val requested = LocalModelDefaults.normalizeModel(requestedModel) ?: return null
+        if (!LocalModelDefaults.isGemmaFamilyModel(requested)) return null
+        val models = getOllamaModels(baseUrl)
+        return LocalModelDefaults.preferredInstalledGemmaModels(models)
+            .firstOrNull { !it.equals(requested, ignoreCase = true) }
+    }
+
+    private fun getOllamaModels(baseUrl: String): List<String> =
+        runCatching {
+            val response = getJson("$baseUrl/api/tags", timeoutMs = 2_000)
+            json.parseToJsonElement(response.body()).jsonObject["models"]?.jsonArray
+                ?.mapNotNull { model ->
+                    val obj = model.jsonObject
+                    obj["name"]?.jsonPrimitive?.contentOrNull
+                        ?: obj["model"]?.jsonPrimitive?.contentOrNull
+                }
+                ?.mapNotNull(LocalModelDefaults::normalizeModel)
+                ?.distinct()
+                ?: emptyList()
+        }.getOrDefault(emptyList())
 
     private fun executeLmStudio(baseUrl: String, model: String, prompt: String, timeoutMs: Long): PluginExecutionOutput {
         val body = buildJsonObject {
@@ -589,6 +626,68 @@ class LocalModelPlugin : AgentPlugin {
         return response
     }
 
+    private fun getJson(url: String, timeoutMs: Long): HttpResponse<String> {
+        val request = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofMillis(timeoutMs.coerceAtLeast(1_000L)))
+            .GET()
+            .build()
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() !in 200..299) {
+            throw AgentExecutionException("Local model request failed (${response.statusCode()}): ${response.body()}")
+        }
+        return response
+    }
+
+    private fun isModelNotFound(error: Throwable): Boolean {
+        val message = error.message.orEmpty()
+        return message.contains("not found", ignoreCase = true) &&
+            message.contains("model", ignoreCase = true)
+    }
+
+    private fun ensureManagedOllamaServer(baseUrl: String) {
+        if (!isDefaultLoopbackOllamaBaseUrl(baseUrl)) return
+        if (runCatching { getJson("$baseUrl/api/tags", timeoutMs = 1_000) }.isSuccess) return
+        val executable = resolveOllamaExecutable() ?: return
+        synchronized(ollamaServerLock) {
+            if (managedOllamaProcess?.isAlive == true) return@synchronized
+            managedOllamaProcess = ProcessBuilder(executable, "serve")
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .apply {
+                    environment()["OLLAMA_HOST"] = "127.0.0.1:11434"
+                }
+                .start()
+        }
+        val deadline = System.currentTimeMillis() + 5_000L
+        while (System.currentTimeMillis() < deadline) {
+            if (runCatching { getJson("$baseUrl/api/tags", timeoutMs = 1_000) }.isSuccess) return
+            Thread.sleep(100)
+        }
+    }
+
+    private fun isDefaultLoopbackOllamaBaseUrl(baseUrl: String): Boolean {
+        val uri = runCatching { URI.create(baseUrl) }.getOrNull() ?: return false
+        val host = uri.host ?: return false
+        val port = if (uri.port == -1) 80 else uri.port
+        return uri.scheme.equals("http", ignoreCase = true) &&
+            port == 11434 &&
+            host in setOf("127.0.0.1", "localhost", "::1")
+    }
+
+    private fun resolveOllamaExecutable(): String? {
+        val pathCandidates = System.getenv("PATH")
+            .orEmpty()
+            .split(java.io.File.pathSeparator)
+            .filter { it.isNotBlank() }
+            .map { Path.of(it).resolve("ollama") }
+        val candidates = pathCandidates + listOf(
+            Path.of("/opt/homebrew/bin/ollama"),
+            Path.of("/usr/local/bin/ollama"),
+            Path.of("/usr/bin/ollama")
+        )
+        return candidates.firstOrNull { Files.isExecutable(it) }?.toString()
+    }
+
     private fun kotlinx.serialization.json.JsonArrayBuilder.addMessage(role: String, content: String) {
         add(
             buildJsonObject {
@@ -596,6 +695,12 @@ class LocalModelPlugin : AgentPlugin {
                 put("content", content)
             }
         )
+    }
+
+    companion object {
+        private val ollamaServerLock = Any()
+        @Volatile
+        private var managedOllamaProcess: Process? = null
     }
 }
 

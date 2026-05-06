@@ -81,6 +81,7 @@ swift run --package-path macos CotorDesktopApp
 ```
 
 번들 backend를 launcher가 관리할 때 launcher와 `DesktopAPI`는 같은 `COTOR_APP_TOKEN` 값을 읽습니다. 환경 변수가 없으면 양쪽 모두 embedded session용 desktop-local token으로 폴백합니다. 패키지 launcher는 이 token을 backend process argument에 넣지 않고 backend 환경 변수와 `0600` runtime token file로 전달합니다.
+embedded backend에는 부모 shell 환경 전체가 아니라 최소한으로 정리된 환경만 전달됩니다. 따라서 우연히 설정된 API key, GitHub/Linear token, password 계열 변수는 로컬 app-server로 상속되지 않습니다. 특정 workflow가 환경 변수 기반 credential을 꼭 필요로 한다면 외부 `cotor app-server`를 명시적으로 실행해서 연결하세요.
 
 ## 로컬 앱 번들 설치
 
@@ -120,6 +121,7 @@ cotor delete
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
 - 라이브 메시지/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal preview, 대표/도움 에이전트 배정 제어를 함께 보여주는 전용 `채팅 컨트롤` 탐색 surface
+- CEO 채팅 인테이크: 대충 쓴 채팅 요청도 확인 후 CEO 소유 목표, 정리된 브리프, 담당 하위 이슈로 만들며 GitHub 저장소를 자동 생성하지 않음
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
 - 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영
 - 이슈 실행 상세 카드는 이제 각 issue-linked run마다 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약을 함께 보여줌
@@ -168,6 +170,7 @@ cotor delete
 - `GET /api/app/companies/{companyId}/projects`
 - `GET /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/goals`
+- `POST /api/app/companies/{companyId}/chat-intake`
 - `GET /api/app/companies/{companyId}/issues`
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
@@ -187,7 +190,8 @@ cotor delete
 - 여러 회사 생성
 - 회사당 하나의 작업 폴더 바인딩
 - 최소 입력 기반 회사 에이전트 정의
-- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 설치된 로컬 모델도 같은 방식으로 선택 가능
+- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
+- 회사 에이전트 편집기에서 내장 스킬 카탈로그를 보여주고, 친근한 스킬 선택값을 각 에이전트의 `SKILL_RUN` capability allowlist로 저장
 - 로컬 지도 도구가 있으면 작업공간 구조 확인용 내장 회사 에이전트 선택 가능, 그리고 모든 회사 에이전트 실행 메모리에 가벼운 작업공간 지도 지침 주입
 - 회사 목표 생성
 - 목표를 이슈로 자동 분해
@@ -196,12 +200,14 @@ cotor delete
 - 연결된 태스크와 실행 이력 조회
 - 리뷰 큐 아이템 생성 및 머지 처리
 - 기본 저장소 `지도`와 runtime/backend/review/session 상태를 합성한 실시간 활동, 실행 현황/리뷰 요약을 함께 제공하는 전용 상황실 보기
-- 채팅 컨트롤 surface에서 목표 생성, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
+- 채팅 컨트롤 surface에서 목표 생성, CEO 채팅 인테이크, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
+- 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
 - 확인용 요청을 준비하기 전에 채팅 컨트롤에서 대표 에이전트와 도움 에이전트 팀을 직접 선택
 - 정상적인 회사 모드에서는 수동 새로고침 없이 회사 활동 조회
 - 압축형 회사 요약 배너에서 런타임 건강도, CEO 승인/차단/리뷰 주의, 최근 런타임 신호 조회
 - 회사 콘솔 안에서 추정 비용을 확인하고 일/월 비용 상한을 조정
 - GitHub PR 발행이 필요한데 `gh`/`origin` 준비가 안 된 저장소는 회사 생성 시 경고
+- PR 모드가 `gh` CLI, `gh` 인증, 또는 `origin` 누락으로 막히면 회사 사이드바에 간단한 GitHub 빠른 연결 패널 표시
 - `origin`이 없는 경우 GitHub 저장소를 자동 생성하지 않고, GitHub 설정 패널에서 기존 저장소 URL을 연결
 - 로컬 런타임 루프의 시작/중지/상태 확인
 - active autonomous goal이 남아 있어도, 수동으로 중지한 회사 런타임은 사용자가 다시 시작할 때까지 유지
