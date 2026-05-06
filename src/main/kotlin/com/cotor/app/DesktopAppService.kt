@@ -993,8 +993,6 @@ class DesktopAppService(
         migrateLegacyCompanyRosters(companyId)
         ensureBaselineAgentCapabilityProfiles(companyId)
         migrateLegacyFollowUpGoals(companyId)
-        resumeRunningCompanyRuntimes(companyId)
-        ensureAutonomousCompanyRuntimes(companyId)
         reconcileStaleAgentRuns(companyId)
         val targetCompanyIds = stateStore.load().companies
             .map { it.id }
@@ -1014,6 +1012,8 @@ class DesktopAppService(
             reconcileSupersededManagedPullRequests(activeCompanyId)
             ensureMorningReport(activeCompanyId)
         }
+        resumeRunningCompanyRuntimes(companyId)
+        ensureAutonomousCompanyRuntimes(companyId)
         stimulateAutonomousCompanyProgress(companyId)
         clearNonAttentionProviderBlockReasons(companyId)
     }
@@ -1021,6 +1021,9 @@ class DesktopAppService(
     internal suspend fun prepareCompanyAutomationStateForTesting(companyId: String? = null) {
         prepareCompanyAutomationState(companyId)
     }
+
+    internal suspend fun requeueRecoverableBlockedIssuesForTesting(companyId: String): Int =
+        requeueRecoverableBlockedIssues(companyId)
 
     private suspend fun clearNonAttentionProviderBlockReasons(companyId: String? = null): Int {
         var changed = 0
