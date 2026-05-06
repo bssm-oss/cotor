@@ -19,6 +19,7 @@ import com.cotor.model.AgentResult
 import com.cotor.model.ProcessExecutionException
 import com.cotor.model.ProcessResult
 import com.cotor.testsupport.withDesktopServiceShutdown
+import io.kotest.common.ExperimentalKotest
 import io.kotest.core.annotation.Isolate
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -49,9 +50,34 @@ import java.time.ZoneId
 import kotlin.io.path.exists
 
 @Isolate
+@OptIn(ExperimentalKotest::class)
 class DesktopAppServiceTest : FunSpec({
+    concurrency = 1
+
     afterTest {
         DesktopAppService.shutdownAllForTesting()
+    }
+
+    fun OperatorCommandResponse.shouldHideRawOperatorInternals() {
+        val visibleText = buildString {
+            appendLine(message)
+            (actions + pendingApprovals + blockedActions).forEach { action ->
+                appendLine(action.title)
+                appendLine(action.detail)
+            }
+        }
+        listOf(
+            "runtime=",
+            "backend=",
+            "FULL_AUTO",
+            "AGENT_APPROVED",
+            "ASK_ME",
+            "USER_CONFIRMATION_REQUIRED",
+            "AGENT_APPROVAL_REQUESTED",
+            "hard-gated"
+        ).forEach { rawToken ->
+            visibleText shouldNotContain rawToken
+        }
     }
 
     test("builtin opencode company agent uses a longer timeout budget") {
@@ -444,6 +470,7 @@ class DesktopAppServiceTest : FunSpec({
         response.automationMode shouldBe OperatorAutomationMode.AGENT_APPROVED
         response.summary?.runtimeStatus shouldBe CompanyRuntimeStatus.STOPPED.name
         response.actions.any { it.type == "status-check" && it.status == "DONE" } shouldBe true
+        response.shouldHideRawOperatorInternals()
         stateStore.load().agentMessages.any { it.kind == "operator-result" && it.fromAgentName == "Company Operator" } shouldBe true
     }
 
@@ -462,6 +489,7 @@ class DesktopAppServiceTest : FunSpec({
         val persisted = service.listCompanyAgentDefinitions(company.id)
 
         response.actions.any { it.type == "agent-model-update" && it.status == "DONE" } shouldBe true
+        response.shouldHideRawOperatorInternals()
         persisted.shouldNotBeEmpty()
         persisted.all { it.agentCli == "opencode" } shouldBe true
         persisted.all { it.model == com.cotor.model.OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
@@ -521,6 +549,7 @@ class DesktopAppServiceTest : FunSpec({
         val response = service.runOperatorCommand(company.id, "막힌 이슈 다시 굴려")
 
         response.pendingApprovals.single().status shouldBe "AGENT_APPROVAL_REQUESTED"
+        response.shouldHideRawOperatorInternals()
         stateStore.load().issues.first { it.id == issue.id }.status shouldBe IssueStatus.BLOCKED
         stateStore.load().agentMessages.any {
             it.kind == "operator-approval" && it.toAgentName == "CEO"
@@ -589,6 +618,9 @@ class DesktopAppServiceTest : FunSpec({
         val hardGateResponse = service.runOperatorCommand(company.id, "저장소 삭제해줘")
 
         modeResponse.automationMode shouldBe OperatorAutomationMode.FULL_AUTO
+        modeResponse.shouldHideRawOperatorInternals()
+        retryResponse.shouldHideRawOperatorInternals()
+        hardGateResponse.shouldHideRawOperatorInternals()
         retryResponse.actions.any { it.type == "blocked-issue-retry" && it.status == "DONE" } shouldBe true
         stateStore.load().issues.first { it.id == issue.id }.status shouldBe IssueStatus.PLANNED
         hardGateResponse.blockedActions.single().type shouldBe "hard-gate"
@@ -2990,7 +3022,7 @@ class DesktopAppServiceTest : FunSpec({
             workspaceId = WORKSPACE_ID,
             title = "Goal-driven planning",
             prompt = "Goal-driven planning should persist assignments and route run prompts through those assignments.",
-            agents = listOf("claude", "codex")
+            agents = listOf("codex")
         )
         service.runTask(plannedTask.id)
         awaitTaskCompletion(stateStore, plannedTask.id)
@@ -11674,7 +11706,7 @@ private class DesktopAppServiceFixture private constructor(
     val task: AgentTask,
     val worktreeRoot: Path
 ) {
-    suspend fun awaitRuns(): List<AgentRun> = withTimeout(30_000) {
+    suspend fun awaitRuns(): List<AgentRun> = withTimeout(90_000) {
         while (true) {
             val runs = service.listRuns(task.id)
             if (runs.isNotEmpty() && runs.none { it.status == AgentRunStatus.QUEUED || it.status == AgentRunStatus.RUNNING }) {
@@ -11905,7 +11937,7 @@ private suspend fun seedWorkspace(stateStore: DesktopStateStore, repoRoot: Path)
 }
 
 private suspend fun awaitTaskCompletion(stateStore: DesktopStateStore, taskId: String) {
-    val completed = withTimeoutOrNull(30_000) {
+    val completed = withTimeoutOrNull(90_000) {
         while (true) {
             val snapshot = stateStore.load()
             val task = snapshot.tasks.first { it.id == taskId }

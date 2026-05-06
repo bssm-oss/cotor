@@ -194,6 +194,146 @@ struct ChatReviewProposal: Equatable {
     let feedback: String?
 }
 
+enum OperatorChatRole: String, Equatable {
+    case user
+    case assistant
+    case system
+}
+
+enum OperatorChatCommandKind: String, Equatable {
+    case sendPrompt
+    case confirmFullAuto
+    case confirmCompanyDelete
+    case confirmMerge
+    case cancelConfirmation
+    case chooseCompanyFolder
+}
+
+struct OperatorChatCommand: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let prompt: String
+    let kind: OperatorChatCommandKind
+    let destructive: Bool
+
+    init(
+        id: String? = nil,
+        title: String,
+        prompt: String,
+        kind: OperatorChatCommandKind = .sendPrompt,
+        destructive: Bool = false
+    ) {
+        self.id = id ?? "\(kind.rawValue)-\(title)-\(prompt)"
+        self.title = title
+        self.prompt = prompt
+        self.kind = kind
+        self.destructive = destructive
+    }
+}
+
+struct OperatorChatPendingPrompt: Equatable {
+    let question: String
+    let resumePrompt: String
+}
+
+struct OperatorChatMessage: Identifiable, Equatable {
+    let id: String
+    let role: OperatorChatRole
+    let text: String
+    let createdAt: Date
+    let commands: [OperatorChatCommand]
+
+    init(
+        id: String = UUID().uuidString,
+        role: OperatorChatRole,
+        text: String,
+        createdAt: Date = Date(),
+        commands: [OperatorChatCommand] = []
+    ) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.createdAt = createdAt
+        self.commands = commands
+    }
+}
+
+func operatorAutomationModeDisplayName(_ mode: String, language: AppLanguage) -> String {
+    switch (language, mode.uppercased()) {
+    case (.english, "FULL_AUTO"):
+        return "Full auto"
+    case (.english, "AGENT_APPROVED"):
+        return "Internal approval"
+    case (.english, "ASK_ME"):
+        return "Confirm first"
+    case (.korean, "FULL_AUTO"):
+        return "완전 자동"
+    case (.korean, "AGENT_APPROVED"):
+        return "내부 승인"
+    case (.korean, "ASK_ME"):
+        return "확인 후 실행"
+    default:
+        return mode.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+func operatorActionStatusDisplayName(_ status: String, language: AppLanguage) -> String {
+    switch (language, status.uppercased()) {
+    case (.english, "USER_CONFIRMATION_REQUIRED"):
+        return "Needs confirmation"
+    case (.english, "AGENT_APPROVAL_REQUESTED"):
+        return "Internal approval pending"
+    case (.english, "READY"):
+        return "Ready"
+    case (.english, "ATTENTION"):
+        return "Needs attention"
+    case (.english, "NOOP"):
+        return "Nothing changed"
+    case (.korean, "USER_CONFIRMATION_REQUIRED"):
+        return "확인 필요"
+    case (.korean, "AGENT_APPROVAL_REQUESTED"):
+        return "내부 승인 대기"
+    case (.korean, "READY"):
+        return "준비됨"
+    case (.korean, "ATTENTION"):
+        return "확인 필요"
+    case (.korean, "NOOP"):
+        return "변경 없음"
+    default:
+        return DesktopStrings.status(status, language: language)
+    }
+}
+
+func sanitizeOperatorUserText(_ text: String, language: AppLanguage) -> String {
+    var sanitized = text
+    let replacements = [
+        "FULL_AUTO": operatorAutomationModeDisplayName("FULL_AUTO", language: language),
+        "AGENT_APPROVED": operatorAutomationModeDisplayName("AGENT_APPROVED", language: language),
+        "ASK_ME": operatorAutomationModeDisplayName("ASK_ME", language: language),
+        "USER_CONFIRMATION_REQUIRED": operatorActionStatusDisplayName("USER_CONFIRMATION_REQUIRED", language: language),
+        "AGENT_APPROVAL_REQUESTED": operatorActionStatusDisplayName("AGENT_APPROVAL_REQUESTED", language: language),
+        "STOPPED": DesktopStrings.status("STOPPED", language: language),
+        "RUNNING": DesktopStrings.status("RUNNING", language: language)
+    ]
+    for (raw, replacement) in replacements {
+        sanitized = sanitized.replacingOccurrences(of: raw, with: replacement)
+    }
+    sanitized = sanitized.replacingOccurrences(
+        of: #"\bruntime=[^,\s.;)]+"#,
+        with: "",
+        options: .regularExpression
+    )
+    sanitized = sanitized.replacingOccurrences(
+        of: #"\bbackend=[^,\s.;)]+"#,
+        with: "",
+        options: .regularExpression
+    )
+    return sanitized
+        .replacingOccurrences(of: " ,", with: ",")
+        .replacingOccurrences(of: "  ", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 /// Main view model for the macOS shell.
 ///
 /// It coordinates bootstrap, selection state, optimistic actions, and runtime
@@ -309,6 +449,9 @@ final class DesktopStore: ObservableObject {
     @Published var marketingRuns: [MarketingRunRecord] = []
     @Published var operatorCommandDraft = ""
     @Published var operatorCommandResponses: [OperatorCommandResponsePayload] = []
+    @Published var operatorChatMessages: [OperatorChatMessage] = []
+    @Published var operatorPendingPrompt: OperatorChatPendingPrompt?
+    @Published var isSendingOperatorChatMessage = false
     @Published var companyReports: [CompanyDailyReportSummaryRecord] = []
     @Published var selectedCompanyReportDate: String?
     @Published var selectedCompanyReport: CompanyDailyReportRecord?
@@ -2987,6 +3130,449 @@ final class DesktopStore: ObservableObject {
         }
     }
 
+    func operatorSuggestedCommands() -> [OperatorChatCommand] {
+        [
+            OperatorChatCommand(title: language("Check status", "상태 확인"), prompt: language("Check whether the agents are running well.", "에이전트들 잘 돌아가고 있는지 확인해줘")),
+            OperatorChatCommand(title: language("Start company", "회사 시작"), prompt: language("Start this company.", "회사 시작해줘")),
+            OperatorChatCommand(title: language("Stop company", "회사 중지"), prompt: language("Stop this company.", "회사 중지해줘")),
+            OperatorChatCommand(title: language("Use DeepSeek", "DeepSeek로 변경"), prompt: language("Change every agent to opencode deepseek.", "모든 에이전트 opencode deepseek 모델로 바꿔줘")),
+            OperatorChatCommand(title: language("Retry blocked work", "막힌 일 재시도"), prompt: language("Retry blocked issues.", "막힌 이슈 다시 처리해줘")),
+            OperatorChatCommand(title: language("Check GitHub", "GitHub 확인"), prompt: language("Check GitHub readiness.", "GitHub 확인해줘")),
+            OperatorChatCommand(title: language("Resync Linear", "Linear 재동기화"), prompt: language("Resync Linear.", "Linear 재동기화해줘"))
+        ]
+    }
+
+    func submitOperatorChatCommand(_ command: OperatorChatCommand) async {
+        switch command.kind {
+        case .sendPrompt:
+            await submitOperatorChatMessage(command.prompt)
+        case .chooseCompanyFolder:
+            openCompanyRootPicker()
+            let text = newCompanyRootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? language("No folder was selected.", "선택된 폴더가 없습니다.")
+                : language("Folder selected. Tell me the company name to create it.", "폴더를 선택했습니다. 만들 회사 이름을 알려주세요.")
+            appendOperatorChatMessage(role: .assistant, text: text)
+        case .confirmFullAuto:
+            appendOperatorChatMessage(role: .user, text: command.title)
+            let reply = await runOperatorCommandAsChatReply(
+                message: command.prompt,
+                automationMode: "FULL_AUTO",
+                confirmFullAuto: true
+            )
+            appendOperatorChatMessage(role: .assistant, text: reply)
+        case .confirmCompanyDelete:
+            appendOperatorChatMessage(role: .user, text: command.title)
+            let name = selectedCompany?.name ?? language("the selected company", "선택한 회사")
+            await deleteSelectedCompany()
+            appendOperatorChatMessage(
+                role: .assistant,
+                text: errorMessage.map { sanitizeOperatorUserText($0, language: language) }
+                    ?? language("\(name) was deleted.", "\(name)을 삭제했습니다.")
+            )
+        case .confirmMerge:
+            appendOperatorChatMessage(role: .user, text: command.title)
+            if let proposal = chatMergeProposal(from: command.prompt),
+               await applyChatMergeProposal(proposal) != nil {
+                appendOperatorChatMessage(
+                    role: .assistant,
+                    text: language("Merged the approved pull request.", "승인된 PR을 머지했습니다.")
+                )
+            } else {
+                appendOperatorChatMessage(role: .assistant, text: operatorFailureFallback())
+            }
+        case .cancelConfirmation:
+            appendOperatorChatMessage(role: .user, text: command.title)
+            appendOperatorChatMessage(role: .assistant, text: language("Cancelled.", "취소했습니다."))
+        }
+    }
+
+    func submitOperatorChatMessage(_ message: String) async {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        appendOperatorChatMessage(role: .user, text: trimmed)
+        operatorCommandDraft = ""
+        isSendingOperatorChatMessage = true
+        defer { isSendingOperatorChatMessage = false }
+
+        if let pending = operatorPendingPrompt {
+            operatorPendingPrompt = nil
+            let resumed = "\(pending.resumePrompt) \(trimmed)"
+            let reply = await executeOperatorChatMessage(resumed, normalized: resumed.lowercased())
+            appendOperatorChatMessage(role: .assistant, text: reply)
+            return
+        }
+
+        let normalized = trimmed.lowercased()
+        if let blockedMessage = blockedOperatorChatSafetyMessage(for: normalized) {
+            appendOperatorChatMessage(role: .assistant, text: blockedMessage)
+            return
+        }
+        if looksLikeFullAutoChatRequest(normalized) {
+            appendOperatorChatMessage(
+                role: .assistant,
+                text: language("Full auto can run routine actions without asking. Confirm once to turn it on.", "완전 자동은 일반 작업을 묻지 않고 실행합니다. 켜려면 한 번만 확인하세요."),
+                commands: [
+                    OperatorChatCommand(
+                        title: language("Turn on full auto", "완전 자동 켜기"),
+                        prompt: trimmed,
+                        kind: .confirmFullAuto
+                    ),
+                    OperatorChatCommand(
+                        title: language("Cancel", "취소"),
+                        prompt: "",
+                        kind: .cancelConfirmation
+                    )
+                ]
+            )
+            return
+        }
+        if looksLikeCompanyDeleteChatRequest(normalized) {
+            let name = selectedCompany?.name ?? language("the selected company", "선택한 회사")
+            appendOperatorChatMessage(
+                role: .assistant,
+                text: language("Delete \(name)? This cannot be undone.", "\(name)을 삭제할까요? 되돌릴 수 없습니다."),
+                commands: [
+                    OperatorChatCommand(
+                        title: language("Delete company", "회사 삭제"),
+                        prompt: trimmed,
+                        kind: .confirmCompanyDelete,
+                        destructive: true
+                    ),
+                    OperatorChatCommand(
+                        title: language("Cancel", "취소"),
+                        prompt: "",
+                        kind: .cancelConfirmation
+                    )
+                ]
+            )
+            return
+        }
+
+        let reply = await executeOperatorChatMessage(trimmed, normalized: normalized)
+        appendOperatorChatMessage(role: .assistant, text: reply)
+    }
+
+    private func appendOperatorChatMessage(
+        role: OperatorChatRole,
+        text: String,
+        commands: [OperatorChatCommand] = []
+    ) {
+        operatorChatMessages.append(
+            OperatorChatMessage(
+                role: role,
+                text: sanitizeOperatorUserText(text, language: language),
+                commands: commands
+            )
+        )
+    }
+
+    private func executeOperatorChatMessage(_ message: String, normalized: String) async -> String {
+        if looksLikeCompanyCreateChatRequest(normalized) {
+            return await createCompanyFromOperatorChat(message)
+        }
+        guard selectedCompany != nil else {
+            return language("Select or create a company first.", "먼저 회사를 선택하거나 만들어주세요.")
+        }
+
+        if looksLikeRuntimeStartChatRequest(normalized) {
+            if let snapshot = await applyChatRuntimeProposal(ChatRuntimeProposal(action: .start, summary: message)) {
+                return snapshot.status.uppercased() == "RUNNING"
+                    ? language("Started the company.", "회사를 시작했습니다.")
+                    : language("Start request was sent.", "시작 요청을 보냈습니다.")
+            }
+            return operatorFailureFallback()
+        }
+        if looksLikeRuntimeStopChatRequest(normalized) {
+            if await applyChatRuntimeProposal(ChatRuntimeProposal(action: .stop, summary: message)) != nil {
+                return language("Stopped the company.", "회사를 중지했습니다.")
+            }
+            return operatorFailureFallback()
+        }
+        if looksLikeBackendChatRequest(normalized),
+           let proposal = chatBackendProposal(from: message),
+           await applyChatBackendProposal(proposal) != nil {
+            switch proposal.action {
+            case .start:
+                return language("Started the backend.", "백엔드를 시작했습니다.")
+            case .stop:
+                return language("Stopped the backend.", "백엔드를 중지했습니다.")
+            case .restart:
+                return language("Restarted the backend.", "백엔드를 재시작했습니다.")
+            }
+        }
+        if looksLikeGoalCreationChatRequest(normalized) {
+            guard selectedCompany != nil else { return language("Select a company first.", "먼저 회사를 선택하세요.") }
+            guard let proposal = chatGoalProposal(from: cleanedCreationPrompt(message)) else {
+                return askOperatorChat(
+                    question: language("What goal should I create?", "어떤 목표를 만들까요?"),
+                    resumePrompt: language("Create goal:", "목표 생성:")
+                )
+            }
+            if let goal = await applyChatGoalProposal(proposal) {
+                return language("Created goal: \(goal.title)", "목표를 만들었습니다: \(goal.title)")
+            }
+            return operatorFailureFallback()
+        }
+        if looksLikeIssueCreationChatRequest(normalized) {
+            guard selectedGoalID != nil || selectedIssue?.goalId != nil else {
+                return language("Select a goal first, then tell me the issue.", "먼저 목표를 선택한 뒤 이슈를 알려주세요.")
+            }
+            guard let proposal = chatIssueProposal(from: cleanedCreationPrompt(message)) else {
+                return askOperatorChat(
+                    question: language("What issue should I create?", "어떤 이슈를 만들까요?"),
+                    resumePrompt: language("Create issue:", "이슈 생성:")
+                )
+            }
+            if let issue = await applyChatIssueProposal(proposal) {
+                return language("Created issue: \(issue.title)", "이슈를 만들었습니다: \(issue.title)")
+            }
+            return operatorFailureFallback()
+        }
+        if looksLikeGoalDecompositionChatRequest(normalized),
+           let proposal = chatGoalDecompositionProposal(from: message),
+           let issues = await applyChatGoalDecompositionProposal(proposal) {
+            return language("Created \(issues.count) issue(s) from the selected goal.", "선택한 목표에서 이슈 \(issues.count)개를 만들었습니다.")
+        }
+        if looksLikeGoalAutonomyChatRequest(normalized),
+           let proposal = chatGoalAutonomyProposal(from: message),
+           let goal = await applyChatGoalAutonomyProposal(proposal) {
+            return goal.autonomyEnabled
+                ? language("Turned on goal automation.", "목표 자동화를 켰습니다.")
+                : language("Turned off goal automation.", "목표 자동화를 껐습니다.")
+        }
+        if looksLikeIssueRunChatRequest(normalized),
+           await applyChatExecutionProposal(ChatExecutionProposal(summary: message)) != nil {
+            return language("Started the selected issue.", "선택한 이슈를 실행했습니다.")
+        }
+        if looksLikeIssueDelegationChatRequest(normalized),
+           await applyChatDelegationProposal(ChatDelegationProposal(summary: message)) != nil {
+            return language("Delegated the selected issue.", "선택한 이슈를 위임했습니다.")
+        }
+        if looksLikeReviewChatRequest(normalized),
+           let proposal = chatReviewProposal(from: message, kind: normalized.contains("qa") ? "qa" : "ceo"),
+           await applyChatReviewProposal(proposal) != nil {
+            return language("Saved the review decision.", "리뷰 판정을 저장했습니다.")
+        }
+        if looksLikeMergeChatRequest(normalized) {
+            appendOperatorChatMessage(
+                role: .assistant,
+                text: language("Merge the approved pull request?", "승인된 PR을 머지할까요?"),
+                commands: [
+                    OperatorChatCommand(title: language("Merge", "머지"), prompt: message, kind: .confirmMerge),
+                    OperatorChatCommand(title: language("Cancel", "취소"), prompt: "", kind: .cancelConfirmation)
+                ]
+            )
+            return language("Waiting for your confirmation.", "확인을 기다리고 있습니다.")
+        }
+        if looksLikeGitHubLoginChatRequest(normalized) {
+            openGitHubLoginTerminal()
+            return companyGitHubStatusMessage ?? language("Opened GitHub login in Terminal.", "터미널에서 GitHub 로그인을 열었습니다.")
+        }
+        if looksLikeGitHubOriginChatRequest(normalized) {
+            if let url = extractRemoteURL(from: message) {
+                companyGitHubOriginInput = url
+                await saveSelectedCompanyGitHubOrigin()
+                return companyGitHubStatusMessage ?? language("GitHub repository is connected.", "GitHub 저장소를 연결했습니다.")
+            }
+            return askOperatorChat(
+                question: language("Send the GitHub repository URL.", "GitHub 저장소 URL을 보내주세요."),
+                resumePrompt: language("Connect GitHub origin:", "GitHub 저장소 연결:")
+            )
+        }
+        if looksLikeBudgetChatRequest(normalized) {
+            await saveSelectedCompanyBudget()
+            return errorMessage.map { sanitizeOperatorUserText($0, language: language) }
+                ?? language("Saved the budget settings.", "예산 설정을 저장했습니다.")
+        }
+        if looksLikeLinearSettingsChatRequest(normalized) {
+            await saveSelectedCompanyLinearSettings()
+            return companyLinearStatusMessage ?? language("Saved Linear settings.", "Linear 설정을 저장했습니다.")
+        }
+
+        return await runOperatorCommandAsChatReply(message: message)
+    }
+
+    private func runOperatorCommandAsChatReply(
+        message: String,
+        automationMode: String? = nil,
+        confirmFullAuto: Bool = false
+    ) async -> String {
+        guard let response = await runCompanyOperatorCommand(
+            message: message,
+            automationMode: automationMode,
+            confirmFullAuto: confirmFullAuto
+        ) else {
+            return operatorFailureFallback()
+        }
+        return operatorAssistantText(for: response)
+    }
+
+    private func operatorAssistantText(for response: OperatorCommandResponsePayload) -> String {
+        let blocked = response.blockedActions.map { operatorActionText($0) }
+        if !blocked.isEmpty {
+            return blocked.joined(separator: "\n")
+        }
+        let pending = response.pendingApprovals.map { operatorActionText($0) }
+        if !pending.isEmpty {
+            return language("Sent this to internal approval.", "내부 승인으로 보냈습니다.") + "\n" + pending.joined(separator: "\n")
+        }
+        let actions = response.actions.map { operatorActionText($0) }
+        if !actions.isEmpty {
+            return actions.joined(separator: "\n")
+        }
+        return sanitizeOperatorUserText(response.message, language: language)
+    }
+
+    private func operatorActionText(_ action: OperatorCommandActionPayload) -> String {
+        let status = operatorActionStatusDisplayName(action.status, language: language)
+        let detail = sanitizeOperatorUserText(action.detail, language: language)
+        return detail.isEmpty ? "\(action.title) · \(status)" : "\(action.title) · \(status)\n\(detail)"
+    }
+
+    private func askOperatorChat(question: String, resumePrompt: String) -> String {
+        operatorPendingPrompt = OperatorChatPendingPrompt(question: question, resumePrompt: resumePrompt)
+        return question
+    }
+
+    private func operatorFailureFallback() -> String {
+        actionErrorMessage ?? errorMessage ?? language("I could not complete that from chat.", "채팅에서 처리하지 못했습니다.")
+    }
+
+    private func createCompanyFromOperatorChat(_ message: String) async -> String {
+        let trimmedName = extractedCompanyName(from: message) ?? newCompanyName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            newCompanyName = trimmedName
+        }
+        if newCompanyRootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            openCompanyRootPicker()
+        }
+        if newCompanyRootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return language("Choose a folder for the company first.", "먼저 회사 폴더를 선택해주세요.")
+        }
+        if newCompanyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return askOperatorChat(
+                question: language("What should I name the company?", "회사 이름을 무엇으로 할까요?"),
+                resumePrompt: language("Create company named", "회사 생성")
+            )
+        }
+        await createCompany()
+        return selectedCompany.map { language("Created company: \($0.name)", "회사를 만들었습니다: \($0.name)") }
+            ?? operatorFailureFallback()
+    }
+
+    private func cleanedCreationPrompt(_ message: String) -> String {
+        message
+            .replacingOccurrences(of: #"(?i)\b(create|make|add)\b"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(목표|이슈|태스크|만들어|생성|추가|해줘)"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func extractedCompanyName(from message: String) -> String? {
+        let cleaned = message
+            .replacingOccurrences(of: #"(?i)\b(create|make|add|company|named)\b"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(회사|만들어|생성|추가|이름|으로|해줘)"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : String(cleaned.prefix(80))
+    }
+
+    private func extractRemoteURL(from message: String) -> String? {
+        message
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .first { token in
+                token.hasPrefix("https://github.com/")
+                    || token.hasPrefix("git@github.com:")
+                    || token.hasSuffix(".git")
+            }
+    }
+
+    private func blockedOperatorChatSafetyMessage(for normalized: String) -> String? {
+        let hardGate = (normalized.contains("저장소 삭제") || normalized.contains("delete repo") || normalized.contains("delete repository")) ||
+            (normalized.contains("rm -rf") || ((normalized.contains("대량") || normalized.contains("모든 파일") || normalized.contains("all files")) && (normalized.contains("삭제") || normalized.contains("delete")))) ||
+            ((normalized.contains("secret") || normalized.contains("token") || normalized.contains("password") || normalized.contains("시크릿") || normalized.contains("토큰")) && (normalized.contains("노출") || normalized.contains("보여") || normalized.contains("expose") || normalized.contains("변경") || normalized.contains("change"))) ||
+            ((normalized.contains("비용 상한") || normalized.contains("budget cap") || normalized.contains("cost cap")) && (normalized.contains("해제") || normalized.contains("remove") || normalized.contains("disable"))) ||
+            ((normalized.contains("배포") || normalized.contains("deploy") || normalized.contains("merge") || normalized.contains("머지")) && normalized.contains("policy") && (normalized.contains("disable") || normalized.contains("해제")))
+        return hardGate
+            ? language("That action is blocked in chat for safety. Use the dedicated settings or repository screen to review it manually.", "그 작업은 안전상 채팅에서 실행하지 않습니다. 전용 설정이나 저장소 화면에서 직접 확인해주세요.")
+            : nil
+    }
+
+    private func containsAny(_ text: String, _ values: [String]) -> Bool {
+        values.contains { text.contains($0) }
+    }
+
+    private func looksLikeFullAutoChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["full_auto", "full auto", "풀오토", "완전 자동"])
+    }
+
+    private func looksLikeCompanyDeleteChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["회사 삭제", "delete company", "remove company"])
+    }
+
+    private func looksLikeCompanyCreateChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["회사 생성", "회사 만들어", "create company", "new company", "make company"])
+    }
+
+    private func looksLikeRuntimeStartChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["회사 시작", "runtime start", "start runtime", "런타임 시작", "가동", "start company"])
+    }
+
+    private func looksLikeRuntimeStopChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["회사 중지", "runtime stop", "stop runtime", "런타임 중지", "정지", "stop company"])
+    }
+
+    private func looksLikeBackendChatRequest(_ text: String) -> Bool {
+        text.contains("backend") || text.contains("백엔드")
+    }
+
+    private func looksLikeGoalCreationChatRequest(_ text: String) -> Bool {
+        (text.contains("목표") || text.contains("goal")) && containsAny(text, ["생성", "만들", "추가", "create", "add"])
+    }
+
+    private func looksLikeIssueCreationChatRequest(_ text: String) -> Bool {
+        (text.contains("이슈") || text.contains("issue") || text.contains("task")) && containsAny(text, ["생성", "만들", "추가", "create", "add"])
+    }
+
+    private func looksLikeGoalDecompositionChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["분해", "decompose", "split goal"])
+    }
+
+    private func looksLikeGoalAutonomyChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["목표 자동", "goal autonomy", "autonomy", "자율"])
+    }
+
+    private func looksLikeIssueRunChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["이슈 실행", "run issue", "실행해", "시작해"])
+    }
+
+    private func looksLikeIssueDelegationChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["위임", "delegate", "assign"])
+    }
+
+    private func looksLikeReviewChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["qa 승인", "qa reject", "qa approve", "리뷰 승인", "ceo 승인", "review approve", "changes requested"])
+    }
+
+    private func looksLikeMergeChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["pr 머지", "머지해", "merge pr", "merge approved"])
+    }
+
+    private func looksLikeGitHubLoginChatRequest(_ text: String) -> Bool {
+        text.contains("github") && containsAny(text, ["login", "로그인"])
+    }
+
+    private func looksLikeGitHubOriginChatRequest(_ text: String) -> Bool {
+        text.contains("github") && containsAny(text, ["origin", "저장소 연결", "repo connect", "연결"])
+    }
+
+    private func looksLikeBudgetChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["budget", "예산"]) && containsAny(text, ["save", "저장", "설정"])
+    }
+
+    private func looksLikeLinearSettingsChatRequest(_ text: String) -> Bool {
+        text.contains("linear") && containsAny(text, ["save", "저장", "settings", "설정"])
+    }
+
     func startSelectedCompanyRuntime() async {
         guard let company = selectedCompany else { return }
         do {
@@ -3330,6 +3916,8 @@ final class DesktopStore: ObservableObject {
         newIssueCompanyID = company.id
         selectedRepositoryID = company.repositoryId
         operatorCommandResponses = []
+        operatorChatMessages = []
+        operatorPendingPrompt = nil
         operatorCommandDraft = ""
         resetCompanyAgentComposer()
         selectedWorkspaceID = dashboard.workspaces.first(where: { $0.repositoryId == company.repositoryId && $0.baseBranch == company.defaultBaseBranch })?.id

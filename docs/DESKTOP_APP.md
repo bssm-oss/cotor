@@ -117,7 +117,8 @@ The current macOS shell has two top-level modes.
   - Marketing Operator skill selection that reveals a delegation-policy panel for allowed channels, domains, daily publish limits, brand rules, session/secret references, and recent marketing run logs
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
-  - dedicated `Company Operator` navigation surface with an operations chat, automation mode control, runtime/approval status, command result cards, and internal senior-agent approval routing
+  - dedicated `Operator Chat` navigation surface with a message-thread interface for natural-language company commands; automation modes, approvals, and runtime actions are exposed through chat commands rather than persistent status/control panels
+  - progressive disclosure across the company and issue surfaces: the first view shows only the current company signal and focused issue queue, while backend health, paths, cost guardrails, metadata, execution logs, Linear links, and agent conversation details stay behind expandable detail views
   - dedicated `Reports` surface for previous-day morning reports covering completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
   - dedicated `Performance` surface for derived per-agent execution scores, success rates, QA pass rates, retries, duration, and known estimated cost without storing separate evaluation history
   - company memory snapshot cards show company, project, team, and agent memory; `workflowMemory` remains in the backend contract for older clients
@@ -218,12 +219,12 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect derived per-agent performance from existing issues, runs, reviews, org profiles, and company agent definitions, with insufficient-data agents called out separately
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to a plain repository `Map`, with synthesized runtime/backend/review/session wall events and floor-view summaries
-- use the Company Operator surface to ask for status, bulk switch selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
+- use the Operator Chat surface to ask for status, bulk switch selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one message-style command chat
 - turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step
 - choose `ASK_ME`, `AGENT_APPROVED`, or `FULL_AUTO` automation; `AGENT_APPROVED` is the default and routes recoverable sensitive actions to CEO/QA/Reviewer approval instead of a user confirmation rail
 - keep hard-gated actions blocked in every mode, including repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks
 - inspect company activity without manual refresh in normal company mode
-- inspect runtime health, CEO approval/blocked/review attention, and the latest runtime signal from the compact company summary banner
+- inspect compact runtime status and focused recent issues first, then open advanced company or issue details for approval, blocked/review attention, runtime signals, and execution evidence
 - inspect estimated spend and adjust daily/monthly cost guardrails without leaving the company console
 - inspect deterministic morning reports generated from previous-day local runtime, activity, issue, run, and review data, including empty-day reports when there was no activity
 - warn during company creation when GitHub PR publishing is required but the repository is not ready for `gh`/`origin` publishing

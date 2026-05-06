@@ -4632,7 +4632,7 @@ class DesktopAppService(
             blockedActions += OperatorCommandAction(
                 type = "automation-mode",
                 title = "Full auto requires confirmation",
-                detail = "FULL_AUTO changes must be confirmed once by the user before the operator can remove routine approval prompts.",
+                detail = "Full auto needs one explicit user confirmation before routine prompts are removed.",
                 status = "USER_CONFIRMATION_REQUIRED"
             )
             handled = true
@@ -4656,7 +4656,7 @@ class DesktopAppService(
             actions += OperatorCommandAction(
                 type = "status-check",
                 title = "Company status checked",
-                detail = formatOperatorSummary(summary),
+                detail = formatOperatorStatusBrief(summary),
                 status = "DONE"
             )
             handled = true
@@ -4678,7 +4678,11 @@ class DesktopAppService(
                 actions += OperatorCommandAction(
                     type = "runtime-start",
                     title = "Runtime started",
-                    detail = "Company runtime is ${runtime.status.name.lowercase()}; backend health is ${runtime.backendHealth}.",
+                    detail = if (runtime.status == CompanyRuntimeStatus.RUNNING) {
+                        "The selected company is now running."
+                    } else {
+                        "The start request was accepted. Check the runtime screen if the company does not begin work shortly."
+                    },
                     status = "DONE"
                 )
                 summary = buildOperatorCompanySummary(companyId)
@@ -4690,7 +4694,7 @@ class DesktopAppService(
                 actions += OperatorCommandAction(
                     type = "runtime-stop",
                     title = "Runtime stopped",
-                    detail = "Company runtime is ${runtime.status.name.lowercase()}.",
+                    detail = "The selected company has been stopped.",
                     status = "DONE"
                 )
                 summary = buildOperatorCompanySummary(companyId)
@@ -4710,7 +4714,7 @@ class DesktopAppService(
                 OperatorAutomationMode.ASK_ME -> pendingApprovals += OperatorCommandAction(
                     type = "blocked-issue-retry",
                     title = "Blocked issue retry is waiting",
-                    detail = "ASK_ME mode keeps retry and reassignment actions pending until the user approves them.",
+                    detail = "This retry needs your confirmation before it can run.",
                     status = "USER_CONFIRMATION_REQUIRED"
                 )
             }
@@ -4757,7 +4761,7 @@ class DesktopAppService(
             actions += OperatorCommandAction(
                 type = "status-check",
                 title = "Company status checked",
-                detail = formatOperatorSummary(summary),
+                detail = formatOperatorStatusBrief(summary),
                 status = "DONE"
             )
         }
@@ -4799,7 +4803,7 @@ class DesktopAppService(
                     OperatorCommandAction(
                         type = "automation-mode",
                         title = "Full auto requires confirmation",
-                        detail = "FULL_AUTO changes require one explicit user confirmation before routine prompts are removed.",
+                        detail = "Full auto needs one explicit user confirmation before routine prompts are removed.",
                         status = "USER_CONFIRMATION_REQUIRED"
                     )
                 )
@@ -4814,7 +4818,7 @@ class DesktopAppService(
             companyId = companyId,
             source = "operator",
             title = "Automation mode changed",
-            detail = requestedMode.name
+            detail = formatOperatorAutomationMode(requestedMode)
         ).withDerivedMetrics()
         stateStore.save(nextState)
         OperatorModeUpdate(
@@ -4823,7 +4827,7 @@ class DesktopAppService(
                 OperatorCommandAction(
                     type = "automation-mode",
                     title = "Automation mode changed",
-                    detail = "Company Operator mode is now ${requestedMode.name}.",
+                    detail = "Company Operator now uses ${formatOperatorAutomationMode(requestedMode)}.",
                     status = "DONE"
                 )
             )
@@ -4872,8 +4876,40 @@ class DesktopAppService(
         )
     }
 
-    private fun formatOperatorSummary(summary: OperatorCompanySummary): String =
-        "runtime=${summary.runtimeStatus.lowercase()}, backend=${summary.backendHealth}, activeAgents=${summary.activeAgentCount}, blockedIssues=${summary.blockedIssueCount}, pendingApprovals=${summary.pendingApprovalCount}"
+    private fun formatOperatorAutomationMode(mode: OperatorAutomationMode): String = when (mode) {
+        OperatorAutomationMode.ASK_ME -> "confirmation before execution"
+        OperatorAutomationMode.AGENT_APPROVED -> "internal approval"
+        OperatorAutomationMode.FULL_AUTO -> "full auto"
+    }
+
+    private fun formatOperatorStatusBrief(summary: OperatorCompanySummary): String {
+        val parts = buildList {
+            if (summary.activeAgentCount > 0) add("${summary.activeAgentCount} active agent run(s)")
+            if (summary.blockedIssueCount > 0) add("${summary.blockedIssueCount} blocked issue(s)")
+            if (summary.pendingApprovalCount > 0) add("${summary.pendingApprovalCount} item(s) waiting for approval")
+            if (summary.reviewQueueCount > 0) add("${summary.reviewQueueCount} review item(s)")
+            if (summary.budgetPaused) add("budget paused")
+        }
+        return if (parts.isEmpty()) {
+            "No active runs, blocked issues, or waiting approvals need attention."
+        } else {
+            parts.joinToString(separator = ", ").replaceFirstChar { it.uppercase() } + "."
+        }
+    }
+
+    private fun formatOperatorActionOutcome(action: OperatorCommandAction): String {
+        val outcome = when (action.status) {
+            "DONE" -> "done"
+            "NOOP" -> "nothing to change"
+            "READY" -> "ready"
+            "ATTENTION" -> "needs attention"
+            "BLOCKED" -> "blocked"
+            "USER_CONFIRMATION_REQUIRED" -> "needs your confirmation"
+            "AGENT_APPROVAL_REQUESTED" -> "sent for internal approval"
+            else -> action.status.lowercase().replace('_', ' ')
+        }
+        return "${action.title} $outcome"
+    }
 
     private fun formatOperatorResponseMessage(
         actions: List<OperatorCommandAction>,
@@ -4883,11 +4919,11 @@ class DesktopAppService(
     ): String {
         val main = when {
             blockedActions.isNotEmpty() && actions.isEmpty() && pendingApprovals.isEmpty() -> blockedActions.first().detail
-            pendingApprovals.isNotEmpty() -> "${pendingApprovals.size} action(s) routed for internal approval."
-            actions.isNotEmpty() -> actions.joinToString("; ") { "${it.title}: ${it.status}" }
+            pendingApprovals.isNotEmpty() -> "${pendingApprovals.size} action(s) were sent for internal approval."
+            actions.isNotEmpty() -> actions.joinToString("; ") { formatOperatorActionOutcome(it) } + "."
             else -> "Company status checked."
         }
-        return "$main ${formatOperatorSummary(summary)}"
+        return "$main ${formatOperatorStatusBrief(summary)}"
     }
 
     private suspend fun updateOperatorAgentModels(
@@ -4945,7 +4981,7 @@ class DesktopAppService(
         OperatorCommandAction(
             type = "agent-model-update",
             title = "Agent models updated",
-            detail = "${targetDefinitions.size} agent(s) now use opencode · ${OpenCodeDefaults.DEFAULT_MODEL} across ${targetCompanies.size} company scope(s).",
+            detail = "${targetDefinitions.size} agent(s) were moved to opencode with ${OpenCodeDefaults.DEFAULT_MODEL} across ${targetCompanies.size} company scope(s).",
             status = "DONE"
         )
     }
@@ -5011,7 +5047,7 @@ class DesktopAppService(
         return OperatorCommandAction(
             type = "agent-approval",
             title = approvalTitle,
-            detail = "Routed to $targetAgent for internal approval under AGENT_APPROVED mode.",
+            detail = "Sent to $targetAgent for internal approval.",
             status = "AGENT_APPROVAL_REQUESTED"
         )
     }
@@ -5094,7 +5130,7 @@ class DesktopAppService(
         return OperatorCommandAction(
             type = "hard-gate",
             title = title,
-            detail = "$title. This v1 operator never executes hard-gated actions automatically.",
+            detail = "$title. This operation is blocked by the operator safety policy.",
             status = "BLOCKED"
         )
     }
