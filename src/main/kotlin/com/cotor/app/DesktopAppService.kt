@@ -4607,6 +4607,495 @@ class DesktopAppService(
         return response
     }
 
+    suspend fun runOperatorCommand(
+        companyId: String,
+        message: String,
+        automationMode: OperatorAutomationMode? = null,
+        confirmFullAuto: Boolean = false
+    ): OperatorCommandResponse {
+        val trimmedMessage = message.trim()
+        require(trimmedMessage.isNotBlank()) { "message is required" }
+
+        val modeUpdate = applyOperatorAutomationMode(companyId, automationMode, confirmFullAuto)
+        val actions = modeUpdate.actions.toMutableList()
+        val pendingApprovals = mutableListOf<OperatorCommandAction>()
+        val blockedActions = modeUpdate.blockedActions.toMutableList()
+        var activeMode = modeUpdate.mode
+        var summary: OperatorCompanySummary? = null
+        var handled = actions.isNotEmpty() || blockedActions.isNotEmpty()
+        val normalized = trimmedMessage.lowercase()
+
+        if (requestsFullAutoMode(normalized) && automationMode == null) {
+            blockedActions += OperatorCommandAction(
+                type = "automation-mode",
+                title = "Full auto requires confirmation",
+                detail = "FULL_AUTO changes must be confirmed once by the user before the operator can remove routine approval prompts.",
+                status = "USER_CONFIRMATION_REQUIRED"
+            )
+            handled = true
+        }
+
+        detectHardGateOperatorAction(normalized)?.let { blocked ->
+            val response = OperatorCommandResponse(
+                message = blocked.detail,
+                automationMode = activeMode,
+                actions = actions,
+                pendingApprovals = pendingApprovals,
+                blockedActions = blockedActions + blocked,
+                summary = buildOperatorCompanySummary(companyId)
+            )
+            recordOperatorCommandConversation(companyId, trimmedMessage, response)
+            return response
+        }
+
+        if (looksLikeStatusRequest(normalized)) {
+            summary = buildOperatorCompanySummary(companyId)
+            actions += OperatorCommandAction(
+                type = "status-check",
+                title = "Company status checked",
+                detail = formatOperatorSummary(summary),
+                status = "DONE"
+            )
+            handled = true
+        }
+
+        if (looksLikeDeepSeekModelUpdate(normalized)) {
+            actions += updateOperatorAgentModels(
+                companyId = companyId,
+                includeAllCompanies = referencesAllCompanies(normalized)
+            )
+            summary = buildOperatorCompanySummary(companyId)
+            handled = true
+        }
+
+        when {
+            looksLikeRuntimeStart(normalized) -> {
+                val runtime = startCompanyRuntime(companyId)
+                activeMode = currentOperatorAutomationMode(companyId)
+                actions += OperatorCommandAction(
+                    type = "runtime-start",
+                    title = "Runtime started",
+                    detail = "Company runtime is ${runtime.status.name.lowercase()}; backend health is ${runtime.backendHealth}.",
+                    status = "DONE"
+                )
+                summary = buildOperatorCompanySummary(companyId)
+                handled = true
+            }
+            looksLikeRuntimeStop(normalized) -> {
+                val runtime = stopCompanyRuntime(companyId)
+                activeMode = currentOperatorAutomationMode(companyId)
+                actions += OperatorCommandAction(
+                    type = "runtime-stop",
+                    title = "Runtime stopped",
+                    detail = "Company runtime is ${runtime.status.name.lowercase()}.",
+                    status = "DONE"
+                )
+                summary = buildOperatorCompanySummary(companyId)
+                handled = true
+            }
+        }
+
+        if (looksLikeBlockedIssueRetry(normalized)) {
+            when (activeMode) {
+                OperatorAutomationMode.FULL_AUTO -> actions += reopenBlockedIssuesFromOperator(companyId)
+                OperatorAutomationMode.AGENT_APPROVED -> pendingApprovals += routeOperatorApprovalToAgent(
+                    companyId = companyId,
+                    request = trimmedMessage,
+                    approvalTitle = "Approve blocked issue retry",
+                    targetAgent = "CEO"
+                )
+                OperatorAutomationMode.ASK_ME -> pendingApprovals += OperatorCommandAction(
+                    type = "blocked-issue-retry",
+                    title = "Blocked issue retry is waiting",
+                    detail = "ASK_ME mode keeps retry and reassignment actions pending until the user approves them.",
+                    status = "USER_CONFIRMATION_REQUIRED"
+                )
+            }
+            summary = buildOperatorCompanySummary(companyId)
+            handled = true
+        }
+
+        if (looksLikeGitHubSync(normalized)) {
+            val status = githubPublishStatus(companyId)
+            actions += OperatorCommandAction(
+                type = "github-status",
+                title = "GitHub status checked",
+                detail = status.message ?: "GitHub readiness was checked for this company.",
+                status = if (status.ghInstalled && status.ghAuthenticated && status.originConfigured) "READY" else "ATTENTION"
+            )
+            handled = true
+        }
+
+        if (looksLikeLinearSync(normalized)) {
+            val result = runCatching { syncCompanyLinear(companyId) }
+            actions += result.fold(
+                onSuccess = { response ->
+                    OperatorCommandAction(
+                        type = "linear-sync",
+                        title = "Linear resynced",
+                        detail = response.message,
+                        status = if (response.ok && response.failedIssues.isEmpty()) "DONE" else "ATTENTION"
+                    )
+                },
+                onFailure = { error ->
+                    OperatorCommandAction(
+                        type = "linear-sync",
+                        title = "Linear sync needs attention",
+                        detail = error.message ?: "Linear sync failed.",
+                        status = "BLOCKED"
+                    )
+                }
+            )
+            handled = true
+        }
+
+        if (!handled) {
+            summary = buildOperatorCompanySummary(companyId)
+            actions += OperatorCommandAction(
+                type = "status-check",
+                title = "Company status checked",
+                detail = formatOperatorSummary(summary),
+                status = "DONE"
+            )
+        }
+
+        val finalSummary = summary ?: buildOperatorCompanySummary(companyId)
+        val response = OperatorCommandResponse(
+            message = formatOperatorResponseMessage(actions, pendingApprovals, blockedActions, finalSummary),
+            automationMode = currentOperatorAutomationMode(companyId),
+            actions = actions,
+            pendingApprovals = pendingApprovals,
+            blockedActions = blockedActions,
+            summary = finalSummary
+        )
+        recordOperatorCommandConversation(companyId, trimmedMessage, response)
+        return response
+    }
+
+    private data class OperatorModeUpdate(
+        val mode: OperatorAutomationMode,
+        val actions: List<OperatorCommandAction> = emptyList(),
+        val blockedActions: List<OperatorCommandAction> = emptyList()
+    )
+
+    private suspend fun applyOperatorAutomationMode(
+        companyId: String,
+        requestedMode: OperatorAutomationMode?,
+        confirmFullAuto: Boolean
+    ): OperatorModeUpdate = stateMutex.withLock {
+        val state = stateStore.load()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        if (requestedMode == null || requestedMode == company.operatorAutomationMode) {
+            return@withLock OperatorModeUpdate(company.operatorAutomationMode)
+        }
+        if (requestedMode == OperatorAutomationMode.FULL_AUTO && !confirmFullAuto) {
+            return@withLock OperatorModeUpdate(
+                mode = company.operatorAutomationMode,
+                blockedActions = listOf(
+                    OperatorCommandAction(
+                        type = "automation-mode",
+                        title = "Full auto requires confirmation",
+                        detail = "FULL_AUTO changes require one explicit user confirmation before routine prompts are removed.",
+                        status = "USER_CONFIRMATION_REQUIRED"
+                    )
+                )
+            )
+        }
+
+        val now = System.currentTimeMillis()
+        val updatedCompany = company.copy(operatorAutomationMode = requestedMode, updatedAt = now)
+        val nextState = state.copy(
+            companies = state.companies.map { if (it.id == companyId) updatedCompany else it }
+        ).recordCompanyActivity(
+            companyId = companyId,
+            source = "operator",
+            title = "Automation mode changed",
+            detail = requestedMode.name
+        ).withDerivedMetrics()
+        stateStore.save(nextState)
+        OperatorModeUpdate(
+            mode = requestedMode,
+            actions = listOf(
+                OperatorCommandAction(
+                    type = "automation-mode",
+                    title = "Automation mode changed",
+                    detail = "Company Operator mode is now ${requestedMode.name}.",
+                    status = "DONE"
+                )
+            )
+        )
+    }
+
+    private suspend fun currentOperatorAutomationMode(companyId: String): OperatorAutomationMode =
+        stateStore.load().companies.firstOrNull { it.id == companyId }?.operatorAutomationMode
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+
+    private suspend fun buildOperatorCompanySummary(companyId: String): OperatorCompanySummary {
+        val state = stateStore.load().withDerivedMetrics()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val runtime = runtimeStatus(companyId)
+        val companyWorkspaceIds = state.workspaces
+            .filter { it.repositoryId == company.repositoryId }
+            .mapTo(linkedSetOf()) { it.id }
+        val companyIssueIds = state.issues
+            .filter { it.companyId == companyId }
+            .mapTo(linkedSetOf()) { it.id }
+        val companyTaskIds = state.tasks
+            .filter { it.issueId in companyIssueIds || it.workspaceId in companyWorkspaceIds }
+            .mapTo(linkedSetOf()) { it.id }
+        val activeAgentCount = state.runs.count {
+            it.taskId in companyTaskIds && (it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.QUEUED)
+        }
+        val blockedIssueCount = state.issues.count { it.companyId == companyId && it.status == IssueStatus.BLOCKED }
+        val attentionReviewCount = state.reviewQueue.count {
+            it.companyId == companyId && it.status !in setOf(ReviewQueueStatus.MERGED)
+        }
+        val pendingApprovalCount = runtime.waitingApprovalCount +
+            state.issues.count { it.companyId == companyId && it.status == IssueStatus.WAITING_FOR_APPROVAL } +
+            state.reviewQueue.count {
+                it.companyId == companyId &&
+                    it.status in setOf(ReviewQueueStatus.READY_FOR_CEO, ReviewQueueStatus.READY_TO_MERGE)
+            }
+        return OperatorCompanySummary(
+            runtimeStatus = runtime.status.name,
+            backendHealth = runtime.backendHealth,
+            activeAgentCount = activeAgentCount,
+            blockedIssueCount = blockedIssueCount,
+            reviewQueueCount = attentionReviewCount,
+            pendingApprovalCount = pendingApprovalCount,
+            budgetPaused = runtime.budgetPausedAt != null
+        )
+    }
+
+    private fun formatOperatorSummary(summary: OperatorCompanySummary): String =
+        "runtime=${summary.runtimeStatus.lowercase()}, backend=${summary.backendHealth}, activeAgents=${summary.activeAgentCount}, blockedIssues=${summary.blockedIssueCount}, pendingApprovals=${summary.pendingApprovalCount}"
+
+    private fun formatOperatorResponseMessage(
+        actions: List<OperatorCommandAction>,
+        pendingApprovals: List<OperatorCommandAction>,
+        blockedActions: List<OperatorCommandAction>,
+        summary: OperatorCompanySummary
+    ): String {
+        val main = when {
+            blockedActions.isNotEmpty() && actions.isEmpty() && pendingApprovals.isEmpty() -> blockedActions.first().detail
+            pendingApprovals.isNotEmpty() -> "${pendingApprovals.size} action(s) routed for internal approval."
+            actions.isNotEmpty() -> actions.joinToString("; ") { "${it.title}: ${it.status}" }
+            else -> "Company status checked."
+        }
+        return "$main ${formatOperatorSummary(summary)}"
+    }
+
+    private suspend fun updateOperatorAgentModels(
+        companyId: String,
+        includeAllCompanies: Boolean
+    ): OperatorCommandAction = stateMutex.withLock {
+        val state = stateStore.load()
+        val selectedCompany = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val targetCompanies = if (includeAllCompanies) state.companies else listOf(selectedCompany)
+        val targetCompanyIds = targetCompanies.mapTo(linkedSetOf()) { it.id }
+        val targetDefinitions = state.companyAgentDefinitions.filter { it.companyId in targetCompanyIds }
+        if (targetDefinitions.isEmpty()) {
+            return@withLock OperatorCommandAction(
+                type = "agent-model-update",
+                title = "No agents to update",
+                detail = "No company agents are registered for the selected scope.",
+                status = "NOOP"
+            )
+        }
+
+        val now = System.currentTimeMillis()
+        val updatedDefinitionIds = targetDefinitions.mapTo(linkedSetOf()) { it.id }
+        val nextDefinitions = state.companyAgentDefinitions.map { definition ->
+            if (definition.id in updatedDefinitionIds && definition.companyId in targetCompanyIds) {
+                definition.copy(
+                    agentCli = "opencode",
+                    model = OpenCodeDefaults.DEFAULT_MODEL,
+                    updatedAt = now
+                )
+            } else {
+                definition
+            }
+        }
+        val nextState = targetCompanies.fold(
+            state.copy(
+                companyAgentDefinitions = nextDefinitions,
+                orgProfiles = deriveProfiles(nextDefinitions, state.companies)
+            )
+        ) { current, company ->
+            current.recordCompanyActivity(
+                companyId = company.id,
+                source = "operator",
+                title = "Updated agent models",
+                detail = "opencode · ${OpenCodeDefaults.DEFAULT_MODEL}"
+            )
+        }.withDerivedMetrics()
+        stateStore.save(nextState)
+        targetCompanies.forEach { company ->
+            nextState.projectContexts.firstOrNull { it.companyId == company.id }?.let { context ->
+                writeCompanyContextSnapshot(nextState, company, context)
+            }
+        }
+
+        OperatorCommandAction(
+            type = "agent-model-update",
+            title = "Agent models updated",
+            detail = "${targetDefinitions.size} agent(s) now use opencode · ${OpenCodeDefaults.DEFAULT_MODEL} across ${targetCompanies.size} company scope(s).",
+            status = "DONE"
+        )
+    }
+
+    private suspend fun reopenBlockedIssuesFromOperator(companyId: String): OperatorCommandAction = stateMutex.withLock {
+        val state = stateStore.load()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val blockedIssues = state.issues.filter { it.companyId == companyId && it.status == IssueStatus.BLOCKED }
+        if (blockedIssues.isEmpty()) {
+            return@withLock OperatorCommandAction(
+                type = "blocked-issue-retry",
+                title = "No blocked issues",
+                detail = "There are no blocked issues to retry for ${company.name}.",
+                status = "NOOP"
+            )
+        }
+
+        val now = System.currentTimeMillis()
+        val blockedIds = blockedIssues.mapTo(linkedSetOf()) { it.id }
+        val nextIssues = state.issues.map { issue ->
+            if (issue.id in blockedIds) {
+                issue.copy(
+                    status = IssueStatus.PLANNED,
+                    transitionReason = "Company Operator reopened this blocked issue for autonomous retry.",
+                    blockedBy = emptyList(),
+                    runtimeDisposition = null,
+                    updatedAt = now
+                )
+            } else {
+                issue
+            }
+        }
+        val nextState = state.copy(issues = nextIssues).recordCompanyActivity(
+            companyId = companyId,
+            source = "operator",
+            title = "Reopened blocked issues",
+            detail = "${blockedIssues.size} issue(s) moved back to planned."
+        ).withDerivedMetrics()
+        stateStore.save(nextState)
+        OperatorCommandAction(
+            type = "blocked-issue-retry",
+            title = "Blocked issues reopened",
+            detail = "${blockedIssues.size} blocked issue(s) were moved back to planned for retry.",
+            status = "DONE"
+        )
+    }
+
+    private suspend fun routeOperatorApprovalToAgent(
+        companyId: String,
+        request: String,
+        approvalTitle: String,
+        targetAgent: String
+    ): OperatorCommandAction {
+        sendMessage(
+            companyId = companyId,
+            fromAgentName = "Company Operator",
+            toAgentName = targetAgent,
+            kind = "operator-approval",
+            subject = approvalTitle,
+            body = request
+        )
+        return OperatorCommandAction(
+            type = "agent-approval",
+            title = approvalTitle,
+            detail = "Routed to $targetAgent for internal approval under AGENT_APPROVED mode.",
+            status = "AGENT_APPROVAL_REQUESTED"
+        )
+    }
+
+    private suspend fun recordOperatorCommandConversation(
+        companyId: String,
+        request: String,
+        response: OperatorCommandResponse
+    ) {
+        runCatching {
+            sendMessage(
+                companyId = companyId,
+                fromAgentName = "User",
+                toAgentName = "Company Operator",
+                kind = "operator-command",
+                subject = "Operator request",
+                body = request
+            )
+            sendMessage(
+                companyId = companyId,
+                fromAgentName = "Company Operator",
+                toAgentName = null,
+                kind = "operator-result",
+                subject = "Operator result",
+                body = response.message
+            )
+        }
+    }
+
+    private fun requestsFullAutoMode(text: String): Boolean =
+        containsAny(text, "full_auto", "full auto", "풀오토", "완전 자동")
+
+    private fun looksLikeStatusRequest(text: String): Boolean =
+        containsAny(text, "status", "health", "잘 돌아", "잘돌", "상태", "확인", "점검", "보고")
+
+    private fun looksLikeDeepSeekModelUpdate(text: String): Boolean =
+        text.contains("opencode") && (text.contains("deepseek") || text.contains("모델") || text.contains("model"))
+
+    private fun looksLikeRuntimeStart(text: String): Boolean =
+        containsAny(text, "runtime start", "start runtime", "런타임 시작", "실행 시작", "가동")
+
+    private fun looksLikeRuntimeStop(text: String): Boolean =
+        containsAny(text, "runtime stop", "stop runtime", "런타임 중지", "실행 중지", "정지")
+
+    private fun looksLikeBlockedIssueRetry(text: String): Boolean =
+        containsAny(text, "blocked", "막힌", "블록") &&
+            containsAny(text, "retry", "reassign", "requeue", "다시", "재시도", "재배정", "굴려")
+
+    private fun looksLikeGitHubSync(text: String): Boolean =
+        text.contains("github") && containsAny(text, "sync", "status", "확인", "동기화", "resync")
+
+    private fun looksLikeLinearSync(text: String): Boolean =
+        text.contains("linear") && containsAny(text, "sync", "확인", "동기화", "resync")
+
+    private fun referencesAllCompanies(text: String): Boolean =
+        containsAny(text, "모든 회사", "전체 회사", "all companies", "every company")
+
+    private fun containsAny(text: String, vararg needles: String): Boolean =
+        needles.any { text.contains(it) }
+
+    private fun detectHardGateOperatorAction(text: String): OperatorCommandAction? {
+        val title = when {
+            containsAny(text, "저장소 삭제", "repo 삭제", "repository 삭제", "delete repository", "delete repo") ->
+                "Repository deletion blocked"
+            (containsAny(text, "대량", "전부", "모든 파일", "all files", "bulk") && containsAny(text, "삭제", "delete", "remove")) ||
+                containsAny(text, "rm -rf") ->
+                "Bulk file deletion blocked"
+            containsAny(text, "secret", "secrets", "token", "password", "api key", "시크릿", "토큰", "비밀번호") &&
+                containsAny(text, "노출", "보여", "print", "expose", "change", "변경", "삭제", "remove") ->
+                "Secret operation blocked"
+            containsAny(text, "비용 상한", "budget cap", "cost cap", "unlimited budget", "무제한 비용") &&
+                containsAny(text, "해제", "없애", "remove", "disable", "unlock", "무제한") ->
+                "Budget cap removal blocked"
+            containsAny(text, "배포", "deploy", "deployment", "merge", "머지") &&
+                containsAny(text, "정책", "policy") &&
+                containsAny(text, "해제", "disable", "unlock", "없애", "끄") ->
+                "Deployment or merge policy unlock blocked"
+            else -> null
+        } ?: return null
+        return OperatorCommandAction(
+            type = "hard-gate",
+            title = title,
+            detail = "$title. This v1 operator never executes hard-gated actions automatically.",
+            status = "BLOCKED"
+        )
+    }
+
     suspend fun createCompanyAgentDefinition(
         companyId: String,
         title: String,

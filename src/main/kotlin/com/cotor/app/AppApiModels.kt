@@ -99,6 +99,42 @@ data class ChatIntakeResponse(
 )
 
 @Serializable
+data class OperatorCommandRequest(
+    val message: String,
+    val automationMode: OperatorAutomationMode? = null,
+    val confirmFullAuto: Boolean = false
+)
+
+@Serializable
+data class OperatorCommandAction(
+    val type: String,
+    val title: String,
+    val detail: String,
+    val status: String
+)
+
+@Serializable
+data class OperatorCompanySummary(
+    val runtimeStatus: String,
+    val backendHealth: String,
+    val activeAgentCount: Int,
+    val blockedIssueCount: Int,
+    val reviewQueueCount: Int,
+    val pendingApprovalCount: Int,
+    val budgetPaused: Boolean
+)
+
+@Serializable
+data class OperatorCommandResponse(
+    val message: String,
+    val automationMode: OperatorAutomationMode,
+    val actions: List<OperatorCommandAction> = emptyList(),
+    val pendingApprovals: List<OperatorCommandAction> = emptyList(),
+    val blockedActions: List<OperatorCommandAction> = emptyList(),
+    val summary: OperatorCompanySummary? = null
+)
+
+@Serializable
 data class UpdateGoalRequest(
     val title: String? = null,
     val description: String? = null,
