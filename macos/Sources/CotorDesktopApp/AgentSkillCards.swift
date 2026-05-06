@@ -75,7 +75,10 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
         enabled = agent.enabled
 
         let settings = profile?.settings ?? [:]
-        let catalogByID = Dictionary(uniqueKeysWithValues: skillCatalog.map { ($0.name, $0) })
+        let catalogByID = Dictionary(
+            skillCatalog.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let selectedSkillIDs = Self.selectedSkillIDs(
             from: settings["SKILL_RUN"],
             defaultSkillIDs: defaultSkillIDs

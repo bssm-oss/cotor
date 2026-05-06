@@ -919,6 +919,29 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func agentSkillCardToleratesDuplicateSkillCatalogEntries() {
+        let agent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "implementation")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "AUTO",
+                skillAllowlist: ["graphify"]
+            )
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"]),
+                skillEntry(name: "graphify", displayName: "Duplicate Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"]),
+            ]
+        )
+
+        #expect(card.selectedSkills.map(\.displayName) == ["Repository Mapper"])
+        #expect(card.capabilityScopes.contains(.repositoryMap))
+    }
+
+    @Test
     func agentSkillCardDerivesMarketingVideoBrowserAndRepositoryScopes() {
         let agent = agentDefinition(id: "agent-operator", title: "Operator", roleSummary: "marketing and video workflows")
         let profile = capabilityProfile(agentId: agent.id, settings: [
