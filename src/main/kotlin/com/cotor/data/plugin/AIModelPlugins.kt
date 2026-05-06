@@ -699,6 +699,7 @@ class LocalModelPlugin : AgentPlugin {
 
     companion object {
         private val ollamaServerLock = Any()
+
         @Volatile
         private var managedOllamaProcess: Process? = null
     }
