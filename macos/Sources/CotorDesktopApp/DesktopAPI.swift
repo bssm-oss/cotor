@@ -39,6 +39,22 @@ struct DesktopAPI {
         try await get(path: "api/app/companies/\(companyId)/dashboard")
     }
 
+    func agentPerformance(companyId: String) async throws -> [AgentPerformanceSnapshotRecord] {
+        try await get(path: "api/app/companies/\(companyId)/agents/performance")
+    }
+
+    func companyReports(companyId: String) async throws -> [CompanyDailyReportSummaryRecord] {
+        try await get(path: "api/app/companies/\(companyId)/reports")
+    }
+
+    func companyReport(companyId: String, date: String) async throws -> CompanyDailyReportRecord {
+        try await get(path: "api/app/companies/\(companyId)/reports/\(date)")
+    }
+
+    func generateCompanyReport(companyId: String) async throws -> CompanyDailyReportRecord {
+        try await post(path: "api/app/companies/\(companyId)/reports/generate", body: EmptyPayload())
+    }
+
     func companyMemorySnapshot(companyId: String, issueId: String?, agentProfileId: String?) async throws -> CompanyMemorySnapshotPayload {
         var query: [URLQueryItem] = []
         if let issueId, !issueId.isEmpty {

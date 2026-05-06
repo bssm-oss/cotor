@@ -60,6 +60,8 @@ private enum CompanySidebarSurface: CaseIterable, Identifiable {
     case room
     case chat
     case goals
+    case performance
+    case reports
     case agents
     case issues
 
@@ -73,6 +75,10 @@ private enum CompanySidebarSurface: CaseIterable, Identifiable {
             return "chat"
         case .goals:
             return "goals"
+        case .performance:
+            return "performance"
+        case .reports:
+            return "reports"
         case .agents:
             return "agents"
         case .issues:
@@ -732,6 +738,10 @@ private struct SidebarView: View {
                     goalSection
                     goalComposer
                 }
+            case .performance:
+                companySection
+            case .reports:
+                companySection
             case .agents:
                 VStack(alignment: .leading, spacing: 14) {
                     rosterSection
@@ -817,6 +827,20 @@ private struct SidebarView: View {
                     subtitle: l("Goals and creation", "목표 보기와 생성"),
                     systemImage: "flag.2.crossed",
                     badge: "\(store.goals.count)"
+                )
+                companyNavButton(
+                    .performance,
+                    title: l("Performance", "인사평가"),
+                    subtitle: l("Scoreable agent signals", "에이전트 성과 지표"),
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    badge: "\(store.scoreableAgentPerformanceCount)"
+                )
+                companyNavButton(
+                    .reports,
+                    title: l("Reports", "보고서"),
+                    subtitle: l("Daily operating brief", "하루 운영 요약"),
+                    systemImage: "doc.text.magnifyingglass",
+                    badge: "\(store.selectedCompanyReports.count)"
                 )
                 companyNavButton(
                     .agents,
@@ -2753,6 +2777,167 @@ private struct GoalNodeCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct PerformanceMetricTile: View {
+    let title: String
+    let value: String
+    let detail: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(0.7)
+                .foregroundStyle(ShellPalette.faint)
+            Text(value)
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(ShellPalette.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(detail)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(ShellPalette.muted)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .fill(ShellPalette.panelAlt)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .stroke(tint.opacity(0.34), lineWidth: 1)
+        )
+    }
+}
+
+private struct PerformanceAgentCard: View {
+    let snapshot: AgentPerformanceSnapshotRecord
+    let language: AppLanguage
+
+    private var stateText: String {
+        if snapshot.dataSufficiency != "SUFFICIENT" {
+            return language("Insufficient data", "데이터 부족")
+        }
+        if (snapshot.score ?? 0) >= 80 {
+            return language("Good", "좋음")
+        }
+        return language("Attention", "주의")
+    }
+
+    private var stateTint: Color {
+        if snapshot.dataSufficiency != "SUFFICIENT" {
+            return ShellPalette.faint
+        }
+        if (snapshot.score ?? 0) >= 80 {
+            return ShellPalette.success
+        }
+        return ShellPalette.warning
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(snapshot.agentName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .lineLimit(1)
+                    Text(snapshot.roleName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 5) {
+                    Text(snapshot.score.map { "\($0)" } ?? "—")
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                        .foregroundStyle(ShellPalette.text)
+                        .monospacedDigit()
+                    StatusSummaryPill(text: stateText, tint: stateTint)
+                }
+            }
+
+            HStack(spacing: 6) {
+                ShellTag(text: snapshot.agentCli, tint: ShellPalette.accent, maxWidth: 110)
+                if let model = snapshot.model, !model.isEmpty {
+                    ShellTag(text: model, tint: ShellPalette.accentWarm, maxWidth: 170)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 8)], alignment: .leading, spacing: 8) {
+                PerformanceValue(label: language("Done", "완료"), value: "\(snapshot.completedIssues)")
+                PerformanceValue(label: language("Active", "진행"), value: "\(snapshot.activeIssues)")
+                PerformanceValue(label: language("Blocked", "막힘"), value: "\(snapshot.blockedIssues)")
+                PerformanceValue(label: language("Run", "실행"), value: percent(snapshot.runSuccessRate))
+                PerformanceValue(label: "QA", value: percent(snapshot.qaPassRate))
+                PerformanceValue(label: language("Retry", "재시도"), value: "\(snapshot.retryCount)")
+                PerformanceValue(label: language("Avg", "평균"), value: duration(snapshot.averageDurationMs))
+                PerformanceValue(label: language("Cost", "비용"), value: cost(snapshot.estimatedCostCents))
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusMedium, style: .continuous)
+                .fill(ShellPalette.panelAlt)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusMedium, style: .continuous)
+                .stroke(ShellPalette.line, lineWidth: 1)
+        )
+    }
+
+    private func percent(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return "\(Int((value * 100).rounded()))%"
+    }
+
+    private func duration(_ value: Int64?) -> String {
+        guard let value else { return "—" }
+        let seconds = max(0, value / 1_000)
+        if seconds < 60 {
+            return "\(seconds)s"
+        }
+        let minutes = seconds / 60
+        if minutes < 60 {
+            return "\(minutes)m"
+        }
+        return "\(minutes / 60)h"
+    }
+
+    private func cost(_ cents: Int?) -> String {
+        guard let cents else { return "—" }
+        let dollars = Double(cents) / 100.0
+        return dollars.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+    }
+}
+
+private struct PerformanceValue: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .foregroundStyle(ShellPalette.faint)
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(ShellPalette.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(ShellPalette.panelDeeper)
+        )
     }
 }
 
@@ -4891,6 +5076,136 @@ private struct OrgChartNode: View {
     }
 }
 
+private struct AgentSkillCardView: View {
+    let card: AgentSkillCardRecord
+    let language: AppLanguage
+    let onEdit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 8) {
+                Circle()
+                    .fill(card.enabled ? ShellPalette.success : ShellPalette.warning)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 5)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(card.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text(card.roleSummary.isEmpty ? language("No role summary", "역할 설명 없음") : card.roleSummary)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 4)
+
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .frame(width: 24, height: 24)
+                        .background(ShellPalette.panelRaised)
+                        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(language("Edit Agent", "에이전트 수정"))
+            }
+
+            compactTags([
+                (card.agentCli, ShellPalette.accent),
+                (card.model ?? "", ShellPalette.accentWarm),
+                (card.enabled ? language("ENABLED", "활성") : language("DISABLED", "비활성"), card.enabled ? ShellPalette.success : ShellPalette.warning),
+            ].filter { !$0.0.isEmpty })
+
+            if !skillTags.isEmpty {
+                compactTags(skillTags)
+            }
+
+            if !scopeTags.isEmpty {
+                compactTags(scopeTags)
+            } else {
+                Text(language("No scope configured", "설정된 범위 없음"))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(ShellPalette.faint)
+            }
+
+            if !policyTags.isEmpty {
+                compactTags(policyTags)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 156, alignment: .topLeading)
+        .padding(12)
+        .background(ShellPalette.panelAlt)
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .stroke(card.enabled ? ShellPalette.line : ShellPalette.warning.opacity(0.38), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+    }
+
+    private var skillTags: [(String, Color)] {
+        var tags = card.selectedSkills.prefix(4).map { ($0.displayName, ShellPalette.accentSoft) }
+        if card.selectedSkills.count > 4 {
+            tags.append(("+\(card.selectedSkills.count - 4)", ShellPalette.panelRaised))
+        }
+        return tags
+    }
+
+    private var scopeTags: [(String, Color)] {
+        card.capabilityScopes.map { ($0.label(language), scopeTint($0)) }
+    }
+
+    private var policyTags: [(String, Color)] {
+        card.policyChips.map { ($0.rawValue, policyTint($0)) }
+    }
+
+    private func compactTags(_ tags: [(String, Color)]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 82), spacing: 6)], alignment: .leading, spacing: 6) {
+            ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+                ShellTag(text: tag.0, tint: tag.1, maxWidth: 132)
+            }
+        }
+    }
+
+    private func scopeTint(_ scope: AgentSkillScope) -> Color {
+        switch scope {
+        case .repositoryMap:
+            return ShellPalette.accent
+        case .browserQA:
+            return ShellPalette.accentWarm
+        case .marketing:
+            return ShellPalette.warning
+        case .video:
+            return ShellPalette.accent
+        case .videoRender, .videoUpload:
+            return ShellPalette.warning
+        case .buildTest:
+            return ShellPalette.success
+        case .qaReview:
+            return ShellPalette.accentWarm
+        }
+    }
+
+    private func policyTint(_ policy: AgentSkillPolicy) -> Color {
+        switch policy {
+        case .auto:
+            return ShellPalette.success
+        case .approvalRequired:
+            return ShellPalette.warning
+        case .readOnly:
+            return ShellPalette.accent
+        case .disabled:
+            return ShellPalette.danger
+        }
+    }
+}
+
 private struct GoalDetailSheet: View {
     let goal: GoalRecord
     let issues: [IssueRecord]
@@ -5335,6 +5650,27 @@ private struct CenterPaneView: View {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    private var scoreablePerformanceSnapshots: [AgentPerformanceSnapshotRecord] {
+        store.agentPerformance.filter { $0.score != nil && $0.dataSufficiency == "SUFFICIENT" }
+    }
+
+    private var averagePerformanceScore: Int? {
+        let scores = scoreablePerformanceSnapshots.compactMap(\.score)
+        guard !scores.isEmpty else { return nil }
+        return Int((Double(scores.reduce(0, +)) / Double(scores.count)).rounded())
+    }
+
+    private var averagePerformanceQaPassRate: Double? {
+        let rates = scoreablePerformanceSnapshots.compactMap(\.qaPassRate)
+        guard !rates.isEmpty else { return nil }
+        return rates.reduce(0, +) / Double(rates.count)
+    }
+
+    private func performancePercent(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return "\(Int((value * 100).rounded()))%"
+    }
+
     private func runningSessionSummary(_ session: RunningAgentSessionRecord) -> String {
         if let issueId = session.issueId,
            let issue = store.dashboard.issues.first(where: { $0.id == issueId }) {
@@ -5585,6 +5921,10 @@ private struct CenterPaneView: View {
             companyChatControlPage
         case .goals:
             goalOverviewPage
+        case .performance:
+            performanceReviewPage
+        case .reports:
+            companyReportsPage
         case .agents:
             organizationOverviewPage
         case .issues:
@@ -5945,7 +6285,7 @@ private struct CenterPaneView: View {
                 subtitle: l("See the team structure and what each agent is working on.", "팀 구성과 각 에이전트가 맡은 이슈를 함께 봅니다.")
             )
 
-            if store.orgProfiles.isEmpty {
+            if store.orgProfiles.isEmpty && store.companyAgentDefinitions.isEmpty {
                 EmptyStateView(
                     image: "person.3.sequence",
                     title: l("No team yet", "아직 팀이 없습니다"),
@@ -5955,8 +6295,288 @@ private struct CenterPaneView: View {
                 .shellInset()
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    organizationChartPanel
+                    if !store.orgProfiles.isEmpty {
+                        organizationChartPanel
+                    }
+                    agentSkillCardsPanel
                     organizationWorkPanel
+                }
+            }
+        }
+    }
+
+    private var performanceReviewPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            companyPageHeader(
+                title: l("Performance", "인사평가"),
+                subtitle: l("Derived agent performance signals from issues, runs, and review outcomes.", "이슈, 실행, 리뷰 결과에서 파생한 에이전트 성과 지표입니다.")
+            )
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                PerformanceMetricTile(
+                    title: l("Average Score", "평균 점수"),
+                    value: averagePerformanceScore.map { "\($0)" } ?? "—",
+                    detail: l("Scoreable agents", "산정 가능") + " \(scoreablePerformanceSnapshots.count)",
+                    tint: ShellPalette.accent
+                )
+                PerformanceMetricTile(
+                    title: l("Data Ready", "데이터 충분"),
+                    value: "\(scoreablePerformanceSnapshots.count)",
+                    detail: l("of", "전체") + " \(store.agentPerformance.count)",
+                    tint: ShellPalette.accentWarm
+                )
+                PerformanceMetricTile(
+                    title: l("QA Pass Rate", "QA 통과율"),
+                    value: performancePercent(averagePerformanceQaPassRate),
+                    detail: l("Reviewed work only", "리뷰된 작업 기준"),
+                    tint: ShellPalette.success
+                )
+                PerformanceMetricTile(
+                    title: l("Retries / Rejections", "재시도 / 반려"),
+                    value: "\(store.agentPerformance.reduce(0) { $0 + $1.retryCount }) / \(store.agentPerformance.reduce(0) { $0 + $1.reviewRejectionCount })",
+                    detail: l("Current company", "현재 회사"),
+                    tint: ShellPalette.warning
+                )
+            }
+
+            if store.agentPerformance.isEmpty {
+                EmptyStateView(
+                    image: "chart.line.uptrend.xyaxis",
+                    title: l("No performance data yet", "아직 인사평가 데이터가 없습니다"),
+                    subtitle: l("Runs and QA reviews will populate this panel.", "실행과 QA 리뷰가 쌓이면 여기에 표시됩니다.")
+                )
+                .frame(minHeight: 240)
+                .shellInset()
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
+                    ForEach(store.agentPerformance) { snapshot in
+                        PerformanceAgentCard(snapshot: snapshot, language: l)
+                    }
+                }
+            }
+        }
+    }
+
+    private var companyReportsPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            companyPageHeader(
+                title: l("Reports", "보고서"),
+                subtitle: l("Read the previous day's work, review outcomes, blockers, and cost snapshot.", "어제 하루의 작업, 리뷰 결과, 막힌 일, 비용 스냅샷을 확인합니다.")
+            )
+
+            HStack(spacing: 8) {
+                if let report = store.selectedCompanyReport {
+                    ShellTag(text: report.date, tint: ShellPalette.accent)
+                    ShellTag(text: "\(report.activityCount) \(l("events", "이벤트"))", tint: ShellPalette.accentWarm)
+                } else {
+                    ShellTag(text: l("No report selected", "선택된 보고서 없음"), tint: ShellPalette.warning)
+                }
+                Spacer()
+                Button {
+                    Task { await store.refreshCompanyReports() }
+                } label: {
+                    Label(l("Refresh", "새로고침"), systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+
+                Button {
+                    Task { await store.generateCompanyReport() }
+                } label: {
+                    Label(
+                        store.isGeneratingCompanyReport ? l("Generating", "생성 중") : l("Generate Latest", "최신 생성"),
+                        systemImage: "doc.badge.plus"
+                    )
+                }
+                .buttonStyle(ShellTopBarButtonStyle(prominent: true))
+                .disabled(store.selectedCompany == nil || store.isGeneratingCompanyReport)
+            }
+
+            if store.selectedCompanyReports.isEmpty && store.selectedCompanyReport == nil {
+                EmptyStateView(
+                    image: "doc.text.magnifyingglass",
+                    title: l("No morning report yet", "아직 아침 보고서가 없습니다"),
+                    subtitle: l("Generate the latest report to summarize yesterday's company operation.", "최신 보고서를 생성하면 어제 회사 운영이 요약됩니다.")
+                )
+                .frame(minHeight: 260)
+                .shellInset()
+            } else if layoutMode == .wide {
+                HStack(alignment: .top, spacing: 12) {
+                    companyReportListPanel
+                        .frame(width: 260, alignment: .top)
+                    companyReportDetailPanel
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .top)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    companyReportListPanel
+                    companyReportDetailPanel
+                }
+            }
+        }
+        .task(id: store.selectedCompanyID) {
+            await store.refreshCompanyReports()
+        }
+    }
+
+    private var companyReportListPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(l("Report Archive", "보고서 보관함"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                Spacer()
+                ShellTag(text: "\(store.selectedCompanyReports.count)", tint: ShellPalette.accentWarm)
+            }
+
+            if store.selectedCompanyReports.isEmpty {
+                Text(l("No saved daily reports.", "저장된 일일 보고서가 없습니다."))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(ShellPalette.panelAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(store.selectedCompanyReports) { summary in
+                        Button {
+                            Task { await store.selectCompanyReport(date: summary.date) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text(summary.date)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(ShellPalette.text)
+                                    Spacer()
+                                    if store.selectedCompanyReportDate == summary.date {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(ShellPalette.accent)
+                                    }
+                                }
+                                Text(summary.summary)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(ShellPalette.muted)
+                                    .lineLimit(3)
+                                HStack(spacing: 6) {
+                                    ShellTag(text: "\(summary.completedCount) \(l("done", "완료"))", tint: ShellPalette.success)
+                                    ShellTag(text: "\(summary.blockedCount) \(l("blocked", "차단"))", tint: summary.blockedCount > 0 ? ShellPalette.warning : ShellPalette.panelRaised)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(store.selectedCompanyReportDate == summary.date ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                                    .stroke(store.selectedCompanyReportDate == summary.date ? ShellPalette.lineStrong : ShellPalette.line, lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .shellInset()
+    }
+
+    @ViewBuilder
+    private var companyReportDetailPanel: some View {
+        if let report = store.selectedCompanyReport {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(l("Morning Brief", "아침 보고서"))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(ShellPalette.text)
+                        Spacer()
+                        Text(relativeTimestamp(report.generatedAt))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.faint)
+                    }
+                    Text(report.summary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
+                    PerformanceMetricTile(title: l("Done", "완료"), value: "\(report.completedItems.count)", detail: l("Completed issues", "완료 이슈"), tint: ShellPalette.success)
+                    PerformanceMetricTile(title: "QA", value: "\(report.reviewItems.filter { $0.status == "QA_PASS" }.count)", detail: l("Pass results", "통과 결과"), tint: ShellPalette.accent)
+                    PerformanceMetricTile(title: l("Blocked", "차단"), value: "\(report.blockedItems.count)", detail: l("Needs attention", "주의 필요"), tint: report.blockedItems.isEmpty ? ShellPalette.panelRaised : ShellPalette.warning)
+                    PerformanceMetricTile(title: l("Cost", "비용"), value: usdCurrencyText(report.costSummary.estimatedRunCostCents), detail: l("Estimated run cost", "추정 실행 비용"), tint: ShellPalette.accentWarm)
+                }
+
+                if report.costSummary.todaySpentCents > 0 || report.costSummary.monthSpentCents > 0 || report.costSummary.dailyBudgetCents != nil || report.costSummary.monthlyBudgetCents != nil {
+                    HStack(spacing: 8) {
+                        ShellTag(
+                            text: runtimeSpendSummary(
+                                label: l("Today", "오늘"),
+                                spentCents: report.costSummary.todaySpentCents,
+                                capCents: report.costSummary.dailyBudgetCents,
+                                language: l
+                            ),
+                            tint: ShellPalette.accent
+                        )
+                        ShellTag(
+                            text: runtimeSpendSummary(
+                                label: l("Month", "월"),
+                                spentCents: report.costSummary.monthSpentCents,
+                                capCents: report.costSummary.monthlyBudgetCents,
+                                language: l
+                            ),
+                            tint: ShellPalette.accentWarm
+                        )
+                        if report.costSummary.budgetPaused {
+                            ShellTag(text: l("Cost cap reached", "비용 상한 도달"), tint: ShellPalette.warning)
+                        }
+                        Spacer()
+                    }
+                }
+
+                companyReportSection(title: l("Highlights", "하이라이트"), items: report.highlights, empty: l("No activity highlights.", "활동 하이라이트가 없습니다."))
+                companyReportSection(title: l("Completed Work", "완료한 일"), items: report.completedItems, empty: l("No completed work in this window.", "이 기간에 완료된 일이 없습니다."))
+                companyReportSection(title: l("Pull Requests", "Pull Request"), items: report.pullRequests, empty: l("No pull requests changed.", "변경된 PR이 없습니다."))
+                companyReportSection(title: l("Review Outcomes", "리뷰 결과"), items: report.reviewItems, empty: l("No QA or CEO review outcomes.", "QA 또는 CEO 리뷰 결과가 없습니다."))
+                companyReportSection(title: l("Blocked", "차단"), items: report.blockedItems, empty: l("No blockers recorded for the day.", "이날 기록된 차단 항목이 없습니다."))
+                companyReportSection(title: l("Next Actions", "다음 액션"), items: report.recommendedNextActions, empty: l("No recommended action.", "권장 액션이 없습니다."))
+            }
+            .padding(14)
+            .shellInset()
+        } else {
+            EmptyStateView(
+                image: "doc.text",
+                title: l("Select a report", "보고서를 선택하세요"),
+                subtitle: l("Choose a date from the archive or generate the latest report.", "보관함에서 날짜를 선택하거나 최신 보고서를 생성하세요.")
+            )
+            .frame(minHeight: 260)
+            .shellInset()
+        }
+    }
+
+    private func companyReportSection(title: String, items: [CompanyDailyReportItemRecord], empty: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                Spacer()
+                ShellTag(text: "\(items.count)", tint: items.isEmpty ? ShellPalette.panelRaised : ShellPalette.accentWarm)
+            }
+            if items.isEmpty {
+                Text(empty)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(ShellPalette.panelDeeper)
+                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(items) { item in
+                        CompanyReportItemRow(item: item, language: l)
+                    }
                 }
             }
         }
@@ -6923,6 +7543,36 @@ private struct CenterPaneView: View {
         }
     }
 
+    private var agentSkillCardsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(l("Agent Skill Cards", "에이전트 스킬 카드"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                    Text(l("Work scope derived from skills and capability settings.", "스킬과 capability 설정에서 파생한 업무 범위입니다."))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                ShellTag(text: "\(store.agentSkillCards.count)", tint: ShellPalette.accentWarm)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 238), spacing: 10)], alignment: .leading, spacing: 10) {
+                ForEach(store.agentSkillCards) { card in
+                    AgentSkillCardView(card: card, language: l) {
+                        if let agent = store.companyAgentDefinitions.first(where: { $0.id == card.id }) {
+                            store.beginEditingCompanyAgent(agent)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .shellInset()
+    }
+
     private var organizationWorkPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(l("Assignments", "할당된 작업"))
@@ -7851,6 +8501,60 @@ private struct CompanyActivityFeedList: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(ShellPalette.muted)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(ShellPalette.panelAlt)
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .stroke(ShellPalette.line, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+    }
+}
+
+private struct CompanyReportItemRow: View {
+    let item: CompanyDailyReportItemRecord
+    let language: AppLanguage
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(companyActivityTint(item.severity))
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(userFacingIssueTitle(item.title, language: language))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    if let status = item.status, !status.isEmpty {
+                        ShellTag(text: language.status(status), tint: companyActivityTint(item.severity))
+                    }
+                    if let timestamp = item.timestamp {
+                        Text(relativeTimestamp(timestamp))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.faint)
+                    }
+                }
+
+                if let detail = item.detail, !detail.isEmpty {
+                    Text(userFacingIssueDescription(detail, language: language))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let url = item.pullRequestUrl,
+                   let link = URL(string: url) {
+                    Link(destination: link) {
+                        Label(language("Open pull request", "PR 열기"), systemImage: "arrow.up.right.square")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(ShellPalette.accent)
+                }
             }
         }
         .padding(12)
