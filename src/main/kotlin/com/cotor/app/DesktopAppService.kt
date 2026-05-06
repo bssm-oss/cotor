@@ -14673,7 +14673,32 @@ class DesktopAppService(
             } else {
                 state.tasks
             }
-            if (nextIssueStatus == currentIssue.status && !hasPublishMetadata) {
+            val completionCandidate =
+                finalStatus == DesktopTaskStatus.COMPLETED &&
+                    nextIssueStatus == IssueStatus.DONE &&
+                    primaryRun != null
+            val collaborationGateApplies =
+                completionCandidate &&
+                    (primaryRun?.a2aSessionId != null || primaryRun?.a2aEndpoint != null)
+            val collaborationMissing =
+                collaborationGateApplies &&
+                    primaryRun != null &&
+                    !hasCanonicalCommunicationForRun(state, currentIssue, primaryRun)
+            val verificationDecision = if (completionCandidate && !collaborationMissing) {
+                companyVerifierService.verifyIssueCompletion(state, currentIssue, primaryRun)
+            } else {
+                null
+            }
+            val verificationBlocked = completionCandidate && verificationDecision?.passed == false
+            val completionGateReason = when {
+                collaborationMissing ->
+                    "Execution completed, but A2A collaboration evidence was not recorded; completion is blocked until a handoff, context note, message, or bridge artifact exists."
+                verificationBlocked ->
+                    verificationDecision?.summary ?: "Execution completed, but verification evidence was insufficient."
+                else -> null
+            }
+            val gatedIssueStatus = if (completionGateReason != null) IssueStatus.BLOCKED else nextIssueStatus
+            if (gatedIssueStatus == currentIssue.status && !hasPublishMetadata) {
                 if (runsWithMissingRequiredPublishFailure != state.runs || tasksWithMissingRequiredPublishFailure != state.tasks) {
                     stateStore.save(
                         state.copy(
@@ -14685,7 +14710,7 @@ class DesktopAppService(
                 return@withLock
             }
             val updatedIssue = currentIssue.copy(
-                status = nextIssueStatus,
+                status = gatedIssueStatus,
                 executionIntent = when {
                     publishMergeConflict -> ExecutionIntent.MERGE_CONFLICT_REMEDIATION
                     else ->
@@ -14704,12 +14729,29 @@ class DesktopAppService(
                 pullRequestState = if (completedWithoutPublish) null else primaryRun?.publish?.pullRequestState ?: currentIssue.pullRequestState,
                 durableRunId = primaryRun?.id ?: currentIssue.durableRunId,
                 approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
-                providerBlockReason = providerBlockReasonForIssue(nextIssueStatus, primaryRun),
+                providerBlockReason = completionGateReason ?: providerBlockReasonForIssue(gatedIssueStatus, primaryRun),
+                verificationStatus = when {
+                    collaborationMissing -> "BLOCKED"
+                    verificationDecision != null -> verificationDecision.status
+                    else -> currentIssue.verificationStatus
+                },
+                verificationSummary = when {
+                    collaborationMissing -> completionGateReason
+                    verificationDecision != null -> verificationDecision.summary
+                    else -> currentIssue.verificationSummary
+                },
+                lastVerifiedAt = when {
+                    collaborationMissing || verificationDecision != null -> now
+                    else -> currentIssue.lastVerifiedAt
+                },
+                runtimeDisposition = if (completionGateReason != null) "collaboration-gate-blocked" else currentIssue.runtimeDisposition,
                 qaVerdict = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.qaVerdict,
                 qaFeedback = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.qaFeedback,
                 ceoVerdict = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.ceoVerdict,
                 ceoFeedback = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.ceoFeedback,
                 transitionReason = when {
+                    completionGateReason != null ->
+                        completionGateReason
                     publishMergeConflict ->
                         "Execution completed on branch ${primaryRun?.branchName}, but PR ${primaryRun?.publish?.pullRequestUrl ?: primaryRun?.publish?.pullRequestNumber} does not merge cleanly with the latest base branch. Re-running on a refreshed base."
                     publishApprovalRequired ->
@@ -14730,6 +14772,7 @@ class DesktopAppService(
             )
             if (updatedIssue.status != currentIssue.status) {
                 val reason = when {
+                    completionGateReason != null -> completionGateReason
                     publishMergeConflict -> "Task completed, but GitHub reported that the published PR no longer merges cleanly with the base branch."
                     publishApprovalRequired -> "Task reached PR creation and is waiting for explicit approval before publishing."
                     finalStatus == DesktopTaskStatus.COMPLETED && pullRequestRequired && hasPublishMetadata -> "Task completed and published a pull request."
@@ -14841,7 +14884,7 @@ class DesktopAppService(
                     ceoReviewedAt = null,
                     approvalIssueId = if (clearWorkflowBindings) null else existing?.approvalIssueId,
                     approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
-                    providerBlockReason = providerBlockReasonForIssue(nextIssueStatus, primaryRun),
+                    providerBlockReason = providerBlockReasonForIssue(gatedIssueStatus, primaryRun),
                     createdAt = if (publishedReviewIdentityChanged) now else existing?.createdAt ?: now,
                     updatedAt = now,
                     workflowLineage = workflowLineage
