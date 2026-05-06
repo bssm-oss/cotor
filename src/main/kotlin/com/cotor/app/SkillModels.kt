@@ -61,5 +61,44 @@ fun skillCatalog(): List<SkillCatalogEntry> = listOf(
         displayName = "Video Builder",
         description = "Plan local video work with Remotion or FFmpeg without rendering or uploading by default.",
         requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.VIDEO_SCRIPT_WRITE)
+    ),
+    SkillCatalogEntry(
+        name = "marketing-operator",
+        displayName = "Marketing Operator",
+        description = "Run delegated browser-driven owned web, CMS, and organic social marketing workflows.",
+        requiredCapabilities = listOf(
+            CapabilityKey.SKILL_RUN,
+            CapabilityKey.BROWSER_READ,
+            CapabilityKey.BROWSER_INTERACT,
+            CapabilityKey.BROWSER_EXTERNAL_DOMAIN,
+            CapabilityKey.BROWSER_LOGIN_FLOW,
+            CapabilityKey.WEB_PUBLISH,
+            CapabilityKey.SOCIAL_POST_CREATE
+        )
+    ),
+    SkillCatalogEntry(
+        name = "audience-scout",
+        displayName = "Audience Scout",
+        description = "Research owned and organic audience signals under a Marketing Operator delegation policy.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.MARKETING_ANALYTICS_READ)
+    ),
+    SkillCatalogEntry(
+        name = "content-publisher",
+        displayName = "Content Publisher",
+        description = "Publish approved owned-web or CMS content through delegated browser sessions.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_INTERACT, CapabilityKey.WEB_PUBLISH)
+    ),
+    SkillCatalogEntry(
+        name = "social-publisher",
+        displayName = "Social Publisher",
+        description = "Create organic social posts through delegated channel accounts.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_INTERACT, CapabilityKey.SOCIAL_POST_CREATE)
+    ),
+    SkillCatalogEntry(
+        name = "analytics-reporter",
+        displayName = "Analytics Reporter",
+        description = "Read delegated marketing analytics and summarize owned or social channel performance.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.MARKETING_ANALYTICS_READ),
+        dangerous = false
     )
 )
