@@ -44,6 +44,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.io.path.exists
 
 @Isolate
@@ -62,6 +64,193 @@ class DesktopAppServiceTest : FunSpec({
         BuiltinAgentCatalog.get("ollama")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:11434"
         BuiltinAgentCatalog.get("lmstudio")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:1234/v1"
         BuiltinAgentCatalog.get("graphify")!!.parameters["argvJson"] shouldBe """["graphify","explain","{input}"]"""
+    }
+
+    test("agent performance aggregates issue run review retry duration and cost signals") {
+        val now = System.currentTimeMillis()
+        val appHome = Files.createTempDirectory("agent-performance-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = Company(
+            id = "company-performance",
+            name = "Performance Co",
+            rootPath = "/Users/example/performance",
+            repositoryId = "repo-performance",
+            defaultBaseBranch = "main",
+            createdAt = now,
+            updatedAt = now
+        )
+        val project = CompanyProjectContext(
+            id = "project-performance",
+            companyId = company.id,
+            name = "Performance Project",
+            slug = "performance",
+            contextDocPath = "/Users/example/performance/.cotor/context.md",
+            lastUpdatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-performance",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Measure delivery",
+            description = "Track agent delivery signals.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val builder = CompanyAgentDefinition(
+            id = "agent-builder",
+            companyId = company.id,
+            title = "Builder",
+            agentCli = "opencode",
+            model = "opencode/nemotron-3-super-free",
+            roleSummary = "Build and ship implementation work.",
+            createdAt = now,
+            updatedAt = now
+        )
+        val observer = CompanyAgentDefinition(
+            id = "agent-observer",
+            companyId = company.id,
+            title = "Observer",
+            agentCli = "codex",
+            roleSummary = "Watch the work queue.",
+            displayOrder = 1,
+            createdAt = now,
+            updatedAt = now
+        )
+        val doneIssue = CompanyIssue(
+            id = "issue-done",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = "workspace-performance",
+            title = "Ship finished work",
+            description = "Completed delivery.",
+            status = IssueStatus.DONE,
+            assigneeProfileId = builder.id,
+            createdAt = now - 20_000,
+            updatedAt = now - 10_000
+        )
+        val activeIssue = doneIssue.copy(
+            id = "issue-active",
+            title = "Continue active work",
+            status = IssueStatus.IN_PROGRESS,
+            createdAt = now - 18_000,
+            updatedAt = now - 8_000
+        )
+        val blockedIssue = doneIssue.copy(
+            id = "issue-blocked",
+            title = "Unblock waiting work",
+            status = IssueStatus.BLOCKED,
+            transitionReason = "Waiting on external readiness.",
+            createdAt = now - 16_000,
+            updatedAt = now - 6_000
+        )
+        val taskDone = AgentTask(
+            id = "task-done",
+            workspaceId = "workspace-performance",
+            issueId = doneIssue.id,
+            title = "Deliver",
+            prompt = "Deliver the issue.",
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.COMPLETED,
+            createdAt = now - 15_000,
+            updatedAt = now - 5_000
+        )
+        val taskActive = taskDone.copy(
+            id = "task-active",
+            issueId = activeIssue.id,
+            title = "Retry active work"
+        )
+        val firstRun = AgentRun(
+            id = "run-first",
+            taskId = taskActive.id,
+            workspaceId = taskDone.workspaceId,
+            repositoryId = company.repositoryId,
+            agentId = builder.id,
+            agentName = builder.title,
+            branchName = "codex/perf-1",
+            worktreePath = "/tmp/perf-1",
+            status = AgentRunStatus.FAILED,
+            durationMs = 1_000,
+            estimatedCostCents = 50,
+            createdAt = now - 12_000,
+            updatedAt = now - 11_000
+        )
+        val secondRun = firstRun.copy(
+            id = "run-second",
+            status = AgentRunStatus.COMPLETED,
+            durationMs = 2_000,
+            estimatedCostCents = null,
+            createdAt = now - 10_000,
+            updatedAt = now - 9_000
+        )
+        val activeRun = firstRun.copy(
+            id = "run-active",
+            taskId = taskDone.id,
+            status = AgentRunStatus.COMPLETED,
+            durationMs = 3_000,
+            estimatedCostCents = 75,
+            createdAt = now - 8_000,
+            updatedAt = now - 7_000
+        )
+        val passReview = ReviewQueueItem(
+            id = "review-pass",
+            companyId = company.id,
+            projectContextId = project.id,
+            issueId = doneIssue.id,
+            runId = activeRun.id,
+            status = ReviewQueueStatus.READY_TO_MERGE,
+            qaVerdict = "PASS",
+            qaReviewedAt = now - 6_000,
+            createdAt = now - 6_000,
+            updatedAt = now - 6_000
+        )
+        val rejectedReview = passReview.copy(
+            id = "review-rejected",
+            issueId = activeIssue.id,
+            runId = secondRun.id,
+            status = ReviewQueueStatus.CHANGES_REQUESTED,
+            qaVerdict = "CHANGES_REQUESTED",
+            updatedAt = now - 4_000
+        )
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company),
+                companyAgentDefinitions = listOf(builder, observer),
+                projectContexts = listOf(project),
+                goals = listOf(goal),
+                issues = listOf(doneIssue, activeIssue, blockedIssue),
+                tasks = listOf(taskDone, taskActive),
+                runs = listOf(firstRun, secondRun, activeRun),
+                reviewQueue = listOf(passReview, rejectedReview)
+            )
+        )
+
+        val performance = service.agentPerformance(company.id)
+        val builderPerformance = performance.first { it.agentId == builder.id }
+        val observerPerformance = performance.first { it.agentId == observer.id }
+
+        builderPerformance.dataSufficiency shouldBe AgentPerformanceDataSufficiency.SUFFICIENT
+        builderPerformance.score shouldBe 54
+        builderPerformance.completedIssues shouldBe 1
+        builderPerformance.activeIssues shouldBe 1
+        builderPerformance.blockedIssues shouldBe 1
+        builderPerformance.runSuccessRate shouldBe (2.0 / 3.0)
+        builderPerformance.qaPassRate shouldBe 0.5
+        builderPerformance.reviewRejectionCount shouldBe 1
+        builderPerformance.retryCount shouldBe 1
+        builderPerformance.averageDurationMs shouldBe 2_000
+        builderPerformance.estimatedCostCents shouldBe 125
+        builderPerformance.lastActivityAt shouldBe rejectedReview.updatedAt
+        observerPerformance.dataSufficiency shouldBe AgentPerformanceDataSufficiency.INSUFFICIENT_DATA
+        observerPerformance.score.shouldBeNull()
+        observerPerformance.estimatedCostCents.shouldBeNull()
     }
 
     test("company memory snapshot hides internal GitHub readiness labels") {
@@ -1250,6 +1439,476 @@ class DesktopAppServiceTest : FunSpec({
         capturedApproval shouldContain "company-chief:CEO:"
         updatedIssue.providerBlockReason shouldContain "GITHUB_PR_CREATE"
         refreshed.opsMetrics.blockedIssues shouldBe 0
+        val traceLog = fixture.stateStore.appHome().resolve("runtime/backend/company-automation-trace.log")
+        val traceText = withTimeout(5_000) {
+            while (!Files.exists(traceLog)) {
+                delay(25)
+            }
+            Files.readString(traceLog)
+        }
+        traceText shouldContain "\"blockedReasonCode\":\"CAPABILITY_APPROVAL_REQUIRED\""
+        traceText shouldContain "\"blockedReasonSummary\":\"Capability approval is required before execution can continue.\""
+    }
+
+    test("execution log records blocked reason detail codes without changing issue dashboard payloads") {
+        val appHome = Files.createTempDirectory("desktop-blocked-reason-log-home")
+        val repoRoot = Files.createTempDirectory("desktop-blocked-reason-log-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-blocked-log",
+            name = "Blocked Log Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-blocked-log",
+            companyId = company.id,
+            title = "Classify blocked work",
+            description = "Keep detailed blocked diagnostics in logs.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        val repository = ManagedRepository(
+            id = REPOSITORY_ID,
+            name = "repo",
+            localPath = repoRoot.toString(),
+            sourceKind = RepositorySourceKind.LOCAL,
+            defaultBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val workspace = Workspace(
+            id = WORKSPACE_ID,
+            repositoryId = repository.id,
+            name = "repo · master",
+            baseBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val cases = listOf(
+            Triple(
+                CompanyIssue(
+                    id = "issue-capability",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    workspaceId = workspace.id,
+                    title = "Approval gate",
+                    description = "Requires approval before PR creation.",
+                    status = IssueStatus.WAITING_FOR_APPROVAL,
+                    kind = "execution",
+                    providerBlockReason = "Capability GITHUB_PR_CREATE requires approval for git.publish.",
+                    createdAt = now,
+                    updatedAt = now + 1
+                ),
+                AgentRunStatus.FAILED to "Capability GITHUB_PR_CREATE requires approval for git.publish.",
+                BlockedReasonCode.CAPABILITY_APPROVAL_REQUIRED
+            ),
+            Triple(
+                CompanyIssue(
+                    id = "issue-github",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    workspaceId = workspace.id,
+                    title = "GitHub readiness",
+                    description = "Requires GitHub publishing.",
+                    status = IssueStatus.BLOCKED,
+                    kind = "execution",
+                    transitionReason = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work.",
+                    sourceSignal = "github-readiness",
+                    createdAt = now,
+                    updatedAt = now + 2
+                ),
+                AgentRunStatus.FAILED to "No GitHub remote configured; kept local commit only",
+                BlockedReasonCode.GITHUB_NOT_READY
+            ),
+            Triple(
+                CompanyIssue(
+                    id = "issue-merge",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    workspaceId = workspace.id,
+                    title = "Merge conflict",
+                    description = "Rebase before merge.",
+                    status = IssueStatus.BLOCKED,
+                    kind = "execution",
+                    transitionReason = "Published PR does not merge cleanly with the latest base branch.",
+                    createdAt = now,
+                    updatedAt = now + 3
+                ),
+                AgentRunStatus.FAILED to "GitHub reported merge conflicts locally.",
+                BlockedReasonCode.MERGE_CONFLICT
+            ),
+            Triple(
+                CompanyIssue(
+                    id = "issue-ci",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    workspaceId = workspace.id,
+                    title = "Failing checks",
+                    description = "Fix checks.",
+                    status = IssueStatus.BLOCKED,
+                    kind = "execution",
+                    createdAt = now,
+                    updatedAt = now + 4
+                ),
+                AgentRunStatus.FAILED to "Checks failed.",
+                BlockedReasonCode.CI_FAILED
+            ),
+            Triple(
+                CompanyIssue(
+                    id = "issue-provider",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    workspaceId = workspace.id,
+                    title = "Provider failed",
+                    description = "Provider returned an error.",
+                    status = IssueStatus.BLOCKED,
+                    kind = "execution",
+                    createdAt = now,
+                    updatedAt = now + 5
+                ),
+                AgentRunStatus.FAILED to "OpenCode execution failed (exit=1): provider returned 500.",
+                BlockedReasonCode.PROVIDER_ERROR
+            ),
+            Triple(
+                CompanyIssue(
+                    id = "issue-tool",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    workspaceId = workspace.id,
+                    title = "Tool unavailable",
+                    description = "Install provider CLI.",
+                    status = IssueStatus.BLOCKED,
+                    kind = "execution",
+                    createdAt = now,
+                    updatedAt = now + 6
+                ),
+                AgentRunStatus.FAILED to "OpenCode was not found on PATH.",
+                BlockedReasonCode.TOOL_UNAVAILABLE
+            ),
+            Triple(
+                CompanyIssue(
+                    id = "issue-interrupted",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    workspaceId = workspace.id,
+                    title = "Interrupted run",
+                    description = "Runtime stopped mid-run.",
+                    status = IssueStatus.BLOCKED,
+                    kind = "execution",
+                    createdAt = now,
+                    updatedAt = now + 7
+                ),
+                AgentRunStatus.FAILED to "Execution was interrupted because the app-server stopped before the run finished.",
+                BlockedReasonCode.RUNTIME_INTERRUPTED
+            )
+        )
+        val issues = cases.map { it.first }
+        val tasks = issues.mapIndexed { index, issue ->
+            AgentTask(
+                id = "task-${issue.id}",
+                workspaceId = workspace.id,
+                issueId = issue.id,
+                title = issue.title,
+                prompt = issue.description,
+                agents = listOf("opencode"),
+                status = DesktopTaskStatus.FAILED,
+                createdAt = now + index,
+                updatedAt = now + index
+            )
+        }
+        val runs = cases.mapIndexed { index, (issue, runSignal, _) ->
+            val task = tasks.first { it.issueId == issue.id }
+            val publish = when (issue.id) {
+                "issue-ci" -> PublishMetadata(checksSummary = "build=COMPLETED/FAILURE")
+                "issue-merge" -> PublishMetadata(mergeability = "DIRTY", error = runSignal.second)
+                "issue-github" -> PublishMetadata(error = runSignal.second)
+                else -> null
+            }
+            AgentRun(
+                id = "run-${issue.id}",
+                taskId = task.id,
+                workspaceId = workspace.id,
+                repositoryId = repository.id,
+                agentName = "opencode",
+                branchName = "codex/cotor/blocked-log/$index",
+                worktreePath = repoRoot.resolve("worktree-$index").toString(),
+                status = runSignal.first,
+                error = runSignal.second,
+                publish = publish,
+                createdAt = now + index,
+                updatedAt = now + index
+            )
+        }
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company),
+                repositories = listOf(repository),
+                workspaces = listOf(workspace),
+                goals = listOf(goal),
+                issues = issues,
+                tasks = tasks,
+                runs = runs
+            )
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+
+        val logByIssue = service.executionLog(company.id).associateBy { it["issueId"] as String }
+
+        cases.forEach { (issue, _, expectedCode) ->
+            val entry = logByIssue[issue.id].shouldNotBeNull()
+            entry["blockedReasonCode"] shouldBe expectedCode.name
+            entry["blockedReasonSummary"].shouldNotBeNull()
+            entry["blockedReasonDetail"].toString() shouldContain "run.error"
+            entry.containsKey("providerBlockReason") shouldBe false
+            val taskLog = (entry["tasks"] as List<*>).single() as Map<*, *>
+            val runLog = (taskLog["runs"] as List<*>).single() as Map<*, *>
+            runLog["failureClass"].shouldNotBeNull()
+            runLog["blockedReasonCode"] shouldBe expectedCode.name
+            runLog["blockedReasonDetail"].toString() shouldContain "run.error"
+        }
+        logByIssue["issue-ci"]!!["blockedReasonSource"] shouldBe "checksSummary"
+        logByIssue["issue-capability"]!!["blockedRetryable"] shouldBe true
+    }
+
+    test("morning reports persist deterministic previous-day company summaries") {
+        val appHome = Files.createTempDirectory("desktop-morning-report-home")
+        val repoRoot = Files.createTempDirectory("desktop-morning-report-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val zone = ZoneId.systemDefault()
+        val reportDate = LocalDate.now().minusDays(1)
+        val periodStart = reportDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        val periodEnd = reportDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val company = Company(
+            id = "company-report",
+            name = "Report Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            dailyBudgetCents = 500,
+            monthlyBudgetCents = 2_000,
+            createdAt = periodStart,
+            updatedAt = periodStart
+        )
+        val repository = ManagedRepository(
+            id = REPOSITORY_ID,
+            name = "repo",
+            localPath = repoRoot.toString(),
+            sourceKind = RepositorySourceKind.LOCAL,
+            defaultBranch = "master",
+            createdAt = periodStart,
+            updatedAt = periodStart
+        )
+        val workspace = Workspace(
+            id = WORKSPACE_ID,
+            repositoryId = repository.id,
+            name = "repo · master",
+            baseBranch = "master",
+            createdAt = periodStart,
+            updatedAt = periodStart
+        )
+        val goal = CompanyGoal(
+            id = "goal-report",
+            companyId = company.id,
+            title = "Ship report",
+            description = "Summarize the company day.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = true,
+            createdAt = periodStart,
+            updatedAt = periodStart
+        )
+        val completedIssue = CompanyIssue(
+            id = "issue-complete",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "Complete daily work",
+            description = "Done during the reporting window.",
+            status = IssueStatus.DONE,
+            kind = "execution",
+            pullRequestUrl = "https://github.com/acme/repo/pull/7",
+            createdAt = periodStart + 1_000,
+            updatedAt = periodStart + 2_000
+        )
+        val blockedIssue = CompanyIssue(
+            id = "issue-blocked",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "Fix blocked publish",
+            description = "Needs GitHub readiness.",
+            status = IssueStatus.BLOCKED,
+            kind = "execution",
+            transitionReason = "GitHub is not connected.",
+            createdAt = periodStart + 3_000,
+            updatedAt = periodStart + 4_000
+        )
+        val outsideIssue = CompanyIssue(
+            id = "issue-outside",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "Old work",
+            description = "Outside report window.",
+            status = IssueStatus.DONE,
+            kind = "execution",
+            createdAt = periodEnd + 1_000,
+            updatedAt = periodEnd + 2_000
+        )
+        val completedTask = AgentTask(
+            id = "task-complete",
+            workspaceId = workspace.id,
+            issueId = completedIssue.id,
+            title = completedIssue.title,
+            prompt = completedIssue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.COMPLETED,
+            createdAt = periodStart + 1_000,
+            updatedAt = periodStart + 2_000
+        )
+        val blockedTask = AgentTask(
+            id = "task-blocked",
+            workspaceId = workspace.id,
+            issueId = blockedIssue.id,
+            title = blockedIssue.title,
+            prompt = blockedIssue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.FAILED,
+            createdAt = periodStart + 3_000,
+            updatedAt = periodStart + 4_000
+        )
+        val completedRun = AgentRun(
+            id = "run-complete",
+            taskId = completedTask.id,
+            workspaceId = workspace.id,
+            repositoryId = repository.id,
+            agentName = "opencode",
+            branchName = "codex/report-complete",
+            worktreePath = repoRoot.resolve("worktree-complete").toString(),
+            status = AgentRunStatus.COMPLETED,
+            publish = PublishMetadata(pullRequestNumber = 7, pullRequestUrl = completedIssue.pullRequestUrl),
+            durationMs = 90_000,
+            estimatedCostCents = 123,
+            createdAt = periodStart + 1_000,
+            updatedAt = periodStart + 2_000
+        )
+        val blockedRun = AgentRun(
+            id = "run-blocked",
+            taskId = blockedTask.id,
+            workspaceId = workspace.id,
+            repositoryId = repository.id,
+            agentName = "opencode",
+            branchName = "codex/report-blocked",
+            worktreePath = repoRoot.resolve("worktree-blocked").toString(),
+            status = AgentRunStatus.FAILED,
+            error = "No GitHub remote configured.",
+            createdAt = periodStart + 3_000,
+            updatedAt = periodStart + 4_000
+        )
+        val review = ReviewQueueItem(
+            id = "review-report",
+            companyId = company.id,
+            issueId = completedIssue.id,
+            runId = completedRun.id,
+            pullRequestNumber = 7,
+            pullRequestUrl = completedIssue.pullRequestUrl,
+            status = ReviewQueueStatus.MERGED,
+            qaVerdict = "PASS",
+            qaReviewedAt = periodStart + 5_000,
+            mergedAt = periodStart + 6_000,
+            createdAt = periodStart + 2_000,
+            updatedAt = periodStart + 6_000
+        )
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company),
+                repositories = listOf(repository),
+                workspaces = listOf(workspace),
+                goals = listOf(goal),
+                issues = listOf(completedIssue, blockedIssue, outsideIssue),
+                tasks = listOf(completedTask, blockedTask),
+                runs = listOf(completedRun, blockedRun),
+                reviewQueue = listOf(review),
+                companyActivity = listOf(
+                    CompanyActivityItem(
+                        id = "activity-1",
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = completedIssue.id,
+                        source = "runtime",
+                        title = "Completed daily work",
+                        detail = "Merged PR #7",
+                        severity = "success",
+                        createdAt = periodStart + 7_000
+                    ),
+                    CompanyActivityItem(
+                        id = "activity-retry",
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = blockedIssue.id,
+                        source = "runtime",
+                        title = "Requeued blocked work",
+                        detail = "Retry scheduled after readiness changes.",
+                        severity = "info",
+                        createdAt = periodStart + 8_000
+                    ),
+                    CompanyActivityItem(
+                        id = "activity-outside",
+                        companyId = company.id,
+                        source = "runtime",
+                        title = "Outside window",
+                        createdAt = periodEnd + 1_000
+                    )
+                ),
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(
+                        companyId = company.id,
+                        todaySpentCents = 321,
+                        monthSpentCents = 999
+                    )
+                )
+            )
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+
+        val report = service.generateMorningReport(company.id, reportDate.toString())
+        val summaries = service.listMorningReports(company.id)
+        val loaded = service.morningReport(company.id, reportDate.toString())
+        val reportPath = appHome.resolve("companies/company-report/reports/$reportDate.json")
+
+        report.date shouldBe reportDate.toString()
+        report.completedItems.map { it.issueId } shouldBe listOf(completedIssue.id)
+        report.blockedItems.map { it.issueId } shouldBe listOf(blockedIssue.id)
+        report.reviewItems.single().status shouldBe "QA_PASS"
+        report.pullRequests.single().pullRequestUrl shouldBe completedIssue.pullRequestUrl
+        report.autoRecoveredItems.shouldNotBeEmpty()
+        report.costSummary.estimatedRunCostCents shouldBe 123
+        report.costSummary.todaySpentCents shouldBe 321
+        report.summary shouldContain "1 completed"
+        report.summary shouldNotContain "Old work"
+        summaries.shouldHaveSize(1)
+        summaries.single().date shouldBe reportDate.toString()
+        loaded.summary shouldBe report.summary
+        reportPath.exists() shouldBe true
+        Files.readString(reportPath) shouldContain "\"date\": \"$reportDate\""
     }
 
     test("prepareCompanyAutomationState lets the CEO agent approve PR creation and requeue publishing") {

@@ -81,6 +81,45 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("company agent performance route returns scoped snapshots") {
+        coEvery { desktopService.agentPerformance("company-performance") } returns listOf(
+            AgentPerformanceSnapshot(
+                agentId = "agent-builder",
+                agentName = "Builder",
+                roleName = "Builder",
+                agentCli = "opencode",
+                model = "opencode/nemotron-3-super-free",
+                score = 88,
+                completedIssues = 4,
+                activeIssues = 1,
+                runSuccessRate = 0.8,
+                qaPassRate = 0.75,
+                dataSufficiency = AgentPerformanceDataSufficiency.SUFFICIENT
+            )
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/companies/company-performance/agents/performance") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val body = response.bodyAsText()
+
+            response.status shouldBe HttpStatusCode.OK
+            body shouldContain "\"agentId\":\"agent-builder\""
+            body shouldContain "\"score\":88"
+            body shouldContain "\"dataSufficiency\":\"SUFFICIENT\""
+            coVerify { desktopService.agentPerformance("company-performance") }
+        }
+    }
+
     test("settings route redacts backend and Linear tokens") {
         every { desktopService.settings() } returns DesktopSettings(
             appHome = "/tmp/cotor-app-home",
@@ -1680,6 +1719,12 @@ class AppServerTest : FunSpec({
                 "issueId" to "issue-1",
                 "issueTitle" to "Ship README change",
                 "issueStatus" to "IN_PROGRESS",
+                "blockedReason" to "Pull request checks failed.",
+                "blockedReasonCode" to "CI_FAILED",
+                "blockedReasonSummary" to "Pull request checks failed.",
+                "blockedReasonDetail" to "checksSummary: build=COMPLETED/FAILURE",
+                "blockedReasonSource" to "checksSummary",
+                "blockedRetryable" to true,
                 "tasks" to listOf(
                     mapOf(
                         "taskId" to "task-1",
@@ -1689,7 +1734,10 @@ class AppServerTest : FunSpec({
                                 "runId" to "run-1",
                                 "agent" to "opencode",
                                 "status" to "RUNNING",
-                                "processId" to 42L
+                                "processId" to 42L,
+                                "failureClass" to "execution",
+                                "blockedReasonCode" to "CI_FAILED",
+                                "blockedReasonDetail" to "checksSummary: build=COMPLETED/FAILURE"
                             )
                         )
                     )
@@ -1714,6 +1762,74 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"issueId\":\"issue-1\""
             response.bodyAsText() shouldContain "\"agent\":\"opencode\""
             response.bodyAsText() shouldContain "\"processId\":42"
+            response.bodyAsText() shouldContain "\"blockedReasonCode\":\"CI_FAILED\""
+            response.bodyAsText() shouldContain "\"blockedReasonSource\":\"checksSummary\""
+            response.bodyAsText() shouldContain "\"blockedRetryable\":true"
+        }
+    }
+
+    test("company report routes return morning report archive and generated detail when authorized") {
+        val company = Company(
+            id = "company-1",
+            name = "Report Co",
+            rootPath = "/tmp/report",
+            repositoryId = "repo-1",
+            defaultBaseBranch = "main",
+            createdAt = 1,
+            updatedAt = 1
+        )
+        val report = CompanyDailyReport(
+            id = "company-1-2026-05-05",
+            companyId = company.id,
+            date = "2026-05-05",
+            generatedAt = 10,
+            periodStart = 1,
+            periodEnd = 2,
+            summary = "1 completed · 0 blocked",
+            completedItems = listOf(
+                CompanyDailyReportItem(
+                    id = "issue-1",
+                    title = "Ship README change",
+                    status = "DONE",
+                    severity = "success",
+                    timestamp = 2
+                )
+            ),
+            costSummary = CompanyDailyReportCostSummary(estimatedRunCostCents = 42),
+            activityCount = 1
+        )
+        coEvery { desktopService.getCompany("company-1") } returns company
+        coEvery { desktopService.listMorningReports("company-1") } returns listOf(report.toSummary())
+        coEvery { desktopService.morningReport("company-1", "2026-05-05") } returns report
+        coEvery { desktopService.generateMorningReport("company-1", null) } returns report
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val listResponse = client.get("/api/app/companies/company-1/reports") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val detailResponse = client.get("/api/app/companies/company-1/reports/2026-05-05") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val generateResponse = client.post("/api/app/companies/company-1/reports/generate") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            listResponse.status shouldBe HttpStatusCode.OK
+            listResponse.bodyAsText() shouldContain "\"date\":\"2026-05-05\""
+            listResponse.bodyAsText() shouldContain "\"completedCount\":1"
+            detailResponse.status shouldBe HttpStatusCode.OK
+            detailResponse.bodyAsText() shouldContain "\"summary\":\"1 completed"
+            detailResponse.bodyAsText() shouldContain "\"estimatedRunCostCents\":42"
+            generateResponse.status shouldBe HttpStatusCode.OK
+            generateResponse.bodyAsText() shouldContain "\"completedItems\""
         }
     }
 
