@@ -12080,7 +12080,9 @@ class DesktopAppService(
             val nextTasks = if (run.status == AgentRunStatus.COMPLETED || run.status == AgentRunStatus.FAILED) {
                 val taskRuns = nextRuns.filter { it.taskId == run.taskId }
                 val hasActiveRun = taskRuns.any { it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.QUEUED }
-                if (hasActiveRun) {
+                val task = state.tasks.firstOrNull { it.id == run.taskId }
+                val expectedRunCount = task?.agents?.distinctBy { it.trim().lowercase() }?.size ?: taskRuns.size
+                if (hasActiveRun || taskRuns.size < expectedRunCount) {
                     state.tasks
                 } else {
                     val finalStatus = finalTaskStatus(taskRuns)
