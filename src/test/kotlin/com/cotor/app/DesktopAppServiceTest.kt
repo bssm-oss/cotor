@@ -19,6 +19,7 @@ import com.cotor.model.AgentResult
 import com.cotor.model.ProcessExecutionException
 import com.cotor.model.ProcessResult
 import com.cotor.testsupport.withDesktopServiceShutdown
+import io.kotest.common.ExperimentalKotest
 import io.kotest.core.annotation.Isolate
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -49,7 +50,10 @@ import java.time.ZoneId
 import kotlin.io.path.exists
 
 @Isolate
+@OptIn(ExperimentalKotest::class)
 class DesktopAppServiceTest : FunSpec({
+    concurrency = 1
+
     afterTest {
         DesktopAppService.shutdownAllForTesting()
     }
