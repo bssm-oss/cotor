@@ -83,6 +83,13 @@ enum class CodePublishMode {
 }
 
 @Serializable
+enum class OperatorAutomationMode {
+    ASK_ME,
+    AGENT_APPROVED,
+    FULL_AUTO
+}
+
+@Serializable
 data class GitHubPublishStatus(
     val policy: CodePublishMode = CodePublishMode.REQUIRE_GITHUB_PR,
     val ghInstalled: Boolean = false,
@@ -179,7 +186,8 @@ data class Company(
     val dailyBudgetCents: Int? = null,
     val monthlyBudgetCents: Int? = null,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val operatorAutomationMode: OperatorAutomationMode = OperatorAutomationMode.AGENT_APPROVED
 )
 
 /**
