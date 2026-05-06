@@ -34,7 +34,7 @@ Cotor는 로컬 우선 AI 워크플로우 실행기에서 출발해, CEO AI가 �
 
 - `agent add`, `agent list`
 - `auth codex-oauth login|status|logout`
-- `company ...` 로 회사/에이전트/목표/이슈/리뷰/런타임/백엔드/Linear/context/message 조작
+- `company ...` 로 회사/에이전트/목표/이슈/리뷰/런타임/백엔드/Linear/context/message/autonomy 조작. `company autonomy scan <company-id>`, `company problem-signals <company-id>` 포함
 - `plugin init`
 - `checkpoint gc`
 - `policy validate`, `policy simulate`
@@ -154,6 +154,9 @@ cotor delete    # 삭제
 - `Company` 요약은 별도 긴 상태 카드 대신 메인 요약 배너 안에서 런타임 건강도, 차단 수, 리뷰 주의 수, 최근 오류/동작을 함께 보여줌
 - `Company` 요약은 선택한 회사의 추정 비용과 일/월 비용 상한도 함께 보여줌
 - 전용 `보고서` 탐색 surface에서 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 모은 결정적 아침 보고서를 보여줌
+- 전용 `인사평가` 탐색 surface에서 기존 회사 실행 데이터로 파생한 에이전트별 점수, 성공률, QA 통과율, 재시도, 평균 시간, 확인된 추정 비용을 보여줌
+- 회사 메모리 스냅샷은 company/project/team/agent 4계층으로 나뉘며, 기존 workflow memory 필드는 project + team의 호환 alias로 유지
+- 자율 런타임은 새 일을 만들기 전에 내부 품질 신호를 먼저 스캔해서, idle 루프가 무작위 continuous prompt 대신 `idle-no-discovered-problems` 또는 `discovery-triage-created` 같은 관측 가능한 상태를 남김
 - `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
 - 데스크톱 backend launch, health check, shutdown, client request가 같은 `COTOR_APP_TOKEN` source를 사용해서 token-protected local session이 어긋나지 않음
 - embedded 데스크톱 backend는 정리된 최소 환경으로 시작해서, 우연히 부모 shell에 있던 API key, provider token, password 계열 변수를 로컬 app-server로 넘기지 않음
@@ -191,7 +194,10 @@ cotor delete    # 삭제
 - 회사 목표 생성
 - 목표를 이슈로 분해
 - 이슈 위임 및 실행
+- issue-linked agent run마다 A2A bridge metadata를 열고 `COTOR_A2A_*` 환경 변수를 주입하며, 직접 완료되는 실행 이슈는 bridge/context evidence가 있어야 `DONE`으로 넘어감
+- 반복 실패, 오래 막힌 이슈, 리뷰 실패, 검증 공백, 런타임 오류, 오래된 follow-up, repository graph 경고를 `CompanyProblemSignal`로 저장하는 내부 discovery scan 실행
 - 완료된 회사 이슈 실행은 실험적 pipeline replay flag 없이도 `cotor resume inspect <run-id>`로 durable run을 확인 가능
+- 기존 회사 이슈, 실행, 리뷰, 조직 프로필, 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 생성
 - 기본 `지도`, 실시간 협업을 보는 `에이전트 회의` 테이블, runtime/backend/review/session 상태를 합성한 이벤트 월, 움직이는 에이전트 플로어를 함께 제공하는 전용 미팅룸 보기
 - 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 명령 채팅으로 실행
@@ -215,7 +221,7 @@ cotor delete    # 삭제
 - 정책 엔진은 v1이며, 현재는 외부 정책 언어 대신 action 단위 allow/deny/approval 제어와 simulate/inspect 흐름에 집중합니다.
 - risk approval은 v1이며, 현재는 action 종류/경로/네트워크 대상 기반 휴리스틱 점수로만 동작합니다.
 - GitHub control plane은 v1이며, 현재는 webhook 기반 GitHub App이 아니라 `gh` 기반 PR 상태/mergeability/status-check summary 동기화 방식입니다.
-- verification bundle은 로컬에 contract/outcome 상태를 저장하지만, verifier agent를 별도 runtime으로 돌리지는 않습니다.
+- verification bundle은 로컬에 contract/outcome 상태를 저장하고, 회사 이슈 완료 시 `verificationStatus` / `verificationSummary`를 남깁니다. 더 깊은 verifier-agent continuation은 아직 별도 runtime이 아니라 prompt-driven 흐름입니다.
 - runtime projection surface는 issue 단위 `runtimeDisposition`을 보여주지만, 스케줄러는 아직 heuristic 수준입니다.
 - 회사 컨텍스트는 `.cotor/companies/...` 스냅샷에 더해 `.cotor/provenance/`, `.cotor/knowledge/` 기반의 구조화된 증거/지식 저장소를 사용합니다.
 - 회사 이슈 실행은 기본적으로 inspect 가능한 durable run snapshot을 생성합니다. 일반 pipeline replay용 `resume continue/fork/approve`는 여전히 `COTOR_EXPERIMENTAL_DURABLE_RUNTIME_V2=1` 뒤의 실험 기능입니다.
