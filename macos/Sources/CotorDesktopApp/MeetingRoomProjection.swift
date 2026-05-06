@@ -71,6 +71,49 @@ struct MeetingRoomFlowItem: Identifiable, Hashable {
     let progress: Double
 }
 
+enum MeetingRoomInteractionKind: String, Hashable {
+    case issueAssigned
+    case workStarted
+    case handoff
+    case meeting
+    case qaReviewRequested
+    case ceoApprovalRequested
+    case approvalGranted
+    case changesRequested
+    case blockedEscalation
+    case mergeCompleted
+    case costPaused
+
+    var usesScheduler: Bool {
+        switch self {
+        case .issueAssigned, .workStarted, .handoff, .meeting, .qaReviewRequested, .ceoApprovalRequested, .changesRequested, .blockedEscalation:
+            return true
+        case .approvalGranted, .mergeCompleted, .costPaused:
+            return false
+        }
+    }
+}
+
+struct MeetingRoomInteractionEvent: Identifiable, Hashable {
+    let id: String
+    let kind: MeetingRoomInteractionKind
+    let title: String
+    let detail: String
+    let speechText: String
+    let fromAgentId: String?
+    let toAgentId: String?
+    let participantAgentIds: [String]
+    let issueId: String?
+    let reviewId: String?
+    let messageId: String?
+    let occurredAt: Int64
+    let priority: Int
+
+    var agentIds: [String] {
+        Array(([fromAgentId, toAgentId].compactMap { $0 } + participantAgentIds).deduplicated())
+    }
+}
+
 struct MeetingRoomIssueSummary: Identifiable, Hashable {
     let id: String
     let title: String
@@ -104,6 +147,7 @@ struct MeetingRoomProjection: Hashable {
     let companyId: String?
     let agents: [MeetingRoomProjectionAgent]
     let flows: [MeetingRoomFlowItem]
+    let interactions: [MeetingRoomInteractionEvent]
     let issues: [MeetingRoomIssueSummary]
     let reviews: [MeetingRoomReviewSummary]
     let runtimeStatus: String
@@ -129,6 +173,7 @@ struct MeetingRoomProjection: Hashable {
         companyId: String?,
         agents allAgents: [CompanyAgentDefinitionRecord],
         goals allGoals: [GoalRecord] = [],
+        goalDecisions allGoalDecisions: [GoalOrchestrationDecisionRecord] = [],
         orgProfiles allOrgProfiles: [OrgAgentProfileRecord] = [],
         issues allIssues: [IssueRecord],
         runningSessions allRunningSessions: [RunningAgentSessionRecord],
@@ -140,6 +185,7 @@ struct MeetingRoomProjection: Hashable {
         let scopedAgents = scoped(allAgents, companyId: companyId)
             .sorted { $0.displayOrder < $1.displayOrder }
         let scopedGoals = scoped(allGoals, companyId: companyId)
+        let scopedGoalDecisions = scoped(allGoalDecisions, companyId: companyId)
         let scopedProfiles = scoped(allOrgProfiles, companyId: companyId)
         let scopedIssues = scoped(allIssues, companyId: companyId)
         let scopedSessions = scoped(allRunningSessions, companyId: companyId)
@@ -216,6 +262,17 @@ struct MeetingRoomProjection: Hashable {
             )
         }
 
+        let interactions = buildInteractions(
+            goals: scopedGoals,
+            goalDecisions: scopedGoalDecisions,
+            agents: projectedAgents,
+            orgProfiles: scopedProfiles,
+            issues: scopedIssues,
+            runningSessions: scopedSessions,
+            reviewQueue: scopedReviews,
+            messages: scopedMessages,
+            runtime: runtime
+        )
         let flows = buildFlows(
             goals: scopedGoals,
             issues: scopedIssues,
@@ -237,6 +294,7 @@ struct MeetingRoomProjection: Hashable {
             companyId: companyId,
             agents: projectedAgents,
             flows: flows,
+            interactions: interactions,
             issues: issueSummaries,
             reviews: reviewSummaries,
             runtimeStatus: runtime.status,
@@ -274,6 +332,8 @@ struct MeetingRoomProjection: Hashable {
                 return agent.companyId == companyId
             case let goal as GoalRecord:
                 return goal.companyId == companyId
+            case let decision as GoalOrchestrationDecisionRecord:
+                return decision.companyId == companyId
             case let profile as OrgAgentProfileRecord:
                 return profile.companyId == companyId
             case let issue as IssueRecord:
@@ -592,6 +652,409 @@ struct MeetingRoomProjection: Hashable {
 
         return Array(flows.prefix(10))
     }
+
+    private static func buildInteractions(
+        goals: [GoalRecord],
+        goalDecisions: [GoalOrchestrationDecisionRecord],
+        agents: [MeetingRoomProjectionAgent],
+        orgProfiles: [OrgAgentProfileRecord],
+        issues: [IssueRecord],
+        runningSessions: [RunningAgentSessionRecord],
+        reviewQueue: [ReviewQueueItemRecord],
+        messages: [AgentMessageRecord],
+        runtime: CompanyRuntimeSnapshotRecord
+    ) -> [MeetingRoomInteractionEvent] {
+        let resolver = MeetingRoomAgentResolver(agents: agents, orgProfiles: orgProfiles)
+        let issuesById = Dictionary(uniqueKeysWithValues: issues.map { ($0.id, $0) })
+        var events: [MeetingRoomInteractionEvent] = []
+
+        for session in runningSessions.sorted(by: { $0.updatedAt > $1.updatedAt }).prefix(6) {
+            let agentId = resolver.agentId(for: session.agentId)
+                ?? resolver.agentId(for: session.roleName)
+                ?? resolver.agentId(for: session.agentName)
+            let issue = session.issueId.flatMap { issuesById[$0] }
+            events.append(
+                MeetingRoomInteractionEvent(
+                    id: "work-\(session.runId)",
+                    kind: .workStarted,
+                    title: issue?.title ?? session.agentName,
+                    detail: session.outputSnippet ?? session.status,
+                    speechText: "Working on it",
+                    fromAgentId: agentId,
+                    toAgentId: nil,
+                    participantAgentIds: [agentId].compactMap { $0 },
+                    issueId: session.issueId,
+                    reviewId: nil,
+                    messageId: nil,
+                    occurredAt: session.updatedAt,
+                    priority: 760
+                )
+            )
+        }
+
+        for review in reviewQueue.sorted(by: { $0.updatedAt > $1.updatedAt }).prefix(8) {
+            let issue = issuesById[review.issueId]
+            let owner = issue.flatMap { resolver.agentId(forIssue: $0) } ?? resolver.builderAgentId()
+            let qa = resolver.qaAgentId()
+            let ceo = resolver.ceoAgentId()
+            let status = review.status.uppercased()
+            let merged = review.pullRequestState?.uppercased() == "MERGED" || review.mergedAt != nil
+
+            if merged || status == "MERGED" {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "merge-\(review.id)",
+                        kind: .mergeCompleted,
+                        title: issue?.title ?? review.issueId,
+                        detail: review.pullRequestUrl ?? review.branchName ?? "Merged work",
+                        speechText: "Merged",
+                        fromAgentId: ceo ?? qa ?? owner,
+                        toAgentId: nil,
+                        participantAgentIds: [owner, qa, ceo].compactMap { $0 },
+                        issueId: review.issueId,
+                        reviewId: review.id,
+                        messageId: nil,
+                        occurredAt: review.mergedAt ?? review.updatedAt,
+                        priority: 520
+                    )
+                )
+            } else if status == "READY_FOR_CEO" || review.approvalIssueId != nil {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "ceo-approval-\(review.id)",
+                        kind: .ceoApprovalRequested,
+                        title: issue?.title ?? review.issueId,
+                        detail: review.pullRequestUrl ?? review.branchName ?? review.status,
+                        speechText: "Approval requested",
+                        fromAgentId: owner,
+                        toAgentId: ceo,
+                        participantAgentIds: [owner, ceo].compactMap { $0 },
+                        issueId: review.issueId,
+                        reviewId: review.id,
+                        messageId: nil,
+                        occurredAt: review.updatedAt,
+                        priority: 930
+                    )
+                )
+            } else if status == "CHANGES_REQUESTED" || status == "FAILED_CHECKS" {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "changes-\(review.id)",
+                        kind: .changesRequested,
+                        title: issue?.title ?? review.issueId,
+                        detail: review.qaFeedback ?? review.ceoFeedback ?? review.checksSummary ?? review.status,
+                        speechText: "Changes requested",
+                        fromAgentId: qa ?? ceo,
+                        toAgentId: owner,
+                        participantAgentIds: [owner, qa, ceo].compactMap { $0 },
+                        issueId: review.issueId,
+                        reviewId: review.id,
+                        messageId: nil,
+                        occurredAt: review.updatedAt,
+                        priority: 880
+                    )
+                )
+            } else if status.contains("QA") || status.contains("REVIEW") || status == "AWAITING_QA" {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "qa-review-\(review.id)",
+                        kind: .qaReviewRequested,
+                        title: issue?.title ?? review.issueId,
+                        detail: review.pullRequestUrl ?? review.branchName ?? review.status,
+                        speechText: "Please review",
+                        fromAgentId: owner,
+                        toAgentId: qa,
+                        participantAgentIds: [owner, qa].compactMap { $0 },
+                        issueId: review.issueId,
+                        reviewId: review.id,
+                        messageId: nil,
+                        occurredAt: review.updatedAt,
+                        priority: 900
+                    )
+                )
+            } else if status == "READY_TO_MERGE" || review.ceoVerdict?.uppercased().contains("PASS") == true {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "approval-granted-\(review.id)",
+                        kind: .approvalGranted,
+                        title: issue?.title ?? review.issueId,
+                        detail: review.ceoFeedback ?? review.status,
+                        speechText: "Approved",
+                        fromAgentId: ceo,
+                        toAgentId: owner,
+                        participantAgentIds: [owner, ceo].compactMap { $0 },
+                        issueId: review.issueId,
+                        reviewId: review.id,
+                        messageId: nil,
+                        occurredAt: review.ceoReviewedAt ?? review.updatedAt,
+                        priority: 700
+                    )
+                )
+            }
+        }
+
+        for message in messages.sorted(by: { $0.createdAt > $1.createdAt }).prefix(8) {
+            let from = resolver.agentId(for: message.fromAgentName)
+            let to = message.toAgentName.flatMap { resolver.agentId(for: $0) }
+            let kind = message.kind.lowercased()
+            let eventKind: MeetingRoomInteractionKind
+            let speech: String
+            let fallbackTarget: String?
+
+            if kind.contains("escalation") {
+                eventKind = .blockedEscalation
+                speech = "Need help"
+                fallbackTarget = resolver.ceoAgentId() ?? resolver.qaAgentId()
+            } else if kind.contains("feedback") {
+                eventKind = .meeting
+                speech = "Feedback sync"
+                fallbackTarget = nil
+            } else if kind.contains("review.request") {
+                eventKind = .qaReviewRequested
+                speech = "Please review"
+                fallbackTarget = resolver.qaAgentId()
+            } else if kind.contains("approval") {
+                eventKind = .ceoApprovalRequested
+                speech = "Approval requested"
+                fallbackTarget = resolver.ceoAgentId()
+            } else {
+                eventKind = .handoff
+                speech = "Handoff update"
+                fallbackTarget = nil
+            }
+
+            let target = to ?? fallbackTarget
+            events.append(
+                MeetingRoomInteractionEvent(
+                    id: "message-\(message.id)",
+                    kind: eventKind,
+                    title: message.subject,
+                    detail: message.body,
+                    speechText: speech,
+                    fromAgentId: from,
+                    toAgentId: target,
+                    participantAgentIds: [from, target].compactMap { $0 },
+                    issueId: message.issueId,
+                    reviewId: nil,
+                    messageId: message.id,
+                    occurredAt: message.createdAt,
+                    priority: eventKind == .blockedEscalation ? 910 : 780
+                )
+            )
+        }
+
+        for issue in issues.sorted(by: { $0.updatedAt > $1.updatedAt }).prefix(8) {
+            let status = issue.status.uppercased()
+            let assignee = resolver.agentId(forIssue: issue)
+            if runtime.isBudgetPaused {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "cost-\(issue.id)",
+                        kind: .costPaused,
+                        title: issue.title,
+                        detail: "Cost guardrail paused runtime.",
+                        speechText: "Cost pause",
+                        fromAgentId: resolver.ceoAgentId(),
+                        toAgentId: assignee,
+                        participantAgentIds: [resolver.ceoAgentId(), assignee].compactMap { $0 },
+                        issueId: issue.id,
+                        reviewId: nil,
+                        messageId: nil,
+                        occurredAt: issue.updatedAt,
+                        priority: 860
+                    )
+                )
+            } else if status == "READY_FOR_CEO" || issue.kind.lowercased() == "approval" {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "issue-approval-\(issue.id)",
+                        kind: .ceoApprovalRequested,
+                        title: issue.title,
+                        detail: issue.transitionReason ?? issue.pullRequestUrl ?? issue.status,
+                        speechText: "Approval requested",
+                        fromAgentId: assignee ?? resolver.builderAgentId(),
+                        toAgentId: resolver.ceoAgentId(),
+                        participantAgentIds: [assignee, resolver.ceoAgentId()].compactMap { $0 },
+                        issueId: issue.id,
+                        reviewId: nil,
+                        messageId: nil,
+                        occurredAt: issue.updatedAt,
+                        priority: 890
+                    )
+                )
+            } else if status.contains("BLOCK") || status.contains("FAIL") {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "blocked-\(issue.id)",
+                        kind: .blockedEscalation,
+                        title: issue.title,
+                        detail: issue.transitionReason ?? issue.providerBlockReasonFallback,
+                        speechText: "Need help",
+                        fromAgentId: assignee,
+                        toAgentId: resolver.ceoAgentId() ?? resolver.qaAgentId(),
+                        participantAgentIds: [assignee, resolver.ceoAgentId(), resolver.qaAgentId()].compactMap { $0 },
+                        issueId: issue.id,
+                        reviewId: nil,
+                        messageId: nil,
+                        occurredAt: issue.updatedAt,
+                        priority: 850
+                    )
+                )
+            } else if status.contains("PLAN") || status == "DELEGATED" || status.contains("BACKLOG") {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "assign-\(issue.id)",
+                        kind: .issueAssigned,
+                        title: issue.title,
+                        detail: issue.transitionReason ?? "Issue is ready to dispatch.",
+                        speechText: "Taking this",
+                        fromAgentId: resolver.planningAgentId(),
+                        toAgentId: assignee,
+                        participantAgentIds: [resolver.planningAgentId(), assignee].compactMap { $0 },
+                        issueId: issue.id,
+                        reviewId: nil,
+                        messageId: nil,
+                        occurredAt: issue.updatedAt,
+                        priority: 620
+                    )
+                )
+            }
+        }
+
+        for decision in goalDecisions.sorted(by: { $0.createdAt > $1.createdAt }).prefix(4) {
+            let participants = decision.assignments
+                .compactMap { assignmentTarget(from: $0) }
+                .compactMap { resolver.agentId(for: $0) }
+            let lead = resolver.ceoAgentId() ?? resolver.planningAgentId()
+            if !participants.isEmpty {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "meeting-\(decision.id)",
+                        kind: .meeting,
+                        title: decision.title,
+                        detail: decision.summary,
+                        speechText: "Plan sync",
+                        fromAgentId: lead,
+                        toAgentId: nil,
+                        participantAgentIds: Array(([lead].compactMap { $0 } + participants).deduplicated()),
+                        issueId: decision.issueId,
+                        reviewId: nil,
+                        messageId: nil,
+                        occurredAt: decision.createdAt,
+                        priority: 740
+                    )
+                )
+            }
+        }
+
+        let goalTitles = Dictionary(uniqueKeysWithValues: goals.map { ($0.id, $0.title) })
+        return Array(events
+            .sorted {
+                if $0.priority != $1.priority {
+                    return $0.priority > $1.priority
+                }
+                return $0.occurredAt > $1.occurredAt
+            }
+            .map { event in
+                guard event.title.isEmpty, let issueId = event.issueId, let issue = issuesById[issueId] else {
+                    return event
+                }
+                return MeetingRoomInteractionEvent(
+                    id: event.id,
+                    kind: event.kind,
+                    title: issue.title,
+                    detail: goalTitles[issue.goalId] ?? event.detail,
+                    speechText: event.speechText,
+                    fromAgentId: event.fromAgentId,
+                    toAgentId: event.toAgentId,
+                    participantAgentIds: event.participantAgentIds,
+                    issueId: event.issueId,
+                    reviewId: event.reviewId,
+                    messageId: event.messageId,
+                    occurredAt: event.occurredAt,
+                    priority: event.priority
+                )
+            }
+            .deduplicatedById()
+            .prefix(14))
+    }
+
+    private static func assignmentTarget(from assignment: String) -> String? {
+        let separators = ["->", "→", ":"]
+        for separator in separators where assignment.contains(separator) {
+            return assignment.components(separatedBy: separator).last?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return assignment.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+    }
+}
+
+private struct MeetingRoomAgentResolver {
+    private let agents: [MeetingRoomProjectionAgent]
+    private let idByKey: [String: String]
+
+    init(agents: [MeetingRoomProjectionAgent], orgProfiles: [OrgAgentProfileRecord]) {
+        self.agents = agents
+        var map: [String: String] = [:]
+        for agent in agents {
+            [agent.id, agent.companyAgentId, agent.name, agent.role, agent.cli].forEach { value in
+                map[value.normalizedMeetingRoomKey] = agent.id
+            }
+        }
+        for profile in orgProfiles {
+            let matched = agents.first {
+                $0.role.normalizedMeetingRoomKey == profile.roleName.normalizedMeetingRoomKey ||
+                    $0.cli.normalizedMeetingRoomKey == profile.executionAgentName.normalizedMeetingRoomKey ||
+                    $0.id.normalizedMeetingRoomKey == profile.id.normalizedMeetingRoomKey
+            }
+            if let matched {
+                [profile.id, profile.roleName, profile.executionAgentName].forEach { value in
+                    map[value.normalizedMeetingRoomKey] = matched.id
+                }
+            }
+        }
+        idByKey = map
+    }
+
+    func agentId(for value: String?) -> String? {
+        guard let key = value?.normalizedMeetingRoomKey, !key.isEmpty else { return nil }
+        return idByKey[key] ?? agents.first { agent in
+            agent.role.normalizedMeetingRoomKey.contains(key) ||
+                key.contains(agent.role.normalizedMeetingRoomKey) ||
+                agent.cli.normalizedMeetingRoomKey.contains(key)
+        }?.id
+    }
+
+    func agentId(forIssue issue: IssueRecord) -> String? {
+        agentId(for: issue.assigneeProfileId)
+    }
+
+    func ceoAgentId() -> String? {
+        agents.first { agent in
+            let role = agent.role.lowercased()
+            return role.contains("ceo") || role.contains("lead") || role.contains("approval")
+        }?.id ?? agents.first?.id
+    }
+
+    func qaAgentId() -> String? {
+        agents.first { agent in
+            let role = agent.role.lowercased()
+            return role.contains("qa") || role.contains("review") || role.contains("test")
+        }?.id
+    }
+
+    func builderAgentId() -> String? {
+        agents.first { agent in
+            let role = agent.role.lowercased()
+            return role.contains("builder") || role.contains("engineer") || role.contains("backend")
+        }?.id
+    }
+
+    func planningAgentId() -> String? {
+        agents.first { agent in
+            let role = agent.role.lowercased()
+            return role.contains("product") || role.contains("ux") || role.contains("planner") || role.contains("ceo")
+        }?.id ?? ceoAgentId()
+    }
 }
 
 private extension MeetingRoomIssueSummary {
@@ -632,10 +1095,32 @@ private extension String {
     var normalizedMeetingRoomKey: String {
         trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
+
+    var nilIfBlank: String? {
+        isEmpty ? nil : self
+    }
 }
 
 private extension IssueRecord {
     var providerBlockReasonFallback: String {
         transitionReason ?? pullRequestState ?? "Blocked issue"
+    }
+}
+
+private extension Array where Element == String {
+    func deduplicated() -> [String] {
+        var seen: Set<String> = []
+        return filter { value in
+            seen.insert(value).inserted
+        }
+    }
+}
+
+private extension Array where Element == MeetingRoomInteractionEvent {
+    func deduplicatedById() -> [MeetingRoomInteractionEvent] {
+        var seen: Set<String> = []
+        return filter { event in
+            seen.insert(event.id).inserted
+        }
     }
 }

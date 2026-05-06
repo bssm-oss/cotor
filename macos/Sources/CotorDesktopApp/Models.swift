@@ -818,6 +818,8 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
     let budgetPausedAt: Int64?
     let budgetResetDate: String?
     let waitingApprovalCount: Int
+    let pendingApprovalRunIds: [String]
+    let reviewQueueAttentionIds: [String]
 
     private enum CodingKeys: String, CodingKey {
         case companyId
@@ -843,6 +845,8 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         case budgetPausedAt
         case budgetResetDate
         case waitingApprovalCount
+        case pendingApprovalRunIds
+        case reviewQueueAttentionIds
     }
 
     init(
@@ -868,7 +872,9 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         monthSpentCents: Int = 0,
         budgetPausedAt: Int64? = nil,
         budgetResetDate: String? = nil,
-        waitingApprovalCount: Int = 0
+        waitingApprovalCount: Int = 0,
+        pendingApprovalRunIds: [String] = [],
+        reviewQueueAttentionIds: [String] = []
     ) {
         self.companyId = companyId
         self.status = status
@@ -893,6 +899,8 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         self.budgetPausedAt = budgetPausedAt
         self.budgetResetDate = budgetResetDate
         self.waitingApprovalCount = waitingApprovalCount
+        self.pendingApprovalRunIds = pendingApprovalRunIds
+        self.reviewQueueAttentionIds = reviewQueueAttentionIds
     }
 
     init(from decoder: Decoder) throws {
@@ -920,6 +928,8 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         budgetPausedAt = try container.decodeIfPresent(Int64.self, forKey: .budgetPausedAt)
         budgetResetDate = try container.decodeIfPresent(String.self, forKey: .budgetResetDate)
         waitingApprovalCount = try container.decodeValue(Int.self, forKey: .waitingApprovalCount, default: 0)
+        pendingApprovalRunIds = try container.decodeValue([String].self, forKey: .pendingApprovalRunIds, default: [])
+        reviewQueueAttentionIds = try container.decodeValue([String].self, forKey: .reviewQueueAttentionIds, default: [])
     }
 
     var isManuallyStopped: Bool {

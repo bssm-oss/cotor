@@ -5707,6 +5707,7 @@ private struct CenterPaneView: View {
             companyId: companyId,
             agents: store.dashboard.companyAgentDefinitions,
             goals: store.dashboard.goals,
+            goalDecisions: store.dashboard.goalDecisions,
             orgProfiles: store.dashboard.orgProfiles,
             issues: store.dashboard.issues,
             runningSessions: store.dashboard.runningAgentSessions,
