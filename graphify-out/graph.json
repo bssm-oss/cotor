@@ -16837,7 +16837,7 @@
       "label": "PluginCommandTest",
       "file_type": "code",
       "source_file": "src/test/kotlin/com/cotor/presentation/cli/PluginCommandTest.kt",
-      "source_location": "L20",
+      "source_location": "L19",
       "id": "cli_plugincommandtest_plugincommandtest",
       "community": 271,
       "norm_label": "plugincommandtest"
@@ -79791,7 +79791,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/test/kotlin/com/cotor/presentation/cli/PluginCommandTest.kt",
-      "source_location": "L20",
+      "source_location": "L19",
       "weight": 1.0,
       "_src": "src_test_kotlin_com_cotor_presentation_cli_plugincommandtest_kt",
       "_tgt": "cli_plugincommandtest_plugincommandtest",
