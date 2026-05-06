@@ -445,9 +445,10 @@ class DesktopStateStore(
                         }
                     }
                 }
-            val retainedReviewQueueIssueIds = issues
-                .filter { it.status != IssueStatus.DONE && it.status != IssueStatus.CANCELED }
-                .mapTo(linkedSetOf()) { it.id }
+            val retainedReviewQueueIssueIds = linkedSetOf<String>().also {
+                it += unresolvedIssueIds
+                it += recentResolvedIssueIds
+            }
             copy(
                 tasks = retainedTasks.map { compactTaskForPersistence(it, unresolvedIssueIds) },
                 runs = retainedRuns.map(::compactRunForPersistence),

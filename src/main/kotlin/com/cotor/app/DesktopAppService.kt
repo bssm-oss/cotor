@@ -2405,6 +2405,7 @@ class DesktopAppService(
                 .filter { it.status == ReviewQueueStatus.MERGED && !it.approvalIssueId.isNullOrBlank() }
                 .mapNotNull { it.approvalIssueId }
                 .toSet()
+            val settledReviewQueue = updatedReviewQueue.filterNot { it.status == ReviewQueueStatus.MERGED }
             val issuesWithApprovalSettled = updatedIssues.map { issue ->
                 if (issue.id in approvalIssuesToComplete) {
                     issue.copy(
@@ -2454,7 +2455,7 @@ class DesktopAppService(
 
             var nextState = state.copy(
                 issues = issuesWithApprovalSettled,
-                reviewQueue = updatedReviewQueue
+                reviewQueue = settledReviewQueue
             )
             if (mergedIssueIds.isNotEmpty()) {
                 nextState = nextState.recordCompanyActivity(
@@ -12824,11 +12825,79 @@ class DesktopAppService(
             it.companyId == companyId && it.status != IssueStatus.DONE && it.status != IssueStatus.CANCELED
         }
         val hasActiveAutonomousGoals = openGoals.any { it.autonomyEnabled && it.status == GoalStatus.ACTIVE }
-        if (hasActiveTasks || unresolvedIssues.isNotEmpty() || hasActiveAutonomousGoals) {
+        val companyHasHistory = state.goals.any { it.companyId == companyId } || state.companyActivity.any { it.companyId == companyId }
+        if (!companyHasHistory || hasActiveTasks || unresolvedIssues.isNotEmpty() || hasActiveAutonomousGoals) {
             return null
         }
 
-        return synthesizeDiscoveryTriageGoal(companyId, state, company)
+        val lastContinuousCycle = state.goals
+            .filter { it.companyId == companyId }
+            .mapNotNull { goal ->
+                goal.operatingPolicy
+                    ?.takeIf { it.startsWith("auto-loop:continuous:") }
+                    ?.removePrefix("auto-loop:continuous:")
+                    ?.toIntOrNull()
+            }
+            .maxOrNull() ?: 0
+        val nextCycle = lastContinuousCycle + 1
+        val recentCompletedGoals = state.goals
+            .filter {
+                it.companyId == companyId &&
+                    it.status == GoalStatus.COMPLETED &&
+                    !it.operatingPolicy.orEmpty().startsWith("auto-follow-up:") &&
+                    !isGeneratedFollowUpTitle(it.title)
+            }
+            .sortedByDescending { it.updatedAt }
+            .take(3)
+        val recentCompletedIssues = state.issues
+            .filter {
+                it.companyId == companyId &&
+                    it.status == IssueStatus.DONE &&
+                    !isGeneratedFollowUpTitle(it.title)
+            }
+            .sortedByDescending { it.updatedAt }
+            .take(5)
+        val title = "CEO continuous improvement cycle #$nextCycle for ${company.name}"
+        val description = buildString {
+            appendLine("CEO generated this goal automatically to keep the company operating without a manual pause.")
+            appendLine()
+            appendLine("Company: ${company.name}")
+            appendLine("Cycle: #$nextCycle")
+            if (recentCompletedGoals.isNotEmpty()) {
+                appendLine()
+                appendLine("Recently completed goals:")
+                recentCompletedGoals.forEach { goal ->
+                    appendLine("- ${goal.title}")
+                }
+            }
+            if (recentCompletedIssues.isNotEmpty()) {
+                appendLine()
+                appendLine("Recently completed issues:")
+                recentCompletedIssues.forEach { issue ->
+                    appendLine("- ${issue.title}")
+                }
+            }
+            appendLine()
+            appendLine("CEO directive:")
+            appendLine("- Review the current company state, recent wins, and unresolved product gaps.")
+            appendLine("- Create a portfolio of 3 to 5 branchable issues for the next cycle instead of one narrow slice.")
+            appendLine("- Use the current roster to run multiple compatible implementation and validation tracks in parallel when possible.")
+            appendLine("- End this cycle with reviewed work and an explicit CEO decision about the next wave.")
+        }
+        return createGoal(
+            companyId = companyId,
+            title = title,
+            description = description,
+            successMetrics = listOf(
+                "The CEO identifies the next improvement cycle and delegates it across the current roster.",
+                "At least two branchable issues are opened when the roster can support concurrent work.",
+                "Reviewed execution slices complete and residual risk is recorded before the next CEO decision."
+            ),
+            autonomyEnabled = true,
+            priority = 2,
+            operatingPolicy = "auto-loop:continuous:$nextCycle",
+            startRuntimeIfNeeded = false
+        )
     }
 
     private suspend fun synthesizeDiscoveryTriageGoal(
@@ -13451,6 +13520,9 @@ class DesktopAppService(
     private fun renderMemorySections(memory: CompanyMemorySnapshot): String = buildString {
         appendLine("Company memory:")
         appendLine(summarizeForPrompt(memory.companyMemory, 180))
+        appendLine()
+        appendLine("Workflow memory:")
+        appendLine(summarizeForPrompt(memory.workflowMemory, 320))
         appendLine()
         appendLine("Project memory:")
         appendLine(summarizeForPrompt(memory.projectMemory, 260))
@@ -14682,8 +14754,7 @@ class DesktopAppService(
                     (primaryRun?.a2aSessionId != null || primaryRun?.a2aEndpoint != null)
             val collaborationMissing =
                 collaborationGateApplies &&
-                    primaryRun != null &&
-                    !hasCanonicalCommunicationForRun(state, currentIssue, primaryRun)
+                    primaryRun?.let { !hasCanonicalCommunicationForRun(state, currentIssue, it) } == true
             val verificationDecision = if (completionCandidate && !collaborationMissing) {
                 companyVerifierService.verifyIssueCompletion(state, currentIssue, primaryRun)
             } else {
