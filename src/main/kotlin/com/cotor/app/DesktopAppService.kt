@@ -516,8 +516,10 @@ class DesktopAppService(
         val periodReviewQueue = state.reviewQueue
             .filter { item ->
                 (item.companyId == companyId || item.issueId in companyIssueIds) &&
-                    (inPeriod(item.updatedAt) || inPeriod(item.createdAt) || inPeriod(item.qaReviewedAt) ||
-                        inPeriod(item.ceoReviewedAt) || inPeriod(item.mergedAt))
+                    (
+                        inPeriod(item.updatedAt) || inPeriod(item.createdAt) || inPeriod(item.qaReviewedAt) ||
+                            inPeriod(item.ceoReviewedAt) || inPeriod(item.mergedAt)
+                        )
             }
             .sortedByDescending { it.updatedAt }
 
@@ -664,7 +666,7 @@ class DesktopAppService(
         )
 
         return CompanyDailyReport(
-            id = "${company.id}-${reportDate}",
+            id = "${company.id}-$reportDate",
             companyId = company.id,
             date = reportDate.toString(),
             generatedAt = generatedAt,
@@ -2239,7 +2241,7 @@ class DesktopAppService(
                         inputSummary = result.inputSummary,
                         postedUrl = result.postedUrl,
                         screenshotPath = result.screenshotPath,
-                        utm = "utm_source=cotor&utm_medium=organic&utm_campaign=${run.id}&utm_content=${channel}",
+                        utm = "utm_source=cotor&utm_medium=organic&utm_campaign=${run.id}&utm_content=$channel",
                         status = MarketingActionStatus.SUCCEEDED,
                         idempotencyKey = idempotencyKey
                     )
@@ -11302,21 +11304,21 @@ class DesktopAppService(
                                 reason = health.message ?: "Codex app server is unavailable"
                             )
                         }
-	                            localExecutionBackend.execute(
-	                                ExecutionBackendRequest(
-	                                    agent = bridgedAgent,
-	                                    prompt = assignedPrompt,
-	                                    effectiveConfig = localBackendConfig(currentState),
-	                                    metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
-	                                )
+                        localExecutionBackend.execute(
+                            ExecutionBackendRequest(
+                                agent = bridgedAgent,
+                                prompt = assignedPrompt,
+                                effectiveConfig = localBackendConfig(currentState),
+                                metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                            )
                         )
                     } else {
-	                        val remoteResult = executionBackend.execute(
-	                            ExecutionBackendRequest(
-	                                agent = bridgedAgent,
-	                                prompt = assignedPrompt,
-	                                effectiveConfig = effectiveBackendConfig,
-	                                metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                        val remoteResult = executionBackend.execute(
+                            ExecutionBackendRequest(
+                                agent = bridgedAgent,
+                                prompt = assignedPrompt,
+                                effectiveConfig = effectiveBackendConfig,
+                                metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
                             )
                         )
                         if (shouldFallbackFromCodexResult(remoteResult)) {
@@ -11328,12 +11330,12 @@ class DesktopAppService(
                                     reason = remoteResult.error ?: "Codex app server execution failed"
                                 )
                             }
-	                            localExecutionBackend.execute(
-	                                ExecutionBackendRequest(
-	                                    agent = bridgedAgent,
-	                                    prompt = assignedPrompt,
-	                                    effectiveConfig = localBackendConfig(currentState),
-	                                    metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                            localExecutionBackend.execute(
+                                ExecutionBackendRequest(
+                                    agent = bridgedAgent,
+                                    prompt = assignedPrompt,
+                                    effectiveConfig = localBackendConfig(currentState),
+                                    metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
                                 )
                             )
                         } else {
@@ -11341,12 +11343,12 @@ class DesktopAppService(
                         }
                     }
                 } else {
-	                    executionBackend.execute(
-	                        ExecutionBackendRequest(
-	                            agent = bridgedAgent,
-	                            prompt = assignedPrompt,
-	                            effectiveConfig = backendConfig,
-	                            metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                    executionBackend.execute(
+                        ExecutionBackendRequest(
+                            agent = bridgedAgent,
+                            prompt = assignedPrompt,
+                            effectiveConfig = backendConfig,
+                            metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
                         )
                     )
                 }
@@ -11414,7 +11416,7 @@ class DesktopAppService(
                     )
                 }
             }
-	            val estimatedCostCents = estimateRunCostCents(bridgedAgent, assignedPrompt, result)
+            val estimatedCostCents = estimateRunCostCents(bridgedAgent, assignedPrompt, result)
 
             val settledRun = startedRun.copy(
                 status = if (result.isSuccess && finalError == null) AgentRunStatus.COMPLETED else AgentRunStatus.FAILED,
@@ -11436,8 +11438,8 @@ class DesktopAppService(
                     recordRunCost(it.id, estimatedCostCents)
                 }
             }
-	            company?.let {
-	                val successDetail = result.output
+            company?.let {
+                val successDetail = result.output
                     ?.lineSequence()
                     ?.filter { it.isNotBlank() }
                     ?.take(6)
@@ -11454,23 +11456,23 @@ class DesktopAppService(
                     },
                     goalId = issue?.goalId,
                     issueId = issue?.id,
-	                    runId = startedRun.id
-	                )
-	                issue?.let { linkedIssue ->
-	                    recordA2aRunBridgeEvent(
-	                        company = it,
-	                        issue = linkedIssue,
-	                        task = task,
-                            run = settledRun,
-	                        kind = if (result.isSuccess && finalError == null) "a2a-run.finished" else "a2a-run.failed",
-	                        detail = if (result.isSuccess && finalError == null) {
-	                            "A2A bridge recorded run completion. ${successDetail ?: "No concise output was captured."}"
-	                        } else {
-	                            "A2A bridge recorded run failure. ${finalError ?: result.error ?: publish?.error ?: "No error detail."}"
-	                        }
-	                    )
-	                }
-	            }
+                    runId = startedRun.id
+                )
+                issue?.let { linkedIssue ->
+                    recordA2aRunBridgeEvent(
+                        company = it,
+                        issue = linkedIssue,
+                        task = task,
+                        run = settledRun,
+                        kind = if (result.isSuccess && finalError == null) "a2a-run.finished" else "a2a-run.failed",
+                        detail = if (result.isSuccess && finalError == null) {
+                            "A2A bridge recorded run completion. ${successDetail ?: "No concise output was captured."}"
+                        } else {
+                            "A2A bridge recorded run failure. ${finalError ?: result.error ?: publish?.error ?: "No error detail."}"
+                        }
+                    )
+                }
+            }
             heartbeatJob?.cancel()
         } catch (cancelled: CancellationException) {
             if (!isTaskIntentionallyInterrupted(task.id)) {
