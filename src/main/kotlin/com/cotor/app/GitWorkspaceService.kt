@@ -324,6 +324,17 @@ class GitWorkspaceService(
         )
     }
 
+    suspend fun hasPublishableChanges(worktreePath: Path, baseBranch: String): Boolean {
+        if (hasUncommittedChanges(worktreePath)) {
+            return true
+        }
+        val aheadCount = gitOutput(worktreePath, "rev-list", "--count", "$baseBranch..HEAD")
+            .trim()
+            .toIntOrNull()
+            ?: 0
+        return aheadCount > 0
+    }
+
     suspend fun ensureWorktree(
         repositoryRoot: Path,
         taskId: String,
