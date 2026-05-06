@@ -1540,14 +1540,14 @@ internal fun Application.cotorAppModule(
                                 companyId = companyId,
                                 agentId = agentId,
                                 action = request.action,
-                            path = request.path,
-                            networkTarget = request.networkTarget,
-                            command = request.command,
-                            skill = request.skill,
-                            channel = request.channel
-                        )
+                                path = request.path,
+                                networkTarget = request.networkTarget,
+                                command = request.command,
+                                skill = request.skill,
+                                channel = request.channel
+                            )
+                        }
                     }
-                }
                 }
 
                 route("/{companyId}/projects") {
