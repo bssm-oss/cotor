@@ -13,6 +13,7 @@ enum MeetingRoomVisualState: String, Hashable {
 enum MeetingRoomExpression: String, Hashable {
     case idle
     case focused
+    case talking
     case confused
     case sad
     case happy
@@ -205,7 +206,7 @@ struct MeetingRoomProjection: Hashable {
                 currentIssueTitle: issue?.title,
                 status: session?.status ?? issue?.status ?? (agent.enabled ? "IDLE" : "PAUSED"),
                 visualState: visualState,
-                expression: expression(for: visualState),
+                expression: messageCount > 0 ? .talking : expression(for: visualState),
                 zone: zone(for: visualState),
                 actionLine: actionLine(for: visualState, role: agent.title),
                 detailLine: detailLine(agent: agent, session: session, issue: issue, reviewCount: scopedReviews.count, runtime: runtime),

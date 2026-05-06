@@ -78,6 +78,7 @@ enum ShellPalette {
 
 enum ShellMetrics {
     static let baseSpacing: CGFloat = 8
+    static let radiusTiny: CGFloat = 4
     static let radiusLarge: CGFloat = 16
     static let radiusMedium: CGFloat = 12
     static let radiusSmall: CGFloat = 8

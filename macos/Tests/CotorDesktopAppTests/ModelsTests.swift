@@ -105,6 +105,92 @@ struct ModelsTests {
     }
 
     @Test
+    func agentCapabilitySettingDecodesMissingChannelAllowlistAsEmpty() throws {
+        let data = """
+        {
+          "enabled": true,
+          "mode": "AUTO",
+          "domainAllowlist": ["cms.example.com"],
+          "skillAllowlist": ["marketing-operator"],
+          "requiresEvidence": true
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AgentCapabilitySettingRecord.self, from: data)
+
+        #expect(decoded.mode == "AUTO")
+        #expect(decoded.domainAllowlist == ["cms.example.com"])
+        #expect(decoded.channelAllowlist.isEmpty)
+        #expect(decoded.skillAllowlist == ["marketing-operator"])
+    }
+
+    @Test
+    func companyRecordDecodesMissingOperatorModeAsLegacyState() throws {
+        let data = """
+        {
+          "id": "company-1",
+          "name": "Legacy",
+          "rootPath": "/tmp/legacy",
+          "repositoryId": "repo-1",
+          "defaultBaseBranch": "main",
+          "backendKind": "LOCAL_COTOR",
+          "linearSyncEnabled": false,
+          "autonomyEnabled": true,
+          "dailyBudgetCents": null,
+          "monthlyBudgetCents": null,
+          "createdAt": 1,
+          "updatedAt": 2
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(CompanyRecord.self, from: data)
+
+        #expect(decoded.operatorAutomationMode == nil)
+    }
+
+    @Test
+    func operatorCommandPayloadsRenderModeResponsesAndPendingApprovals() throws {
+        let request = OperatorCommandRequestPayload(
+            message: "모든 에이전트 opencode deepseek",
+            automationMode: "AGENT_APPROVED",
+            confirmFullAuto: false
+        )
+        let requestData = try JSONEncoder().encode(request)
+        let decodedRequest = try JSONDecoder().decode(OperatorCommandRequestPayload.self, from: requestData)
+
+        let response = OperatorCommandResponsePayload(
+            message: "1 action routed for internal approval.",
+            automationMode: "AGENT_APPROVED",
+            actions: [],
+            pendingApprovals: [
+                OperatorCommandActionPayload(
+                    type: "agent-approval",
+                    title: "Approve blocked issue retry",
+                    detail: "Routed to CEO.",
+                    status: "AGENT_APPROVAL_REQUESTED"
+                )
+            ],
+            blockedActions: [],
+            summary: OperatorCompanySummaryPayload(
+                runtimeStatus: "RUNNING",
+                backendHealth: "healthy",
+                activeAgentCount: 2,
+                blockedIssueCount: 1,
+                reviewQueueCount: 3,
+                pendingApprovalCount: 1,
+                budgetPaused: false
+            )
+        )
+        let responseData = try JSONEncoder().encode(response)
+        let decodedResponse = try JSONDecoder().decode(OperatorCommandResponsePayload.self, from: responseData)
+
+        #expect(decodedRequest.automationMode == "AGENT_APPROVED")
+        #expect(decodedResponse.automationMode == "AGENT_APPROVED")
+        #expect(decodedResponse.pendingApprovals.first?.status == "AGENT_APPROVAL_REQUESTED")
+        #expect(decodedResponse.summary?.pendingApprovalCount == 1)
+    }
+
+    @Test
     func batchUpdatePayloadEncodesSelectedFields() throws {
         let payload = BatchUpdateCompanyAgentsPayload(
             agentIds: ["agent-1", "agent-2"],

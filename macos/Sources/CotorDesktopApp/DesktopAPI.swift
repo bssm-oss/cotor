@@ -190,6 +190,22 @@ struct DesktopAPI {
         )
     }
 
+    func runOperatorCommand(
+        companyId: String,
+        message: String,
+        automationMode: String? = nil,
+        confirmFullAuto: Bool = false
+    ) async throws -> OperatorCommandResponsePayload {
+        try await post(
+            path: "api/app/companies/\(companyId)/operator/commands",
+            body: OperatorCommandRequestPayload(
+                message: message,
+                automationMode: automationMode,
+                confirmFullAuto: confirmFullAuto
+            )
+        )
+    }
+
     func skills() async throws -> [SkillCatalogEntryRecord] {
         try await get(path: "api/app/skills")
     }
@@ -203,6 +219,37 @@ struct DesktopAPI {
             path: "api/app/companies/\(companyId)/agents/\(agentId)/capabilities",
             body: UpdateAgentCapabilitiesPayload(settings: settings)
         )
+    }
+
+    func marketingPolicies(companyId: String? = nil, agentId: String? = nil) async throws -> [MarketingDelegationPolicyRecord] {
+        var queryItems: [String] = []
+        if let companyId, !companyId.isEmpty {
+            queryItems.append("companyId=\(companyId)")
+        }
+        if let agentId, !agentId.isEmpty {
+            queryItems.append("agentId=\(agentId)")
+        }
+        let suffix = queryItems.isEmpty ? "" : "?\(queryItems.joined(separator: "&"))"
+        return try await get(path: "api/app/marketing/policies\(suffix)")
+    }
+
+    func marketingRuns(companyId: String? = nil, agentId: String? = nil) async throws -> [MarketingRunRecord] {
+        var queryItems: [String] = []
+        if let companyId, !companyId.isEmpty {
+            queryItems.append("companyId=\(companyId)")
+        }
+        if let agentId, !agentId.isEmpty {
+            queryItems.append("agentId=\(agentId)")
+        }
+        let suffix = queryItems.isEmpty ? "" : "?\(queryItems.joined(separator: "&"))"
+        return try await get(path: "api/app/marketing/runs\(suffix)")
+    }
+
+    func upsertMarketingPolicy(_ payload: UpsertMarketingDelegationPolicyPayload) async throws -> MarketingDelegationPolicyRecord {
+        if let id = payload.id, !id.isEmpty {
+            return try await patch(path: "api/app/marketing/policies/\(id)", body: payload)
+        }
+        return try await post(path: "api/app/marketing/policies", body: payload)
     }
 
     func updateGoal(
