@@ -54,6 +54,28 @@ class DesktopAppServiceTest : FunSpec({
         DesktopAppService.shutdownAllForTesting()
     }
 
+    fun OperatorCommandResponse.shouldHideRawOperatorInternals() {
+        val visibleText = buildString {
+            appendLine(message)
+            (actions + pendingApprovals + blockedActions).forEach { action ->
+                appendLine(action.title)
+                appendLine(action.detail)
+            }
+        }
+        listOf(
+            "runtime=",
+            "backend=",
+            "FULL_AUTO",
+            "AGENT_APPROVED",
+            "ASK_ME",
+            "USER_CONFIRMATION_REQUIRED",
+            "AGENT_APPROVAL_REQUESTED",
+            "hard-gated"
+        ).forEach { rawToken ->
+            visibleText shouldNotContain rawToken
+        }
+    }
+
     test("builtin opencode company agent uses a longer timeout budget") {
         BuiltinAgentCatalog.get("opencode")!!.timeout shouldBe 45 * 60_000L
     }
@@ -444,6 +466,7 @@ class DesktopAppServiceTest : FunSpec({
         response.automationMode shouldBe OperatorAutomationMode.AGENT_APPROVED
         response.summary?.runtimeStatus shouldBe CompanyRuntimeStatus.STOPPED.name
         response.actions.any { it.type == "status-check" && it.status == "DONE" } shouldBe true
+        response.shouldHideRawOperatorInternals()
         stateStore.load().agentMessages.any { it.kind == "operator-result" && it.fromAgentName == "Company Operator" } shouldBe true
     }
 
@@ -462,6 +485,7 @@ class DesktopAppServiceTest : FunSpec({
         val persisted = service.listCompanyAgentDefinitions(company.id)
 
         response.actions.any { it.type == "agent-model-update" && it.status == "DONE" } shouldBe true
+        response.shouldHideRawOperatorInternals()
         persisted.shouldNotBeEmpty()
         persisted.all { it.agentCli == "opencode" } shouldBe true
         persisted.all { it.model == com.cotor.model.OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
@@ -521,6 +545,7 @@ class DesktopAppServiceTest : FunSpec({
         val response = service.runOperatorCommand(company.id, "막힌 이슈 다시 굴려")
 
         response.pendingApprovals.single().status shouldBe "AGENT_APPROVAL_REQUESTED"
+        response.shouldHideRawOperatorInternals()
         stateStore.load().issues.first { it.id == issue.id }.status shouldBe IssueStatus.BLOCKED
         stateStore.load().agentMessages.any {
             it.kind == "operator-approval" && it.toAgentName == "CEO"
@@ -589,6 +614,9 @@ class DesktopAppServiceTest : FunSpec({
         val hardGateResponse = service.runOperatorCommand(company.id, "저장소 삭제해줘")
 
         modeResponse.automationMode shouldBe OperatorAutomationMode.FULL_AUTO
+        modeResponse.shouldHideRawOperatorInternals()
+        retryResponse.shouldHideRawOperatorInternals()
+        hardGateResponse.shouldHideRawOperatorInternals()
         retryResponse.actions.any { it.type == "blocked-issue-retry" && it.status == "DONE" } shouldBe true
         stateStore.load().issues.first { it.id == issue.id }.status shouldBe IssueStatus.PLANNED
         hardGateResponse.blockedActions.single().type shouldBe "hard-gate"
