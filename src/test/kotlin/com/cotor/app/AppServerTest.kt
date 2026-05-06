@@ -2004,6 +2004,97 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("company chat intake route lets CEO plan from one vague message") {
+        val goal = CompanyGoal(
+            id = "goal-1",
+            companyId = "company-1",
+            projectContextId = "project-1",
+            title = "Make the app work from chat",
+            description = "CEO clarified this from chat.",
+            status = GoalStatus.ACTIVE,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val planningIssue = CompanyIssue(
+            id = "planning-1",
+            companyId = "company-1",
+            projectContextId = "project-1",
+            goalId = "goal-1",
+            workspaceId = "workspace-1",
+            title = "CEO plan and delegate",
+            description = "CEO planning lane.",
+            status = IssueStatus.DONE,
+            kind = "planning",
+            createdAt = 1L,
+            updatedAt = 2L
+        )
+        val issue = CompanyIssue(
+            id = "issue-1",
+            companyId = "company-1",
+            projectContextId = "project-1",
+            goalId = "goal-1",
+            workspaceId = "workspace-1",
+            title = "Build chat intake",
+            description = "Implement the chat intake path.",
+            status = IssueStatus.PLANNED,
+            kind = "execution",
+            createdAt = 2L,
+            updatedAt = 2L
+        )
+        val message = AgentMessage(
+            id = "message-1",
+            companyId = "company-1",
+            fromAgentName = "CEO",
+            kind = "ceo-plan",
+            subject = "CEO clarified and delegated",
+            body = "CEO interpretation",
+            goalId = "goal-1",
+            createdAt = 3L
+        )
+        coEvery {
+            desktopService.createChatIntake("company-1", "대충 채팅만으로 다 되게 해줘", false)
+        } returns ChatIntakeResponse(
+            goal = goal,
+            planningIssue = planningIssue,
+            issues = listOf(issue),
+            ceoBrief = "CEO interpretation",
+            assignmentPreview = listOf(
+                ChatAssignmentPreview(
+                    issueId = "issue-1",
+                    title = "Build chat intake",
+                    assigneeRole = "Builder",
+                    phase = "execution",
+                    reason = "CEO assigned this work."
+                )
+            ),
+            message = message
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/companies/company-1/chat-intake") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"message":"대충 채팅만으로 다 되게 해줘","startRuntime":false}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"ceoBrief\":\"CEO interpretation\""
+            response.bodyAsText() shouldContain "\"assigneeRole\":\"Builder\""
+            response.bodyAsText() shouldContain "\"kind\":\"ceo-plan\""
+            coVerify(exactly = 1) {
+                desktopService.createChatIntake("company-1", "대충 채팅만으로 다 되게 해줘", false)
+            }
+        }
+    }
+
     test("company dashboard route returns a company-scoped live snapshot when authorized") {
         coEvery { desktopService.companyDashboardReadOnly("company-1") } returns CompanyDashboardResponse(
             companies = listOf(

@@ -183,6 +183,28 @@ struct DesktopAPI {
         )
     }
 
+    func createChatIntake(companyId: String, message: String, startRuntime: Bool = false) async throws -> ChatIntakeResponsePayload {
+        try await post(
+            path: "api/app/companies/\(companyId)/chat-intake",
+            body: ChatIntakeRequestPayload(message: message, startRuntime: startRuntime)
+        )
+    }
+
+    func skills() async throws -> [SkillCatalogEntryRecord] {
+        try await get(path: "api/app/skills")
+    }
+
+    func updateAgentCapabilities(
+        companyId: String,
+        agentId: String,
+        settings: [String: AgentCapabilitySettingRecord]
+    ) async throws -> AgentCapabilityProfileRecord {
+        try await patch(
+            path: "api/app/companies/\(companyId)/agents/\(agentId)/capabilities",
+            body: UpdateAgentCapabilitiesPayload(settings: settings)
+        )
+    }
+
     func updateGoal(
         companyId: String,
         goalId: String,

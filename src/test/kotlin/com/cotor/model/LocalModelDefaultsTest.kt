@@ -16,6 +16,13 @@ class LocalModelDefaultsTest : FunSpec({
         LocalModelDefaults.isGemma4Model("notgemma4:latest") shouldBe false
     }
 
+    test("detects installed Gemma family models for app-managed local fallback") {
+        LocalModelDefaults.isGemmaFamilyModel("gemma4:e2b") shouldBe true
+        LocalModelDefaults.isGemmaFamilyModel("gemma3:4b") shouldBe true
+        LocalModelDefaults.isGemmaFamilyModel("google/gemma-4-31b-it") shouldBe true
+        LocalModelDefaults.isGemmaFamilyModel("notgemma4:latest") shouldBe false
+    }
+
     test("installed Gemma 4 models are trimmed and de-duplicated in discovery order") {
         LocalModelDefaults.installedGemma4Models(
             listOf(
@@ -26,5 +33,17 @@ class LocalModelDefaultsTest : FunSpec({
                 "gemma3:4b"
             )
         ) shouldBe listOf("gemma4:e2b", "google/gemma-4-31b-it")
+    }
+
+    test("preferred installed Gemma models keep Gemma 4 first and then fallback family models") {
+        LocalModelDefaults.preferredInstalledGemmaModels(
+            listOf(
+                " qwen2.5:3b ",
+                "gemma3:4b",
+                "gemma4:e2b",
+                "gemma3:4b",
+                "google/gemma-4-31b-it"
+            )
+        ) shouldBe listOf("gemma4:e2b", "google/gemma-4-31b-it", "gemma3:4b")
     }
 })

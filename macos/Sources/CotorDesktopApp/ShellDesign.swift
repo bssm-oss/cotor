@@ -252,13 +252,24 @@ struct ShellStatusPill: View {
 struct ShellTag: View {
     let text: String
     let tint: Color
+    let maxWidth: CGFloat?
+
+    init(text: String, tint: Color, maxWidth: CGFloat? = nil) {
+        self.text = text
+        self.tint = tint
+        self.maxWidth = maxWidth
+    }
 
     var body: some View {
         Text(text)
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(ShellPalette.text)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .minimumScaleFactor(0.88)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
+            .frame(maxWidth: maxWidth, alignment: .leading)
             .background(tint.opacity(0.16))
             .overlay(
                 Capsule()

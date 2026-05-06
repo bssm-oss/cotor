@@ -1001,8 +1001,8 @@ private val landingHtml = """
     <section class="hero">
       <h1>Cotor 설명 페이지</h1>
       <p class="subtitle">
-        Cotor는 멀티 에이전트 워크플로를 설계/저장/실행할 수 있는 오케스트레이션 도구입니다.
-        CLI 자동화와 웹 에디터를 함께 제공해, 초안부터 운영까지 한 경로에서 진행할 수 있습니다.
+        Cotor는 로컬 환경에서 회사 목표, 이슈, 에이전트 실행을 관리하는 오케스트레이션 도구입니다.
+        CLI, 웹 에디터, 데스크톱 앱이 같은 실행 상태를 공유합니다.
       </p>
       <div class="actions">
         <a class="btn primary" href="/editor">웹 에디터 시작하기</a>
@@ -1062,7 +1062,7 @@ private fun companyHtml(): String = """
 <body>
   <h1>Cotor Company Console</h1>
   <div class="card">
-    <p>This page exposes company APIs from the same service layer used by the desktop app and CLI.</p>
+    <p>Use this console to inspect company state and runtime activity.</p>
     <button onclick="loadDashboard()">Load Dashboard</button>
   </div>
   <div class="card">

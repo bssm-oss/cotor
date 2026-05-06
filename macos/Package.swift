@@ -17,6 +17,7 @@ let package = Package(
             name: "CotorDesktopApp",
             path: "Sources/CotorDesktopApp",
             resources: [
+                .copy("Resources/Brand"),
                 .copy("Resources/Terminal")
             ]
         ),

@@ -154,6 +154,95 @@ struct CompanyAgentDefinitionRecord: Codable, Identifiable, Hashable {
     let updatedAt: Int64
 }
 
+struct SkillCatalogEntryRecord: Codable, Identifiable, Hashable {
+    var id: String { name }
+    let name: String
+    let displayName: String
+    let description: String
+    let requiredCapabilities: [String]
+    let localOnly: Bool
+    let dangerous: Bool
+}
+
+struct AgentCapabilitySettingRecord: Codable, Hashable {
+    let enabled: Bool
+    let mode: String
+    let providerId: String?
+    let modelOverride: String?
+    let costLimitDaily: Int?
+    let costLimitMonthly: Int?
+    let maxRuntimeSeconds: Int?
+    let domainAllowlist: [String]
+    let pathAllowlist: [String]
+    let skillAllowlist: [String]
+    let secretRefs: [String]
+    let requiresEvidence: Bool
+    let requiresReview: Bool
+    let notes: String?
+
+    init(
+        enabled: Bool = true,
+        mode: String = "APPROVAL_REQUIRED",
+        providerId: String? = nil,
+        modelOverride: String? = nil,
+        costLimitDaily: Int? = nil,
+        costLimitMonthly: Int? = nil,
+        maxRuntimeSeconds: Int? = nil,
+        domainAllowlist: [String] = [],
+        pathAllowlist: [String] = [],
+        skillAllowlist: [String] = [],
+        secretRefs: [String] = [],
+        requiresEvidence: Bool = true,
+        requiresReview: Bool = false,
+        notes: String? = nil
+    ) {
+        self.enabled = enabled
+        self.mode = mode
+        self.providerId = providerId
+        self.modelOverride = modelOverride
+        self.costLimitDaily = costLimitDaily
+        self.costLimitMonthly = costLimitMonthly
+        self.maxRuntimeSeconds = maxRuntimeSeconds
+        self.domainAllowlist = domainAllowlist
+        self.pathAllowlist = pathAllowlist
+        self.skillAllowlist = skillAllowlist
+        self.secretRefs = secretRefs
+        self.requiresEvidence = requiresEvidence
+        self.requiresReview = requiresReview
+        self.notes = notes
+    }
+
+    func withSkillAllowlist(_ skillIDs: [String]) -> AgentCapabilitySettingRecord {
+        AgentCapabilitySettingRecord(
+            enabled: !skillIDs.isEmpty,
+            mode: skillIDs.isEmpty ? "DISABLED" : (mode == "DISABLED" ? "APPROVAL_REQUIRED" : mode),
+            providerId: providerId,
+            modelOverride: modelOverride,
+            costLimitDaily: costLimitDaily,
+            costLimitMonthly: costLimitMonthly,
+            maxRuntimeSeconds: maxRuntimeSeconds,
+            domainAllowlist: domainAllowlist,
+            pathAllowlist: pathAllowlist,
+            skillAllowlist: skillIDs,
+            secretRefs: secretRefs,
+            requiresEvidence: requiresEvidence,
+            requiresReview: requiresReview,
+            notes: notes
+        )
+    }
+}
+
+struct AgentCapabilityProfileRecord: Codable, Hashable {
+    let companyId: String
+    let agentId: String
+    let settings: [String: AgentCapabilitySettingRecord]
+    let updatedAt: Int64
+}
+
+struct UpdateAgentCapabilitiesPayload: Codable {
+    let settings: [String: AgentCapabilitySettingRecord]
+}
+
 struct CompanyProjectContextRecord: Codable, Identifiable, Hashable {
     let id: String
     let companyId: String
@@ -254,6 +343,28 @@ struct AgentMessageRecord: Codable, Identifiable, Hashable {
     let status: String
     let parentMessageId: String?
     let createdAt: Int64
+}
+
+struct ChatIntakeRequestPayload: Codable {
+    let message: String
+    let startRuntime: Bool
+}
+
+struct ChatAssignmentPreviewPayload: Codable, Hashable {
+    let issueId: String
+    let title: String
+    let assigneeRole: String?
+    let phase: String
+    let reason: String
+}
+
+struct ChatIntakeResponsePayload: Codable, Hashable {
+    let goal: GoalRecord
+    let planningIssue: IssueRecord?
+    let issues: [IssueRecord]
+    let ceoBrief: String
+    let assignmentPreview: [ChatAssignmentPreviewPayload]
+    let message: AgentMessageRecord
 }
 
 /// User-authored task record shown in the center pane.
@@ -684,6 +795,7 @@ struct CompanyEventEnvelopePayload: Codable {
 struct CompanyDashboardPayload: Codable {
     let companies: [CompanyRecord]
     let companyAgentDefinitions: [CompanyAgentDefinitionRecord]
+    let agentCapabilityProfiles: [AgentCapabilityProfileRecord]
     let projectContexts: [CompanyProjectContextRecord]
     let goals: [GoalRecord]
     let issues: [IssueRecord]
@@ -705,6 +817,7 @@ struct CompanyDashboardPayload: Codable {
     private enum CodingKeys: String, CodingKey {
         case companies
         case companyAgentDefinitions
+        case agentCapabilityProfiles
         case projectContexts
         case goals
         case issues
@@ -728,6 +841,7 @@ struct CompanyDashboardPayload: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         companies = try container.decodeValue([CompanyRecord].self, forKey: .companies, default: [])
         companyAgentDefinitions = try container.decodeValue([CompanyAgentDefinitionRecord].self, forKey: .companyAgentDefinitions, default: [])
+        agentCapabilityProfiles = try container.decodeValue([AgentCapabilityProfileRecord].self, forKey: .agentCapabilityProfiles, default: [])
         projectContexts = try container.decodeValue([CompanyProjectContextRecord].self, forKey: .projectContexts, default: [])
         goals = try container.decodeValue([GoalRecord].self, forKey: .goals, default: [])
         issues = try container.decodeValue([IssueRecord].self, forKey: .issues, default: [])
@@ -929,6 +1043,7 @@ struct DashboardPayload: Codable {
     let settings: DesktopSettingsPayload
     let companies: [CompanyRecord]
     let companyAgentDefinitions: [CompanyAgentDefinitionRecord]
+    let agentCapabilityProfiles: [AgentCapabilityProfileRecord]
     let projectContexts: [CompanyProjectContextRecord]
     let goals: [GoalRecord]
     let issues: [IssueRecord]
@@ -976,6 +1091,7 @@ extension DashboardPayload {
         ),
         companies: [],
         companyAgentDefinitions: [],
+        agentCapabilityProfiles: [],
         projectContexts: [],
         goals: [],
         issues: [],
@@ -1304,6 +1420,32 @@ struct MockSeed {
                 enabled: true,
                 displayOrder: 2,
                 createdAt: 0,
+                updatedAt: 0
+            )
+        ],
+        agentCapabilityProfiles: [
+            AgentCapabilityProfileRecord(
+                companyId: "company-demo",
+                agentId: "agent-def-ceo",
+                settings: [
+                    "SKILL_RUN": AgentCapabilitySettingRecord(skillAllowlist: ["graphify"])
+                ],
+                updatedAt: 0
+            ),
+            AgentCapabilityProfileRecord(
+                companyId: "company-demo",
+                agentId: "agent-def-builder",
+                settings: [
+                    "SKILL_RUN": AgentCapabilitySettingRecord(skillAllowlist: ["graphify", "browser-smoke"])
+                ],
+                updatedAt: 0
+            ),
+            AgentCapabilityProfileRecord(
+                companyId: "company-demo",
+                agentId: "agent-def-qa",
+                settings: [
+                    "SKILL_RUN": AgentCapabilitySettingRecord(skillAllowlist: ["browser-smoke", "video-plan"])
+                ],
                 updatedAt: 0
             )
         ],

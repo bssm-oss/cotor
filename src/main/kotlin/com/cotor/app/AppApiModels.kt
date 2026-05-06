@@ -72,6 +72,31 @@ data class CreateGoalRequest(
 )
 
 @Serializable
+data class ChatIntakeRequest(
+    val message: String,
+    val startRuntime: Boolean = false
+)
+
+@Serializable
+data class ChatAssignmentPreview(
+    val issueId: String,
+    val title: String,
+    val assigneeRole: String? = null,
+    val phase: String,
+    val reason: String
+)
+
+@Serializable
+data class ChatIntakeResponse(
+    val goal: CompanyGoal,
+    val planningIssue: CompanyIssue? = null,
+    val issues: List<CompanyIssue>,
+    val ceoBrief: String,
+    val assignmentPreview: List<ChatAssignmentPreview>,
+    val message: AgentMessage
+)
+
+@Serializable
 data class UpdateGoalRequest(
     val title: String? = null,
     val description: String? = null,
@@ -253,6 +278,7 @@ data class LinearSyncResponse(
 data class CompanyDashboardResponse(
     val companies: List<Company> = emptyList(),
     val companyAgentDefinitions: List<CompanyAgentDefinition> = emptyList(),
+    val agentCapabilityProfiles: List<AgentCapabilityProfile> = emptyList(),
     val projectContexts: List<CompanyProjectContext> = emptyList(),
     val goals: List<CompanyGoal> = emptyList(),
     val issues: List<CompanyIssue> = emptyList(),
@@ -311,6 +337,7 @@ data class DashboardResponse(
     val settings: DesktopSettings,
     val companies: List<Company> = emptyList(),
     val companyAgentDefinitions: List<CompanyAgentDefinition> = emptyList(),
+    val agentCapabilityProfiles: List<AgentCapabilityProfile> = emptyList(),
     val projectContexts: List<CompanyProjectContext> = emptyList(),
     val goals: List<CompanyGoal> = emptyList(),
     val issues: List<CompanyIssue> = emptyList(),

@@ -60,6 +60,8 @@ cotor video render --company <companyId> --agent <agentId> --project ./video --p
 cotor video transcode --company <companyId> --agent <agentId> --input ./input.mov --output ./output.mp4
 ```
 
+Internal skill ids stay stable for CLI/API use. The desktop app shows friendlier assignment labels such as `Repository Mapper`, `Browser Tester`, and `Video Builder` when configuring company agents.
+
 Capability settings can include provider/model hints, path/domain/skill allowlists, secret reference names, evidence/review requirements, and notes. Store secret reference names only; do not store secret values.
 
 ## App-Server API

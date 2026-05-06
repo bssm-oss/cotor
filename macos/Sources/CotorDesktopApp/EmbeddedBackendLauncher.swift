@@ -274,16 +274,12 @@ actor EmbeddedBackendLauncher {
     }
 
     private func mergedEnvironment(javaPath: String) -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        let javaHome = URL(fileURLWithPath: javaPath).deletingLastPathComponent().deletingLastPathComponent().path
-        let appHome = defaultDesktopAppHome().path
-        env["JAVA_HOME"] = env["JAVA_HOME"] ?? javaHome
-        env["COTOR_DESKTOP_APP_HOME"] = env["COTOR_DESKTOP_APP_HOME"] ?? appHome
-        env["COTOR_APP_HOME"] = env["COTOR_APP_HOME"] ?? appHome
-        env["COTOR_APP_TOKEN"] = env["COTOR_APP_TOKEN"] ?? DesktopAPI.appToken
-        let defaultPath = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
-        env["PATH"] = [env["PATH"], defaultPath].compactMap { $0 }.joined(separator: ":")
-        return env
+        sanitizedEmbeddedBackendEnvironment(
+            processEnvironment: ProcessInfo.processInfo.environment,
+            javaPath: javaPath,
+            appHomePath: defaultDesktopAppHome().path,
+            appToken: DesktopAPI.appToken
+        )
     }
 
     private func usesExternalServerConfiguration() -> Bool {
@@ -410,4 +406,56 @@ actor EmbeddedBackendLauncher {
         self.process = nil
         return terminated
     }
+}
+
+internal func sanitizedEmbeddedBackendEnvironment(
+    processEnvironment: [String: String],
+    javaPath: String,
+    appHomePath: String,
+    appToken: String
+) -> [String: String] {
+    let passthroughKeys: Set<String> = [
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "NO_COLOR",
+        "CODEX_HOME",
+        "COTOR_CODEX_OAUTH_HOME"
+    ]
+    var env = processEnvironment.filter { key, value in
+        !value.isEmpty && (passthroughKeys.contains(key) || key.hasPrefix("LC_"))
+    }
+    let javaHome = URL(fileURLWithPath: javaPath).deletingLastPathComponent().deletingLastPathComponent().path
+    let defaultPath = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+
+    env["JAVA_HOME"] = nonEmpty(processEnvironment["JAVA_HOME"]) ?? javaHome
+    env["COTOR_DESKTOP_APP_HOME"] = appHomePath
+    env["COTOR_APP_HOME"] = appHomePath
+    env["COTOR_APP_TOKEN"] = appToken
+    env["PATH"] = mergePath(nonEmpty(processEnvironment["PATH"]), defaultPath)
+    return env
+}
+
+private func nonEmpty(_ value: String?) -> String? {
+    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
+    return trimmed
+}
+
+private func mergePath(_ inheritedPath: String?, _ defaultPath: String) -> String {
+    let entries = [inheritedPath, defaultPath]
+        .compactMap(nonEmpty)
+        .flatMap { $0.split(separator: ":").map(String.init) }
+    var seen = Set<String>()
+    let uniqueEntries = entries.filter { entry in
+        seen.insert(entry).inserted
+    }
+    return uniqueEntries.joined(separator: ":")
 }

@@ -45,21 +45,21 @@ data class SkillRunResult(
 fun skillCatalog(): List<SkillCatalogEntry> = listOf(
     SkillCatalogEntry(
         name = "graphify",
-        displayName = "Graphify",
-        description = "Query and explain repository graph structure from graphify-out artifacts.",
+        displayName = "Repository Mapper",
+        description = "Read the repository map and explain how important parts of the codebase connect.",
         requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.KNOWLEDGE_GRAPH_READ),
         dangerous = false
     ),
     SkillCatalogEntry(
         name = "browser-smoke",
-        displayName = "Browser Smoke",
-        description = "Plan a local-first Playwright smoke check with screenshot or trace evidence.",
+        displayName = "Browser Tester",
+        description = "Check an app in a browser and collect screenshot or trace evidence when needed.",
         requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_SCREENSHOT)
     ),
     SkillCatalogEntry(
         name = "video-plan",
-        displayName = "Video Plan",
-        description = "Plan local Remotion or FFmpeg video work without rendering or uploading by default.",
+        displayName = "Video Builder",
+        description = "Plan local video work with Remotion or FFmpeg without rendering or uploading by default.",
         requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.VIDEO_SCRIPT_WRITE)
     )
 )

@@ -76,6 +76,7 @@ swift run --package-path macos CotorDesktopApp
 ```
 
 When the bundled backend is launcher-managed, the launcher and `DesktopAPI` both read the same `COTOR_APP_TOKEN` value. If the variable is unset, both sides fall back to the desktop-local token used for embedded sessions. The packaged launcher passes this token through the backend environment and a `0600` runtime token file rather than placing it in the backend process arguments.
+The embedded backend receives a minimal sanitized environment instead of the full parent shell environment, so incidental API keys, GitHub/Linear tokens, and password-like variables are not inherited by the local app-server. Run an external `cotor app-server` explicitly if a workflow must provide additional environment-scoped credentials.
 
 ## Install A Local App Bundle
 
@@ -116,6 +117,7 @@ The current macOS shell has two top-level modes.
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
   - dedicated `Chat Control` navigation surface that shows live messages/context, backend memory snapshot, confirmation-first proposal previews, and lightweight main/helper assignment controls
+  - CEO chat intake: a vague chat request can be confirmed into one CEO-owned goal, a clarified brief, and assigned downstream issues without creating a GitHub repository
 - company activity feed with live event-driven updates
 - live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event
 - issue execution detail cards now show agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary for each issue-linked run
@@ -162,6 +164,7 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/projects`
 - `GET /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/goals`
+- `POST /api/app/companies/{companyId}/chat-intake`
 - `GET /api/app/companies/{companyId}/issues`
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
@@ -181,7 +184,8 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - create multiple companies
 - bind each company to one working folder
 - define company agents with minimal user input
-- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or installed local models discovered from Ollama/LM Studio explicitly
+- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:e2b` alias is unavailable.
+- show the built-in skill catalog in the company agent editor and save each agent's friendly skill selections into the `SKILL_RUN` capability allowlist.
 - expose the repository map as a built-in company-agent choice when the local map tool is available, and inject lightweight workspace-map guidance into every company agent execution memory bundle
 - create a company goal
 - auto-decompose that goal into issues
@@ -190,12 +194,14 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect linked tasks and runs
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to a plain repository `Map`, with synthesized runtime/backend/review/session wall events and floor-view summaries
-- use the Chat Control surface to preview and explicitly confirm goal creation, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
+- use the Chat Control surface to preview and explicitly confirm goal creation, CEO chat intake, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
+- turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step
 - choose the main agent and helper team directly from Chat Control before staging a confirmed request
 - inspect company activity without manual refresh in normal company mode
 - inspect runtime health, CEO approval/blocked/review attention, and the latest runtime signal from the compact company summary banner
 - inspect estimated spend and adjust daily/monthly cost guardrails without leaving the company console
 - warn during company creation when GitHub PR publishing is required but the repository is not ready for `gh`/`origin` publishing
+- surface a compact GitHub quick-connect panel in the company sidebar when PR mode is blocked by a missing `gh` CLI, `gh` auth, or `origin`
 - connect an existing GitHub repository from the GitHub settings panel without auto-creating a remote repository when `origin` is missing
 - start, stop, and inspect the local runtime loop
 - keep an explicit company stop sticky until the user presses Start again, even if active autonomous goals still exist
