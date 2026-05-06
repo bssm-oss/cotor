@@ -288,7 +288,8 @@ class AppServerTest : FunSpec({
                 path = null,
                 networkTarget = null,
                 command = null,
-                skill = null
+                skill = null,
+                channel = null
             )
         } returns CapabilitySimulationResult(
             action = "github.merge",
@@ -328,7 +329,8 @@ class AppServerTest : FunSpec({
                 path = null,
                 networkTarget = null,
                 command = null,
-                skill = "graphify"
+                skill = "graphify",
+                channel = null
             )
         } returns CapabilitySimulationResult(
             action = "skill.run",
@@ -365,7 +367,8 @@ class AppServerTest : FunSpec({
                     path = null,
                     networkTarget = null,
                     command = null,
-                    skill = "graphify"
+                    skill = "graphify",
+                    channel = null
                 )
             }
         }
@@ -539,6 +542,80 @@ class AppServerTest : FunSpec({
                     )
                 )
             }
+        }
+    }
+
+    test("marketing policy and run routes delegate to browser-driven marketing backend") {
+        val policy = MarketingDelegationPolicy(
+            id = "policy-1",
+            companyId = "company-1",
+            agentId = "agent-1",
+            allowedDomains = listOf("cms.example.com"),
+            channelAccounts = listOf(
+                MarketingChannelAccount(channel = "web", accountRef = "cms", allowedDomains = listOf("cms.example.com"))
+            )
+        )
+        val run = MarketingRunRecord(
+            id = "run-1",
+            companyId = "company-1",
+            agentId = "agent-1",
+            objective = "Publish update",
+            channels = listOf("web"),
+            delegationPolicyId = "policy-1",
+            status = MarketingRunStatus.COMPLETED
+        )
+        coEvery {
+            desktopService.listMarketingDelegationPolicies(companyId = "company-1", agentId = null)
+        } returns listOf(policy)
+        coEvery {
+            desktopService.upsertMarketingDelegationPolicy(any())
+        } returns policy
+        coEvery {
+            desktopService.createMarketingRun(any())
+        } returns run
+        coEvery {
+            desktopService.marketingRun("run-1")
+        } returns run
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val policies = client.get("/api/app/marketing/policies?companyId=company-1") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val savedPolicy = client.post("/api/app/marketing/policies") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody(
+                    """
+                    {"companyId":"company-1","agentId":"agent-1","allowedDomains":["cms.example.com"],"channelAccounts":[{"channel":"web","accountRef":"cms","allowedDomains":["cms.example.com"],"secretRefs":[]}]}
+                    """.trimIndent()
+                )
+            }
+            val createdRun = client.post("/api/app/marketing/runs") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"companyId":"company-1","agentId":"agent-1","objective":"Publish update","channels":["web"],"delegationPolicyId":"policy-1"}""")
+            }
+            val fetchedRun = client.get("/api/app/marketing/runs/run-1") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            policies.status shouldBe HttpStatusCode.OK
+            policies.bodyAsText() shouldContain "cms.example.com"
+            savedPolicy.status shouldBe HttpStatusCode.OK
+            savedPolicy.bodyAsText() shouldContain "policy-1"
+            createdRun.status shouldBe HttpStatusCode.OK
+            createdRun.bodyAsText() shouldContain "\"status\":\"COMPLETED\""
+            fetchedRun.status shouldBe HttpStatusCode.OK
+            fetchedRun.bodyAsText() shouldContain "run-1"
+            coVerify(exactly = 1) { desktopService.createMarketingRun(any()) }
         }
     }
 

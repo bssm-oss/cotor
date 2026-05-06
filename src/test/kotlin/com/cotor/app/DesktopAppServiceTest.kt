@@ -3549,7 +3549,7 @@ class DesktopAppServiceTest : FunSpec({
         val issues = service.listIssues(goal.id)
 
         profiles.map { it.executionAgentName }.distinct() shouldBe listOf("opencode")
-        profiles shouldHaveSize 9
+        profiles shouldHaveSize 10
         val assignedProfileIds = issues.mapNotNull { it.assigneeProfileId }.toSet()
         assignedProfileIds.shouldNotBeEmpty()
         assignedProfileIds.subtract(profiles.map { it.id }.toSet()).shouldBeEmpty()
@@ -3601,6 +3601,7 @@ class DesktopAppServiceTest : FunSpec({
         definitions.map { it.title } shouldBe listOf(
             "CEO",
             "Product Strategist",
+            "Marketing Operator",
             "Engineering Lead",
             "UX Builder",
             "UI Builder",
@@ -4609,6 +4610,7 @@ class DesktopAppServiceTest : FunSpec({
         definitions.map { it.title } shouldBe listOf(
             "CEO",
             "Product Strategist",
+            "Marketing Operator",
             "Engineering Lead",
             "UX Builder",
             "UI Builder",
