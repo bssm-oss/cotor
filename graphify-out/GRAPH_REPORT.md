@@ -1,7 +1,7 @@
 # Graph Report - cotor-company-operator-chat-fix  (2026-05-06)
 
 ## Corpus Check
-- 328 files · ~523,363 words
+- 328 files · ~523,357 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
