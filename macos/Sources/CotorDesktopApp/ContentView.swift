@@ -806,7 +806,7 @@ private struct SidebarView: View {
                 )
                 companyNavButton(
                     .chat,
-                    title: l("Chat Control", "채팅 컨트롤"),
+                    title: l("Company Operator", "운영 채팅"),
                     subtitle: l("Agent chat and approvals", "에이전트 대화와 승인"),
                     systemImage: "bubble.left.and.text.bubble.right",
                     badge: "\(store.dashboard.agentMessages.count)"
@@ -1771,6 +1771,118 @@ private struct SidebarView: View {
         .accessibilityLabel(skill.displayName)
     }
 
+    private var agentMarketingPolicyBlock: some View {
+        agentFieldBlock(
+            title: l("Marketing Delegation Policy", "마케팅 위임 정책"),
+            helper: l("Policy-outside browser actions are denied and replanned instead of queued for approval.", "정책 밖 브라우저 동작은 승인 대기 없이 거부되고 더 작은 범위로 재계획됩니다.")
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], alignment: .leading, spacing: 10) {
+                    agentFieldBlock(
+                        title: l("Domains", "도메인"),
+                        helper: l("Owned web, CMS, or social domains.", "자사 웹, CMS 또는 소셜 도메인입니다.")
+                    ) {
+                        TextField("example.com, cms.example.com", text: $store.marketingPolicyAllowedDomains)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    agentFieldBlock(
+                        title: l("Channels", "채널"),
+                        helper: l("Organic channels only.", "유기적 채널만 허용합니다.")
+                    ) {
+                        TextField("web, linkedin, x", text: $store.marketingPolicyChannels)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    agentFieldBlock(
+                        title: l("Daily Posts", "일 게시 한도"),
+                        helper: l("Maximum delegated publishes per day.", "하루 자동 게시 최대치입니다.")
+                    ) {
+                        TextField("1", text: $store.marketingPolicyDailyPostLimit)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    agentFieldBlock(
+                        title: l("Max Runtime", "최대 실행"),
+                        helper: l("Seconds before browser work stops.", "브라우저 작업 중단 시간(초)입니다.")
+                    ) {
+                        TextField("900", text: $store.marketingPolicyMaxRuntimeSeconds)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+
+                agentFieldBlock(
+                    title: l("Brand Tone", "브랜드 톤"),
+                    helper: l("Concise tone guidance for generated copy.", "생성 문구에 적용할 짧은 톤 가이드입니다.")
+                ) {
+                    TextField(l("Helpful, precise, product-led", "도움되고 정확한 제품 중심 톤"), text: $store.marketingPolicyBrandTone)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                agentFieldBlock(
+                    title: l("Forbidden Terms", "금칙어"),
+                    helper: l("Comma-separated words or phrases.", "쉼표로 구분한 단어나 문구입니다.")
+                ) {
+                    TextField(l("forbidden, unapproved", "금칙어, 미승인"), text: $store.marketingPolicyForbiddenTerms)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                agentFieldBlock(
+                    title: l("Prohibited Actions", "금지 행동"),
+                    helper: l("Paid ads, bulk email, DMs, payment, and budget changes stay out of V1.", "유료 광고, 대량 이메일, DM, 결제, 예산 변경은 V1 범위 밖입니다.")
+                ) {
+                    TextField("paid-ad, budget-change, bulk-email, direct-message, payment", text: $store.marketingPolicyProhibitedActions)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], alignment: .leading, spacing: 10) {
+                    agentFieldBlock(
+                        title: l("Session Ref", "세션 참조"),
+                        helper: l("Browser profile or storage-state reference.", "브라우저 프로필 또는 storage-state 참조입니다.")
+                    ) {
+                        TextField("marketing-browser-profile", text: $store.marketingPolicyBrowserSessionRef)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    agentFieldBlock(
+                        title: l("Secret Refs", "Secret 참조"),
+                        helper: l("References only; no secret values.", "값이 아닌 참조만 저장합니다.")
+                    ) {
+                        TextField("secret://cms/session", text: $store.marketingPolicySecretRefs)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    ShellTag(text: l("Delegated AUTO", "위임 자동"), tint: ShellPalette.accent)
+                    Text(store.marketingPolicyConnectionSummary)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+
+                if !store.recentMarketingRunsForEditedAgent.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(l("Recent Runs", "최근 실행"))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(ShellPalette.text)
+                        ForEach(store.recentMarketingRunsForEditedAgent.prefix(3)) { run in
+                            HStack(spacing: 8) {
+                                ShellTag(text: run.status, tint: run.status == "COMPLETED" ? ShellPalette.success : ShellPalette.accentWarm)
+                                Text(run.objective)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(ShellPalette.muted)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func companySubpanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
             .padding(12)
@@ -2039,6 +2151,18 @@ private struct SidebarView: View {
                 }
 
                     agentSkillsBlock
+
+                    if store.isMarketingOperatorSelected {
+                        agentFieldBlock(
+                            title: l("Marketing Delegation Policy", "마케팅 위임 정책"),
+                            helper: l("Policy-outside browser actions are denied.", "정책 밖 브라우저 동작은 거부됩니다.")
+                        ) {
+                            Text(store.marketingPolicyConnectionSummary)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(ShellPalette.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
             }
 
             companySubpanel {
@@ -3125,6 +3249,8 @@ private struct CompanyChatControlRail: View {
     @Binding var draft: String
     @Binding var applyReviewDraft: String
     @State private var isApplyingGoalProposal = false
+    @State private var showFullAutoConfirmation = false
+    @State private var requestedAutomationMode: String?
 
     private var l: AppLanguage { store.language }
 
@@ -3481,25 +3607,285 @@ private struct CompanyChatControlRail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
-            sourceStrip
-            memoryStrip
-            conversationZone
-            composerZone
+            operatorHeader
+            operatorStatusStrip
+            operatorConversationZone
+            operatorComposerZone
         }
         .shellCard(accent: ShellPalette.lineStrong)
+        .confirmationDialog(
+            l("Enable FULL_AUTO?", "FULL_AUTO를 켤까요?"),
+            isPresented: $showFullAutoConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(l("Enable FULL_AUTO", "FULL_AUTO 켜기")) {
+                Task {
+                    await store.setSelectedCompanyOperatorAutomationMode("FULL_AUTO", confirmFullAuto: true)
+                    requestedAutomationMode = nil
+                }
+            }
+            Button(l("Cancel", "취소"), role: .cancel) {
+                requestedAutomationMode = nil
+            }
+        } message: {
+            Text(l("Routine approvals will stop. Hard-gated actions remain blocked.", "일반 승인 요청은 줄어들지만 hard-gate 작업은 계속 차단됩니다."))
+        }
+    }
+
+    private var operatorHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(l("Company Operator", "운영 채팅"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                Text(l("Natural-language control for the selected company.", "선택된 회사를 자연어로 운영합니다."))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            StatusSummaryPill(text: store.selectedOperatorAutomationMode, tint: automationModeTint(store.selectedOperatorAutomationMode))
+        }
+    }
+
+    private var operatorStatusStrip: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker(l("Automation", "자동화"), selection: Binding(
+                get: { store.selectedOperatorAutomationMode },
+                set: { nextMode in
+                    if nextMode == "FULL_AUTO", store.selectedOperatorAutomationMode != "FULL_AUTO" {
+                        requestedAutomationMode = nextMode
+                        showFullAutoConfirmation = true
+                    } else {
+                        Task { await store.setSelectedCompanyOperatorAutomationMode(nextMode) }
+                    }
+                }
+            )) {
+                Text("ASK_ME").tag("ASK_ME")
+                Text("AGENT_APPROVED").tag("AGENT_APPROVED")
+                Text("FULL_AUTO").tag("FULL_AUTO")
+            }
+            .pickerStyle(.segmented)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ShellTag(text: scopeChip, tint: ShellPalette.accent)
+                    ShellTag(text: l("Runtime", "런타임") + " " + (store.selectedRuntime?.status ?? "STOPPED"), tint: runtimeTint(store.selectedRuntime?.status ?? "STOPPED"))
+                    ShellTag(text: l("Approvals", "승인") + " \(operatorPendingApprovalCount)", tint: operatorPendingApprovalCount > 0 ? ShellPalette.warning : ShellPalette.faint)
+                    ShellTag(text: l("Blocked", "막힘") + " \(store.scopedOpsMetrics(companyID: store.selectedCompanyID).blockedIssues)", tint: ShellPalette.accentWarm)
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    private var operatorConversationZone: some View {
+        MeetingRoomZoneCard(
+            title: l("Operator Results", "운영 결과"),
+            subtitle: l("Commands, status cards, and internal approval routes.", "명령 결과, 상태 카드, 내부 승인 라우팅입니다."),
+            tint: ShellPalette.accent
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                if store.operatorCommandResponses.isEmpty && conversationHistory.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        EmptyStateView(
+                            image: "terminal",
+                            title: l("No operator commands yet", "아직 운영 명령이 없습니다"),
+                            subtitle: l("Try a short command below.", "아래에 짧게 입력하세요.")
+                        )
+                        .frame(minHeight: 150)
+                        exampleCommandChips
+                    }
+                } else {
+                    ForEach(store.operatorCommandResponses) { response in
+                        operatorResponseCard(response)
+                    }
+                    ForEach(conversationHistory.prefix(layoutMode == .wide ? 8 : 5)) { item in
+                        historyRow(item)
+                    }
+                }
+            }
+        }
+    }
+
+    private var operatorComposerZone: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $store.operatorCommandDraft)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(ShellPalette.text)
+                    .frame(minHeight: layoutMode == .wide ? 106 : 92)
+                    .padding(8)
+                    .scrollContentBackground(.hidden)
+                    .background(ShellPalette.panelDeeper)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                            .stroke(ShellPalette.line, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+
+                if store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(l("에이전트들 잘 돌아가고 있는지 확인해줘", "에이전트들 잘 돌아가고 있는지 확인해줘"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ShellPalette.faint)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            HStack(spacing: 8) {
+                exampleButton("에이전트들 잘 돌아가?") {
+                    store.operatorCommandDraft = "에이전트들 잘 돌아가고 있는지 확인해줘"
+                }
+                exampleButton("opencode deepseek") {
+                    store.operatorCommandDraft = "모든 에이전트 opencode deepseek 모델로 바꿔줘"
+                }
+                Spacer(minLength: 8)
+                Button {
+                    let command = store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !command.isEmpty else { return }
+                    store.operatorCommandDraft = ""
+                    Task { _ = await store.runCompanyOperatorCommand(message: command) }
+                } label: {
+                    Label(l("Run", "실행"), systemImage: "paperplane.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.selectedCompany == nil || store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private var exampleCommandChips: some View {
+        FlowLayout(
+            items: [
+                "에이전트들 잘 돌아가?",
+                "모든 에이전트 opencode deepseek",
+                "막힌 이슈 다시 굴려"
+            ],
+            selected: []
+        ) { command in
+            store.operatorCommandDraft = command
+        }
+    }
+
+    private func operatorResponseCard(_ response: OperatorCommandResponsePayload) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                StatusSummaryPill(text: response.automationMode, tint: automationModeTint(response.automationMode))
+                Spacer(minLength: 0)
+                if let summary = response.summary {
+                    StatusSummaryPill(text: summary.runtimeStatus, tint: runtimeTint(summary.runtimeStatus))
+                }
+            }
+
+            Text(response.message)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ShellPalette.text)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let summary = response.summary {
+                HStack(spacing: 6) {
+                    summaryChip(l("Agents", "에이전트"), "\(summary.activeAgentCount)", ShellPalette.accent)
+                    summaryChip(l("Blocked", "막힘"), "\(summary.blockedIssueCount)", ShellPalette.accentWarm)
+                    summaryChip(l("Review", "리뷰"), "\(summary.reviewQueueCount)", ShellPalette.warning)
+                    summaryChip(l("Approval", "승인"), "\(summary.pendingApprovalCount)", ShellPalette.faint)
+                }
+            }
+
+            operatorActionGroup(actions: response.actions, tint: ShellPalette.accent)
+            operatorActionGroup(actions: response.pendingApprovals, tint: ShellPalette.warning)
+            operatorActionGroup(actions: response.blockedActions, tint: ShellPalette.accentWarm)
+        }
+        .padding(10)
+        .background(ShellPalette.panel)
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .stroke(ShellPalette.line, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+    }
+
+    private func operatorActionGroup(actions: [OperatorCommandActionPayload], tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(actions) { action in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(action.title)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(ShellPalette.text)
+                        Text(action.detail)
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(ShellPalette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    StatusSummaryPill(text: action.status, tint: statusTint(for: action.status))
+                }
+            }
+        }
+    }
+
+    private func summaryChip(_ title: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(ShellPalette.faint)
+            Text(value)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(ShellPalette.panelDeeper)
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusTiny, style: .continuous))
+    }
+
+    private func exampleButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private var operatorPendingApprovalCount: Int {
+        let responsePending = store.operatorCommandResponses.first?.pendingApprovals.count ?? 0
+        return responsePending + (store.selectedRuntime?.waitingApprovalCount ?? 0)
+    }
+
+    private func automationModeTint(_ mode: String) -> Color {
+        switch mode.uppercased() {
+        case "FULL_AUTO": return ShellPalette.accentWarm
+        case "ASK_ME": return ShellPalette.warning
+        default: return ShellPalette.accent
+        }
+    }
+
+    private func runtimeTint(_ status: String) -> Color {
+        switch status.uppercased() {
+        case "RUNNING": return ShellPalette.accent
+        case "ERROR": return ShellPalette.accentWarm
+        default: return ShellPalette.faint
+        }
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(l("Chat Control", "채팅 컨트롤"))
+                Text(l("Company Operator", "운영 채팅"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ShellPalette.text)
                 Text(
                     l(
-                        "Agent messages, context, and confirmed company actions.",
-                        "에이전트 메시지, 컨텍스트, 확인된 회사 액션을 관리합니다."
+                        "Natural-language company operations and internal approval routing.",
+                        "자연어 회사 운영과 내부 승인 라우팅입니다."
                     )
                 )
                 .font(.system(size: 11, weight: .medium))
@@ -5219,8 +5605,8 @@ private struct CenterPaneView: View {
     private var companyChatControlPage: some View {
         VStack(alignment: .leading, spacing: 12) {
             companyPageHeader(
-                title: l("Chat Control", "채팅 컨트롤"),
-                subtitle: l("Review agent messages, company context, and pending actions.", "에이전트 메시지, 회사 컨텍스트, 대기 중인 액션을 검토합니다.")
+                title: l("Company Operator", "운영 채팅"),
+                subtitle: l("Run selected-company operations through a command chat.", "선택된 회사 운영을 명령 채팅으로 실행합니다.")
             )
             CompanyChatControlRail(
                 layoutMode: layoutMode,
