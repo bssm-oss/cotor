@@ -92,7 +92,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Collections
@@ -4400,8 +4399,10 @@ class DesktopAppService(
             containsAny(text, "비용 상한", "budget cap", "cost cap", "unlimited budget", "무제한 비용") &&
                 containsAny(text, "해제", "없애", "remove", "disable", "unlock", "무제한") ->
                 "Budget cap removal blocked"
-            (containsAny(text, "배포", "deploy", "deployment", "merge", "머지") && containsAny(text, "정책", "policy") &&
-                containsAny(text, "해제", "disable", "unlock", "없애", "끄")) ->
+            (
+                containsAny(text, "배포", "deploy", "deployment", "merge", "머지") && containsAny(text, "정책", "policy") &&
+                    containsAny(text, "해제", "disable", "unlock", "없애", "끄")
+                ) ->
                 "Deployment or merge policy unlock blocked"
             else -> null
         } ?: return null

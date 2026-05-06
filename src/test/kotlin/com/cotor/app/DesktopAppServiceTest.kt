@@ -318,11 +318,13 @@ class DesktopAppServiceTest : FunSpec({
             createdAt = now,
             updatedAt = now
         )
-        stateStore.save(baseState.copy(
-            projectContexts = if (baseState.projectContexts.any { it.id == project.id }) baseState.projectContexts else baseState.projectContexts + project,
-            goals = baseState.goals + goal,
-            issues = baseState.issues + issue
-        ))
+        stateStore.save(
+            baseState.copy(
+                projectContexts = if (baseState.projectContexts.any { it.id == project.id }) baseState.projectContexts else baseState.projectContexts + project,
+                goals = baseState.goals + goal,
+                issues = baseState.issues + issue
+            )
+        )
 
         val response = service.runOperatorCommand(company.id, "막힌 이슈 다시 굴려")
 
@@ -376,11 +378,13 @@ class DesktopAppServiceTest : FunSpec({
             createdAt = now,
             updatedAt = now
         )
-        stateStore.save(baseState.copy(
-            projectContexts = if (baseState.projectContexts.any { it.id == project.id }) baseState.projectContexts else baseState.projectContexts + project,
-            goals = baseState.goals + goal,
-            issues = baseState.issues + issue
-        ))
+        stateStore.save(
+            baseState.copy(
+                projectContexts = if (baseState.projectContexts.any { it.id == project.id }) baseState.projectContexts else baseState.projectContexts + project,
+                goals = baseState.goals + goal,
+                issues = baseState.issues + issue
+            )
+        )
 
         val modeResponse = service.runOperatorCommand(
             companyId = company.id,
