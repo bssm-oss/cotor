@@ -114,9 +114,10 @@ The current macOS shell has two top-level modes.
   - company creation bound to one root folder
   - direct `Meeting Room` navigation that opens to a plain repository `Map`, falls back to a simple folder map when prepared graph data is missing, and exposes `Agent Meeting` plus live floor views without showing technical graph paths
   - agent-definition composer
+  - Marketing Operator skill selection that reveals a delegation-policy panel for allowed channels, domains, daily publish limits, brand rules, session/secret references, and recent marketing run logs
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
-  - dedicated `Chat Control` navigation surface that shows live messages/context, backend memory snapshot, confirmation-first proposal previews, and lightweight main/helper assignment controls
+  - dedicated `Company Operator` navigation surface with an operations chat, automation mode control, runtime/approval status, command result cards, and internal senior-agent approval routing
   - CEO chat intake: a vague chat request can be confirmed into one CEO-owned goal, a clarified brief, and assigned downstream issues without creating a GitHub repository
 - company activity feed with live event-driven updates
 - live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event
@@ -165,6 +166,7 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/chat-intake`
+- `POST /api/app/companies/{companyId}/operator/commands`
 - `GET /api/app/companies/{companyId}/issues`
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
@@ -173,6 +175,12 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
 - `POST /api/app/companies/{companyId}/runtime/stop`
+- `GET /api/app/marketing/policies`
+- `POST /api/app/marketing/policies`
+- `PATCH /api/app/marketing/policies/{policyId}`
+- `GET /api/app/marketing/runs`
+- `POST /api/app/marketing/runs`
+- `GET /api/app/marketing/runs/{runId}`
 - `PATCH /api/app/companies/{companyId}/linear`
 - `POST /api/app/companies/{companyId}/linear/resync`
 - `PATCH /api/app/workspaces/{workspaceId}/base-branch`
@@ -186,6 +194,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - define company agents with minimal user input
 - store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:e2b` alias is unavailable.
 - show the built-in skill catalog in the company agent editor and save each agent's friendly skill selections into the `SKILL_RUN` capability allowlist.
+- configure a Marketing Operator delegation policy from the agent editor; the policy opens browser and marketing publish capabilities only for allowed owned/social domains and channels, while out-of-policy actions are denied instead of routed to user approval.
 - expose the repository map as a built-in company-agent choice when the local map tool is available, and inject lightweight workspace-map guidance into every company agent execution memory bundle
 - create a company goal
 - auto-decompose that goal into issues
@@ -194,9 +203,10 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect linked tasks and runs
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to a plain repository `Map`, with synthesized runtime/backend/review/session wall events and floor-view summaries
-- use the Chat Control surface to preview and explicitly confirm goal creation, CEO chat intake, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
+- use the Company Operator surface to ask for status, bulk switch selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
 - turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step
-- choose the main agent and helper team directly from Chat Control before staging a confirmed request
+- choose `ASK_ME`, `AGENT_APPROVED`, or `FULL_AUTO` automation; `AGENT_APPROVED` is the default and routes recoverable sensitive actions to CEO/QA/Reviewer approval instead of a user confirmation rail
+- keep hard-gated actions blocked in every mode, including repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks
 - inspect company activity without manual refresh in normal company mode
 - inspect runtime health, CEO approval/blocked/review attention, and the latest runtime signal from the compact company summary banner
 - inspect estimated spend and adjust daily/monthly cost guardrails without leaving the company console

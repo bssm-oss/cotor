@@ -18,8 +18,9 @@ Cotor는 회사 에이전트마다 명시적인 capability profile을 저장하�
 - file write, shell execution, package install, git write, PR 생성/수정, external API call, memory write, graph write, security scan은 기본 `APPROVAL_REQUIRED`입니다.
 - local test, lint, build, git read는 상황에 맞게 `AUTO`입니다.
 - memory read, graph read, file read, shell read, GitHub read는 읽기 중심 모드입니다.
+- `WEB_PUBLISH`, `SOCIAL_POST_CREATE`, `MARKETING_ANALYTICS_READ`는 마케팅 전용 capability이며, 위임된 Marketing Operator 정책이 열기 전까지 기본 `DISABLED`입니다.
 
-새 회사의 기본 로스터에는 저장소 범위 실행 profile도 함께 저장됩니다. 이 profile은 기본 회사 에이전트가 회사 저장소 루트 안에서만 로컬 agent CLI 실행과 격리 git worktree 생성을 자동으로 할 수 있게 합니다. publish, PR 수정, merge, browser 제어, package install, external API call 같은 더 위험한 action은 운영자가 profile을 바꾸지 않는 한 더 엄격한 catalog 기본값을 유지합니다.
+새 회사의 기본 로스터에는 저장소 범위 실행 profile도 함께 저장됩니다. 이 profile은 기본 회사 에이전트가 회사 저장소 루트 안에서만 로컬 agent CLI 실행과 격리 git worktree 생성을 자동으로 할 수 있게 합니다. publish, PR 수정, merge, browser 제어, package install, external API call, 마케팅 게시 같은 더 위험한 action은 운영자가 profile을 바꾸지 않는 한 더 엄격한 catalog 기본값을 유지합니다.
 
 ## Backend 강제
 
@@ -28,6 +29,7 @@ guard는 action block이 실행되기 전에 runtime action kind를 capability k
 - `agent.exec` 및 위험 shell command -> `SHELL_EXEC`
 - `skill.run` -> `SKILL_RUN`; `skillAllowlist`가 있으면 action metadata의 `skill` 값이 일치해야 합니다.
 - `browser.read`, `browser.interact`, `browser.screenshot`, `browser.trace`, `browser.record`, `browser.external-domain`, `browser.login-flow` -> 대응하는 `BROWSER_*` key
+- `web.publish`, `social.post-create`, `marketing.analytics-read` -> 대응하는 마케팅 key
 - `video.script-write`, `video.render-local`, `video.generate-remote`, `video.transcode`, `video.upload` -> 대응하는 `VIDEO_*` key
 - package manager install -> `PACKAGE_INSTALL`
 - test/lint/build command -> `TEST_RUN`, `LINT_RUN`, `BUILD_RUN`
@@ -60,9 +62,21 @@ cotor video render --company <companyId> --agent <agentId> --project ./video --p
 cotor video transcode --company <companyId> --agent <agentId> --input ./input.mov --output ./output.mp4
 ```
 
-CLI/API에서는 내부 skill id를 안정적으로 유지합니다. 데스크톱 앱에서는 회사 에이전트를 설정할 때 `Repository Mapper`, `Browser Tester`, `Video Builder` 같은 더 친근한 배정 이름으로 표시합니다.
+CLI/API에서는 내부 skill id를 안정적으로 유지합니다. 데스크톱 앱에서는 회사 에이전트를 설정할 때 `Repository Mapper`, `Browser Tester`, `Video Builder`, `Marketing Operator`, `Audience Scout`, `Content Publisher`, `Social Publisher`, `Analytics Reporter` 같은 더 친근한 배정 이름으로 표시합니다.
 
-Capability setting에는 provider/model 힌트, path/domain/skill allowlist, secret reference 이름, evidence/review 요구사항, notes를 넣을 수 있습니다. secret 값은 저장하지 말고 reference 이름만 저장하세요.
+Capability setting에는 provider/model 힌트, path/domain/channel/skill allowlist, secret reference 이름, evidence/review 요구사항, notes를 넣을 수 있습니다. secret 값은 저장하지 말고 reference 이름만 저장하세요.
+
+## Marketing Operator 위임
+
+Marketing Operator V1은 자사 웹/CMS와 유기적 소셜 작업에 한해서, 매 action마다 approval queue를 만들지 않고 browser control을 열 수 있는 유일한 예외입니다. 제어 단위는 런타임 승인이 아니라 `MarketingDelegationPolicy`입니다.
+
+- `BROWSER_READ`, `BROWSER_INTERACT`, `BROWSER_EXTERNAL_DOMAIN`, `BROWSER_LOGIN_FLOW`는 `Marketing Operator` skill이 배정된 회사 에이전트에게만, 그리고 정책의 domain/channel allowlist 안에서만 `AUTO`가 될 수 있습니다.
+- `WEB_PUBLISH`, `SOCIAL_POST_CREATE`, `MARKETING_ANALYTICS_READ`도 같은 allowlist 규칙을 따릅니다.
+- 정책 밖 action은 `DENIED`로 반환하며 승인 요청으로 전환하지 않습니다. run에는 denial을 기록하고, operator는 범위를 줄여 다시 계획할 수 있습니다.
+- 각 run은 target URL, input summary, posted URL, screenshot path, UTM, status, idempotency key를 담은 `MarketingActionRecord`를 남깁니다.
+- secret 값은 Cotor에 저장하지 않습니다. 정책에는 `secretRefs`와 선택적 browser session/profile reference만 저장합니다.
+
+V1 범위는 의도적으로 좁습니다. 자사 웹사이트/CMS surface와 유기적 social posting만 포함합니다. 유료 광고, 대량 이메일, 자동 DM, 결제 작업, credential 저장, 예산 변경은 계속 금지 action입니다.
 
 ## App-Server API
 
@@ -71,6 +85,12 @@ Capability setting에는 provider/model 힌트, path/domain/skill allowlist, sec
 - `PATCH /api/app/companies/{companyId}/agents/{agentId}/capabilities`
 - `POST /api/app/companies/{companyId}/agents/{agentId}/capabilities/simulate`
 - `POST /api/app/browser/smoke`
+- `GET /api/app/marketing/policies`
+- `POST /api/app/marketing/policies`
+- `PATCH /api/app/marketing/policies/{policyId}`
+- `GET /api/app/marketing/runs`
+- `POST /api/app/marketing/runs`
+- `GET /api/app/marketing/runs/{runId}`
 - `POST /api/app/video/plan`
 - `POST /api/app/video/render-local`
 - `POST /api/app/video/transcode`

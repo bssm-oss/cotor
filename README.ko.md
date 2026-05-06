@@ -150,7 +150,7 @@ cotor delete    # 삭제
 
 - 최상위 `Company` / `TUI` 모드 분리
 - `Company` 모드에서 회사 목록, 에이전트 정의, 목표, 이슈 보드/캔버스, 활동 피드, 런타임 제어, 전용 `미팅룸` surface 제공
-- 라이브 대화/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal 흐름, 대표/도움 에이전트 배정, 대충 쓴 요청을 담당 작업으로 바꾸는 CEO 채팅 인테이크를 담은 전용 `채팅 컨트롤` 탐색 surface 제공
+- 자연어 운영 채팅, 자동화 모드, 런타임/승인 상태, 명령 결과 카드, CEO/QA/Reviewer 내부 승인 라우팅을 담은 전용 `운영 채팅` 탐색 surface 제공
 - `Company` 요약은 별도 긴 상태 카드 대신 메인 요약 배너 안에서 런타임 건강도, 차단 수, 리뷰 주의 수, 최근 오류/동작을 함께 보여줌
 - `Company` 요약은 선택한 회사의 추정 비용과 일/월 비용 상한도 함께 보여줌
 - `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
@@ -162,7 +162,9 @@ cotor delete    # 삭제
 - 회사 런타임은 이제 이슈/태스크/리뷰 상태 변화가 생기면 바로 깨어나며, 서로 다른 역할이 같은 execution CLI를 쓰더라도 runnable issue를 병렬로 시작할 수 있음
 - CEO 머지는 GitHub 새로고침 결과가 실제 `MERGED`로 확인된 뒤에만 로컬 workflow 상태를 merged로 기록함
 - 회사 CEO/최종 승인 에이전트가 있으면 PR 생성 정책 게이트도 내부 승인으로 처리해서, 사용자가 직접 승인 프롬프트를 누르지 않아도 게시 재시도가 이어짐
+- 운영 채팅은 `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO`를 지원하며 기본값은 `AGENT_APPROVED`. `FULL_AUTO`에서도 저장소 삭제, 대량 파일 삭제, secret 작업, 비용 상한 해제, 배포/머지 정책 해제 같은 hard-gate 작업은 차단
 - 회사 에이전트 정의는 이제 Codex, OpenCode, Ollama, LM Studio, 앱 관리형 로컬 Gemma 모델 같은 provider별로 선택 모델을 개별 지정할 수 있음. Cotor는 설치된 Gemma 4 모델을 우선 사용하고, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 실패 없이 이어감
+- 회사 에이전트에서 Marketing Operator skill을 선택하면 owned/social channel, 허용 domain, 게시 한도, 브랜드 규칙, session/secret reference를 설정하는 위임 정책 패널 표시
 - 회사 실시간 stream이 잠깐 끊겨도 현재 company snapshot은 유지하고, generic decode 오류 대신 회사 전용 재동기화 메시지를 보여줌
 - 이슈 보드는 lane 내부 스크롤을 써서 차단/리뷰 카드가 많아져도 상단만 잘린 채 보이지 않게 함
 - stale한 Cotor retry PR은 배치 정리로 닫아서 같은 리뷰 루프가 수백 개의 오래된 open PR을 계속 남기지 않게 함
@@ -184,15 +186,16 @@ cotor delete    # 삭제
 - 직함/CLI/역할 설명만으로 회사 에이전트 정의
 - `gemma4`, `ollama`, `lmstudio` 에이전트로 회사 에이전트별 provider 모델 선택 저장. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
 - 같은 에이전트 팀에서 내장 저장소 지도 에이전트로 작업공간 구조를 확인하며, 모든 회사 에이전트의 실행 메모리에도 가벼운 작업공간 지도 지침 주입
+- Marketing Operator browser 게시 작업은 사전 위임 정책으로만 열고, 정책 밖 owned/social action은 사용자 승인 queue로 보내지 않고 deny 처리
 - 회사 목표 생성
 - 목표를 이슈로 분해
 - 이슈 위임 및 실행
 - 완료된 회사 이슈 실행은 실험적 pipeline replay flag 없이도 `cotor resume inspect <run-id>`로 durable run을 확인 가능
 - 리뷰 큐 생성
 - 기본 `지도`, 실시간 협업을 보는 `에이전트 회의` 테이블, runtime/backend/review/session 상태를 합성한 이벤트 월, 움직이는 에이전트 플로어를 함께 제공하는 전용 미팅룸 보기
-- 채팅 컨트롤 surface에서 목표 생성, CEO 채팅 인테이크, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
+- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 명령 채팅으로 실행
 - 느슨하게 쓴 채팅 요청도 CEO가 목표, 성공 기준, 담당 하위 이슈로 정리하게 하되 GitHub 저장소는 자동 생성하지 않음
-- 확인용 요청을 만들기 전에 채팅 컨트롤에서 대표 에이전트와 도움 에이전트 팀을 직접 선택
+- `AGENT_APPROVED` 모드에서는 복구 가능한 민감 작업을 사용자 확인 패널 대신 상위 회사 에이전트 승인으로 라우팅
 - 한 wave가 끝나면 CEO planning lane을 다시 열어서 active goal이 첫 batch 이후에도 다음 이슈 wave를 이어서 만들 수 있음
 - continuous improvement goal은 한 개의 좁은 후속 이슈보다 여러 branchable issue와 병렬 slice를 우선 만들도록 유도
 - 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 팀이 한두 개 이슈로만 수렴하지 않게 함

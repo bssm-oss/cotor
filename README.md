@@ -147,7 +147,7 @@ Current desktop model:
 
 - top-level `Company` and `TUI` shell modes
 - `Company` mode for multi-company operations, agent team, goals, issue board/canvas, activity feed, runtime controls, and a dedicated `Meeting Room` surface
-- dedicated `Chat Control` navigation surface with live conversation/context, backend memory snapshot, confirmation-first proposal flow, lightweight main/helper assignment controls, and CEO chat intake for turning vague requests into assigned work
+- dedicated `Company Operator` navigation surface with an operations chat, automation mode control, runtime/approval status, command result cards, and internal CEO/QA/Reviewer approval routing
 - `Company` summary keeps runtime health, blocked workflow count, review attention, and the latest error/action inside the main summary banner instead of a separate tall status card
 - `Company` summary now also shows estimated spend plus daily/monthly cost guardrails for the selected company runtime
 - `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
@@ -159,7 +159,9 @@ Current desktop model:
 - company runtime now wakes immediately on issue/task/review transitions and can dispatch multiple runnable issues in parallel even when different roles share the same execution CLI
 - CEO merge only marks local workflow state as merged after GitHub refresh confirms the PR is actually `MERGED`
 - company CEO/chief approval agents can satisfy PR creation policy gates internally, so publish retries do not stop on a user-facing approval prompt when the company has an approval authority
+- Company Operator supports `ASK_ME`, `AGENT_APPROVED`, and `FULL_AUTO`; `AGENT_APPROVED` is the default, while `FULL_AUTO` still blocks hard-gated actions such as repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks
 - company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, Ollama, LM Studio, and app-managed local Gemma models; Cotor prefers installed Gemma 4 models and falls back to installed Gemma-family models instead of failing on a missing default alias
+- selecting the Marketing Operator skill on a company agent exposes a delegation-policy panel for owned/social channels, allowed domains, publish limits, brand rules, and session/secret references
 - stale Cotor-managed retry PRs are reconciled and closed in batches so repeated review loops do not keep hundreds of obsolete open PRs around
 - legacy CEO merge-conflict blockers are pushed back into execution so the company can rebase, republish, and continue instead of staying stuck in a blocked approval lane
 - if the live company stream drops, the desktop shell keeps the current company snapshot on screen and shows a company-specific re-sync message instead of a generic decode error
@@ -181,15 +183,16 @@ The current build includes a working local operations layer:
 - define company agents with only title, CLI, and role summary
 - optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:e2b` alias is not present.
 - use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory
+- delegate Marketing Operator browser publishing only through a prior policy; out-of-policy owned/social actions are denied rather than sent to a user approval queue
 - create company goals
 - decompose goals into issues
 - delegate and run issues
 - inspect completed company issue runs through `cotor resume inspect <run-id>` without enabling the experimental pipeline replay flag
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page with a default repository `Map`, a visible `Agent Meeting` table for live coordination, synthesized runtime/backend/review/session wall events, and animated agent presence in the floor view
-- use the Chat Control surface to preview and explicitly confirm real goal creation, CEO chat intake, goal decomposition, issue creation, issue delegation, issue execution, QA/CEO verdicts, merge, runtime control, backend control, and company-agent creation
+- use the Company Operator surface to ask for status, change all selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
-- choose the main agent and helper team directly from Chat Control before staging a confirmed company request
+- route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel
 - inspect compact runtime status, blocked/review attention, and recent company activity from the company summary page
 - inspect estimated company spend and adjust daily/monthly runtime guardrails without leaving the company console
 - start and stop a local autonomous runtime loop per company

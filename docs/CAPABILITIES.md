@@ -18,8 +18,9 @@ Dangerous actions are not automatic by default:
 - file writes, shell execution, package install, git writes, PR creation/update, external API calls, memory writes, graph writes, and security scans default to `APPROVAL_REQUIRED`.
 - local tests, lint, builds, and git reads default to `AUTO` where appropriate.
 - memory reads, graph reads, file reads, shell reads, and GitHub reads default to read-only modes.
+- `WEB_PUBLISH`, `SOCIAL_POST_CREATE`, and `MARKETING_ANALYTICS_READ` are marketing-only capabilities and default to `DISABLED` until a delegated Marketing Operator policy opens them.
 
-New company rosters also receive a repository-scoped execution profile. That profile lets built-in company agents run the local agent CLI and create isolated git worktrees automatically only under the company's repository root. Publishing, PR updates, merges, browser control, package installs, external API calls, and other higher-risk actions keep the stricter catalog defaults unless an operator changes the profile.
+New company rosters also receive a repository-scoped execution profile. That profile lets built-in company agents run the local agent CLI and create isolated git worktrees automatically only under the company's repository root. Publishing, PR updates, merges, browser control, package installs, external API calls, marketing publishing, and other higher-risk actions keep the stricter catalog defaults unless an operator changes the profile.
 
 ## Backend Enforcement
 
@@ -28,6 +29,7 @@ The guard maps runtime action kinds to capability keys before the action block r
 - `agent.exec` and unsafe shell commands -> `SHELL_EXEC`
 - `skill.run` -> `SKILL_RUN`; if `skillAllowlist` is set, the action must carry a matching `skill` metadata value
 - `browser.read`, `browser.interact`, `browser.screenshot`, `browser.trace`, `browser.record`, `browser.external-domain`, and `browser.login-flow` -> matching `BROWSER_*` keys
+- `web.publish`, `social.post-create`, and `marketing.analytics-read` -> matching marketing keys
 - `video.script-write`, `video.render-local`, `video.generate-remote`, `video.transcode`, and `video.upload` -> matching `VIDEO_*` keys
 - package manager installs -> `PACKAGE_INSTALL`
 - test/lint/build commands -> `TEST_RUN`, `LINT_RUN`, `BUILD_RUN`
@@ -60,9 +62,21 @@ cotor video render --company <companyId> --agent <agentId> --project ./video --p
 cotor video transcode --company <companyId> --agent <agentId> --input ./input.mov --output ./output.mp4
 ```
 
-Internal skill ids stay stable for CLI/API use. The desktop app shows friendlier assignment labels such as `Repository Mapper`, `Browser Tester`, and `Video Builder` when configuring company agents.
+Internal skill ids stay stable for CLI/API use. The desktop app shows friendlier assignment labels such as `Repository Mapper`, `Browser Tester`, `Video Builder`, `Marketing Operator`, `Audience Scout`, `Content Publisher`, `Social Publisher`, and `Analytics Reporter` when configuring company agents.
 
-Capability settings can include provider/model hints, path/domain/skill allowlists, secret reference names, evidence/review requirements, and notes. Store secret reference names only; do not store secret values.
+Capability settings can include provider/model hints, path/domain/channel/skill allowlists, secret reference names, evidence/review requirements, and notes. Store secret reference names only; do not store secret values.
+
+## Marketing Operator Delegation
+
+Marketing Operator V1 is the only exception that can open browser control for owned web/CMS and organic social work without a per-action approval queue. The control surface is a `MarketingDelegationPolicy`, not runtime approval:
+
+- `BROWSER_READ`, `BROWSER_INTERACT`, `BROWSER_EXTERNAL_DOMAIN`, and `BROWSER_LOGIN_FLOW` can become `AUTO` only for a company agent assigned the `Marketing Operator` skill and only with the policy's domain and channel allowlists.
+- `WEB_PUBLISH`, `SOCIAL_POST_CREATE`, and `MARKETING_ANALYTICS_READ` follow the same allowlist rule.
+- Actions outside the policy return `DENIED`; they are not converted into approval requests. The run records the denial so the operator can narrow scope and replan.
+- Each run records `MarketingActionRecord` entries with target URL, input summary, posted URL, screenshot path, UTM, status, and idempotency key.
+- Secret values are never stored in Cotor. Policies store `secretRefs` and an optional browser session/profile reference.
+
+V1 scope is deliberately narrow: owned websites/CMS surfaces and organic social posting. Paid ads, bulk email, automated DMs, payment operations, credential storage, and budget changes stay prohibited actions.
 
 ## App-Server API
 
@@ -71,6 +85,12 @@ Capability settings can include provider/model hints, path/domain/skill allowlis
 - `PATCH /api/app/companies/{companyId}/agents/{agentId}/capabilities`
 - `POST /api/app/companies/{companyId}/agents/{agentId}/capabilities/simulate`
 - `POST /api/app/browser/smoke`
+- `GET /api/app/marketing/policies`
+- `POST /api/app/marketing/policies`
+- `PATCH /api/app/marketing/policies/{policyId}`
+- `GET /api/app/marketing/runs`
+- `POST /api/app/marketing/runs`
+- `GET /api/app/marketing/runs/{runId}`
 - `POST /api/app/video/plan`
 - `POST /api/app/video/render-local`
 - `POST /api/app/video/transcode`

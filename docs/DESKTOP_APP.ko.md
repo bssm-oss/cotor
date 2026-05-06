@@ -118,9 +118,10 @@ cotor delete
 - 하나의 루트 폴더에 묶이는 회사 생성
 - 기본으로 쉬운 저장소 `지도`를 열고, 준비된 그래프가 없어도 폴더 기반 기본 지도를 보여주며, 기술적인 그래프 파일 경로 없이 `에이전트 회의`와 라이브 플로어로 전환할 수 있는 `상황실` 직접 탐색
 - 에이전트 정의 작성
+- Marketing Operator skill을 선택하면 channel, domain, 일일 게시 한도, 브랜드 규칙, session/secret reference, 최근 marketing run log를 설정하는 위임 정책 패널 표시
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
-- 라이브 메시지/컨텍스트, 백엔드 메모리 스냅샷, 확인 우선 proposal preview, 대표/도움 에이전트 배정 제어를 함께 보여주는 전용 `채팅 컨트롤` 탐색 surface
+- 자연어 운영 채팅, 자동화 모드, 런타임/승인 상태, 명령 결과 카드, 상위 에이전트 내부 승인 라우팅을 보여주는 전용 `운영 채팅` 탐색 surface
 - CEO 채팅 인테이크: 대충 쓴 채팅 요청도 확인 후 CEO 소유 목표, 정리된 브리프, 담당 하위 이슈로 만들며 GitHub 저장소를 자동 생성하지 않음
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
 - 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영
@@ -171,6 +172,7 @@ cotor delete
 - `GET /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/chat-intake`
+- `POST /api/app/companies/{companyId}/operator/commands`
 - `GET /api/app/companies/{companyId}/issues`
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
@@ -179,6 +181,12 @@ cotor delete
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
 - `POST /api/app/companies/{companyId}/runtime/stop`
+- `GET /api/app/marketing/policies`
+- `POST /api/app/marketing/policies`
+- `PATCH /api/app/marketing/policies/{policyId}`
+- `GET /api/app/marketing/runs`
+- `POST /api/app/marketing/runs`
+- `GET /api/app/marketing/runs/{runId}`
 - `PATCH /api/app/companies/{companyId}/linear`
 - `POST /api/app/companies/{companyId}/linear/resync`
 - `PATCH /api/app/workspaces/{workspaceId}/base-branch`
@@ -192,6 +200,7 @@ cotor delete
 - 최소 입력 기반 회사 에이전트 정의
 - 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
 - 회사 에이전트 편집기에서 내장 스킬 카탈로그를 보여주고, 친근한 스킬 선택값을 각 에이전트의 `SKILL_RUN` capability allowlist로 저장
+- 에이전트 편집기에서 Marketing Operator 위임 정책 설정. 이 정책은 허용된 자사/social domain과 channel 안에서만 browser 및 marketing publish capability를 열고, 정책 밖 action은 사용자 승인으로 보내지 않고 deny 처리
 - 로컬 지도 도구가 있으면 작업공간 구조 확인용 내장 회사 에이전트 선택 가능, 그리고 모든 회사 에이전트 실행 메모리에 가벼운 작업공간 지도 지침 주입
 - 회사 목표 생성
 - 목표를 이슈로 자동 분해
@@ -200,9 +209,10 @@ cotor delete
 - 연결된 태스크와 실행 이력 조회
 - 리뷰 큐 아이템 생성 및 머지 처리
 - 기본 저장소 `지도`와 runtime/backend/review/session 상태를 합성한 실시간 활동, 실행 현황/리뷰 요약을 함께 제공하는 전용 상황실 보기
-- 채팅 컨트롤 surface에서 목표 생성, CEO 채팅 인테이크, 목표 분해, 이슈 생성, 이슈 위임, 이슈 실행, QA/CEO 판정, 머지, 런타임 제어, 백엔드 제어, 회사 에이전트 생성을 미리 보고 명시적으로 확인한 뒤 적용
+- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 명령 채팅으로 실행
 - 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
-- 확인용 요청을 준비하기 전에 채팅 컨트롤에서 대표 에이전트와 도움 에이전트 팀을 직접 선택
+- `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO` 자동화 모드를 선택할 수 있고 기본값은 `AGENT_APPROVED`. 복구 가능한 민감 작업은 사용자 확인 rail 대신 CEO/QA/Reviewer 승인으로 라우팅
+- 저장소 삭제, 대량 파일 삭제, secret 작업, 비용 상한 해제, 배포/머지 정책 해제 같은 hard-gate 작업은 모든 모드에서 차단
 - 정상적인 회사 모드에서는 수동 새로고침 없이 회사 활동 조회
 - 압축형 회사 요약 배너에서 런타임 건강도, CEO 승인/차단/리뷰 주의, 최근 런타임 신호 조회
 - 회사 콘솔 안에서 추정 비용을 확인하고 일/월 비용 상한을 조정
