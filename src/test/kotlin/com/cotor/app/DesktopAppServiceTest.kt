@@ -1876,7 +1876,8 @@ class DesktopAppServiceTest : FunSpec({
                     CompanyRuntimeSnapshot(
                         companyId = company.id,
                         todaySpentCents = 321,
-                        monthSpentCents = 999
+                        monthSpentCents = 999,
+                        budgetResetDate = LocalDate.now().toString()
                     )
                 )
             )
@@ -7498,7 +7499,7 @@ class DesktopAppServiceTest : FunSpec({
         service.stopCompanyRuntime(goal.companyId).status shouldBe CompanyRuntimeStatus.STOPPED
     }
 
-    test("company, workflow, and agent memory files are persisted and injected into execution prompts") {
+    test("company, project, team, and agent memory files are persisted and injected into execution prompts") {
         val appHome = Files.createTempDirectory("desktop-runtime-memory-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-memory-test").resolve("repo"))
         val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-memory-worktree"))
@@ -7592,12 +7593,14 @@ class DesktopAppServiceTest : FunSpec({
 
         val prompt = capturedInputs.firstOrNull {
             it.orEmpty().contains("Company memory:") &&
-                it.orEmpty().contains("Workflow memory:") &&
+                it.orEmpty().contains("Project memory:") &&
+                it.orEmpty().contains("Team memory:") &&
                 it.orEmpty().contains("Agent memory:")
         }.orEmpty()
         prompt.contains("Persistent memory") shouldBe true
         prompt.contains("Company memory:") shouldBe true
-        prompt.contains("Workflow memory:") shouldBe true
+        prompt.contains("Project memory:") shouldBe true
+        prompt.contains("Team memory:") shouldBe true
         prompt.contains("Agent memory:") shouldBe true
         prompt.length shouldBeLessThan 8_000
         contextRoot.resolve("agents").resolve("${ceo.id}.md").toFile().readText().contains("Final approver for release.") shouldBe true

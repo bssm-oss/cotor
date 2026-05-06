@@ -262,11 +262,12 @@ class DesktopAppServiceExecutionMemoryTest : FunSpec({
         val planningPrompt = service.buildCeoPlanningPromptForTesting(state, planningIssue, ceoProfile)
 
         planningPrompt shouldContain "Company memory:"
-        planningPrompt shouldContain "Workflow memory:"
+        planningPrompt shouldContain "Project memory:"
+        planningPrompt shouldContain "Team memory:"
         planningPrompt shouldContain "Agent memory:"
     }
 
-    test("buildCompanyMemorySnapshot exposes company, workflow, and agent memory consistently") {
+    test("buildCompanyMemorySnapshot exposes company, project, team, workflow alias, and agent memory consistently") {
         val appHome = Files.createTempDirectory("desktop-company-memory-snapshot-home")
         val stateStore = DesktopStateStore { appHome }
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-company-memory-snapshot-repo").resolve("repo"))
@@ -307,6 +308,8 @@ class DesktopAppServiceExecutionMemoryTest : FunSpec({
         )
 
         snapshot.companyMemory shouldContain "company=Snapshot Co"
+        snapshot.projectMemory shouldContain "goal=Snapshot Goal"
+        snapshot.teamMemory shouldContain "team memory"
         snapshot.workflowMemory shouldContain "goal=Snapshot Goal"
         snapshot.agentMemory shouldContain "role=CEO"
     }
