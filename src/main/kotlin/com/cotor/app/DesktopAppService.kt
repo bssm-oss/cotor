@@ -9972,143 +9972,14 @@ class DesktopAppService(
         scopedReviewQueue: List<ReviewQueueItem> = state.reviewQueue.filter { item ->
             scopedIssues.any { it.id == item.issueId }
         }
-    ): List<AgentPerformanceSnapshot> {
-        val companyIds = state.companies
-            .filter { companyId == null || it.id == companyId }
-            .map { it.id }
-            .toSet()
-        val definitions = state.companyAgentDefinitions
-            .filter { it.companyId in companyIds && it.enabled }
-            .sortedWith(compareBy<CompanyAgentDefinition> { it.companyId }.thenBy { it.displayOrder }.thenBy { it.title.lowercase() })
-        val profiles = orgProfiles.filter { it.companyId in companyIds && it.enabled }
-        val tasksById = scopedTasks.associateBy { it.id }
-        val taskIds = tasksById.keys
-        val runs = state.runs.filter { it.taskId in taskIds }
-        val tasksByIssueId = scopedTasks.filter { it.issueId != null }.groupBy { it.issueId.orEmpty() }
-        val reviewByIssueId = scopedReviewQueue.groupBy { it.issueId }
-
-        fun snapshotFor(
-            agentId: String,
-            agentName: String,
-            roleName: String,
-            agentCli: String,
-            model: String?,
-            profile: OrgAgentProfile?
-        ): AgentPerformanceSnapshot {
-            val relatedIssues = scopedIssues.filter { issue ->
-                issue.assigneeProfileId == profile?.id ||
-                    profile != null && issue.assigneeProfileId == null &&
-                    tasksByIssueId[issue.id].orEmpty().any { task ->
-                        task.agents.any { it.equals(agentCli, ignoreCase = true) || it.equals(agentName, ignoreCase = true) }
-                    }
-            }
-            val relatedIssueIds = relatedIssues.map { it.id }.toSet()
-            val relatedTaskIds = scopedTasks
-                .filter { task ->
-                    task.issueId in relatedIssueIds ||
-                        task.agents.any { it.equals(agentCli, ignoreCase = true) || it.equals(agentName, ignoreCase = true) }
-                }
-                .map { it.id }
-                .toSet()
-            val relatedRuns = runs.filter { run ->
-                run.agentId == agentId ||
-                    run.agentName.equals(agentCli, ignoreCase = true) ||
-                    run.agentName.equals(agentName, ignoreCase = true) ||
-                    run.taskId in relatedTaskIds
-            }
-            val terminalRuns = relatedRuns.filter { it.status == AgentRunStatus.COMPLETED || it.status == AgentRunStatus.FAILED }
-            val successfulRuns = terminalRuns.count { it.status == AgentRunStatus.COMPLETED }
-            val qaReviewed = relatedIssueIds
-                .flatMap { reviewByIssueId[it].orEmpty() }
-                .filter { !it.qaVerdict.isNullOrBlank() }
-            val qaPasses = qaReviewed.count { it.qaVerdict.equals("PASS", ignoreCase = true) }
-            val reviewRejections = relatedIssueIds
-                .flatMap { reviewByIssueId[it].orEmpty() }
-                .count { item ->
-                    item.status == ReviewQueueStatus.CHANGES_REQUESTED ||
-                        item.qaVerdict.equals("CHANGES_REQUESTED", ignoreCase = true) ||
-                        item.ceoVerdict.equals("CHANGES_REQUESTED", ignoreCase = true)
-                }
-            val blockedIssues = relatedIssues.count { it.status == IssueStatus.BLOCKED || it.status == IssueStatus.WAITING_FOR_APPROVAL }
-            val completedIssues = relatedIssues.count { it.status == IssueStatus.DONE }
-            val activeIssues = relatedIssues.count { it.status !in setOf(IssueStatus.DONE, IssueStatus.CANCELED, IssueStatus.BLOCKED) }
-            val runSuccessRate = terminalRuns.takeIf { it.isNotEmpty() }?.let { successfulRuns.toDouble() / it.size.toDouble() }
-            val qaPassRate = qaReviewed.takeIf { it.isNotEmpty() }?.let { qaPasses.toDouble() / it.size.toDouble() }
-            val averageDurationMs = relatedRuns.mapNotNull { it.durationMs }.takeIf { it.isNotEmpty() }?.let { durations ->
-                durations.average().toLong()
-            }
-            val estimatedCost = relatedRuns.mapNotNull { it.estimatedCostCents }.takeIf { it.isNotEmpty() }?.sum()
-            val lastActivityAt = (
-                relatedRuns.map { it.updatedAt } +
-                    relatedIssues.map { it.updatedAt } +
-                    relatedTaskIds.mapNotNull { tasksById[it]?.updatedAt }
-                ).maxOrNull()
-            val evidenceCount = relatedRuns.size + relatedIssues.size
-            val sufficiency = if (evidenceCount >= 3) {
-                AgentPerformanceDataSufficiency.SUFFICIENT
-            } else {
-                AgentPerformanceDataSufficiency.INSUFFICIENT_DATA
-            }
-            val score = if (sufficiency == AgentPerformanceDataSufficiency.SUFFICIENT) {
-                val runScore = ((runSuccessRate ?: 0.0) * 60.0).toInt()
-                val qaScore = ((qaPassRate ?: 1.0) * 20.0).toInt()
-                (runScore + qaScore + completedIssues * 3 - blockedIssues * 5 - reviewRejections * 4)
-                    .coerceIn(0, 100)
-            } else {
-                null
-            }
-            return AgentPerformanceSnapshot(
-                agentId = agentId,
-                agentName = agentName,
-                roleName = roleName,
-                agentCli = agentCli,
-                model = model,
-                score = score,
-                completedIssues = completedIssues,
-                activeIssues = activeIssues,
-                blockedIssues = blockedIssues,
-                runSuccessRate = runSuccessRate,
-                qaPassRate = qaPassRate,
-                reviewRejectionCount = reviewRejections,
-                retryCount = terminalRuns.count { it.status == AgentRunStatus.FAILED },
-                averageDurationMs = averageDurationMs,
-                estimatedCostCents = estimatedCost,
-                lastActivityAt = lastActivityAt,
-                dataSufficiency = sufficiency
-            )
-        }
-
-        val definitionSnapshots = definitions.map { definition ->
-            val profile = profiles.firstOrNull {
-                it.companyId == definition.companyId &&
-                    it.roleName.equals(definition.title, ignoreCase = true) &&
-                    it.executionAgentName.equals(definition.agentCli, ignoreCase = true)
-            }
-            snapshotFor(
-                agentId = definition.id,
-                agentName = definition.title,
-                roleName = profile?.roleName ?: definition.title,
-                agentCli = definition.agentCli,
-                model = definition.model,
-                profile = profile
-            )
-        }
-        val definitionKeys = definitions.map { it.companyId to it.title.lowercase() }.toSet()
-        val profileOnlySnapshots = profiles
-            .filter { it.companyId to it.roleName.lowercase() !in definitionKeys }
-            .map { profile ->
-                snapshotFor(
-                    agentId = profile.id,
-                    agentName = profile.executionAgentName,
-                    roleName = profile.roleName,
-                    agentCli = profile.executionAgentName,
-                    model = null,
-                    profile = profile
-                )
-            }
-        return (definitionSnapshots + profileOnlySnapshots)
-            .sortedWith(compareByDescending<AgentPerformanceSnapshot> { it.lastActivityAt ?: 0L }.thenBy { it.roleName.lowercase() })
-    }
+    ): List<AgentPerformanceSnapshot> = AgentPerformanceCalculator.compute(
+        state = state,
+        companyId = companyId,
+        orgProfiles = orgProfiles,
+        scopedIssues = scopedIssues,
+        scopedTasks = scopedTasks,
+        scopedReviewQueue = scopedReviewQueue
+    )
 
     private fun computeRunningAgentSessions(
         state: DesktopAppState,
@@ -14465,15 +14336,21 @@ class DesktopAppService(
         }
     }
 
-    private suspend fun hasCanonicalCommunicationForRun(issue: CompanyIssue, run: AgentRun): Boolean {
-        val state = stateStore.load()
+    private suspend fun hasCanonicalCommunicationForRun(issue: CompanyIssue, run: AgentRun): Boolean =
+        hasCanonicalCommunicationForRun(stateStore.load(), issue, run)
+
+    private fun hasCanonicalCommunicationForRun(
+        state: DesktopAppState,
+        issue: CompanyIssue,
+        run: AgentRun
+    ): Boolean {
         val relevantContextKinds = setOf("note", "handoff", "warning")
         val relevantMessageKinds = setOf("feedback", "escalation")
         val hasContext = state.agentContextEntries.any { entry ->
             entry.companyId == issue.companyId &&
                 entry.issueId == issue.id &&
                 entry.agentName == run.agentName &&
-                entry.kind in relevantContextKinds &&
+                (entry.kind in relevantContextKinds || entry.kind.startsWith("a2a-")) &&
                 entry.createdAt >= run.createdAt
         }
         val hasMessages = state.agentMessages.any { message ->
