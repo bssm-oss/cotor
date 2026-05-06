@@ -60,6 +60,61 @@ struct CompanyMemorySnapshotPayload: Codable, Hashable {
     let companyMemory: String
     let workflowMemory: String
     let agentMemory: String
+    let projectMemory: String
+    let teamMemory: String
+
+    enum CodingKeys: String, CodingKey {
+        case companyMemory
+        case workflowMemory
+        case agentMemory
+        case projectMemory
+        case teamMemory
+    }
+
+    init(
+        companyMemory: String,
+        workflowMemory: String,
+        agentMemory: String,
+        projectMemory: String? = nil,
+        teamMemory: String = ""
+    ) {
+        self.companyMemory = companyMemory
+        self.workflowMemory = workflowMemory
+        self.agentMemory = agentMemory
+        self.projectMemory = projectMemory ?? workflowMemory
+        self.teamMemory = teamMemory
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        companyMemory = try container.decode(String.self, forKey: .companyMemory)
+        workflowMemory = try container.decode(String.self, forKey: .workflowMemory)
+        agentMemory = try container.decode(String.self, forKey: .agentMemory)
+        projectMemory = try container.decodeIfPresent(String.self, forKey: .projectMemory) ?? workflowMemory
+        teamMemory = try container.decodeIfPresent(String.self, forKey: .teamMemory) ?? ""
+    }
+}
+
+struct CompanyProblemSignalRecord: Codable, Identifiable, Hashable {
+    let id: String
+    let companyId: String
+    let kind: String
+    let title: String
+    let detail: String
+    let severity: String
+    let confidence: Double
+    let source: String
+    let dedupeKey: String
+    let status: String
+    let goalId: String?
+    let issueId: String?
+    let reviewQueueItemId: String?
+    let runId: String?
+    let triageGoalId: String?
+    let cooldownUntil: Int64?
+    let firstSeenAt: Int64
+    let lastSeenAt: Int64
+    let updatedAt: Int64
 }
 
 struct CreateCompanyResponsePayload: Codable, Hashable {
