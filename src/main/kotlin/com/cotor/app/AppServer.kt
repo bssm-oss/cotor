@@ -486,6 +486,61 @@ internal fun Application.cotorAppModule(
                 }
             }
 
+            route("/marketing") {
+                route("/policies") {
+                    get {
+                        if (!requireToken(token)) return@get
+                        val companyId = call.request.queryParameters["companyId"]
+                        val agentId = call.request.queryParameters["agentId"]
+                        call.respond(desktopService.listMarketingDelegationPolicies(companyId = companyId, agentId = agentId))
+                    }
+
+                    post {
+                        if (!requireToken(token)) return@post
+                        val request = call.receive<UpsertMarketingDelegationPolicyRequest>()
+                        respondDesktopRequest {
+                            desktopService.upsertMarketingDelegationPolicy(request)
+                        }
+                    }
+
+                    patch("/{policyId}") {
+                        if (!requireToken(token)) return@patch
+                        val policyId = call.parameters["policyId"]
+                            ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "policyId is required"))
+                        val request = call.receive<UpsertMarketingDelegationPolicyRequest>()
+                        respondDesktopRequest {
+                            desktopService.upsertMarketingDelegationPolicy(request.copy(id = policyId))
+                        }
+                    }
+                }
+
+                route("/runs") {
+                    get {
+                        if (!requireToken(token)) return@get
+                        val companyId = call.request.queryParameters["companyId"]
+                        val agentId = call.request.queryParameters["agentId"]
+                        call.respond(desktopService.listMarketingRuns(companyId = companyId, agentId = agentId))
+                    }
+
+                    post {
+                        if (!requireToken(token)) return@post
+                        val request = call.receive<MarketingRunRequest>()
+                        respondDesktopRequest {
+                            desktopService.createMarketingRun(request)
+                        }
+                    }
+
+                    get("/{runId}") {
+                        if (!requireToken(token)) return@get
+                        val runId = call.parameters["runId"]
+                            ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "runId is required"))
+                        val run = desktopService.marketingRun(runId)
+                            ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Marketing run not found: $runId"))
+                        call.respond(run)
+                    }
+                }
+            }
+
             route("/video") {
                 post("/plan") {
                     if (!requireToken(token)) return@post
@@ -516,6 +571,63 @@ internal fun Application.cotorAppModule(
                     val request = call.receive<VideoPlanRequest>()
                     respondDesktopRequest {
                         desktopService.planVideoGenerateRemote(request)
+                    }
+                }
+            }
+
+            route("/marketing") {
+                get("/policies") {
+                    if (!requireToken(token)) return@get
+                    call.respond(
+                        desktopService.listMarketingDelegationPolicies(
+                            companyId = call.request.queryParameters["companyId"],
+                            agentId = call.request.queryParameters["agentId"]
+                        )
+                    )
+                }
+
+                post("/policies") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<UpsertMarketingDelegationPolicyRequest>()
+                    respondDesktopRequest {
+                        desktopService.upsertMarketingDelegationPolicy(request)
+                    }
+                }
+
+                patch("/policies/{policyId}") {
+                    if (!requireToken(token)) return@patch
+                    val policyId = call.parameters["policyId"]
+                        ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "policyId is required"))
+                    val request = call.receive<UpsertMarketingDelegationPolicyRequest>()
+                    respondDesktopRequest {
+                        desktopService.upsertMarketingDelegationPolicy(request.copy(id = policyId))
+                    }
+                }
+
+                get("/runs") {
+                    if (!requireToken(token)) return@get
+                    call.respond(
+                        desktopService.listMarketingRuns(
+                            companyId = call.request.queryParameters["companyId"],
+                            agentId = call.request.queryParameters["agentId"]
+                        )
+                    )
+                }
+
+                post("/runs") {
+                    if (!requireToken(token)) return@post
+                    val request = call.receive<MarketingRunRequest>()
+                    respondDesktopRequest {
+                        desktopService.runMarketing(request)
+                    }
+                }
+
+                get("/runs/{runId}") {
+                    if (!requireToken(token)) return@get
+                    val runId = call.parameters["runId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "runId is required"))
+                    respondDesktopRequest {
+                        desktopService.marketingRun(runId)
                     }
                 }
             }
@@ -1428,13 +1540,14 @@ internal fun Application.cotorAppModule(
                                 companyId = companyId,
                                 agentId = agentId,
                                 action = request.action,
-                                path = request.path,
-                                networkTarget = request.networkTarget,
-                                command = request.command,
-                                skill = request.skill
-                            )
-                        }
+                            path = request.path,
+                            networkTarget = request.networkTarget,
+                            command = request.command,
+                            skill = request.skill,
+                            channel = request.channel
+                        )
                     }
+                }
                 }
 
                 route("/{companyId}/projects") {
