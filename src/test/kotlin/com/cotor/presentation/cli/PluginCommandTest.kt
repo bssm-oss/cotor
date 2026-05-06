@@ -12,7 +12,6 @@ import com.github.ajalt.clikt.testing.test
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import java.nio.file.Files
 import kotlin.io.path.Path
 import kotlin.io.path.exists
 import kotlin.io.path.readText
@@ -32,9 +31,7 @@ class PluginCommandTest : FunSpec({
             pluginRoot.resolve("src/main/resources/META-INF/services/com.cotor.data.plugin.AgentPlugin").readText() shouldContain "com.example.plugin.SamplePlugin"
         } finally {
             if (pluginRoot.exists()) {
-                Files.walk(pluginRoot)
-                    .sorted(Comparator.reverseOrder())
-                    .forEach { Files.deleteIfExists(it) }
+                pluginRoot.toFile().deleteRecursively()
             }
         }
     }
