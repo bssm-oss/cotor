@@ -74,7 +74,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = Company(
             id = "company-performance",
@@ -261,7 +262,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = Company(
             id = "company-1",
@@ -391,7 +393,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = service.createCompany(
             name = "Chat Intake QA",
@@ -531,7 +534,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = service.createCompany(name = "Operator Full Auto", rootPath = appHome.toString())
         val now = System.currentTimeMillis()
