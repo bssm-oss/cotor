@@ -816,10 +816,10 @@ private struct SidebarView: View {
                 )
                 companyNavButton(
                     .chat,
-                    title: l("Company Operator", "운영 채팅"),
+                    title: l("Operator Chat", "운영 채팅"),
                     subtitle: l("Agent chat and approvals", "에이전트 대화와 승인"),
                     systemImage: "bubble.left.and.text.bubble.right",
-                    badge: "\(store.dashboard.agentMessages.count)"
+                    badge: "\(store.operatorChatMessages.count)"
                 )
                 companyNavButton(
                     .goals,
@@ -870,7 +870,7 @@ private struct SidebarView: View {
         Button {
             companySurface = surface
         } label: {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(companySurface == surface ? ShellPalette.accentSoft : ShellPalette.panel)
@@ -880,14 +880,10 @@ private struct SidebarView: View {
                 }
                 .frame(width: 30, height: 30)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
-                    Text(subtitle)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(ShellPalette.muted)
-                        .lineLimit(2)
                 }
 
                 Spacer(minLength: 8)
@@ -898,7 +894,7 @@ private struct SidebarView: View {
             }
             .foregroundStyle(companySurface == surface ? ShellPalette.text : ShellPalette.muted)
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -2992,42 +2988,98 @@ private struct IssueSummaryRow: View {
     var assignee: OrgAgentProfileRecord? = nil
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Circle()
                 .fill(statusTint(for: issue.status))
                 .frame(width: 8, height: 8)
-                .padding(.top, 4)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .top) {
                     Text(userFacingIssueTitle(issue.title, language: language))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(ShellPalette.text)
-                        .lineLimit(2)
+                        .lineLimit(1)
                     Spacer()
                     StatusSummaryPill(text: language.status(issue.status), tint: statusTint(for: issue.status))
                 }
-                Text(userFacingIssueDescription(issue.description, language: language))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(2)
-                HStack(spacing: 8) {
-                    StatusSummaryPill(text: userFacingIssueKind(issue.kind, language: language), tint: ShellPalette.accentSoft)
-                    if let assignee {
-                        StatusSummaryPill(text: assignee.roleName, tint: ShellPalette.accent)
-                    }
-                    if let linearIdentifier = issue.linearIssueIdentifier, !linearIdentifier.isEmpty {
-                        StatusSummaryPill(text: linearIdentifier, tint: ShellPalette.accentWarm)
-                    }
+                if let assignee {
+                    Text(assignee.roleName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(1)
                 }
             }
         }
-        .padding(12)
+        .padding(10)
         .background(ShellPalette.panelAlt)
         .overlay(
             RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
                 .stroke(ShellPalette.line, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+    }
+}
+
+private struct IssueFocusRow: View {
+    let issue: IssueRecord
+    let language: AppLanguage
+    let assignee: OrgAgentProfileRecord?
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 10) {
+                Circle()
+                    .fill(statusTint(for: issue.status))
+                    .frame(width: 8, height: 8)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(userFacingIssueTitle(issue.title, language: language))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(language.status(issue.status))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.muted)
+                        if let assignee {
+                            Text(assignee.roleName)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(ShellPalette.faint)
+                                .lineLimit(1)
+                        }
+                        if !issue.dependsOn.isEmpty {
+                            Text("\(issue.dependsOn.count) \(language("deps", "의존"))")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(ShellPalette.warning)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                if issue.priority > 0 {
+                    Text("P\(issue.priority)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ShellPalette.faint)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(ShellPalette.faint)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+            .overlay(
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .stroke(isSelected ? ShellPalette.lineStrong : ShellPalette.line, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -3072,14 +3124,14 @@ private struct AgentWorkSummaryRow: View {
                     Text(agent.title)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(ShellPalette.text)
-                    Text("\(agent.agentCli) · \(agent.roleSummary)")
+                    Text("\(assignedIssues.count) \(language("assigned", "담당"))")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(ShellPalette.muted)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
                 Spacer()
                 StatusSummaryPill(
-                    text: agent.enabled ? "ON" : "OFF",
+                    text: agent.enabled ? language("Active", "활성") : language("Off", "꺼짐"),
                     tint: agent.enabled ? ShellPalette.success : ShellPalette.warning
                 )
             }
@@ -3434,8 +3486,6 @@ private struct CompanyChatControlRail: View {
     @Binding var draft: String
     @Binding var applyReviewDraft: String
     @State private var isApplyingGoalProposal = false
-    @State private var showFullAutoConfirmation = false
-    @State private var requestedAutomationMode: String?
 
     private var l: AppLanguage { store.language }
 
@@ -3804,274 +3854,219 @@ private struct CompanyChatControlRail: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             operatorHeader
-            operatorStatusStrip
             operatorConversationZone
             operatorComposerZone
         }
         .shellCard(accent: ShellPalette.lineStrong)
-        .confirmationDialog(
-            l("Enable FULL_AUTO?", "FULL_AUTO를 켤까요?"),
-            isPresented: $showFullAutoConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(l("Enable FULL_AUTO", "FULL_AUTO 켜기")) {
-                Task {
-                    await store.setSelectedCompanyOperatorAutomationMode("FULL_AUTO", confirmFullAuto: true)
-                    requestedAutomationMode = nil
-                }
-            }
-            Button(l("Cancel", "취소"), role: .cancel) {
-                requestedAutomationMode = nil
-            }
-        } message: {
-            Text(l("Routine approvals will stop. Hard-gated actions remain blocked.", "일반 승인 요청은 줄어들지만 hard-gate 작업은 계속 차단됩니다."))
-        }
     }
 
     private var operatorHeader: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(ShellPalette.accent)
             VStack(alignment: .leading, spacing: 4) {
-                Text(l("Company Operator", "운영 채팅"))
+                Text(l("Operator Chat", "운영 채팅"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ShellPalette.text)
-                Text(l("Natural-language control for the selected company.", "선택된 회사를 자연어로 운영합니다."))
+                Text(store.selectedCompany?.name ?? l("No company selected", "선택된 회사 없음"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(ShellPalette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
-
-            StatusSummaryPill(text: store.selectedOperatorAutomationMode, tint: automationModeTint(store.selectedOperatorAutomationMode))
-        }
-    }
-
-    private var operatorStatusStrip: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker(l("Automation", "자동화"), selection: Binding(
-                get: { store.selectedOperatorAutomationMode },
-                set: { nextMode in
-                    if nextMode == "FULL_AUTO", store.selectedOperatorAutomationMode != "FULL_AUTO" {
-                        requestedAutomationMode = nextMode
-                        showFullAutoConfirmation = true
-                    } else {
-                        Task { await store.setSelectedCompanyOperatorAutomationMode(nextMode) }
-                    }
-                }
-            )) {
-                Text("ASK_ME").tag("ASK_ME")
-                Text("AGENT_APPROVED").tag("AGENT_APPROVED")
-                Text("FULL_AUTO").tag("FULL_AUTO")
-            }
-            .pickerStyle(.segmented)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ShellTag(text: scopeChip, tint: ShellPalette.accent)
-                    ShellTag(text: l("Runtime", "런타임") + " " + (store.selectedRuntime?.status ?? "STOPPED"), tint: runtimeTint(store.selectedRuntime?.status ?? "STOPPED"))
-                    ShellTag(text: l("Approvals", "승인") + " \(operatorPendingApprovalCount)", tint: operatorPendingApprovalCount > 0 ? ShellPalette.warning : ShellPalette.faint)
-                    ShellTag(text: l("Blocked", "막힘") + " \(store.scopedOpsMetrics(companyID: store.selectedCompanyID).blockedIssues)", tint: ShellPalette.accentWarm)
-                }
-                .padding(.vertical, 2)
-            }
         }
     }
 
     private var operatorConversationZone: some View {
-        MeetingRoomZoneCard(
-            title: l("Operator Results", "운영 결과"),
-            subtitle: l("Commands, status cards, and internal approval routes.", "명령 결과, 상태 카드, 내부 승인 라우팅입니다."),
-            tint: ShellPalette.accent
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                if store.operatorCommandResponses.isEmpty && conversationHistory.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        EmptyStateView(
-                            image: "terminal",
-                            title: l("No operator commands yet", "아직 운영 명령이 없습니다"),
-                            subtitle: l("Try a short command below.", "아래에 짧게 입력하세요.")
-                        )
-                        .frame(minHeight: 150)
-                        exampleCommandChips
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if store.operatorChatMessages.isEmpty {
+                        operatorEmptyState
+                    } else {
+                        ForEach(store.operatorChatMessages) { message in
+                            operatorMessageBubble(message)
+                                .id(message.id)
+                        }
                     }
-                } else {
-                    ForEach(store.operatorCommandResponses) { response in
-                        operatorResponseCard(response)
-                    }
-                    ForEach(conversationHistory.prefix(layoutMode == .wide ? 8 : 5)) { item in
-                        historyRow(item)
-                    }
+                }
+                .padding(.vertical, 8)
+            }
+            .frame(minHeight: layoutMode == .wide ? 430 : 320)
+            .background(ShellPalette.panelDeeper.opacity(0.58))
+            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .stroke(ShellPalette.line, lineWidth: 1)
+            )
+            .onChange(of: store.operatorChatMessages.count) { _, _ in
+                guard let last = store.operatorChatMessages.last else { return }
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
         }
     }
 
     private var operatorComposerZone: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $store.operatorCommandDraft)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+        HStack(alignment: .bottom, spacing: 8) {
+            operatorCommandMenu
+
+            ZStack(alignment: .leading) {
+                TextField(l("Ask Cotor to run something...", "Cotor에게 실행할 일을 말하세요..."), text: $store.operatorCommandDraft, axis: .vertical)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(ShellPalette.text)
-                    .frame(minHeight: layoutMode == .wide ? 106 : 92)
-                    .padding(8)
-                    .scrollContentBackground(.hidden)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .background(ShellPalette.panelDeeper)
                     .overlay(
                         RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
                             .stroke(ShellPalette.line, lineWidth: 1)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
-
-                if store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(l("에이전트들 잘 돌아가고 있는지 확인해줘", "에이전트들 잘 돌아가고 있는지 확인해줘"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(ShellPalette.faint)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .allowsHitTesting(false)
-                }
+                    .onSubmit { sendOperatorDraft() }
             }
 
-            HStack(spacing: 8) {
-                exampleButton("에이전트들 잘 돌아가?") {
-                    store.operatorCommandDraft = "에이전트들 잘 돌아가고 있는지 확인해줘"
-                }
-                exampleButton("opencode deepseek") {
-                    store.operatorCommandDraft = "모든 에이전트 opencode deepseek 모델로 바꿔줘"
-                }
-                Spacer(minLength: 8)
+            Button {
+                sendOperatorDraft()
+            } label: {
+                Image(systemName: store.isSendingOperatorChatMessage ? "hourglass" : "paperplane.fill")
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isSendingOperatorChatMessage)
+        }
+    }
+
+    private var operatorEmptyState: some View {
+        VStack(alignment: .center, spacing: 14) {
+            Spacer(minLength: 48)
+            Image(systemName: "message.fill")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(ShellPalette.accent)
+            VStack(spacing: 5) {
+                Text(l("What should Cotor do?", "무엇을 할까요?"))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                Text(l("Use chat to run the same company actions you would normally click.", "평소 버튼으로 하던 회사 작업을 채팅으로 실행하세요."))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .multilineTextAlignment(.center)
+            }
+            operatorQuickCommands
+            Spacer(minLength: 48)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 18)
+    }
+
+    private var operatorQuickCommands: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], alignment: .center, spacing: 8) {
+            ForEach(store.operatorSuggestedCommands()) { command in
                 Button {
-                    let command = store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !command.isEmpty else { return }
-                    store.operatorCommandDraft = ""
-                    Task { _ = await store.runCompanyOperatorCommand(message: command) }
+                    Task { await store.submitOperatorChatCommand(command) }
                 } label: {
-                    Label(l("Run", "실행"), systemImage: "paperplane.fill")
+                    Text(command.title)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.84)
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.selectedCompany == nil || store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-    }
-
-    private var exampleCommandChips: some View {
-        FlowLayout(
-            items: [
-                "에이전트들 잘 돌아가?",
-                "모든 에이전트 opencode deepseek",
-                "막힌 이슈 다시 굴려"
-            ],
-            selected: []
-        ) { command in
-            store.operatorCommandDraft = command
-        }
-    }
-
-    private func operatorResponseCard(_ response: OperatorCommandResponsePayload) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                StatusSummaryPill(text: response.automationMode, tint: automationModeTint(response.automationMode))
-                Spacer(minLength: 0)
-                if let summary = response.summary {
-                    StatusSummaryPill(text: summary.runtimeStatus, tint: runtimeTint(summary.runtimeStatus))
-                }
-            }
-
-            Text(response.message)
-                .font(.system(size: 11, weight: .medium))
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(ShellPalette.panelAlt)
+                .overlay(
+                    RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                        .stroke(ShellPalette.line, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
                 .foregroundStyle(ShellPalette.text)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let summary = response.summary {
-                HStack(spacing: 6) {
-                    summaryChip(l("Agents", "에이전트"), "\(summary.activeAgentCount)", ShellPalette.accent)
-                    summaryChip(l("Blocked", "막힘"), "\(summary.blockedIssueCount)", ShellPalette.accentWarm)
-                    summaryChip(l("Review", "리뷰"), "\(summary.reviewQueueCount)", ShellPalette.warning)
-                    summaryChip(l("Approval", "승인"), "\(summary.pendingApprovalCount)", ShellPalette.faint)
-                }
+                .font(.system(size: 12, weight: .semibold))
             }
-
-            operatorActionGroup(actions: response.actions, tint: ShellPalette.accent)
-            operatorActionGroup(actions: response.pendingApprovals, tint: ShellPalette.warning)
-            operatorActionGroup(actions: response.blockedActions, tint: ShellPalette.accentWarm)
         }
-        .padding(10)
-        .background(ShellPalette.panel)
-        .overlay(
-            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                .stroke(ShellPalette.line, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
     }
 
-    private func operatorActionGroup(actions: [OperatorCommandActionPayload], tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(actions) { action in
-                HStack(alignment: .top, spacing: 8) {
-                    Circle()
-                        .fill(tint)
-                        .frame(width: 6, height: 6)
-                        .padding(.top, 5)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(action.title)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(ShellPalette.text)
-                        Text(action.detail)
-                            .font(.system(size: 10, weight: .regular))
-                            .foregroundStyle(ShellPalette.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+    private var operatorCommandMenu: some View {
+        Menu {
+            ForEach(store.operatorSuggestedCommands()) { command in
+                Button(command.title) {
+                    Task { await store.submitOperatorChatCommand(command) }
+                }
+            }
+            Divider()
+            Button(l("Create company...", "회사 만들기...")) {
+                Task { await store.submitOperatorChatMessage(l("Create a new company.", "새 회사 만들어줘")) }
+            }
+        } label: {
+            Image(systemName: "plus")
+                .frame(width: 30, height: 30)
+        }
+        .menuStyle(.borderlessButton)
+    }
+
+    private func operatorMessageBubble(_ message: OperatorChatMessage) -> some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            if message.role == .user {
+                Spacer(minLength: 36)
+            }
+
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
+                Text(message.text)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(message.role == .user ? Color.white : ShellPalette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !message.commands.isEmpty {
+                    HStack(spacing: 7) {
+                        ForEach(message.commands) { command in
+                            Button {
+                                Task { await store.submitOperatorChatCommand(command) }
+                            } label: {
+                                Text(command.title)
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(command.destructive ? ShellPalette.accentWarm : ShellPalette.accent)
+                        }
                     }
-                    Spacer(minLength: 8)
-                    StatusSummaryPill(text: action.status, tint: statusTint(for: action.status))
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: layoutMode == .wide ? 620 : 420, alignment: message.role == .user ? .trailing : .leading)
+            .background(operatorBubbleBackground(message.role))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(message.role == .user ? ShellPalette.accent.opacity(0.25) : ShellPalette.line, lineWidth: 1)
+            )
+
+            if message.role != .user {
+                Spacer(minLength: 36)
+            }
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private func operatorBubbleBackground(_ role: OperatorChatRole) -> Color {
+        switch role {
+        case .user:
+            return ShellPalette.accent.opacity(0.78)
+        case .assistant:
+            return ShellPalette.panel
+        case .system:
+            return ShellPalette.panel.opacity(0.72)
         }
     }
 
-    private func summaryChip(_ title: String, _ value: String, _ tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(ShellPalette.faint)
-            Text(value)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(tint)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(ShellPalette.panelDeeper)
-        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusTiny, style: .continuous))
-    }
-
-    private func exampleButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-        }
-        .buttonStyle(.borderless)
-    }
-
-    private var operatorPendingApprovalCount: Int {
-        let responsePending = store.operatorCommandResponses.first?.pendingApprovals.count ?? 0
-        return responsePending + (store.selectedRuntime?.waitingApprovalCount ?? 0)
-    }
-
-    private func automationModeTint(_ mode: String) -> Color {
-        switch mode.uppercased() {
-        case "FULL_AUTO": return ShellPalette.accentWarm
-        case "ASK_ME": return ShellPalette.warning
-        default: return ShellPalette.accent
-        }
-    }
-
-    private func runtimeTint(_ status: String) -> Color {
-        switch status.uppercased() {
-        case "RUNNING": return ShellPalette.accent
-        case "ERROR": return ShellPalette.accentWarm
-        default: return ShellPalette.faint
-        }
+    private func sendOperatorDraft() {
+        let command = store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+        Task { await store.submitOperatorChatMessage(command) }
     }
 
     private var header: some View {
@@ -5486,46 +5481,40 @@ private struct IssueSidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(userFacingIssueTitle(issue.title, language: language))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ShellPalette.text)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .center, spacing: 10) {
+                Circle()
+                    .fill(statusTint(for: issue.status))
+                    .frame(width: 8, height: 8)
 
-                Text(userFacingIssueDescription(issue.description, language: language))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(userFacingIssueTitle(issue.title, language: language))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack(spacing: 8) {
-                    ShellTag(text: userFacingIssueKind(issue.kind, language: language), tint: ShellPalette.accentSoft)
-                    ShellTag(text: language.status(issue.status), tint: statusTint(for: issue.status))
-                    Spacer()
-                }
-
-                if !issue.dependsOn.isEmpty {
                     HStack(spacing: 8) {
-                        ShellTag(text: "\(issue.dependsOn.count) \(language("deps", "의존"))", tint: ShellPalette.warning)
-                        Spacer()
+                        Text(language.status(issue.status))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.muted)
+
+                        if !issue.dependsOn.isEmpty {
+                            Text("\(issue.dependsOn.count) \(language("deps", "의존"))")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(ShellPalette.warning)
+                        }
                     }
+                    .lineLimit(1)
                 }
             }
-            .padding(.top, 12)
-            .padding(.bottom, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
             .padding(.trailing, 12)
-            .padding(.leading, 34)
+            .padding(.leading, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .background(isSelected ? ShellPalette.panelRaised : ShellPalette.panelAlt)
-            .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(statusTint(for: issue.status))
-                    .frame(width: 6)
-                    .padding(.vertical, 12)
-                    .padding(.leading, 12)
-            }
             .overlay(
                 RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
                     .stroke(isSelected ? ShellPalette.lineStrong : ShellPalette.line, lineWidth: 1)
@@ -5546,7 +5535,10 @@ private struct CenterPaneView: View {
     @State private var companyOverviewSurface: CompanyOverviewSurface = .summary
     @State private var meetingRoomSurface: MeetingRoomSurface = .map
     @State private var detailDrawerOpen = false
+    @State private var companyOverviewDetailsExpanded = false
     @State private var issueComposerExpanded = false
+    @State private var issueDetailsExpanded = false
+    @State private var issueActivityExpanded = false
     @State private var presentedGoal: GoalRecord?
     @State private var companyChatDraft = ""
     @State private var companyChatApplyReviewDraft = ""
@@ -5877,6 +5869,48 @@ private struct CenterPaneView: View {
         }
     }
 
+    private var focusedIssues: [IssueRecord] {
+        filteredIssues.sorted { lhs, rhs in
+            let lhsRank = issueFocusRank(lhs)
+            let rhsRank = issueFocusRank(rhs)
+            if lhsRank != rhsRank {
+                return lhsRank < rhsRank
+            }
+            if lhs.priority != rhs.priority {
+                return lhs.priority > rhs.priority
+            }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
+    private var issueStatusSummary: [(String, Int, Color)] {
+        let statuses = ["BLOCKED", "IN_PROGRESS", "IN_REVIEW", "DELEGATED", "PLANNED", "DONE"]
+        return statuses.compactMap { status in
+            let count = filteredIssues.filter { $0.status == status }.count
+            guard count > 0 else { return nil }
+            return (l.status(status), count, statusTint(for: status))
+        }
+    }
+
+    private func issueFocusRank(_ issue: IssueRecord) -> Int {
+        switch issue.status.uppercased() {
+        case "BLOCKED":
+            return 0
+        case "WAITING_FOR_APPROVAL", "IN_REVIEW", "READY_FOR_CEO", "READY_TO_MERGE":
+            return 1
+        case "IN_PROGRESS":
+            return 2
+        case "DELEGATED":
+            return 3
+        case "PLANNED", "BACKLOG":
+            return 4
+        case "DONE", "MERGED":
+            return 9
+        default:
+            return 5
+        }
+    }
+
     private var filteredTasks: [TaskRecord] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let base = store.tasks.sorted { $0.updatedAt > $1.updatedAt }
@@ -6066,7 +6100,7 @@ private struct CenterPaneView: View {
         VStack(alignment: .leading, spacing: 12) {
             companyPageHeader(
                 title: l("Company Summary", "회사 요약"),
-                subtitle: l("Monitor current goals, active work, runtime health, and reviews.", "현재 목표, 진행 중인 작업, 런타임 상태, 리뷰를 모니터링합니다.")
+                subtitle: l("A compact view of what needs attention now.", "지금 봐야 할 것만 간단히 보여줍니다.")
             )
             HStack(spacing: 8) {
                 Button {
@@ -6105,32 +6139,36 @@ private struct CenterPaneView: View {
                     }
                 }
 
-                if layoutMode == .wide {
-                    HStack(alignment: .top, spacing: 12) {
-                        companyCurrentIssuesPanel
-                        companyAgentWorkPanel
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        companyCurrentIssuesPanel
-                        companyAgentWorkPanel
-                    }
-                }
+                companyCurrentIssuesPanel
 
-                if layoutMode == .wide {
-                    HStack(alignment: .top, spacing: 12) {
-                        companyRunningAgentsPanel
-                        companyDecisionPanel
-                    }
-                } else {
+                DisclosureGroup(isExpanded: $companyOverviewDetailsExpanded) {
                     VStack(alignment: .leading, spacing: 12) {
-                        companyRunningAgentsPanel
-                        companyDecisionPanel
-                    }
-                }
+                        companyAgentWorkPanel
 
-                companyLinearPanel
-                companyActivityFeed
+                        if layoutMode == .wide {
+                            HStack(alignment: .top, spacing: 12) {
+                                companyRunningAgentsPanel
+                                companyDecisionPanel
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 12) {
+                                companyRunningAgentsPanel
+                                companyDecisionPanel
+                            }
+                        }
+
+                        companyLinearPanel
+                        companyActivityFeed
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    compactDisclosureLabel(
+                        title: l("More company detail", "회사 세부정보 더보기"),
+                        subtitle: l("Live runs, CEO decisions, Linear, and activity history.", "실행 현황, CEO 결정, Linear, 활동 기록")
+                    )
+                }
+                .padding(14)
+                .shellInset()
             }
         }
     }
@@ -6138,7 +6176,6 @@ private struct CenterPaneView: View {
     @ViewBuilder
     private var companyRuntimeSummaryStrip: some View {
         if let runtime = store.selectedRuntime {
-            let selectedCompany = store.selectedCompany
             let companyID = store.selectedCompany?.id
             let approvalNeededCount = store.dashboard.issues.filter { issue in
                 issue.companyId == companyID &&
@@ -6154,75 +6191,43 @@ private struct CenterPaneView: View {
                 item.companyId == companyID &&
                     (item.status == "CHANGES_REQUESTED" || item.status == "READY_FOR_CEO")
             }.count
-            let runtimeHealthy = runtime.status.uppercased() == "RUNNING" && runtime.backendHealth.lowercased() == "healthy"
+            let headline = companyRuntimeHeadline(runtime)
+            let headlineTint = companyRuntimeHeadlineTint(runtime)
             VStack(alignment: .leading, spacing: 6) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        StatusSummaryPill(text: l.status(runtime.status), tint: companyRuntimeTint(runtime.status))
-                        if runtime.isManuallyStopped {
-                            ShellTag(
-                                text: l("Stopped manually", "수동 중지"),
-                                tint: ShellPalette.warning
-                            )
-                        }
-                        StatusSummaryPill(text: runtime.backendHealth.uppercased(), tint: companyRuntimeHealthTint(runtime.backendHealth))
+                        StatusSummaryPill(text: headline, tint: headlineTint)
                         if approvalNeededCount > 0 {
                             ShellTag(
-                                text: "\(approvalNeededCount) \(l("CEO approvals queued", "CEO 승인 대기"))",
+                                text: "\(approvalNeededCount) \(l("to approve", "승인"))",
                                 tint: ShellPalette.accentWarm
                             )
                         }
                         if blockedWorkflowCount > 0 {
                             ShellTag(
-                                text: "\(blockedWorkflowCount) \(l("workflow issues blocked", "워크플로우 차단"))",
+                                text: "\(blockedWorkflowCount) \(l("blocked", "막힘"))",
                                 tint: ShellPalette.warning
                             )
                         }
                         if reviewAttentionCount > 0 {
                             ShellTag(
-                                text: "\(reviewAttentionCount) \(l("reviews need attention", "리뷰 대기"))",
+                                text: "\(reviewAttentionCount) \(l("to review", "리뷰"))",
                                 tint: ShellPalette.accentWarm
-                            )
-                        }
-                        if let company = selectedCompany {
-                            ShellTag(
-                                text: runtimeSpendSummary(
-                                    label: l("Today", "오늘"),
-                                    spentCents: runtime.todaySpentCents,
-                                    capCents: company.dailyBudgetCents,
-                                    language: l
-                                ),
-                                tint: ShellPalette.accent
-                            )
-                            ShellTag(
-                                text: runtimeSpendSummary(
-                                    label: l("Month", "월"),
-                                    spentCents: runtime.monthSpentCents,
-                                    capCents: company.monthlyBudgetCents,
-                                    language: l
-                                ),
-                                tint: ShellPalette.accentWarm
-                            )
-                        }
-                        if runtime.isBudgetPaused {
-                            ShellTag(
-                                text: l("Cost cap reached", "비용 상한 도달"),
-                                tint: ShellPalette.warning
                             )
                         }
                     }
                 }
 
                 if let lastError = runtime.lastError, !lastError.isEmpty {
-                    Text("\(l("Latest runtime error", "최근 런타임 오류")): \(lastError)")
+                    Text("\(l("Problem", "문제")): \(lastError)")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(ShellPalette.danger)
                         .lineLimit(1)
                 } else if runtime.isManuallyStopped {
                     Text(
                         l(
-                            "Runtime was stopped manually. Press Start to resume company automation.",
-                            "런타임이 수동으로 중지되었습니다. 회사 자동화를 다시 시작하려면 시작을 누르세요."
+                            "Press Start when you want the company to continue.",
+                            "계속 진행하려면 시작을 누르세요."
                         )
                     )
                     .font(.system(size: 11, weight: .medium))
@@ -6231,41 +6236,42 @@ private struct CenterPaneView: View {
                 } else if runtime.isBudgetPaused {
                     Text(
                         l(
-                            "Estimated spend hit a configured guardrail. Raise the cap or wait for the budget window to reset.",
-                            "추정 비용이 설정한 상한에 도달했습니다. 상한을 올리거나 예산 창이 리셋될 때까지 기다리세요."
+                            "Cost limit reached. Adjust the limit or wait for the next budget window.",
+                            "비용 한도에 도달했습니다. 한도를 조정하거나 다음 예산 기간을 기다리세요."
                         )
                     )
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(ShellPalette.warning)
                     .lineLimit(2)
-                } else if runtimeHealthy && approvalNeededCount > 0 {
-                    Text(
-                        l(
-                            "Runtime is healthy. A company approval agent is handling pull request creation.",
-                            "런타임은 정상입니다. 회사 승인 에이전트가 PR 생성을 처리 중입니다."
-                        )
-                    )
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(1)
-                } else if runtimeHealthy && (blockedWorkflowCount > 0 || reviewAttentionCount > 0) {
-                    Text(
-                        l(
-                            "Runtime is healthy. The bottleneck is in QA, CEO approval, or merge follow-up.",
-                            "런타임은 정상입니다. 병목은 QA, CEO 승인, 또는 병합 후속 작업입니다."
-                        )
-                    )
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(1)
-                } else if let lastAction = runtime.lastAction, !lastAction.isEmpty {
-                    Text("\(l("Last runtime action", "최근 런타임 동작")): \(lastAction)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(ShellPalette.muted)
-                        .lineLimit(1)
                 }
             }
         }
+    }
+
+    private func companyRuntimeHeadline(_ runtime: CompanyRuntimeSnapshotRecord) -> String {
+        if runtime.lastError?.isEmpty == false {
+            return l("Needs attention", "확인 필요")
+        }
+        if runtime.isManuallyStopped {
+            return l("Paused", "멈춤")
+        }
+        if runtime.isBudgetPaused {
+            return l("Cost paused", "비용 확인")
+        }
+        if runtime.status.uppercased() == "RUNNING" {
+            return l("Running", "진행 중")
+        }
+        return l.status(runtime.status)
+    }
+
+    private func companyRuntimeHeadlineTint(_ runtime: CompanyRuntimeSnapshotRecord) -> Color {
+        if runtime.lastError?.isEmpty == false {
+            return ShellPalette.danger
+        }
+        if runtime.isBudgetPaused || runtime.isManuallyStopped {
+            return ShellPalette.warning
+        }
+        return companyRuntimeTint(runtime.status)
     }
 
     private var goalOverviewPage: some View {
@@ -6600,7 +6606,7 @@ private struct CenterPaneView: View {
         VStack(alignment: .leading, spacing: 12) {
             companyPageHeader(
                 title: l("Issues", "이슈"),
-                subtitle: l("Select an issue to see its status, linked task, and latest execution log.", "이슈를 선택하면 상태, 연결된 task, 최근 실행 로그를 볼 수 있습니다.")
+                subtitle: l("Start with the work that needs attention. Open details only when needed.", "먼저 봐야 할 작업만 보고, 필요할 때 세부정보를 엽니다.")
             )
             if shouldShowIssueComposer {
                 issueComposerPanel
@@ -6629,17 +6635,9 @@ private struct CenterPaneView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(l("Execution Board", "실행 보드"))
+                    Text(l("Work Queue", "작업 큐"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(ShellPalette.text)
-                    Text(
-                        l(
-                            "Track issue status, ownership, and execution progress.",
-                            "이슈 상태, 담당자, 실행 진행 상황을 추적합니다."
-                        )
-                    )
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
                 }
 
                 Spacer(minLength: 0)
@@ -6658,6 +6656,16 @@ private struct CenterPaneView: View {
                     )
                 }
                 .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+            }
+
+            if !issueStatusSummary.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(issueStatusSummary, id: \.0) { item in
+                            ShellTag(text: "\(item.0) \(item.1)", tint: item.2)
+                        }
+                    }
+                }
             }
 
             issueSurface
@@ -7613,7 +7621,7 @@ private struct CenterPaneView: View {
     private var selectedIssueDetailPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(l("Selected Issue", "선택된 이슈"))
+                Text(l("Issue", "이슈"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(ShellPalette.text)
                 Spacer()
@@ -7623,50 +7631,78 @@ private struct CenterPaneView: View {
             }
 
             if let issue = store.selectedIssue {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(userFacingIssueTitle(issue.title, language: l))
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(ShellPalette.text)
+                            .lineLimit(3)
 
                         Text(userFacingIssueDescription(issue.description, language: l))
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(ShellPalette.text.opacity(0.84))
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(3)
 
-                        HStack(spacing: 8) {
-                            StatusSummaryPill(text: userFacingIssueKind(issue.kind, language: l), tint: ShellPalette.accentSoft)
-                            if let assignee = store.selectedIssueAssignee {
-                                StatusSummaryPill(text: assignee.roleName, tint: ShellPalette.accent)
-                            }
-                            if let linearIdentifier = issue.linearIssueIdentifier, !linearIdentifier.isEmpty {
-                                StatusSummaryPill(text: linearIdentifier, tint: ShellPalette.accentWarm)
-                            }
-                            if let task = selectedIssueTask {
-                                StatusSummaryPill(text: l.status(task.status), tint: statusTint(for: task.status))
-                            }
-                            if let reviewItem = store.selectedReviewQueueItem {
-                                StatusSummaryPill(text: l.status(reviewItem.status), tint: reviewTint(reviewItem.status))
-                            }
+                        if let assignee = store.selectedIssueAssignee {
+                            Text(assignee.roleName)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(ShellPalette.muted)
+                                .lineLimit(1)
                         }
 
-                        HStack(spacing: 8) {
-                            Button(role: .destructive) {
-                                Task { await store.deleteSelectedIssue() }
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                            Button {
+                                Task { _ = await store.applyChatExecutionProposal(ChatExecutionProposal(summary: "Run selected issue")) }
                             } label: {
-                                Label(l("Delete Issue", "이슈 삭제"), systemImage: "trash")
+                                Label(l("Run", "실행"), systemImage: "play.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(store.selectedIssue == nil)
+
+                            Button {
+                                Task { _ = await store.applyChatDelegationProposal(ChatDelegationProposal(summary: "Delegate selected issue")) }
+                            } label: {
+                                Label(l("Delegate", "위임"), systemImage: "person.crop.circle.badge.plus")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+                            .disabled(store.selectedIssue == nil)
                         }
+                    }
 
-                        if issue.linearIssueId != nil {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(l("Linear", "Linear"))
+                    DisclosureGroup(isExpanded: $issueDetailsExpanded) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if !issue.acceptanceCriteria.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(l("Acceptance", "수용 기준"))
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(ShellPalette.text)
+                                    ForEach(Array(issue.acceptanceCriteria.prefix(4)), id: \.self) { criterion in
+                                        StatusSummaryLine(text: criterion, tint: ShellPalette.success)
+                                    }
+                                    if issue.acceptanceCriteria.count > 4 {
+                                        Text(l("+ \(issue.acceptanceCriteria.count - 4) more", "+ \(issue.acceptanceCriteria.count - 4)개 더"))
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(ShellPalette.faint)
+                                    }
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(l("Metadata", "메타데이터"))
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(ShellPalette.text)
+                                valueLine(label: l("Type", "유형"), value: userFacingIssueKind(issue.kind, language: l))
+                                valueLine(label: l("Priority", "우선순위"), value: "P\(issue.priority)")
                                 if let linearIdentifier = issue.linearIssueIdentifier, !linearIdentifier.isEmpty {
-                                    valueLine(label: l("Issue", "이슈"), value: linearIdentifier)
+                                    valueLine(label: "Linear", value: linearIdentifier)
+                                }
+                                if let task = selectedIssueTask {
+                                    valueLine(label: l("Task", "태스크"), value: l.status(task.status))
+                                }
+                                if let reviewItem = store.selectedReviewQueueItem {
+                                    valueLine(label: l("Review", "리뷰"), value: l.status(reviewItem.status))
                                 }
                                 if let linearIssueUrl = issue.linearIssueUrl, let url = URL(string: linearIssueUrl) {
                                     Link(destination: url) {
@@ -7675,34 +7711,28 @@ private struct CenterPaneView: View {
                                     }
                                     .foregroundStyle(ShellPalette.accent)
                                 }
-                                if let lastSyncAt = issue.lastLinearSyncAt {
-                                    valueLine(label: l("Last sync", "마지막 동기화"), value: relativeTimestamp(lastSyncAt))
-                                }
                             }
-                        }
 
-                        if !issue.acceptanceCriteria.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(l("Acceptance", "수용 기준"))
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(ShellPalette.text)
-                                ForEach(Array(issue.acceptanceCriteria.prefix(3)), id: \.self) { criterion in
-                                    StatusSummaryLine(text: criterion, tint: ShellPalette.success)
-                                }
-                                if issue.acceptanceCriteria.count > 3 {
-                                    Text(l("+ \(issue.acceptanceCriteria.count - 3) more", "+ \(issue.acceptanceCriteria.count - 3)개 더"))
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundStyle(ShellPalette.faint)
-                                }
+                            Button(role: .destructive) {
+                                Task { await store.deleteSelectedIssue() }
+                            } label: {
+                                Label(l("Delete Issue", "이슈 삭제"), systemImage: "trash")
+                                    .frame(maxWidth: .infinity)
                             }
+                            .buttonStyle(ShellTopBarButtonStyle(prominent: false))
                         }
+                        .padding(.top, 8)
+                    } label: {
+                        compactDisclosureLabel(
+                            title: l("Details", "세부정보"),
+                            subtitle: l("Acceptance, metadata, linked task, and Linear.", "수용 기준, 메타데이터, 연결된 태스크, Linear")
+                        )
+                    }
 
+                    DisclosureGroup(isExpanded: $issueActivityExpanded) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(l("Agent Execution", "에이전트 실행"))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(ShellPalette.text)
                             if store.issueExecutionDetails.isEmpty {
-                                Text(l("No agent execution details have been captured for this issue yet.", "이 이슈에 대한 에이전트 실행 상세가 아직 없습니다."))
+                                Text(l("No execution details yet.", "아직 실행 상세가 없습니다."))
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(ShellPalette.text.opacity(0.8))
                                     .padding(12)
@@ -7714,7 +7744,7 @@ private struct CenterPaneView: View {
                                     )
                                     .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
                             } else {
-                                VStack(spacing: 10) {
+                                VStack(spacing: 8) {
                                     ForEach(store.issueExecutionDetails) { detail in
                                         IssueExecutionDetailCard(
                                             detail: detail,
@@ -7724,61 +7754,43 @@ private struct CenterPaneView: View {
                                     }
                                 }
                             }
-                        }
 
-                        if !selectedIssueContextEntries.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(l("Shared Notes", "공유 메모"))
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(ShellPalette.text)
-                                ForEach(Array(selectedIssueContextEntries.prefix(5))) { entry in
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text("\(entry.agentName) · \(entry.kind.uppercased())")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundStyle(ShellPalette.accent)
-                                        Text(entry.content)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(ShellPalette.text.opacity(0.84))
-                                            .fixedSize(horizontal: false, vertical: true)
+                            if !selectedIssueContextEntries.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(l("Shared Notes", "공유 메모"))
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(ShellPalette.text)
+                                    ForEach(Array(selectedIssueContextEntries.prefix(3))) { entry in
+                                        issueDebugNote(
+                                            eyebrow: "\(entry.agentName) · \(entry.kind.uppercased())",
+                                            body: entry.content,
+                                            tint: ShellPalette.accent
+                                        )
                                     }
-                                    .padding(10)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(ShellPalette.panelAlt)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                                            .stroke(ShellPalette.line, lineWidth: 1)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                                }
+                            }
+
+                            if !selectedIssueMessages.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(l("Conversation", "대화"))
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(ShellPalette.text)
+                                    ForEach(Array(selectedIssueMessages.prefix(3))) { message in
+                                        issueDebugNote(
+                                            eyebrow: "\(message.fromAgentName) → \(message.toAgentName ?? "all") · \(message.kind)",
+                                            body: message.body,
+                                            tint: message.kind == "escalation" ? ShellPalette.warning : ShellPalette.accent
+                                        )
+                                    }
                                 }
                             }
                         }
-
-                        if !selectedIssueMessages.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(l("Conversation", "대화"))
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(ShellPalette.text)
-                                ForEach(Array(selectedIssueMessages.prefix(5))) { message in
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text("\(message.fromAgentName) → \(message.toAgentName ?? "all") · \(message.kind)")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundStyle(message.kind == "escalation" ? ShellPalette.warning : ShellPalette.accent)
-                                        Text(message.body)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(ShellPalette.text.opacity(0.84))
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .padding(10)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(ShellPalette.panelAlt)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                                            .stroke(ShellPalette.line, lineWidth: 1)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
-                                }
-                            }
-                        }
+                        .padding(.top, 8)
+                    } label: {
+                        compactDisclosureLabel(
+                            title: l("Execution activity", "실행 활동"),
+                            subtitle: l("Logs, shared notes, and agent conversation.", "로그, 공유 메모, 에이전트 대화")
+                        )
                     }
                 }
             } else {
@@ -7792,6 +7804,44 @@ private struct CenterPaneView: View {
         }
         .padding(14)
         .shellInset()
+    }
+
+    private func compactDisclosureLabel(title: String, subtitle: String) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                Text(subtitle)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private func issueDebugNote(eyebrow: String, body: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(eyebrow)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+            Text(body)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ShellPalette.text.opacity(0.84))
+                .lineLimit(4)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ShellPalette.panelAlt)
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .stroke(ShellPalette.line, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
     }
 
     private func companyPageHeader(title: String, subtitle: String) -> some View {
@@ -7932,19 +7982,16 @@ private struct CenterPaneView: View {
             companyRuntimeSummaryStrip
 
             HStack(spacing: 8) {
-                ShellTag(text: "\(l("Goals", "목표")) \(scopedMetrics.openGoals)", tint: ShellPalette.accentWarm)
                 ShellTag(text: "\(l("Active Issues", "활성 이슈")) \(scopedMetrics.activeIssues)", tint: ShellPalette.accent)
                 if approvalNeededCount > 0 {
-                    ShellTag(text: "\(l("CEO Approval", "CEO 승인")) \(approvalNeededCount)", tint: ShellPalette.accentWarm)
+                    ShellTag(text: "\(l("Approval", "승인")) \(approvalNeededCount)", tint: ShellPalette.accentWarm)
                 }
-                ShellTag(text: "\(l("Blocked", "차단")) \(blockedIssueCount)", tint: ShellPalette.warning)
-                ShellTag(text: "\(l("Merge", "병합")) \(scopedMetrics.readyToMergeCount)", tint: ShellPalette.success)
-                Spacer()
-            }
-
-            HStack(spacing: 8) {
-                ShellTag(text: "\(l("Main agent", "대표 에이전트")): \(workflowLeader)", tint: ShellPalette.accent)
-                ShellTag(text: "\(l("Helpers", "도움")): \(workerAgents.count)", tint: ShellPalette.success)
+                if blockedIssueCount > 0 {
+                    ShellTag(text: "\(l("Blocked", "차단")) \(blockedIssueCount)", tint: ShellPalette.warning)
+                }
+                if scopedMetrics.readyToMergeCount > 0 {
+                    ShellTag(text: "\(l("Merge", "병합")) \(scopedMetrics.readyToMergeCount)", tint: ShellPalette.success)
+                }
                 Spacer()
             }
         }
@@ -7989,8 +8036,8 @@ private struct CenterPaneView: View {
 
     private var surfaceSwitcher: some View {
         Picker(l("Surface", "화면"), selection: $goalSurface) {
-            Text(l("Board", "보드")).tag(GoalSurface.board)
-            Text(l("Canvas", "캔버스")).tag(GoalSurface.canvas)
+            Text(l("Focus", "핵심")).tag(GoalSurface.board)
+            Text(l("Board", "보드")).tag(GoalSurface.canvas)
         }
         .pickerStyle(.segmented)
     }
@@ -7999,9 +8046,45 @@ private struct CenterPaneView: View {
     private var issueSurface: some View {
         switch goalSurface {
         case .board:
-            issueBoard
+            issueFocusList
         case .canvas:
-            issueCanvas
+            issueBoard
+        }
+    }
+
+    private var issueFocusList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if focusedIssues.isEmpty {
+                EmptyStateView(
+                    image: "checklist",
+                    title: l("No issues to show", "표시할 이슈가 없습니다"),
+                    subtitle: l("Create a goal or issue to start the queue.", "목표나 이슈를 만들어 큐를 시작하세요.")
+                )
+                .frame(height: 180)
+            } else {
+                ForEach(focusedIssues.prefix(12)) { issue in
+                    IssueFocusRow(
+                        issue: issue,
+                        language: l,
+                        assignee: store.orgProfiles.first(where: { $0.id == issue.assigneeProfileId }),
+                        isSelected: store.selectedIssueID == issue.id
+                    ) {
+                        withAnimation(ShellMotion.spring) {
+                            issueDetailsExpanded = false
+                            issueActivityExpanded = false
+                        }
+                        Task { await store.selectIssue(issue) }
+                    }
+                }
+
+                if focusedIssues.count > 12 {
+                    Text(l("+ \(focusedIssues.count - 12) more in board view", "+ \(focusedIssues.count - 12)개는 보드에서 더 볼 수 있습니다."))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ShellPalette.faint)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                }
+            }
         }
     }
 
@@ -8422,43 +8505,20 @@ private struct CompanyCard: View {
                     )
                 }
 
-                Text(userFacingPathLabel(company.rootPath))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(1)
-
                 HStack(spacing: 8) {
-                    ShellTag(text: company.defaultBaseBranch, tint: ShellPalette.accentWarm)
                     if let runtime {
-                        ShellTag(text: language.status(runtime.status), tint: companyRuntimeTint(runtime.status))
-                        if runtime.isManuallyStopped {
-                            ShellTag(text: language("Stopped manually", "수동 중지"), tint: ShellPalette.warning)
-                        }
-                        ShellTag(text: runtime.backendHealth.uppercased(), tint: companyRuntimeHealthTint(runtime.backendHealth))
-                        if runtime.isBudgetPaused {
-                            ShellTag(text: language("Cap reached", "상한 도달"), tint: ShellPalette.warning)
-                        }
-                        if let lastError = runtime.lastError, !lastError.isEmpty {
-                            ShellTag(text: language("Needs attention", "주의 필요"), tint: ShellPalette.danger)
-                        }
-                    }
-                }
-
-                if let runtime, runtime.todaySpentCents > 0 || company.dailyBudgetCents != nil || company.monthlyBudgetCents != nil {
-                    Text(
-                        companySpendOverview(
-                            company: company,
-                            runtime: runtime,
-                            language: language
+                        ShellTag(
+                            text: companyCardRuntimeLabel(runtime, language: language),
+                            tint: companyCardRuntimeTint(runtime)
                         )
-                    )
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(2)
+                    } else {
+                        ShellTag(text: language("Not started", "시작 전"), tint: ShellPalette.panelRaised)
+                    }
+                    Spacer()
                 }
             }
-            .padding(.top, 12)
-            .padding(.bottom, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
             .padding(.trailing, 12)
             .padding(.leading, 34)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -8480,6 +8540,32 @@ private struct CompanyCard: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+private func companyCardRuntimeLabel(_ runtime: CompanyRuntimeSnapshotRecord, language: AppLanguage) -> String {
+    if runtime.lastError?.isEmpty == false {
+        return language("Needs attention", "확인 필요")
+    }
+    if runtime.isManuallyStopped {
+        return language("Paused", "멈춤")
+    }
+    if runtime.isBudgetPaused {
+        return language("Cost paused", "비용 확인")
+    }
+    if runtime.status.uppercased() == "RUNNING" {
+        return language("Running", "진행 중")
+    }
+    return language.status(runtime.status)
+}
+
+private func companyCardRuntimeTint(_ runtime: CompanyRuntimeSnapshotRecord) -> Color {
+    if runtime.lastError?.isEmpty == false {
+        return ShellPalette.danger
+    }
+    if runtime.isBudgetPaused || runtime.isManuallyStopped {
+        return ShellPalette.warning
+    }
+    return companyRuntimeTint(runtime.status)
 }
 
 private struct CompanyActivityFeedList: View {
@@ -9098,8 +9184,8 @@ private struct IssueBoardLaneView: View {
             if issues.isEmpty {
                 EmptyStateView(
                     image: "tray",
-                    title: language("No issues", "이슈 없음"),
-                    subtitle: language("The CEO agent has nothing queued in this lane right now.", "이 lane에는 현재 CEO 에이전트가 배치한 이슈가 없습니다.")
+                    title: language("No work here", "작업 없음"),
+                    subtitle: language("Nothing is waiting in this step.", "이 단계에는 대기 중인 작업이 없습니다.")
                 )
                 .frame(maxWidth: .infinity, minHeight: 176, maxHeight: 176)
             } else {
@@ -9143,7 +9229,7 @@ private struct IssueBoardCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(userFacingIssueTitle(issue.title, language: language))
@@ -9151,10 +9237,10 @@ private struct IssueBoardCard: View {
                             .foregroundStyle(ShellPalette.text)
                             .multilineTextAlignment(.leading)
                             .lineLimit(2)
-                        HStack(spacing: 6) {
-                            ShellTag(text: userFacingIssueKind(issue.kind, language: language), tint: ShellPalette.accentSoft)
-                            ShellTag(text: language.status(issue.status), tint: statusTint(for: issue.status))
-                        }
+                        Text(language.status(issue.status))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.muted)
+                            .lineLimit(1)
                     }
                     Spacer(minLength: 8)
                     Circle()
@@ -9162,43 +9248,35 @@ private struct IssueBoardCard: View {
                         .frame(width: 8, height: 8)
                 }
 
-                Text(userFacingIssueDescription(issue.description, language: language))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(3)
-
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     if let assignee {
-                        ShellTag(text: assignee.roleName, tint: ShellPalette.accent)
+                        Text(assignee.roleName)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.faint)
+                            .lineLimit(1)
                     }
-                    ShellTag(text: "P\(issue.priority)", tint: ShellPalette.accentWarm)
+                    if issue.priority > 0 {
+                        Text("P\(issue.priority)")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.faint)
+                    }
+                    if !issue.dependsOn.isEmpty {
+                        Text("\(issue.dependsOn.count) \(language("deps", "의존"))")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(ShellPalette.warning)
+                    }
                     Spacer()
                 }
 
-                if !issue.dependsOn.isEmpty {
-                    HStack(spacing: 8) {
-                        ShellTag(text: "\(issue.dependsOn.count) \(language("deps", "의존"))", tint: ShellPalette.warning)
-                        Spacer()
-                    }
-                }
-
                 if let reviewItem {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(language("Review Queue", "리뷰 큐"))
-                            .font(.system(size: 9, weight: .bold))
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(reviewTint(reviewItem.status))
+                            .frame(width: 6, height: 6)
+                        Text(language("Review", "리뷰"))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(ShellPalette.faint)
-                        HStack(spacing: 8) {
-                            ShellTag(text: language.status(reviewItem.status), tint: reviewTint(reviewItem.status))
-                            if let mergeability = reviewItem.mergeability, !mergeability.isEmpty {
-                                ShellTag(text: mergeability, tint: ShellPalette.success)
-                            }
-                        }
-                        if let checksSummary = reviewItem.checksSummary, !checksSummary.isEmpty {
-                            Text(checksSummary)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(ShellPalette.muted)
-                                .lineLimit(1)
-                        }
+                        Spacer()
                     }
                 }
             }
