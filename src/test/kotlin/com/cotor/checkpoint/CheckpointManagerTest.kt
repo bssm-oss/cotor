@@ -20,7 +20,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 class CheckpointManagerTest : FunSpec({
-    val checkpointDir = ".cotor/test-checkpoints"
+    lateinit var checkpointDir: String
     lateinit var checkpointManager: CheckpointManager
 
     test("default checkpoint manager writes under desktop app home") {
@@ -46,6 +46,7 @@ class CheckpointManagerTest : FunSpec({
     }
 
     beforeTest {
+        checkpointDir = File.createTempFile("cotor-checkpoints", "").also { it.delete() }.absolutePath
         checkpointManager = CheckpointManager(checkpointDir)
         File(checkpointDir).mkdirs()
     }

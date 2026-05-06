@@ -81,6 +81,45 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("company agent performance route returns scoped snapshots") {
+        coEvery { desktopService.agentPerformance("company-performance") } returns listOf(
+            AgentPerformanceSnapshot(
+                agentId = "agent-builder",
+                agentName = "Builder",
+                roleName = "Builder",
+                agentCli = "opencode",
+                model = "opencode/nemotron-3-super-free",
+                score = 88,
+                completedIssues = 4,
+                activeIssues = 1,
+                runSuccessRate = 0.8,
+                qaPassRate = 0.75,
+                dataSufficiency = AgentPerformanceDataSufficiency.SUFFICIENT
+            )
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/companies/company-performance/agents/performance") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val body = response.bodyAsText()
+
+            response.status shouldBe HttpStatusCode.OK
+            body shouldContain "\"agentId\":\"agent-builder\""
+            body shouldContain "\"score\":88"
+            body shouldContain "\"dataSufficiency\":\"SUFFICIENT\""
+            coVerify { desktopService.agentPerformance("company-performance") }
+        }
+    }
+
     test("settings route redacts backend and Linear tokens") {
         every { desktopService.settings() } returns DesktopSettings(
             appHome = "/tmp/cotor-app-home",
@@ -249,7 +288,8 @@ class AppServerTest : FunSpec({
                 path = null,
                 networkTarget = null,
                 command = null,
-                skill = null
+                skill = null,
+                channel = null
             )
         } returns CapabilitySimulationResult(
             action = "github.merge",
@@ -289,7 +329,8 @@ class AppServerTest : FunSpec({
                 path = null,
                 networkTarget = null,
                 command = null,
-                skill = "graphify"
+                skill = "graphify",
+                channel = null
             )
         } returns CapabilitySimulationResult(
             action = "skill.run",
@@ -326,7 +367,8 @@ class AppServerTest : FunSpec({
                     path = null,
                     networkTarget = null,
                     command = null,
-                    skill = "graphify"
+                    skill = "graphify",
+                    channel = null
                 )
             }
         }
@@ -503,31 +545,27 @@ class AppServerTest : FunSpec({
         }
     }
 
-    test("marketing policy and run routes delegate to backend service") {
+    test("marketing policy and run routes delegate to browser-driven marketing backend") {
         val policy = MarketingDelegationPolicy(
             id = "policy-1",
             companyId = "company-1",
             agentId = "agent-1",
             allowedDomains = listOf("cms.example.com"),
-            channelAccounts = listOf(MarketingChannelAccount(channel = "web", allowedDomains = listOf("cms.example.com"))),
-            dailyPostLimit = 1,
-            createdAt = 1L,
-            updatedAt = 2L
+            channelAccounts = listOf(
+                MarketingChannelAccount(channel = "web", accountRef = "cms", allowedDomains = listOf("cms.example.com"))
+            )
         )
         val run = MarketingRunRecord(
-            id = "marketing-run-1",
+            id = "run-1",
             companyId = "company-1",
             agentId = "agent-1",
-            objective = "Publish launch notes",
+            objective = "Publish update",
             channels = listOf("web"),
             delegationPolicyId = "policy-1",
-            status = MarketingRunStatus.COMPLETED,
-            createdAt = 1L,
-            updatedAt = 2L,
-            completedAt = 2L
+            status = MarketingRunStatus.COMPLETED
         )
         coEvery {
-            desktopService.listMarketingDelegationPolicies(companyId = "company-1", agentId = "agent-1")
+            desktopService.listMarketingDelegationPolicies(companyId = "company-1", agentId = null)
         } returns listOf(policy)
         coEvery {
             desktopService.upsertMarketingDelegationPolicy(any())
@@ -536,7 +574,7 @@ class AppServerTest : FunSpec({
             desktopService.createMarketingRun(any())
         } returns run
         coEvery {
-            desktopService.marketingRun("marketing-run-1")
+            desktopService.marketingRun("run-1")
         } returns run
 
         testApplication {
@@ -548,41 +586,35 @@ class AppServerTest : FunSpec({
                 )
             }
 
-            val policies = client.get("/api/app/marketing/policies?companyId=company-1&agentId=agent-1") {
+            val policies = client.get("/api/app/marketing/policies?companyId=company-1") {
                 header("Authorization", "Bearer secret-token")
             }
-            val upsert = client.post("/api/app/marketing/policies") {
+            val savedPolicy = client.post("/api/app/marketing/policies") {
                 header("Authorization", "Bearer secret-token")
                 header("Content-Type", "application/json")
                 setBody(
                     """
-                    {
-                      "companyId":"company-1",
-                      "agentId":"agent-1",
-                      "allowedDomains":["cms.example.com"],
-                      "channelAccounts":[{"channel":"web","allowedDomains":["cms.example.com"]}],
-                      "dailyPostLimit":1
-                    }
+                    {"companyId":"company-1","agentId":"agent-1","allowedDomains":["cms.example.com"],"channelAccounts":[{"channel":"web","accountRef":"cms","allowedDomains":["cms.example.com"],"secretRefs":[]}]}
                     """.trimIndent()
                 )
             }
-            val created = client.post("/api/app/marketing/runs") {
+            val createdRun = client.post("/api/app/marketing/runs") {
                 header("Authorization", "Bearer secret-token")
                 header("Content-Type", "application/json")
-                setBody("""{"companyId":"company-1","agentId":"agent-1","objective":"Publish launch notes","channels":["web"],"delegationPolicyId":"policy-1"}""")
+                setBody("""{"companyId":"company-1","agentId":"agent-1","objective":"Publish update","channels":["web"],"delegationPolicyId":"policy-1"}""")
             }
-            val inspected = client.get("/api/app/marketing/runs/marketing-run-1") {
+            val fetchedRun = client.get("/api/app/marketing/runs/run-1") {
                 header("Authorization", "Bearer secret-token")
             }
 
             policies.status shouldBe HttpStatusCode.OK
             policies.bodyAsText() shouldContain "cms.example.com"
-            upsert.status shouldBe HttpStatusCode.OK
-            upsert.bodyAsText() shouldContain "\"id\":\"policy-1\""
-            created.status shouldBe HttpStatusCode.OK
-            created.bodyAsText() shouldContain "\"status\":\"COMPLETED\""
-            inspected.status shouldBe HttpStatusCode.OK
-            inspected.bodyAsText() shouldContain "marketing-run-1"
+            savedPolicy.status shouldBe HttpStatusCode.OK
+            savedPolicy.bodyAsText() shouldContain "policy-1"
+            createdRun.status shouldBe HttpStatusCode.OK
+            createdRun.bodyAsText() shouldContain "\"status\":\"COMPLETED\""
+            fetchedRun.status shouldBe HttpStatusCode.OK
+            fetchedRun.bodyAsText() shouldContain "run-1"
             coVerify(exactly = 1) { desktopService.createMarketingRun(any()) }
         }
     }
@@ -1764,6 +1796,12 @@ class AppServerTest : FunSpec({
                 "issueId" to "issue-1",
                 "issueTitle" to "Ship README change",
                 "issueStatus" to "IN_PROGRESS",
+                "blockedReason" to "Pull request checks failed.",
+                "blockedReasonCode" to "CI_FAILED",
+                "blockedReasonSummary" to "Pull request checks failed.",
+                "blockedReasonDetail" to "checksSummary: build=COMPLETED/FAILURE",
+                "blockedReasonSource" to "checksSummary",
+                "blockedRetryable" to true,
                 "tasks" to listOf(
                     mapOf(
                         "taskId" to "task-1",
@@ -1773,7 +1811,10 @@ class AppServerTest : FunSpec({
                                 "runId" to "run-1",
                                 "agent" to "opencode",
                                 "status" to "RUNNING",
-                                "processId" to 42L
+                                "processId" to 42L,
+                                "failureClass" to "execution",
+                                "blockedReasonCode" to "CI_FAILED",
+                                "blockedReasonDetail" to "checksSummary: build=COMPLETED/FAILURE"
                             )
                         )
                     )
@@ -1798,6 +1839,74 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"issueId\":\"issue-1\""
             response.bodyAsText() shouldContain "\"agent\":\"opencode\""
             response.bodyAsText() shouldContain "\"processId\":42"
+            response.bodyAsText() shouldContain "\"blockedReasonCode\":\"CI_FAILED\""
+            response.bodyAsText() shouldContain "\"blockedReasonSource\":\"checksSummary\""
+            response.bodyAsText() shouldContain "\"blockedRetryable\":true"
+        }
+    }
+
+    test("company report routes return morning report archive and generated detail when authorized") {
+        val company = Company(
+            id = "company-1",
+            name = "Report Co",
+            rootPath = "/tmp/report",
+            repositoryId = "repo-1",
+            defaultBaseBranch = "main",
+            createdAt = 1,
+            updatedAt = 1
+        )
+        val report = CompanyDailyReport(
+            id = "company-1-2026-05-05",
+            companyId = company.id,
+            date = "2026-05-05",
+            generatedAt = 10,
+            periodStart = 1,
+            periodEnd = 2,
+            summary = "1 completed · 0 blocked",
+            completedItems = listOf(
+                CompanyDailyReportItem(
+                    id = "issue-1",
+                    title = "Ship README change",
+                    status = "DONE",
+                    severity = "success",
+                    timestamp = 2
+                )
+            ),
+            costSummary = CompanyDailyReportCostSummary(estimatedRunCostCents = 42),
+            activityCount = 1
+        )
+        coEvery { desktopService.getCompany("company-1") } returns company
+        coEvery { desktopService.listMorningReports("company-1") } returns listOf(report.toSummary())
+        coEvery { desktopService.morningReport("company-1", "2026-05-05") } returns report
+        coEvery { desktopService.generateMorningReport("company-1", null) } returns report
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val listResponse = client.get("/api/app/companies/company-1/reports") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val detailResponse = client.get("/api/app/companies/company-1/reports/2026-05-05") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val generateResponse = client.post("/api/app/companies/company-1/reports/generate") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            listResponse.status shouldBe HttpStatusCode.OK
+            listResponse.bodyAsText() shouldContain "\"date\":\"2026-05-05\""
+            listResponse.bodyAsText() shouldContain "\"completedCount\":1"
+            detailResponse.status shouldBe HttpStatusCode.OK
+            detailResponse.bodyAsText() shouldContain "\"summary\":\"1 completed"
+            detailResponse.bodyAsText() shouldContain "\"estimatedRunCostCents\":42"
+            generateResponse.status shouldBe HttpStatusCode.OK
+            generateResponse.bodyAsText() shouldContain "\"completedItems\""
         }
     }
 
@@ -2175,60 +2284,6 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"kind\":\"ceo-plan\""
             coVerify(exactly = 1) {
                 desktopService.createChatIntake("company-1", "대충 채팅만으로 다 되게 해줘", false)
-            }
-        }
-    }
-
-    test("company operator command route forwards automation mode and command text") {
-        coEvery {
-            desktopService.runOperatorCommand(
-                companyId = "company-1",
-                message = "에이전트들 잘 돌아가?",
-                automationMode = OperatorAutomationMode.AGENT_APPROVED,
-                confirmFullAuto = false
-            )
-        } returns OperatorCommandResponse(
-            message = "Company status checked.",
-            automationMode = OperatorAutomationMode.AGENT_APPROVED,
-            actions = listOf(
-                OperatorCommandAction(
-                    type = "status-check",
-                    title = "Company status checked",
-                    detail = "runtime=stopped",
-                    status = "DONE"
-                )
-            ),
-            summary = OperatorCompanySummary(
-                runtimeStatus = "STOPPED",
-                backendHealth = "unknown",
-                activeAgentCount = 0,
-                blockedIssueCount = 0,
-                reviewQueueCount = 0,
-                pendingApprovalCount = 0,
-                budgetPaused = false
-            )
-        )
-
-        testApplication {
-            application {
-                cotorAppModule(
-                    token = "secret-token",
-                    desktopService = desktopService,
-                    tuiSessionService = tuiSessionService
-                )
-            }
-
-            val response = client.post("/api/app/companies/company-1/operator/commands") {
-                header("Authorization", "Bearer secret-token")
-                header("Content-Type", "application/json")
-                setBody("""{"message":"에이전트들 잘 돌아가?","automationMode":"AGENT_APPROVED","confirmFullAuto":false}""")
-            }
-
-            response.status shouldBe HttpStatusCode.OK
-            response.bodyAsText() shouldContain "\"automationMode\":\"AGENT_APPROVED\""
-            response.bodyAsText() shouldContain "\"type\":\"status-check\""
-            coVerify(exactly = 1) {
-                desktopService.runOperatorCommand("company-1", "에이전트들 잘 돌아가?", OperatorAutomationMode.AGENT_APPROVED, false)
             }
         }
     }

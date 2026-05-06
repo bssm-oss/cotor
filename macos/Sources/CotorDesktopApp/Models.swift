@@ -60,6 +60,61 @@ struct CompanyMemorySnapshotPayload: Codable, Hashable {
     let companyMemory: String
     let workflowMemory: String
     let agentMemory: String
+    let projectMemory: String
+    let teamMemory: String
+
+    enum CodingKeys: String, CodingKey {
+        case companyMemory
+        case workflowMemory
+        case agentMemory
+        case projectMemory
+        case teamMemory
+    }
+
+    init(
+        companyMemory: String,
+        workflowMemory: String,
+        agentMemory: String,
+        projectMemory: String? = nil,
+        teamMemory: String = ""
+    ) {
+        self.companyMemory = companyMemory
+        self.workflowMemory = workflowMemory
+        self.agentMemory = agentMemory
+        self.projectMemory = projectMemory ?? workflowMemory
+        self.teamMemory = teamMemory
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        companyMemory = try container.decode(String.self, forKey: .companyMemory)
+        workflowMemory = try container.decode(String.self, forKey: .workflowMemory)
+        agentMemory = try container.decode(String.self, forKey: .agentMemory)
+        projectMemory = try container.decodeIfPresent(String.self, forKey: .projectMemory) ?? workflowMemory
+        teamMemory = try container.decodeIfPresent(String.self, forKey: .teamMemory) ?? ""
+    }
+}
+
+struct CompanyProblemSignalRecord: Codable, Identifiable, Hashable {
+    let id: String
+    let companyId: String
+    let kind: String
+    let title: String
+    let detail: String
+    let severity: String
+    let confidence: Double
+    let source: String
+    let dedupeKey: String
+    let status: String
+    let goalId: String?
+    let issueId: String?
+    let reviewQueueItemId: String?
+    let runId: String?
+    let triageGoalId: String?
+    let cooldownUntil: Int64?
+    let firstSeenAt: Int64
+    let lastSeenAt: Int64
+    let updatedAt: Int64
 }
 
 struct CreateCompanyResponsePayload: Codable, Hashable {
@@ -930,6 +985,86 @@ struct RunningAgentSessionRecord: Codable, Hashable, Identifiable {
     let updatedAt: Int64
 }
 
+struct AgentPerformanceSnapshotRecord: Codable, Hashable, Identifiable {
+    var id: String { agentId }
+
+    let agentId: String
+    let agentName: String
+    let roleName: String
+    let agentCli: String
+    let model: String?
+    let score: Int?
+    let completedIssues: Int
+    let activeIssues: Int
+    let blockedIssues: Int
+    let runSuccessRate: Double?
+    let qaPassRate: Double?
+    let reviewRejectionCount: Int
+    let retryCount: Int
+    let averageDurationMs: Int64?
+    let estimatedCostCents: Int?
+    let lastActivityAt: Int64?
+    let dataSufficiency: String
+}
+
+struct CompanyDailyReportItemRecord: Codable, Hashable, Identifiable {
+    let id: String
+    let title: String
+    let detail: String?
+    let issueId: String?
+    let goalId: String?
+    let runId: String?
+    let pullRequestUrl: String?
+    let status: String?
+    let severity: String
+    let timestamp: Int64?
+}
+
+struct CompanyDailyReportCostSummaryRecord: Codable, Hashable {
+    let estimatedRunCostCents: Int
+    let todaySpentCents: Int
+    let monthSpentCents: Int
+    let dailyBudgetCents: Int?
+    let monthlyBudgetCents: Int?
+    let budgetPaused: Bool
+}
+
+struct CompanyDailyReportSummaryRecord: Codable, Hashable, Identifiable {
+    let id: String
+    let companyId: String
+    let date: String
+    let generatedAt: Int64
+    let periodStart: Int64
+    let periodEnd: Int64
+    let summary: String
+    let completedCount: Int
+    let blockedCount: Int
+    let qaPassedCount: Int
+    let changesRequestedCount: Int
+    let pullRequestCount: Int
+    let estimatedRunCostCents: Int
+    let activityCount: Int
+}
+
+struct CompanyDailyReportRecord: Codable, Hashable, Identifiable {
+    let id: String
+    let companyId: String
+    let date: String
+    let generatedAt: Int64
+    let periodStart: Int64
+    let periodEnd: Int64
+    let summary: String
+    let highlights: [CompanyDailyReportItemRecord]
+    let completedItems: [CompanyDailyReportItemRecord]
+    let pullRequests: [CompanyDailyReportItemRecord]
+    let reviewItems: [CompanyDailyReportItemRecord]
+    let blockedItems: [CompanyDailyReportItemRecord]
+    let autoRecoveredItems: [CompanyDailyReportItemRecord]
+    let recommendedNextActions: [CompanyDailyReportItemRecord]
+    let costSummary: CompanyDailyReportCostSummaryRecord
+    let activityCount: Int
+}
+
 struct CompanyEventRecord: Codable, Hashable, Identifiable {
     let id: String
     let companyId: String
@@ -969,6 +1104,7 @@ struct CompanyDashboardPayload: Codable {
     let activity: [CompanyActivityItemRecord]
     let agentContextEntries: [AgentContextEntryRecord]
     let agentMessages: [AgentMessageRecord]
+    var agentPerformance: [AgentPerformanceSnapshotRecord] = []
 
     private enum CodingKeys: String, CodingKey {
         case companies
@@ -991,6 +1127,7 @@ struct CompanyDashboardPayload: Codable {
         case activity
         case agentContextEntries
         case agentMessages
+        case agentPerformance
     }
 
     init(from decoder: Decoder) throws {
@@ -1015,6 +1152,7 @@ struct CompanyDashboardPayload: Codable {
         activity = try container.decodeValue([CompanyActivityItemRecord].self, forKey: .activity, default: [])
         agentContextEntries = try container.decodeValue([AgentContextEntryRecord].self, forKey: .agentContextEntries, default: [])
         agentMessages = try container.decodeValue([AgentMessageRecord].self, forKey: .agentMessages, default: [])
+        agentPerformance = try container.decodeValue([AgentPerformanceSnapshotRecord].self, forKey: .agentPerformance, default: [])
     }
 }
 
@@ -1214,6 +1352,7 @@ struct DashboardPayload: Codable {
     let companyRuntimes: [CompanyRuntimeSnapshotRecord]
     let agentContextEntries: [AgentContextEntryRecord]
     let agentMessages: [AgentMessageRecord]
+    let agentPerformance: [AgentPerformanceSnapshotRecord]
 }
 
 extension DashboardPayload {
@@ -1268,8 +1407,60 @@ extension DashboardPayload {
         activity: [],
         companyRuntimes: [],
         agentContextEntries: [],
-        agentMessages: []
+        agentMessages: [],
+        agentPerformance: []
     )
+
+    private enum CodingKeys: String, CodingKey {
+        case repositories
+        case workspaces
+        case tasks
+        case settings
+        case companies
+        case companyAgentDefinitions
+        case agentCapabilityProfiles
+        case projectContexts
+        case goals
+        case issues
+        case reviewQueue
+        case orgProfiles
+        case workflowTopologies
+        case goalDecisions
+        case runningAgentSessions
+        case backendStatuses
+        case opsMetrics
+        case activity
+        case companyRuntimes
+        case agentContextEntries
+        case agentMessages
+        case agentPerformance
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        repositories = try container.decodeValue([RepositoryRecord].self, forKey: .repositories, default: [])
+        workspaces = try container.decodeValue([WorkspaceRecord].self, forKey: .workspaces, default: [])
+        tasks = try container.decodeValue([TaskRecord].self, forKey: .tasks, default: [])
+        settings = try container.decodeValue(DesktopSettingsPayload.self, forKey: .settings, default: DashboardPayload.empty.settings)
+        companies = try container.decodeValue([CompanyRecord].self, forKey: .companies, default: [])
+        companyAgentDefinitions = try container.decodeValue([CompanyAgentDefinitionRecord].self, forKey: .companyAgentDefinitions, default: [])
+        agentCapabilityProfiles = try container.decodeValue([AgentCapabilityProfileRecord].self, forKey: .agentCapabilityProfiles, default: [])
+        projectContexts = try container.decodeValue([CompanyProjectContextRecord].self, forKey: .projectContexts, default: [])
+        goals = try container.decodeValue([GoalRecord].self, forKey: .goals, default: [])
+        issues = try container.decodeValue([IssueRecord].self, forKey: .issues, default: [])
+        reviewQueue = try container.decodeValue([ReviewQueueItemRecord].self, forKey: .reviewQueue, default: [])
+        orgProfiles = try container.decodeValue([OrgAgentProfileRecord].self, forKey: .orgProfiles, default: [])
+        workflowTopologies = try container.decodeValue([WorkflowTopologySnapshotRecord].self, forKey: .workflowTopologies, default: [])
+        goalDecisions = try container.decodeValue([GoalOrchestrationDecisionRecord].self, forKey: .goalDecisions, default: [])
+        runningAgentSessions = try container.decodeValue([RunningAgentSessionRecord].self, forKey: .runningAgentSessions, default: [])
+        backendStatuses = try container.decodeValue([ExecutionBackendStatusPayload].self, forKey: .backendStatuses, default: [])
+        opsMetrics = try container.decodeValue(OpsMetricSnapshotRecord.self, forKey: .opsMetrics, default: OpsMetricSnapshotRecord())
+        activity = try container.decodeValue([CompanyActivityItemRecord].self, forKey: .activity, default: [])
+        companyRuntimes = try container.decodeValue([CompanyRuntimeSnapshotRecord].self, forKey: .companyRuntimes, default: [])
+        agentContextEntries = try container.decodeValue([AgentContextEntryRecord].self, forKey: .agentContextEntries, default: [])
+        agentMessages = try container.decodeValue([AgentMessageRecord].self, forKey: .agentMessages, default: [])
+        agentPerformance = try container.decodeValue([AgentPerformanceSnapshotRecord].self, forKey: .agentPerformance, default: [])
+    }
 }
 
 /// Request body for creating a workspace from the macOS client.
@@ -1905,7 +2096,8 @@ struct MockSeed {
                 parentMessageId: nil,
                 createdAt: 0
             )
-        ]
+        ],
+        agentPerformance: []
     )
 
     static let runs = [

@@ -88,6 +88,16 @@ struct ModelsTests {
         #expect(dashboard.issues.isEmpty)
         #expect(dashboard.reviewQueue.isEmpty)
         #expect(dashboard.settings.availableAgents.isEmpty)
+        #expect(dashboard.agentPerformance.isEmpty)
+    }
+
+    @Test
+    func performancePayloadsDecodeMissingFieldsAsEmpty() throws {
+        let companyDashboard = try JSONDecoder().decode(CompanyDashboardPayload.self, from: Data("{}".utf8))
+        let dashboard = try JSONDecoder().decode(DashboardPayload.self, from: Data("{}".utf8))
+
+        #expect(companyDashboard.agentPerformance.isEmpty)
+        #expect(dashboard.agentPerformance.isEmpty)
     }
 
     @Test
@@ -146,6 +156,57 @@ struct ModelsTests {
         let decoded = try JSONDecoder().decode(CompanyRecord.self, from: data)
 
         #expect(decoded.operatorAutomationMode == nil)
+    }
+
+    @Test
+    func companyDailyReportDecodesSummaryItemsAndCost() throws {
+        let data = """
+        {
+          "id": "company-1-2026-05-05",
+          "companyId": "company-1",
+          "date": "2026-05-05",
+          "generatedAt": 10,
+          "periodStart": 1,
+          "periodEnd": 2,
+          "summary": "1 completed · 0 blocked",
+          "highlights": [],
+          "completedItems": [
+            {
+              "id": "issue-1",
+              "title": "Ship README change",
+              "detail": "Merged PR #7",
+              "issueId": "issue-1",
+              "goalId": "goal-1",
+              "runId": "run-1",
+              "pullRequestUrl": "https://github.com/acme/repo/pull/7",
+              "status": "DONE",
+              "severity": "success",
+              "timestamp": 2
+            }
+          ],
+          "pullRequests": [],
+          "reviewItems": [],
+          "blockedItems": [],
+          "autoRecoveredItems": [],
+          "recommendedNextActions": [],
+          "costSummary": {
+            "estimatedRunCostCents": 42,
+            "todaySpentCents": 100,
+            "monthSpentCents": 200,
+            "dailyBudgetCents": 500,
+            "monthlyBudgetCents": 2000,
+            "budgetPaused": false
+          },
+          "activityCount": 1
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(CompanyDailyReportRecord.self, from: data)
+
+        #expect(decoded.date == "2026-05-05")
+        #expect(decoded.completedItems.first?.pullRequestUrl?.contains("/pull/7") == true)
+        #expect(decoded.costSummary.estimatedRunCostCents == 42)
+        #expect(decoded.activityCount == 1)
     }
 
     @Test

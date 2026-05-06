@@ -447,16 +447,19 @@ class DesktopStateStore(
                         }
                     }
                 }
-            val retainedReviewQueueIssueIds = issues
-                .filter { it.status != IssueStatus.DONE && it.status != IssueStatus.CANCELED }
-                .mapTo(linkedSetOf()) { it.id }
+            val retainedReviewQueueIssueIds = linkedSetOf<String>().also {
+                it += unresolvedIssueIds
+                it += recentResolvedIssueIds
+            }
             copy(
                 tasks = retainedTasks.map { compactTaskForPersistence(it, unresolvedIssueIds) },
                 runs = retainedRuns.map(::compactRunForPersistence),
                 reviewQueue = reviewQueue.filter { it.issueId in retainedReviewQueueIssueIds },
                 companyActivity = companyActivity.sortedByDescending { it.createdAt }.take(200),
                 signals = signals.sortedByDescending { it.createdAt }.take(150),
-                goalDecisions = goalDecisions.sortedByDescending { it.createdAt }.take(150)
+                goalDecisions = goalDecisions.sortedByDescending { it.createdAt }.take(150),
+                marketingRuns = marketingRuns.sortedByDescending { it.createdAt }.take(200),
+                problemSignals = problemSignals.sortedByDescending { it.updatedAt }.take(200)
             )
         }
 

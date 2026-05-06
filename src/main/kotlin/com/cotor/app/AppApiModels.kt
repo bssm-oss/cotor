@@ -17,7 +17,9 @@ import kotlinx.serialization.Serializable
 data class CompanyMemorySnapshotResponse(
     val companyMemory: String,
     val workflowMemory: String,
-    val agentMemory: String
+    val agentMemory: String,
+    val projectMemory: String = workflowMemory,
+    val teamMemory: String = ""
 )
 
 @Serializable
@@ -333,7 +335,8 @@ data class CompanyDashboardResponse(
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
     val agentMessages: List<AgentMessage> = emptyList(),
     val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
-    val marketingRuns: List<MarketingRunRecord> = emptyList()
+    val marketingRuns: List<MarketingRunRecord> = emptyList(),
+    val agentPerformance: List<AgentPerformanceSnapshot> = emptyList()
 )
 
 internal fun BackendConnectionConfig.redactedForApi(): BackendConnectionConfig = copy(token = null)
@@ -391,7 +394,8 @@ data class DashboardResponse(
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
     val agentMessages: List<AgentMessage> = emptyList(),
     val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
-    val marketingRuns: List<MarketingRunRecord> = emptyList()
+    val marketingRuns: List<MarketingRunRecord> = emptyList(),
+    val agentPerformance: List<AgentPerformanceSnapshot> = emptyList()
 )
 
 internal fun DashboardResponse.redactedForApi(): DashboardResponse = copy(

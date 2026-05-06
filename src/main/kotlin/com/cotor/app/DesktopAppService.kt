@@ -92,8 +92,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeParseException
 import java.util.Collections
 import java.util.Comparator
 import java.util.UUID
@@ -122,7 +124,11 @@ private data class CompanyAutomationTraceEvent(
     val latestRunStatus: String? = null,
     val latestRunUpdatedAt: Long? = null,
     val retryEligible: Boolean? = null,
-    val runErrorSnippet: String? = null
+    val runErrorSnippet: String? = null,
+    val blockedReasonCode: BlockedReasonCode? = null,
+    val blockedReasonSummary: String? = null,
+    val blockedReasonDetail: String? = null,
+    val blockedRetryable: Boolean? = null
 )
 
 @kotlinx.serialization.Serializable
@@ -151,20 +157,6 @@ private data class CeoChatIntakeDraft(
     val description: String,
     val successMetrics: List<String>,
     val ceoBrief: String
-)
-
-private data class MarketingActionPlan(
-    val channel: String,
-    val actionKind: ActionKind,
-    val targetUrl: String,
-    val idempotencyKey: String,
-    val screenshotPath: String
-)
-
-private data class MarketingRunStart(
-    val run: MarketingRunRecord,
-    val policy: MarketingDelegationPolicy,
-    val plans: List<MarketingActionPlan>
 )
 
 /**
@@ -201,11 +193,13 @@ class DesktopAppService(
     private val knowledgeService: KnowledgeService = KnowledgeService(),
     private val durableRuntimeService: DurableRuntimeService = defaultDesktopDurableRuntimeService(stateStore),
     private val verificationBundleService: VerificationBundleService = VerificationBundleService(),
-    private val autoStartAutomationRefresh: Boolean = true,
+    private val companyVerifierService: CompanyVerifierService = CompanyVerifierService(verificationBundleService),
+    private val autonomousDiscoveryService: AutonomousDiscoveryService = AutonomousDiscoveryService(),
     private val marketingBrowserRunner: MarketingBrowserRunner = LocalPlaywrightMarketingBrowserRunner(
         appHomeProvider = { stateStore.appHome() },
         commandAvailability = commandAvailability
-    )
+    ),
+    private val autoStartAutomationRefresh: Boolean = true
 ) {
     companion object {
         private val liveServicesForTesting =
@@ -269,6 +263,11 @@ class DesktopAppService(
     private val companyEventStream = MutableSharedFlow<CompanyEventEnvelope>(replay = 0, extraBufferCapacity = 64)
     private val recentAgentModelDiscoveries = ConcurrentHashMap<String, CachedAgentModels>()
     private val backendJson = Json { ignoreUnknownKeys = true }
+    private val dailyReportJson = Json {
+        ignoreUnknownKeys = true
+        prettyPrint = true
+        encodeDefaults = true
+    }
     private val localExecutionBackend = LocalCotorBackend(agentExecutor)
     private val codexAppServerBackend = CodexAppServerBackend(backendJson)
 
@@ -398,8 +397,10 @@ class DesktopAppService(
                 .sortedByDescending { it.lastTickAt ?: 0L },
             agentContextEntries = state.agentContextEntries.sortedByDescending { it.createdAt },
             agentMessages = state.agentMessages.sortedByDescending { it.createdAt },
-            marketingDelegationPolicies = state.marketingDelegationPolicies.sortedByDescending { it.updatedAt },
-            marketingRuns = state.marketingRuns.sortedByDescending { it.updatedAt }
+            marketingDelegationPolicies = state.marketingDelegationPolicies
+                .sortedWith(compareBy<MarketingDelegationPolicy> { it.companyId }.thenBy { it.agentId }.thenBy { it.name.lowercase() }),
+            marketingRuns = state.marketingRuns.sortedByDescending { it.createdAt },
+            agentPerformance = computeAgentPerformance(state, companyId = null, orgProfiles = orgProfiles)
         ).redactedForApi()
     }
 
@@ -421,6 +422,443 @@ class DesktopAppService(
     suspend fun companyDashboardReadOnly(companyId: String? = null): CompanyDashboardResponse {
         val state = stateStore.load().withDerivedMetrics()
         return companyDashboardSnapshot(state, companyId).redactedForApi()
+    }
+
+    suspend fun agentPerformance(companyId: String): List<AgentPerformanceSnapshot> {
+        val state = stateStore.load().withDerivedMetrics()
+        val orgProfiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+        return computeAgentPerformance(state, companyId, orgProfiles)
+    }
+
+    suspend fun listMorningReports(companyId: String): List<CompanyDailyReportSummary> {
+        ensureMorningReport(companyId)
+        return withContext(Dispatchers.IO) {
+            val dir = companyReportsDir(companyId)
+            if (!Files.exists(dir)) {
+                return@withContext emptyList()
+            }
+            val reports = mutableListOf<CompanyDailyReportSummary>()
+            Files.list(dir).use { stream ->
+                stream
+                    .filter { path -> path.fileName.toString().endsWith(".json") }
+                    .forEach { path ->
+                        readMorningReportFile(path)?.toSummary()?.let { reports += it }
+                    }
+            }
+            reports.sortedWith(
+                compareByDescending<CompanyDailyReportSummary> { it.date }
+                    .thenByDescending { it.generatedAt }
+            )
+        }
+    }
+
+    suspend fun morningReport(companyId: String, date: String): CompanyDailyReport {
+        val parsedDate = parseMorningReportDate(date)
+        val existing = withContext(Dispatchers.IO) {
+            readMorningReportFile(companyReportPath(companyId, parsedDate))
+        }
+        return existing ?: generateMorningReport(companyId, parsedDate.toString())
+    }
+
+    suspend fun generateMorningReport(companyId: String, date: String? = null): CompanyDailyReport =
+        generateMorningReport(companyId, date, System.currentTimeMillis())
+
+    private suspend fun generateMorningReport(
+        companyId: String,
+        date: String?,
+        generatedAt: Long
+    ): CompanyDailyReport {
+        val reportDate = date?.let(::parseMorningReportDate) ?: previousMorningReportDate(generatedAt)
+        val state = stateStore.load().withDerivedMetrics()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val report = buildMorningReport(state, company, reportDate, generatedAt)
+        writeMorningReport(report)
+        return report
+    }
+
+    private suspend fun ensureMorningReport(
+        companyId: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): CompanyDailyReport? {
+        val state = stateStore.load()
+        if (state.companies.none { it.id == companyId }) {
+            throw IllegalArgumentException("Company not found: $companyId")
+        }
+        val reportDate = previousMorningReportDate(nowMillis)
+        val path = companyReportPath(companyId, reportDate)
+        val existing = withContext(Dispatchers.IO) { readMorningReportFile(path) }
+        return existing ?: generateMorningReport(companyId, reportDate.toString(), nowMillis)
+    }
+
+    private fun buildMorningReport(
+        state: DesktopAppState,
+        company: Company,
+        reportDate: LocalDate,
+        generatedAt: Long
+    ): CompanyDailyReport {
+        val (periodStart, periodEnd) = morningReportPeriod(reportDate)
+        fun inPeriod(timestamp: Long?): Boolean = timestamp != null && timestamp >= periodStart && timestamp < periodEnd
+
+        val companyId = company.id
+        val goalsById = state.goals.associateBy { it.id }
+        val companyIssues = state.issues.filter { it.companyId == companyId }
+        val companyIssueIds = companyIssues.map { it.id }.toSet()
+        val issuesById = companyIssues.associateBy { it.id }
+        val companyTasks = state.tasks.filter { task -> task.issueId?.let { it in companyIssueIds } == true }
+        val companyTaskIds = companyTasks.map { it.id }.toSet()
+        val companyRuns = state.runs.filter { it.taskId in companyTaskIds }
+        val periodRuns = companyRuns.filter { inPeriod(it.updatedAt) || inPeriod(it.createdAt) }
+        val periodIssues = companyIssues.filter { inPeriod(it.updatedAt) || inPeriod(it.createdAt) }
+        val periodActivities = state.companyActivity
+            .filter { it.companyId == companyId && inPeriod(it.createdAt) }
+            .sortedByDescending { it.createdAt }
+        val periodReviewQueue = state.reviewQueue
+            .filter { item ->
+                (item.companyId == companyId || item.issueId in companyIssueIds) &&
+                    (
+                        inPeriod(item.updatedAt) || inPeriod(item.createdAt) || inPeriod(item.qaReviewedAt) ||
+                            inPeriod(item.ceoReviewedAt) || inPeriod(item.mergedAt)
+                        )
+            }
+            .sortedByDescending { it.updatedAt }
+
+        val completedItems = periodIssues
+            .filter { it.status == IssueStatus.DONE && inPeriod(it.updatedAt) }
+            .sortedByDescending { it.updatedAt }
+            .map { issue ->
+                issue.toReportItem(
+                    goalsById = goalsById,
+                    status = "DONE",
+                    severity = "success",
+                    timestamp = issue.updatedAt
+                )
+            }
+
+        val pullRequests = periodReviewQueue
+            .filter { !it.pullRequestUrl.isNullOrBlank() }
+            .map { item ->
+                val issue = issuesById[item.issueId]
+                CompanyDailyReportItem(
+                    id = "pr-${item.id}",
+                    title = issue?.title ?: "Pull request ${item.pullRequestNumber ?: item.id}",
+                    detail = listOfNotNull(
+                        item.pullRequestNumber?.let { "#$it" },
+                        item.pullRequestState,
+                        item.checksSummary,
+                        item.mergeability
+                    ).joinToString(" · ").ifBlank { null },
+                    issueId = item.issueId,
+                    goalId = issue?.goalId,
+                    runId = item.runId,
+                    pullRequestUrl = item.pullRequestUrl,
+                    status = if (item.status == ReviewQueueStatus.MERGED) "MERGED" else item.status.name,
+                    severity = if (item.status == ReviewQueueStatus.MERGED) "success" else "info",
+                    timestamp = item.mergedAt ?: item.updatedAt
+                )
+            }
+
+        val reviewItems = periodReviewQueue
+            .map { item ->
+                val issue = issuesById[item.issueId]
+                val reportStatus = when {
+                    item.qaVerdict.equals("PASS", ignoreCase = true) -> "QA_PASS"
+                    item.qaVerdict.equals("CHANGES_REQUESTED", ignoreCase = true) ||
+                        item.ceoVerdict.equals("CHANGES_REQUESTED", ignoreCase = true) ||
+                        item.status == ReviewQueueStatus.CHANGES_REQUESTED -> "CHANGES_REQUESTED"
+                    item.status == ReviewQueueStatus.MERGED -> "MERGED"
+                    else -> item.status.name
+                }
+                CompanyDailyReportItem(
+                    id = "review-${item.id}",
+                    title = issue?.title ?: "Review ${item.id}",
+                    detail = listOfNotNull(
+                        item.qaVerdict?.let { "QA $it" },
+                        item.ceoVerdict?.let { "CEO $it" },
+                        item.checksSummary,
+                        item.mergeability
+                    ).joinToString(" · ").ifBlank { null },
+                    issueId = item.issueId,
+                    goalId = issue?.goalId,
+                    runId = item.runId,
+                    pullRequestUrl = item.pullRequestUrl,
+                    status = reportStatus,
+                    severity = when (reportStatus) {
+                        "QA_PASS", "MERGED" -> "success"
+                        "CHANGES_REQUESTED" -> "warning"
+                        else -> "info"
+                    },
+                    timestamp = item.qaReviewedAt ?: item.ceoReviewedAt ?: item.mergedAt ?: item.updatedAt
+                )
+            }
+
+        val blockedItems = periodIssues
+            .filter { it.status == IssueStatus.BLOCKED || it.status == IssueStatus.WAITING_FOR_APPROVAL }
+            .sortedByDescending { it.updatedAt }
+            .map { issue ->
+                val latestRun = companyRuns
+                    .filter { run -> companyTasks.firstOrNull { it.id == run.taskId }?.issueId == issue.id }
+                    .maxByOrNull { it.updatedAt }
+                val blockedReason = classifyBlockedReason(
+                    issue = issue,
+                    latestRun = latestRun,
+                    reviewQueueItem = state.reviewQueue.firstOrNull { it.issueId == issue.id }
+                )
+                issue.toReportItem(
+                    goalsById = goalsById,
+                    detailOverride = blockedReason?.summary ?: issue.transitionReason ?: issue.providerBlockReason,
+                    status = issue.status.name,
+                    severity = if (issue.status == IssueStatus.WAITING_FOR_APPROVAL) "warning" else "danger",
+                    timestamp = issue.updatedAt
+                )
+            }
+
+        val autoRecoveredItems = periodActivities
+            .filter { activity ->
+                val haystack = listOfNotNull(activity.source, activity.title, activity.detail)
+                    .joinToString(" ")
+                    .lowercase()
+                listOf("recover", "retry", "requeue", "resume", "reopen").any { token -> token in haystack }
+            }
+            .map { activity ->
+                CompanyDailyReportItem(
+                    id = "activity-${activity.id}",
+                    title = activity.title,
+                    detail = activity.detail,
+                    issueId = activity.issueId,
+                    goalId = activity.goalId,
+                    status = activity.source,
+                    severity = activity.severity,
+                    timestamp = activity.createdAt
+                )
+            }
+
+        val highlights = periodActivities
+            .take(6)
+            .map { activity ->
+                CompanyDailyReportItem(
+                    id = "highlight-${activity.id}",
+                    title = activity.title,
+                    detail = activity.detail,
+                    issueId = activity.issueId,
+                    goalId = activity.goalId,
+                    status = activity.source,
+                    severity = activity.severity,
+                    timestamp = activity.createdAt
+                )
+            }
+
+        val recommendedNextActions = recommendedMorningReportActions(
+            issues = companyIssues,
+            reviewQueue = state.reviewQueue.filter { it.companyId == companyId || it.issueId in companyIssueIds },
+            goalsById = goalsById
+        )
+
+        val runtime = state.companyRuntimes.firstOrNull { it.companyId == companyId }
+        val estimatedRunCostCents = periodRuns.mapNotNull { it.estimatedCostCents }.sum()
+        val costSummary = CompanyDailyReportCostSummary(
+            estimatedRunCostCents = estimatedRunCostCents,
+            todaySpentCents = runtime?.todaySpentCents ?: 0,
+            monthSpentCents = runtime?.monthSpentCents ?: 0,
+            dailyBudgetCents = company.dailyBudgetCents,
+            monthlyBudgetCents = company.monthlyBudgetCents,
+            budgetPaused = runtime?.budgetPausedAt != null
+        )
+
+        return CompanyDailyReport(
+            id = "${company.id}-$reportDate",
+            companyId = company.id,
+            date = reportDate.toString(),
+            generatedAt = generatedAt,
+            periodStart = periodStart,
+            periodEnd = periodEnd,
+            summary = morningReportSummary(
+                completedCount = completedItems.size,
+                pullRequestCount = pullRequests.size,
+                qaPassedCount = reviewItems.count { it.status == "QA_PASS" },
+                blockedCount = blockedItems.size,
+                estimatedRunCostCents = estimatedRunCostCents,
+                activityCount = periodActivities.size
+            ),
+            highlights = highlights,
+            completedItems = completedItems,
+            pullRequests = pullRequests,
+            reviewItems = reviewItems,
+            blockedItems = blockedItems,
+            autoRecoveredItems = autoRecoveredItems,
+            recommendedNextActions = recommendedNextActions,
+            costSummary = costSummary,
+            activityCount = periodActivities.size
+        )
+    }
+
+    private fun recommendedMorningReportActions(
+        issues: List<CompanyIssue>,
+        reviewQueue: List<ReviewQueueItem>,
+        goalsById: Map<String, CompanyGoal>
+    ): List<CompanyDailyReportItem> {
+        val blocked = issues
+            .filter { it.status == IssueStatus.BLOCKED || it.status == IssueStatus.WAITING_FOR_APPROVAL }
+            .sortedByDescending { it.updatedAt }
+            .take(3)
+            .map { issue ->
+                issue.toReportItem(
+                    goalsById = goalsById,
+                    detailOverride = issue.transitionReason ?: issue.providerBlockReason ?: "Needs operator or agent attention.",
+                    status = issue.status.name,
+                    severity = "warning",
+                    timestamp = issue.updatedAt,
+                    idPrefix = "next-issue"
+                )
+            }
+        if (blocked.isNotEmpty()) return blocked
+
+        val reviewAttention = reviewQueue
+            .filter {
+                it.status == ReviewQueueStatus.CHANGES_REQUESTED ||
+                    it.status == ReviewQueueStatus.FAILED_CHECKS ||
+                    it.status == ReviewQueueStatus.READY_FOR_CEO ||
+                    it.status == ReviewQueueStatus.READY_TO_MERGE
+            }
+            .sortedByDescending { it.updatedAt }
+            .take(3)
+            .map {
+                CompanyDailyReportItem(
+                    id = "next-review-${it.id}",
+                    title = "Review queue item ${it.pullRequestNumber?.let { number -> "#$number" } ?: it.id}",
+                    detail = it.checksSummary ?: it.mergeability ?: "Review queue needs attention.",
+                    issueId = it.issueId,
+                    runId = it.runId,
+                    pullRequestUrl = it.pullRequestUrl,
+                    status = it.status.name,
+                    severity = "warning",
+                    timestamp = it.updatedAt
+                )
+            }
+        if (reviewAttention.isNotEmpty()) return reviewAttention
+
+        val active = issues
+            .filter {
+                it.status == IssueStatus.PLANNED ||
+                    it.status == IssueStatus.DELEGATED ||
+                    it.status == IssueStatus.IN_PROGRESS ||
+                    it.status == IssueStatus.IN_REVIEW ||
+                    it.status == IssueStatus.READY_FOR_CEO
+            }
+            .sortedByDescending { it.updatedAt }
+            .take(3)
+            .map { issue ->
+                issue.toReportItem(
+                    goalsById = goalsById,
+                    detailOverride = "Continue this active work item.",
+                    status = issue.status.name,
+                    severity = "info",
+                    timestamp = issue.updatedAt,
+                    idPrefix = "next-active"
+                )
+            }
+        return active.ifEmpty {
+            listOf(
+                CompanyDailyReportItem(
+                    id = "next-idle",
+                    title = "No urgent action",
+                    detail = "No blocked work or pending review was found for the next operating cycle.",
+                    status = "IDLE",
+                    severity = "info"
+                )
+            )
+        }
+    }
+
+    private fun CompanyIssue.toReportItem(
+        goalsById: Map<String, CompanyGoal>,
+        detailOverride: String? = null,
+        status: String,
+        severity: String,
+        timestamp: Long,
+        idPrefix: String = "issue"
+    ): CompanyDailyReportItem = CompanyDailyReportItem(
+        id = "$idPrefix-$id",
+        title = title,
+        detail = detailOverride ?: goalsById[goalId]?.title ?: description,
+        issueId = id,
+        goalId = goalId,
+        pullRequestUrl = pullRequestUrl,
+        status = status,
+        severity = severity,
+        timestamp = timestamp
+    )
+
+    private fun morningReportSummary(
+        completedCount: Int,
+        pullRequestCount: Int,
+        qaPassedCount: Int,
+        blockedCount: Int,
+        estimatedRunCostCents: Int,
+        activityCount: Int
+    ): String {
+        if (completedCount == 0 && pullRequestCount == 0 && qaPassedCount == 0 && blockedCount == 0 && activityCount == 0) {
+            return "No company activity was recorded for this report window."
+        }
+        return buildList {
+            add("$completedCount completed")
+            add("$pullRequestCount pull requests")
+            add("$qaPassedCount QA passes")
+            add("$blockedCount blocked")
+            if (estimatedRunCostCents > 0) add("estimated run cost ${formatCents(estimatedRunCostCents)}")
+            add("$activityCount activity events")
+        }.joinToString(" · ")
+    }
+
+    private fun formatCents(cents: Int): String =
+        "$" + "%.2f".format(java.util.Locale.US, cents.toDouble() / 100.0)
+
+    private fun previousMorningReportDate(nowMillis: Long): LocalDate =
+        Instant.ofEpochMilli(nowMillis).atZone(ZoneId.systemDefault()).toLocalDate().minusDays(1)
+
+    private fun parseMorningReportDate(date: String): LocalDate =
+        try {
+            LocalDate.parse(date)
+        } catch (error: DateTimeParseException) {
+            throw IllegalArgumentException("Report date must use YYYY-MM-DD: $date", error)
+        }
+
+    private fun morningReportPeriod(date: LocalDate): Pair<Long, Long> {
+        val zone = ZoneId.systemDefault()
+        val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        return start to end
+    }
+
+    private fun companyReportsDir(companyId: String): Path =
+        stateStore.appHome()
+            .resolve("companies")
+            .resolve(safeReportPathSegment(companyId))
+            .resolve("reports")
+
+    private fun companyReportPath(companyId: String, date: LocalDate): Path =
+        companyReportsDir(companyId).resolve("$date.json")
+
+    private fun safeReportPathSegment(raw: String): String =
+        raw.trim().replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "company" }
+
+    private fun readMorningReportFile(path: Path): CompanyDailyReport? =
+        runCatching {
+            dailyReportJson.decodeFromString(CompanyDailyReport.serializer(), Files.readString(path))
+        }.getOrNull()
+
+    private suspend fun writeMorningReport(report: CompanyDailyReport) {
+        withContext(Dispatchers.IO) {
+            val dir = companyReportsDir(report.companyId)
+            Files.createDirectories(dir)
+            Files.writeString(
+                companyReportPath(report.companyId, LocalDate.parse(report.date)),
+                dailyReportJson.encodeToString(CompanyDailyReport.serializer(), report),
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE
+            )
+        }
     }
 
     private fun companyDashboardSnapshot(
@@ -448,6 +886,9 @@ class DesktopAppService(
                 runtime = state.companyRuntimes.firstOrNull { runtime -> runtime.companyId == it } ?: CompanyRuntimeSnapshot(companyId = it)
             )
         }
+        val scopedIssues = boundRuntime?.issues?.filter { it.id in filteredIssueIds } ?: filteredIssues
+        val scopedReviewQueue = (boundRuntime?.reviewQueue ?: state.reviewQueue)
+            .filter { companyId == null || it.companyId == companyId || it.issueId in filteredIssueIds }
         return CompanyDashboardResponse(
             companies = state.companies.sortedByDescending { it.updatedAt },
             companyAgentDefinitions = state.companyAgentDefinitions
@@ -460,12 +901,10 @@ class DesktopAppService(
                 .filter { companyId == null || it.companyId == companyId }
                 .sortedByDescending { it.lastUpdatedAt },
             goals = filteredGoals,
-            issues = boundRuntime?.issues?.filter { it.id in filteredIssueIds } ?: filteredIssues,
+            issues = scopedIssues,
             tasks = filteredTasks,
             issueDependencies = state.issueDependencies.filter { it.issueId in filteredIssueIds || it.dependsOnIssueId in filteredIssueIds },
-            reviewQueue = (boundRuntime?.reviewQueue ?: state.reviewQueue)
-                .filter { companyId == null || it.companyId == companyId }
-                .sortedByDescending { it.updatedAt },
+            reviewQueue = scopedReviewQueue.sortedByDescending { it.updatedAt },
             orgProfiles = orgProfiles
                 .filter { companyId == null || it.companyId == companyId },
             workflowTopologies = computeWorkflowTopologies(state, orgProfiles)
@@ -497,10 +936,18 @@ class DesktopAppService(
                 .sortedByDescending { it.createdAt },
             marketingDelegationPolicies = state.marketingDelegationPolicies
                 .filter { companyId == null || it.companyId == companyId }
-                .sortedByDescending { it.updatedAt },
+                .sortedWith(compareBy<MarketingDelegationPolicy> { it.companyId }.thenBy { it.agentId }.thenBy { it.name.lowercase() }),
             marketingRuns = state.marketingRuns
                 .filter { companyId == null || it.companyId == companyId }
-                .sortedByDescending { it.updatedAt }
+                .sortedByDescending { it.createdAt },
+            agentPerformance = computeAgentPerformance(
+                state = state,
+                companyId = companyId,
+                orgProfiles = orgProfiles,
+                scopedIssues = scopedIssues,
+                scopedTasks = filteredTasks,
+                scopedReviewQueue = scopedReviewQueue
+            )
         )
     }
 
@@ -565,6 +1012,7 @@ class DesktopAppService(
             requeueLegacyMergeConflictExecutionIssues(activeCompanyId)
             requeueRecoverableBlockedIssues(activeCompanyId)
             reconcileSupersededManagedPullRequests(activeCompanyId)
+            ensureMorningReport(activeCompanyId)
         }
         stimulateAutonomousCompanyProgress(companyId)
         clearNonAttentionProviderBlockReasons(companyId)
@@ -1593,6 +2041,517 @@ class DesktopAppService(
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
+    suspend fun listMarketingDelegationPolicies(
+        companyId: String? = null,
+        agentId: String? = null
+    ): List<MarketingDelegationPolicy> =
+        stateStore.load().marketingDelegationPolicies
+            .filter { companyId == null || it.companyId == companyId }
+            .filter { agentId == null || it.agentId == agentId }
+            .sortedWith(compareBy<MarketingDelegationPolicy> { it.companyId }.thenBy { it.agentId }.thenByDescending { it.updatedAt })
+
+    suspend fun listMarketingRuns(
+        companyId: String? = null,
+        agentId: String? = null
+    ): List<MarketingRunRecord> =
+        stateStore.load().marketingRuns
+            .filter { companyId == null || it.companyId == companyId }
+            .filter { agentId == null || it.agentId == agentId }
+            .sortedByDescending { it.createdAt }
+
+    suspend fun marketingRun(runId: String): MarketingRunRecord? =
+        stateStore.load().marketingRuns.firstOrNull { it.id == runId }
+
+    suspend fun upsertMarketingDelegationPolicy(
+        request: UpsertMarketingDelegationPolicyRequest
+    ): MarketingDelegationPolicy = stateMutex.withLock {
+        val state = stateStore.load()
+        val company = state.companies.firstOrNull { it.id == request.companyId }
+            ?: throw IllegalArgumentException("Company not found: ${request.companyId}")
+        val definition = state.companyAgentDefinitions.firstOrNull { it.companyId == company.id && it.id == request.agentId }
+            ?: throw IllegalArgumentException("Company agent not found: ${request.agentId}")
+        require(isMarketingOperatorAgent(state, definition)) {
+            "MarketingDelegationPolicy can only be attached to a Marketing Operator agent."
+        }
+        val now = System.currentTimeMillis()
+        val existing = request.id
+            ?.let { id -> state.marketingDelegationPolicies.firstOrNull { it.id == id } }
+            ?: state.marketingDelegationPolicies.firstOrNull { it.companyId == company.id && it.agentId == definition.id }
+        val policy = sanitizeMarketingDelegationPolicyRequest(request, existing, now)
+        val currentProfile = state.agentCapabilityProfiles.firstOrNull { it.companyId == company.id && it.agentId == definition.id }
+            ?: AgentCapabilityProfile(companyId = company.id, agentId = definition.id)
+        val profile = currentProfile.copy(
+            settings = currentProfile.settings + marketingPolicyCapabilitySettings(policy),
+            updatedAt = now
+        )
+        val nextState = state.copy(
+            marketingDelegationPolicies = state.marketingDelegationPolicies.filterNot { it.id == policy.id } + policy,
+            agentCapabilityProfiles = state.agentCapabilityProfiles.filterNot { it.companyId == company.id && it.agentId == definition.id } + profile
+        ).recordCompanyActivity(
+            companyId = company.id,
+            source = "marketing-delegation",
+            title = "Updated Marketing Operator policy",
+            detail = "${definition.title} · ${policy.channelAccounts.map { it.channel }.joinToString(", ")}"
+        ).withDerivedMetrics()
+        stateStore.save(nextState)
+        policy
+    }
+
+    suspend fun createMarketingRun(request: MarketingRunRequest): MarketingRunRecord {
+        val prepared = stateMutex.withLock {
+            val state = stateStore.load()
+            val company = state.companies.firstOrNull { it.id == request.companyId }
+                ?: throw IllegalArgumentException("Company not found: ${request.companyId}")
+            val definition = state.companyAgentDefinitions.firstOrNull { it.companyId == company.id && it.id == request.agentId }
+                ?: throw IllegalArgumentException("Company agent not found: ${request.agentId}")
+            val policy = resolveMarketingPolicy(state, request, definition)
+            val channels = request.channels
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinctBy { it.lowercase() }
+                .ifEmpty { policy.channelAccounts.map { it.channel }.distinctBy { channel -> channel.lowercase() } }
+            val now = System.currentTimeMillis()
+            val run = MarketingRunRecord(
+                companyId = company.id,
+                agentId = definition.id,
+                objective = request.objective.trim(),
+                channels = channels,
+                delegationPolicyId = policy.id,
+                createdAt = now,
+                updatedAt = now
+            )
+            stateStore.save(
+                state.copy(marketingRuns = state.marketingRuns + run)
+                    .recordCompanyActivity(
+                        companyId = company.id,
+                        source = "marketing-run",
+                        title = "Started Marketing Operator run",
+                        detail = channels.joinToString(", ")
+                    )
+                    .withDerivedMetrics()
+            )
+            PreparedMarketingRun(run = run, policy = policy, definition = definition)
+        }
+        val completed = executeMarketingRun(prepared)
+        stateMutex.withLock {
+            val state = stateStore.load()
+            stateStore.save(
+                state.copy(marketingRuns = state.marketingRuns.filterNot { it.id == completed.id } + completed)
+                    .recordCompanyActivity(
+                        companyId = completed.companyId,
+                        source = "marketing-run",
+                        title = "Finished Marketing Operator run",
+                        detail = "${completed.status} · ${completed.actions.size} action(s)"
+                    )
+                    .withDerivedMetrics()
+            )
+        }
+        return completed
+    }
+
+    private data class PreparedMarketingRun(
+        val run: MarketingRunRecord,
+        val policy: MarketingDelegationPolicy,
+        val definition: CompanyAgentDefinition
+    )
+
+    private suspend fun executeMarketingRun(prepared: PreparedMarketingRun): MarketingRunRecord {
+        val run = prepared.run
+        val policy = prepared.policy
+        validateMarketingRunPolicy(policy, run)?.let { reason ->
+            val denied = marketingDeniedAction(run, policy, run.channels.firstOrNull().orEmpty(), reason)
+            return finishMarketingRun(run, MarketingRunStatus.DENIED, listOf(denied), reason)
+        }
+        val actions = mutableListOf<MarketingActionRecord>()
+        for (channel in run.channels) {
+            val account = policy.channelAccounts.firstOrNull { it.channel.equals(channel, ignoreCase = true) }
+            if (account == null) {
+                actions += marketingDeniedAction(run, policy, channel, "Channel is outside the MarketingDelegationPolicy: $channel")
+                continue
+            }
+            val targetUrl = marketingTargetUrl(policy, account)
+            if (targetUrl == null) {
+                actions += marketingDeniedAction(run, policy, channel, "Channel has no allowed target domain: $channel")
+                continue
+            }
+            val browserTarget = browserNetworkTarget(targetUrl)
+            if (browserTarget == null) {
+                actions += marketingDeniedAction(run, policy, channel, "Marketing browser target must be http(s): $targetUrl")
+                continue
+            }
+            val idempotencyKey = marketingIdempotencyKey(policy, run.objective, channel, browserTarget.hostWithPort)
+            val previous = stateStore.load().marketingRuns
+                .asSequence()
+                .flatMap { it.actions.asSequence() }
+                .firstOrNull { it.idempotencyKey == idempotencyKey && it.status == MarketingActionStatus.SUCCEEDED }
+            if (previous != null) {
+                actions += previous.copy(
+                    id = UUID.randomUUID().toString(),
+                    runId = run.id,
+                    channel = channel,
+                    status = MarketingActionStatus.SKIPPED,
+                    error = "Idempotency key already posted by ${previous.runId}.",
+                    updatedAt = System.currentTimeMillis()
+                )
+                continue
+            }
+            val publishAction = if (channel.equals("web", ignoreCase = true) || channel.equals("cms", ignoreCase = true)) {
+                ActionKind.WEB_PUBLISH
+            } else {
+                ActionKind.SOCIAL_POST_CREATE
+            }
+            val checks = marketingCapabilityChecks(
+                companyId = run.companyId,
+                agentId = run.agentId,
+                channel = channel,
+                networkTarget = browserTarget.hostWithPort,
+                includeExternal = !browserTarget.isLocal,
+                includeLoginFlow = !policy.browserSessionRef.isNullOrBlank() || policy.secretRefs.isNotEmpty() || account.secretRefs.isNotEmpty(),
+                publishAction = publishAction
+            )
+            val blocked = checks.firstOrNull { !it.allowed || it.requiresApproval }
+            if (blocked != null) {
+                actions += marketingDeniedAction(
+                    run = run,
+                    policy = policy,
+                    channel = channel,
+                    reason = "Capability ${blocked.capability} blocked marketing action: ${blocked.reason}",
+                    targetUrl = targetUrl,
+                    idempotencyKey = idempotencyKey
+                )
+                continue
+            }
+            val command = MarketingBrowserCommand(
+                channel = channel,
+                objective = run.objective,
+                targetUrl = withMarketingUtm(targetUrl, run.id, channel),
+                inputSummary = marketingInputSummary(run.objective, policy),
+                browserSessionRef = policy.browserSessionRef,
+                screenshotPath = marketingScreenshotPath(run.id, channel).toString(),
+                maxRuntimeSeconds = policy.maxRuntimeSeconds
+            )
+            actions += runCatching {
+                marketingBrowserRunner.execute(command)
+            }.fold(
+                onSuccess = { result ->
+                    MarketingActionRecord(
+                        runId = run.id,
+                        channel = channel,
+                        targetUrl = targetUrl,
+                        inputSummary = result.inputSummary,
+                        postedUrl = result.postedUrl,
+                        screenshotPath = result.screenshotPath,
+                        utm = "utm_source=cotor&utm_medium=organic&utm_campaign=${run.id}&utm_content=$channel",
+                        status = MarketingActionStatus.SUCCEEDED,
+                        idempotencyKey = idempotencyKey
+                    )
+                },
+                onFailure = { error ->
+                    MarketingActionRecord(
+                        runId = run.id,
+                        channel = channel,
+                        targetUrl = targetUrl,
+                        inputSummary = command.inputSummary,
+                        screenshotPath = command.screenshotPath,
+                        status = MarketingActionStatus.FAILED,
+                        idempotencyKey = idempotencyKey,
+                        error = error.message ?: error::class.simpleName.orEmpty()
+                    )
+                }
+            )
+        }
+        val status = when {
+            actions.any { it.status == MarketingActionStatus.FAILED } -> MarketingRunStatus.FAILED
+            actions.any { it.status == MarketingActionStatus.DENIED } -> MarketingRunStatus.DENIED
+            else -> MarketingRunStatus.COMPLETED
+        }
+        val error = actions.firstOrNull { it.status == MarketingActionStatus.DENIED || it.status == MarketingActionStatus.FAILED }?.error
+        return finishMarketingRun(run, status, actions, error)
+    }
+
+    private suspend fun marketingCapabilityChecks(
+        companyId: String,
+        agentId: String,
+        channel: String,
+        networkTarget: String,
+        includeExternal: Boolean,
+        includeLoginFlow: Boolean,
+        publishAction: ActionKind
+    ): List<CapabilitySimulationResult> {
+        val actions = buildList {
+            add(ActionKind.BROWSER_READ)
+            add(ActionKind.BROWSER_INTERACT)
+            if (includeExternal) add(ActionKind.BROWSER_EXTERNAL_DOMAIN)
+            if (includeLoginFlow) add(ActionKind.BROWSER_LOGIN_FLOW)
+            add(publishAction)
+        }
+        return actions.map { action ->
+            simulateAgentCapability(
+                companyId = companyId,
+                agentId = agentId,
+                action = action.wireValue,
+                networkTarget = networkTarget,
+                channel = channel
+            )
+        }
+    }
+
+    private fun finishMarketingRun(
+        run: MarketingRunRecord,
+        status: MarketingRunStatus,
+        actions: List<MarketingActionRecord>,
+        error: String?
+    ): MarketingRunRecord {
+        val now = System.currentTimeMillis()
+        return run.copy(
+            status = status,
+            actions = actions,
+            updatedAt = now,
+            completedAt = now,
+            error = error
+        )
+    }
+
+    private fun marketingDeniedAction(
+        run: MarketingRunRecord,
+        policy: MarketingDelegationPolicy,
+        channel: String,
+        reason: String,
+        targetUrl: String = "",
+        idempotencyKey: String = marketingIdempotencyKey(policy, run.objective, channel.ifBlank { "none" }, targetUrl)
+    ): MarketingActionRecord = MarketingActionRecord(
+        runId = run.id,
+        channel = channel.ifBlank { "none" },
+        targetUrl = targetUrl,
+        inputSummary = marketingInputSummary(run.objective, policy),
+        status = MarketingActionStatus.DENIED,
+        idempotencyKey = idempotencyKey,
+        error = reason
+    )
+
+    private suspend fun validateMarketingRunPolicy(
+        policy: MarketingDelegationPolicy,
+        run: MarketingRunRecord
+    ): String? {
+        if (run.objective.isBlank()) {
+            return "Marketing objective is required."
+        }
+        if (run.channels.isEmpty()) {
+            return "Marketing run requires at least one channel."
+        }
+        val allowedChannels = policy.channelAccounts.map { it.channel.lowercase() }.toSet()
+        val outsideChannels = run.channels.filterNot { it.lowercase() in allowedChannels }
+        if (outsideChannels.isNotEmpty()) {
+            return "Channels are outside the MarketingDelegationPolicy: ${outsideChannels.joinToString(", ")}"
+        }
+        marketingPolicyTextViolation(policy, run.objective)?.let { return it }
+        val state = stateStore.load()
+        val usedToday = marketingPostCountToday(state, policy, System.currentTimeMillis())
+        val newPostCount = run.channels.count { channel ->
+            val account = policy.channelAccounts.firstOrNull { it.channel.equals(channel, ignoreCase = true) }
+            val targetUrl = account?.let { marketingTargetUrl(policy, it) }
+            val browserTarget = targetUrl?.let(::browserNetworkTarget)
+            if (browserTarget == null) {
+                true
+            } else {
+                val key = marketingIdempotencyKey(policy, run.objective, channel, browserTarget.hostWithPort)
+                state.marketingRuns
+                    .asSequence()
+                    .flatMap { it.actions.asSequence() }
+                    .none { it.idempotencyKey == key && it.status == MarketingActionStatus.SUCCEEDED }
+            }
+        }
+        if (usedToday + newPostCount > policy.dailyPostLimit.coerceAtLeast(0)) {
+            return "MarketingDelegationPolicy daily post limit would be exceeded: used=$usedToday requested=$newPostCount limit=${policy.dailyPostLimit}."
+        }
+        return null
+    }
+
+    private fun marketingPolicyTextViolation(policy: MarketingDelegationPolicy, objective: String): String? {
+        val normalizedObjective = objective.lowercase()
+        policy.forbiddenTerms.firstOrNull { term ->
+            term.isNotBlank() && normalizedObjective.contains(term.lowercase())
+        }?.let { return "Marketing objective contains a forbidden term: $it" }
+        policy.prohibitedActions.firstOrNull { action ->
+            val normalizedAction = action.lowercase()
+            normalizedAction.isNotBlank() &&
+                (
+                    normalizedObjective.contains(normalizedAction) ||
+                        normalizedObjective.contains(normalizedAction.replace("-", " "))
+                    )
+        }?.let { return "Marketing objective requests a prohibited action: $it" }
+        return null
+    }
+
+    private fun marketingPostCountToday(
+        state: DesktopAppState,
+        policy: MarketingDelegationPolicy,
+        now: Long
+    ): Int {
+        val startOfDay = LocalDate.now(ZoneId.systemDefault())
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        return state.marketingRuns
+            .filter { it.delegationPolicyId == policy.id && it.createdAt >= startOfDay && it.createdAt <= now }
+            .sumOf { run ->
+                run.actions.count { it.status == MarketingActionStatus.SUCCEEDED }
+            }
+    }
+
+    private fun resolveMarketingPolicy(
+        state: DesktopAppState,
+        request: MarketingRunRequest,
+        definition: CompanyAgentDefinition
+    ): MarketingDelegationPolicy {
+        require(isMarketingOperatorAgent(state, definition)) {
+            "Marketing runs can only be created for a Marketing Operator agent."
+        }
+        return request.delegationPolicyId
+            ?.let { policyId ->
+                state.marketingDelegationPolicies.firstOrNull {
+                    it.id == policyId && it.companyId == request.companyId && it.agentId == definition.id
+                }
+            }
+            ?: state.marketingDelegationPolicies.firstOrNull { it.companyId == request.companyId && it.agentId == definition.id }
+            ?: throw IllegalArgumentException("MarketingDelegationPolicy not found for agent: ${definition.id}")
+    }
+
+    private fun sanitizeMarketingDelegationPolicyRequest(
+        request: UpsertMarketingDelegationPolicyRequest,
+        existing: MarketingDelegationPolicy?,
+        now: Long
+    ): MarketingDelegationPolicy {
+        val allowedDomains = request.allowedDomains.map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+        val accounts = request.channelAccounts
+            .mapNotNull { account ->
+                val channel = account.channel.trim().lowercase()
+                if (channel.isBlank()) {
+                    null
+                } else {
+                    MarketingChannelAccount(
+                        channel = channel,
+                        accountRef = account.accountRef.trim().ifBlank { channel },
+                        allowedDomains = account.allowedDomains.map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() },
+                        secretRefs = account.secretRefs.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                    )
+                }
+            }
+            .distinctBy { it.channel }
+        require(allowedDomains.isNotEmpty()) { "MarketingDelegationPolicy requires at least one allowed domain." }
+        require(accounts.isNotEmpty()) { "MarketingDelegationPolicy requires at least one channel account." }
+        return MarketingDelegationPolicy(
+            id = existing?.id ?: request.id?.trim()?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
+            companyId = request.companyId,
+            agentId = request.agentId,
+            name = request.name.trim().ifBlank { "Owned+Social" },
+            allowedDomains = allowedDomains,
+            channelAccounts = accounts.map { account ->
+                if (account.allowedDomains.isEmpty()) {
+                    account.copy(allowedDomains = allowedDomains)
+                } else {
+                    account
+                }
+            },
+            dailyPostLimit = request.dailyPostLimit.coerceAtLeast(0),
+            forbiddenTerms = request.forbiddenTerms.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+            brandTone = request.brandTone?.trim()?.takeIf { it.isNotBlank() },
+            prohibitedActions = request.prohibitedActions
+                .ifEmpty { defaultMarketingProhibitedActions() }
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct(),
+            secretRefs = request.secretRefs.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+            browserSessionRef = request.browserSessionRef?.trim()?.takeIf { it.isNotBlank() },
+            maxRuntimeSeconds = request.maxRuntimeSeconds.coerceAtLeast(15),
+            createdAt = existing?.createdAt ?: now,
+            updatedAt = now
+        )
+    }
+
+    private fun marketingPolicyCapabilitySettings(policy: MarketingDelegationPolicy): Map<CapabilityKey, AgentCapabilitySetting> {
+        val domains = (policy.allowedDomains + policy.channelAccounts.flatMap { it.allowedDomains })
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+        val channels = policy.channelAccounts.map { it.channel }.distinctBy { it.lowercase() }
+        val refs = (policy.secretRefs + policy.channelAccounts.flatMap { it.secretRefs }).distinct()
+        val notes = "Opened by MarketingDelegationPolicy ${policy.name}; out-of-policy marketing/browser actions are DENIED, not routed to approval."
+        val autoSetting = AgentCapabilitySetting(
+            enabled = true,
+            mode = CapabilityMode.AUTO,
+            domainAllowlist = domains,
+            channelAllowlist = channels,
+            secretRefs = refs,
+            maxRuntimeSeconds = policy.maxRuntimeSeconds,
+            requiresEvidence = true,
+            requiresReview = false,
+            notes = notes
+        )
+        return mapOf(
+            CapabilityKey.BROWSER_READ to autoSetting,
+            CapabilityKey.BROWSER_INTERACT to autoSetting,
+            CapabilityKey.BROWSER_EXTERNAL_DOMAIN to autoSetting,
+            CapabilityKey.BROWSER_LOGIN_FLOW to autoSetting,
+            CapabilityKey.WEB_PUBLISH to autoSetting,
+            CapabilityKey.SOCIAL_POST_CREATE to autoSetting,
+            CapabilityKey.MARKETING_ANALYTICS_READ to autoSetting
+        )
+    }
+
+    private fun isMarketingOperatorAgent(state: DesktopAppState, definition: CompanyAgentDefinition): Boolean {
+        if (definition.title.equals("Marketing Operator", ignoreCase = true)) {
+            return true
+        }
+        val profile = state.agentCapabilityProfiles.firstOrNull { it.companyId == definition.companyId && it.agentId == definition.id }
+        return profile?.settings?.get(CapabilityKey.SKILL_RUN)
+            ?.skillAllowlist
+            .orEmpty()
+            .any { it.equals("marketing-operator", ignoreCase = true) }
+    }
+
+    private fun marketingTargetUrl(
+        policy: MarketingDelegationPolicy,
+        account: MarketingChannelAccount
+    ): String? {
+        val raw = account.allowedDomains.firstOrNull()
+            ?: policy.allowedDomains.firstOrNull()
+            ?: return null
+        return if (raw.contains("://")) raw else "https://$raw"
+    }
+
+    private fun marketingInputSummary(objective: String, policy: MarketingDelegationPolicy): String {
+        val tone = policy.brandTone?.let { " Tone: $it" }.orEmpty()
+        return (objective.trim() + tone).take(1_000)
+    }
+
+    private fun marketingScreenshotPath(runId: String, channel: String): Path =
+        stateStore.appHome()
+            .resolve("runtime")
+            .resolve("marketing-browser")
+            .resolve("screenshots")
+            .resolve("${safeMarketingPathSegment(runId)}-${safeMarketingPathSegment(channel)}.png")
+
+    private fun withMarketingUtm(targetUrl: String, runId: String, channel: String): String {
+        val separator = if (targetUrl.contains("?")) "&" else "?"
+        return targetUrl + separator +
+            "utm_source=cotor&utm_medium=organic&utm_campaign=${safeMarketingPathSegment(runId)}&utm_content=${safeMarketingPathSegment(channel)}"
+    }
+
+    private fun marketingIdempotencyKey(
+        policy: MarketingDelegationPolicy,
+        objective: String,
+        channel: String,
+        target: String
+    ): String {
+        val raw = "${policy.id}|${policy.companyId}|${policy.agentId}|${channel.lowercase()}|${target.lowercase()}|${objective.trim().lowercase()}"
+        val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun safeMarketingPathSegment(raw: String): String =
+        raw.trim().replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "marketing" }
+
     suspend fun planVideoScript(request: VideoPlanRequest): VideoPlanResult = planVideoAction(
         action = ActionKind.VIDEO_SCRIPT_WRITE,
         request = request,
@@ -1830,513 +2789,6 @@ class DesktopAppService(
         notes = setting.notes?.trim()?.takeIf { it.isNotBlank() }
     )
 
-    suspend fun listMarketingDelegationPolicies(companyId: String? = null, agentId: String? = null): List<MarketingDelegationPolicy> =
-        stateStore.load().marketingDelegationPolicies
-            .filter { companyId == null || it.companyId == companyId }
-            .filter { agentId == null || it.agentId == agentId }
-            .sortedByDescending { it.updatedAt }
-
-    suspend fun listMarketingRuns(companyId: String? = null, agentId: String? = null): List<MarketingRunRecord> =
-        stateStore.load().marketingRuns
-            .filter { companyId == null || it.companyId == companyId }
-            .filter { agentId == null || it.agentId == agentId }
-            .sortedByDescending { it.updatedAt }
-
-    suspend fun marketingRun(runId: String): MarketingRunRecord =
-        stateStore.load().marketingRuns.firstOrNull { it.id == runId }
-            ?: throw IllegalArgumentException("Marketing run not found: $runId")
-
-    suspend fun upsertMarketingDelegationPolicy(request: UpsertMarketingDelegationPolicyRequest): MarketingDelegationPolicy =
-        stateMutex.withLock {
-            val state = stateStore.load()
-            val company = state.companies.firstOrNull { it.id == request.companyId }
-                ?: throw IllegalArgumentException("Company not found: ${request.companyId}")
-            val definition = state.companyAgentDefinitions.firstOrNull { it.companyId == request.companyId && it.id == request.agentId }
-                ?: throw IllegalArgumentException("Company agent not found: ${request.agentId}")
-            require(isMarketingOperatorDefinition(definition) || agentHasMarketingOperatorSkill(state, request.companyId, request.agentId)) {
-                "Marketing delegation policy can only be assigned to a Marketing Operator agent."
-            }
-            val now = System.currentTimeMillis()
-            val existing = request.id?.let { id ->
-                state.marketingDelegationPolicies.firstOrNull { it.id == id }
-            } ?: state.marketingDelegationPolicies.firstOrNull {
-                it.companyId == request.companyId && it.agentId == request.agentId
-            }
-            val policyId = existing?.id ?: request.id?.trim()?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
-            val policy = MarketingDelegationPolicy(
-                id = policyId,
-                companyId = request.companyId,
-                agentId = request.agentId,
-                name = request.name?.trim()?.takeIf { it.isNotBlank() } ?: existing?.name ?: "Owned+Social",
-                allowedDomains = sanitizeMarketingDomains(request.allowedDomains),
-                channelAccounts = sanitizeMarketingChannelAccounts(request.channelAccounts),
-                dailyPostLimit = request.dailyPostLimit.coerceAtLeast(0),
-                forbiddenTerms = sanitizeMarketingTokens(request.forbiddenTerms),
-                brandTone = request.brandTone?.trim()?.takeIf { it.isNotBlank() },
-                prohibitedActions = sanitizeMarketingTokens(request.prohibitedActions).ifEmpty { defaultMarketingProhibitedActions() },
-                secretRefs = sanitizeMarketingTokens(request.secretRefs),
-                browserSessionRef = request.browserSessionRef?.trim()?.takeIf { it.isNotBlank() },
-                maxRuntimeSeconds = request.maxRuntimeSeconds.coerceIn(30, 6 * 60 * 60),
-                createdAt = existing?.createdAt ?: now,
-                updatedAt = now
-            )
-            require(policy.allowedDomains.isNotEmpty() || policy.channelAccounts.any { it.allowedDomains.isNotEmpty() }) {
-                "Marketing delegation policy requires at least one allowed domain."
-            }
-            require(policy.channelAccounts.isNotEmpty()) {
-                "Marketing delegation policy requires at least one channel account."
-            }
-            val nextState = applyMarketingPolicyCapabilities(
-                state.copy(
-                    marketingDelegationPolicies = state.marketingDelegationPolicies.filterNot { it.id == policy.id } + policy
-                ),
-                company = company,
-                definition = definition,
-                policy = policy,
-                now = now
-            ).recordCompanyActivity(
-                companyId = company.id,
-                source = "marketing-policy",
-                title = "Updated marketing delegation policy",
-                detail = "${definition.title} · ${policy.channelAccounts.joinToString { it.channel }}"
-            ).withDerivedMetrics()
-            stateStore.save(nextState)
-            policy
-        }
-
-    suspend fun createMarketingRun(request: MarketingRunRequest): MarketingRunRecord {
-        val start = startMarketingRun(request)
-        if (start.run.status != MarketingRunStatus.RUNNING) {
-            return start.run
-        }
-        val completedActions = mutableListOf<MarketingActionRecord>()
-        for (plan in start.plans) {
-            val skipped = existingMarketingActionForIdempotency(start.policy.id, plan.idempotencyKey)
-            if (skipped != null) {
-                completedActions += MarketingActionRecord(
-                    id = UUID.randomUUID().toString(),
-                    channel = plan.channel,
-                    action = plan.actionKind.wireValue,
-                    targetUrl = plan.targetUrl,
-                    inputSummary = "Skipped because idempotency key already published.",
-                    postedUrl = skipped.postedUrl,
-                    screenshotPath = skipped.screenshotPath,
-                    utm = marketingUtm(start.run.id, plan.channel),
-                    status = MarketingActionStatus.SKIPPED,
-                    idempotencyKey = plan.idempotencyKey,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis()
-                )
-                continue
-            }
-            completedActions += runMarketingAction(start.run, start.policy, plan)
-        }
-        val finalStatus = if (completedActions.any { it.status == MarketingActionStatus.FAILED }) {
-            MarketingRunStatus.FAILED
-        } else {
-            MarketingRunStatus.COMPLETED
-        }
-        val now = System.currentTimeMillis()
-        val finalRun = start.run.copy(
-            status = finalStatus,
-            actions = completedActions,
-            message = if (finalStatus == MarketingRunStatus.COMPLETED) {
-                "Marketing run completed under delegation policy ${start.policy.name}."
-            } else {
-                "Marketing run failed for one or more delegated actions."
-            },
-            error = completedActions.firstOrNull { it.status == MarketingActionStatus.FAILED }?.error,
-            updatedAt = now,
-            completedAt = now
-        )
-        stateMutex.withLock {
-            val state = stateStore.load()
-            stateStore.save(
-                state.copy(marketingRuns = state.marketingRuns.map { if (it.id == finalRun.id) finalRun else it })
-                    .recordCompanyActivity(
-                        companyId = finalRun.companyId,
-                        source = "marketing-run",
-                        title = "Marketing run ${finalRun.status.name.lowercase()}",
-                        detail = finalRun.objective.take(180)
-                    ).withDerivedMetrics()
-            )
-        }
-        publishCompanyEvent(
-            companyId = finalRun.companyId,
-            type = "marketing.run.${finalRun.status.name.lowercase()}",
-            title = "Marketing run ${finalRun.status.name.lowercase()}",
-            detail = finalRun.message ?: finalRun.error,
-            runId = finalRun.id
-        )
-        return finalRun
-    }
-
-    private suspend fun startMarketingRun(request: MarketingRunRequest): MarketingRunStart = stateMutex.withLock {
-        val state = stateStore.load()
-        val company = state.companies.firstOrNull { it.id == request.companyId }
-            ?: throw IllegalArgumentException("Company not found: ${request.companyId}")
-        val definition = state.companyAgentDefinitions.firstOrNull { it.companyId == request.companyId && it.id == request.agentId }
-            ?: throw IllegalArgumentException("Company agent not found: ${request.agentId}")
-        val policy = state.marketingDelegationPolicies.firstOrNull {
-            it.id == request.delegationPolicyId && it.companyId == request.companyId && it.agentId == request.agentId
-        } ?: throw IllegalArgumentException("Marketing delegation policy not found: ${request.delegationPolicyId}")
-        require(isMarketingOperatorDefinition(definition) || agentHasMarketingOperatorSkill(state, request.companyId, request.agentId)) {
-            "Marketing runs require a Marketing Operator agent."
-        }
-        val objective = request.objective.trim()
-        require(objective.isNotBlank()) { "Marketing objective is required." }
-        val channels = request.channels.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-            .ifEmpty { policy.channelAccounts.map { it.channel } }
-        val plans = buildMarketingActionPlans(policy, objective, channels)
-        val checks = plans.flatMap { plan ->
-            requestedMarketingActions(policy, plan).map { action ->
-                simulateMarketingCapability(
-                    companyId = company.id,
-                    agentId = definition.id,
-                    action = action,
-                    networkTarget = plan.targetUrl,
-                    channel = plan.channel
-                )
-            }
-        }
-        val denial = marketingPolicyDenial(state, policy, objective, channels, plans)
-            ?: checks.firstOrNull { !it.allowed }?.reason
-            ?: checks.firstOrNull { it.requiresApproval }?.let { "Marketing actions must be delegated as AUTO; ${it.reason}" }
-        val now = System.currentTimeMillis()
-        val run = MarketingRunRecord(
-            id = UUID.randomUUID().toString(),
-            companyId = company.id,
-            agentId = definition.id,
-            objective = objective,
-            channels = channels,
-            delegationPolicyId = policy.id,
-            status = if (denial == null) MarketingRunStatus.RUNNING else MarketingRunStatus.DENIED,
-            checks = checks,
-            message = if (denial == null) "Marketing run started under delegation policy ${policy.name}." else null,
-            error = denial,
-            createdAt = now,
-            updatedAt = now,
-            completedAt = if (denial == null) null else now
-        )
-        val nextState = state.copy(marketingRuns = state.marketingRuns + run)
-            .recordCompanyActivity(
-                companyId = company.id,
-                source = "marketing-run",
-                title = if (denial == null) "Started marketing run" else "Denied marketing run",
-                detail = denial ?: objective.take(180),
-                severity = if (denial == null) "info" else "warning"
-            ).withDerivedMetrics()
-        stateStore.save(nextState)
-        MarketingRunStart(run = run, policy = policy, plans = plans)
-    }
-
-    private suspend fun runMarketingAction(
-        run: MarketingRunRecord,
-        policy: MarketingDelegationPolicy,
-        plan: MarketingActionPlan
-    ): MarketingActionRecord {
-        val now = System.currentTimeMillis()
-        val base = MarketingActionRecord(
-            id = UUID.randomUUID().toString(),
-            channel = plan.channel,
-            action = plan.actionKind.wireValue,
-            targetUrl = plan.targetUrl,
-            inputSummary = run.objective.take(240),
-            screenshotPath = plan.screenshotPath,
-            utm = marketingUtm(run.id, plan.channel),
-            status = MarketingActionStatus.FAILED,
-            idempotencyKey = plan.idempotencyKey,
-            createdAt = now,
-            updatedAt = now
-        )
-        if (plan.actionKind == ActionKind.MARKETING_ANALYTICS_READ) {
-            return base.copy(
-                inputSummary = "Read analytics for ${plan.channel}.",
-                status = MarketingActionStatus.SUCCEEDED,
-                updatedAt = System.currentTimeMillis()
-            )
-        }
-        return runCatching {
-            marketingBrowserRunner.execute(
-                MarketingBrowserCommand(
-                    runId = run.id,
-                    actionId = base.id,
-                    channel = plan.channel,
-                    objective = run.objective,
-                    targetUrl = plan.targetUrl,
-                    brandTone = policy.brandTone,
-                    browserSessionRef = policy.browserSessionRef,
-                    secretRefs = policy.secretRefs,
-                    screenshotPath = plan.screenshotPath,
-                    idempotencyKey = plan.idempotencyKey
-                ),
-                timeoutSeconds = policy.maxRuntimeSeconds
-            )
-        }.fold(
-            onSuccess = { result ->
-                base.copy(
-                    inputSummary = result.inputSummary,
-                    postedUrl = result.postedUrl,
-                    screenshotPath = result.screenshotPath ?: plan.screenshotPath,
-                    status = MarketingActionStatus.SUCCEEDED,
-                    updatedAt = System.currentTimeMillis()
-                )
-            },
-            onFailure = { error ->
-                base.copy(
-                    status = MarketingActionStatus.FAILED,
-                    error = error.message ?: error::class.simpleName.orEmpty(),
-                    updatedAt = System.currentTimeMillis()
-                )
-            }
-        )
-    }
-
-    private suspend fun simulateMarketingCapability(
-        companyId: String,
-        agentId: String,
-        action: ActionKind,
-        networkTarget: String,
-        channel: String
-    ): CapabilitySimulationResult =
-        AgentCapabilityGuard(stateStore).simulate(
-            ActionRequest(
-                kind = action,
-                label = "marketing.${action.wireValue}:$channel",
-                scope = ActionScope.COMPANY,
-                subject = ActionSubject(companyId = companyId, agentName = agentId),
-                networkTarget = networkTarget,
-                metadata = mapOf(
-                    "skill" to "marketing-operator",
-                    "channel" to channel
-                )
-            )
-        )
-
-    private fun applyMarketingPolicyCapabilities(
-        state: DesktopAppState,
-        company: Company,
-        definition: CompanyAgentDefinition,
-        policy: MarketingDelegationPolicy,
-        now: Long
-    ): DesktopAppState {
-        val current = state.agentCapabilityProfiles.firstOrNull { it.companyId == company.id && it.agentId == definition.id }
-            ?: AgentCapabilityProfile(
-                companyId = company.id,
-                agentId = definition.id,
-                settings = companyAgentCapabilitySettings(company, definition),
-                updatedAt = now
-            )
-        val nextSettings = defaultAgentCapabilitySettings() + current.settings + marketingCapabilitySettings(policy)
-        val profile = current.copy(settings = nextSettings, updatedAt = now)
-        return state.copy(
-            agentCapabilityProfiles = state.agentCapabilityProfiles
-                .filterNot { it.companyId == company.id && it.agentId == definition.id } + profile
-        )
-    }
-
-    private fun marketingCapabilitySettings(policy: MarketingDelegationPolicy): Map<CapabilityKey, AgentCapabilitySetting> {
-        val domains = policy.allAllowedDomains()
-        val channels = policy.channelAccounts.map { it.channel }
-        val notes = "Marketing Operator may execute only inside the saved delegation policy. Policy outside this allowlist is denied instead of queued for approval."
-        val setting = AgentCapabilitySetting(
-            enabled = true,
-            mode = CapabilityMode.AUTO,
-            domainAllowlist = domains,
-            channelAllowlist = channels,
-            secretRefs = policy.secretRefs,
-            maxRuntimeSeconds = policy.maxRuntimeSeconds,
-            requiresEvidence = true,
-            requiresReview = false,
-            notes = notes
-        )
-        return mapOf(
-            CapabilityKey.BROWSER_READ to setting,
-            CapabilityKey.BROWSER_INTERACT to setting,
-            CapabilityKey.BROWSER_EXTERNAL_DOMAIN to setting,
-            CapabilityKey.BROWSER_LOGIN_FLOW to setting,
-            CapabilityKey.WEB_PUBLISH to setting,
-            CapabilityKey.SOCIAL_POST_CREATE to setting,
-            CapabilityKey.MARKETING_ANALYTICS_READ to setting
-        )
-    }
-
-    private fun buildMarketingActionPlans(
-        policy: MarketingDelegationPolicy,
-        objective: String,
-        channels: List<String>
-    ): List<MarketingActionPlan> =
-        channels.map { channel ->
-            val account = policy.channelAccounts.firstOrNull { it.channel.equals(channel, ignoreCase = true) }
-            val target = (account?.allowedDomains.orEmpty() + policy.allowedDomains).firstOrNull()
-                ?: throw IllegalArgumentException("Marketing channel $channel has no allowed domain.")
-            val targetUrl = normalizeMarketingTargetUrl(target)
-            val actionKind = marketingActionKind(channel)
-            val idempotencyKey = marketingIdempotencyKey(policy.companyId, policy.id, channel, objective)
-            MarketingActionPlan(
-                channel = channel,
-                actionKind = actionKind,
-                targetUrl = targetUrl,
-                idempotencyKey = idempotencyKey,
-                screenshotPath = stateStore.appHome()
-                    .resolve("runtime")
-                    .resolve("marketing")
-                    .resolve("screenshots")
-                    .resolve("$idempotencyKey.png")
-                    .toString()
-            )
-        }
-
-    private fun requestedMarketingActions(policy: MarketingDelegationPolicy, plan: MarketingActionPlan): List<ActionKind> = buildList {
-        add(ActionKind.BROWSER_READ)
-        if (!isLocalMarketingTarget(plan.targetUrl)) add(ActionKind.BROWSER_EXTERNAL_DOMAIN)
-        if (policy.browserSessionRef != null || policy.secretRefs.isNotEmpty()) add(ActionKind.BROWSER_LOGIN_FLOW)
-        when (plan.actionKind) {
-            ActionKind.WEB_PUBLISH,
-            ActionKind.SOCIAL_POST_CREATE -> {
-                add(ActionKind.BROWSER_INTERACT)
-                add(plan.actionKind)
-            }
-            ActionKind.MARKETING_ANALYTICS_READ -> add(ActionKind.MARKETING_ANALYTICS_READ)
-            else -> add(plan.actionKind)
-        }
-    }
-
-    private suspend fun existingMarketingActionForIdempotency(policyId: String, idempotencyKey: String): MarketingActionRecord? =
-        stateStore.load().marketingRuns
-            .filter { it.delegationPolicyId == policyId }
-            .flatMap { it.actions }
-            .firstOrNull { it.idempotencyKey == idempotencyKey && it.status == MarketingActionStatus.SUCCEEDED }
-
-    private fun marketingPolicyDenial(
-        state: DesktopAppState,
-        policy: MarketingDelegationPolicy,
-        objective: String,
-        channels: List<String>,
-        plans: List<MarketingActionPlan>
-    ): String? {
-        val allowedChannels = policy.channelAccounts.map { it.channel.lowercase() }.toSet()
-        val unknownChannel = channels.firstOrNull { it.lowercase() !in allowedChannels }
-        if (unknownChannel != null) {
-            return "Marketing channel $unknownChannel is not delegated by policy ${policy.name}."
-        }
-        val objectiveLower = objective.lowercase()
-        policy.forbiddenTerms.firstOrNull { objectiveLower.contains(it.lowercase()) }?.let { term ->
-            return "Marketing objective contains forbidden term: $term"
-        }
-        policy.prohibitedActions.firstOrNull { action ->
-            val normalized = action.lowercase().replace('-', ' ')
-            objectiveLower.contains(action.lowercase()) || objectiveLower.contains(normalized)
-        }?.let { action ->
-            return "Marketing objective requests prohibited action: $action"
-        }
-        val domainHosts = policy.allAllowedDomains().mapNotNull { normalizeMarketingHost(it) }.toSet()
-        val outsidePlan = plans.firstOrNull { plan ->
-            val host = normalizeMarketingHost(plan.targetUrl)
-            host == null || domainHosts.none { allowed -> host == allowed || host.endsWith(".$allowed") }
-        }
-        if (outsidePlan != null) {
-            return "Marketing target ${outsidePlan.targetUrl} is outside the delegated domain allowlist."
-        }
-        val publishingActionsToday = state.marketingRuns
-            .filter { it.delegationPolicyId == policy.id && it.createdAt >= startOfTodayMillis() }
-            .flatMap { it.actions }
-            .count {
-                it.status == MarketingActionStatus.SUCCEEDED &&
-                    (it.action == ActionKind.WEB_PUBLISH.wireValue || it.action == ActionKind.SOCIAL_POST_CREATE.wireValue)
-            }
-        val newPublishingActions = plans.count {
-            it.actionKind == ActionKind.WEB_PUBLISH || it.actionKind == ActionKind.SOCIAL_POST_CREATE
-        }
-        if (policy.dailyPostLimit >= 0 && publishingActionsToday + newPublishingActions > policy.dailyPostLimit) {
-            return "Marketing daily post limit exceeded: ${publishingActionsToday + newPublishingActions}/${policy.dailyPostLimit}."
-        }
-        return null
-    }
-
-    private fun agentHasMarketingOperatorSkill(state: DesktopAppState, companyId: String, agentId: String): Boolean =
-        state.agentCapabilityProfiles.firstOrNull { it.companyId == companyId && it.agentId == agentId }
-            ?.settings
-            ?.get(CapabilityKey.SKILL_RUN)
-            ?.skillAllowlist
-            ?.any { it.equals("marketing-operator", ignoreCase = true) } == true
-
-    private fun isMarketingOperatorDefinition(definition: CompanyAgentDefinition): Boolean {
-        val haystack = listOf(definition.title, definition.roleSummary, definition.specialties.joinToString(" "))
-            .joinToString(" ")
-            .lowercase()
-        return haystack.contains("marketing operator") || haystack.contains("marketing")
-    }
-
-    private fun marketingActionKind(channel: String): ActionKind {
-        val normalized = channel.lowercase()
-        return when {
-            normalized.contains("analytics") || normalized.contains("report") -> ActionKind.MARKETING_ANALYTICS_READ
-            normalized in setOf("web", "cms", "site", "blog", "owned") -> ActionKind.WEB_PUBLISH
-            else -> ActionKind.SOCIAL_POST_CREATE
-        }
-    }
-
-    private fun MarketingDelegationPolicy.allAllowedDomains(): List<String> =
-        (allowedDomains + channelAccounts.flatMap { it.allowedDomains })
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-
-    private fun sanitizeMarketingDomains(values: List<String>): List<String> =
-        values.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-
-    private fun sanitizeMarketingTokens(values: List<String>): List<String> =
-        values.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-
-    private fun sanitizeMarketingChannelAccounts(values: List<MarketingChannelAccount>): List<MarketingChannelAccount> =
-        values.mapNotNull { account ->
-            val channel = account.channel.trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            MarketingChannelAccount(
-                channel = channel,
-                accountRef = account.accountRef?.trim()?.takeIf { it.isNotBlank() },
-                allowedDomains = sanitizeMarketingDomains(account.allowedDomains),
-                secretRefs = sanitizeMarketingTokens(account.secretRefs)
-            )
-        }.distinctBy { it.channel.lowercase() }
-
-    private fun normalizeMarketingTargetUrl(raw: String): String {
-        val trimmed = raw.trim()
-        val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
-        val uri = URI(withScheme)
-        require(uri.scheme == "http" || uri.scheme == "https" || uri.scheme == "file") {
-            "Marketing target must be http(s) or file URL: $raw"
-        }
-        require(uri.scheme == "file" || !uri.host.isNullOrBlank()) {
-            "Marketing target must include a host: $raw"
-        }
-        return uri.toString()
-    }
-
-    private fun normalizeMarketingHost(raw: String): String? = runCatching {
-        val withScheme = if (raw.contains("://")) raw else "https://$raw"
-        URI(withScheme).host?.trim('[', ']')?.lowercase()?.takeIf { it.isNotBlank() }
-    }.getOrNull()
-
-    private fun isLocalMarketingTarget(raw: String): Boolean {
-        val host = normalizeMarketingHost(raw) ?: return raw.startsWith("file:", ignoreCase = true)
-        return host == "localhost" || host == "127.0.0.1" || host == "::1"
-    }
-
-    private fun marketingIdempotencyKey(companyId: String, policyId: String, channel: String, objective: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest("$companyId|$policyId|${channel.lowercase()}|${objective.trim()}".toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }.take(32)
-    }
-
-    private fun marketingUtm(runId: String, channel: String): String =
-        "utm_source=cotor&utm_medium=${channel.lowercase()}&utm_campaign=$runId"
-
-    private fun startOfTodayMillis(): Long {
-        val zone = ZoneId.systemDefault()
-        return LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
-    }
-
     suspend fun evidenceForRun(runId: String): EvidenceBundle =
         provenanceService.bundleForRun(runId)
 
@@ -2485,6 +2937,7 @@ class DesktopAppService(
                 .filter { it.status == ReviewQueueStatus.MERGED && !it.approvalIssueId.isNullOrBlank() }
                 .mapNotNull { it.approvalIssueId }
                 .toSet()
+            val settledReviewQueue = updatedReviewQueue.filterNot { it.status == ReviewQueueStatus.MERGED }
             val issuesWithApprovalSettled = updatedIssues.map { issue ->
                 if (issue.id in approvalIssuesToComplete) {
                     issue.copy(
@@ -2534,7 +2987,7 @@ class DesktopAppService(
 
             var nextState = state.copy(
                 issues = issuesWithApprovalSettled,
-                reviewQueue = updatedReviewQueue
+                reviewQueue = settledReviewQueue
             )
             if (mergedIssueIds.isNotEmpty()) {
                 nextState = nextState.recordCompanyActivity(
@@ -2617,6 +3070,46 @@ class DesktopAppService(
         return buildCompanyMemorySnapshot(state, company, projectContext, goal, issue, profile).toResponse()
     }
 
+    suspend fun listProblemSignals(companyId: String): List<CompanyProblemSignal> =
+        stateStore.load().problemSignals
+            .filter { it.companyId == companyId }
+            .sortedWith(
+                compareByDescending<CompanyProblemSignal> { problemSignalSeverityRank(it.severity) }
+                    .thenByDescending { it.updatedAt }
+            )
+
+    suspend fun runAutonomyDiscoveryScan(companyId: String): List<CompanyProblemSignal> {
+        var changed = false
+        stateMutex.withLock {
+            val state = stateStore.load()
+            if (state.companies.none { it.id == companyId }) {
+                throw IllegalArgumentException("Company not found: $companyId")
+            }
+            val scan = autonomousDiscoveryService.scan(state, companyId)
+            if (scan.signals != state.problemSignals) {
+                stateStore.save(
+                    state.copy(
+                        problemSignals = scan.signals
+                    ).recordSignal(
+                        source = "autonomous-discovery",
+                        message = if (scan.changedCount > 0) {
+                            "Autonomous discovery recorded ${scan.changedCount} problem signal(s)."
+                        } else {
+                            "Autonomous discovery found no new internal quality problems."
+                        },
+                        severity = if (scan.changedCount > 0) "warning" else "info",
+                        companyId = companyId
+                    ).withDerivedMetrics()
+                )
+                changed = scan.changedCount > 0
+            }
+        }
+        if (changed) {
+            knowledgeService.synchronizeFromState(stateStore.load())
+        }
+        return listProblemSignals(companyId)
+    }
+
     private suspend fun bindIssueToDurableRun(
         issueId: String,
         runId: String,
@@ -2671,6 +3164,185 @@ class DesktopAppService(
                 ?.takeIf { it.isNotBlank() }
             ?: run?.error
                 ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun classifyBlockedReason(
+        issue: CompanyIssue,
+        latestRun: AgentRun?,
+        reviewQueueItem: ReviewQueueItem? = null,
+        transitionReasonOverride: String? = null
+    ): BlockedReasonSnapshot? {
+        if (issue.status != IssueStatus.BLOCKED && issue.status != IssueStatus.WAITING_FOR_APPROVAL) {
+            return null
+        }
+        val publishError = latestRun?.let(::effectiveExecutionLogPublishError)
+        val checksSummary = latestRun?.publish?.checksSummary?.takeIf { it.isNotBlank() }
+            ?: reviewQueueItem?.checksSummary?.takeIf { it.isNotBlank() }
+        val mergeability = latestRun?.publish?.mergeability?.takeIf { it.isNotBlank() }
+            ?: reviewQueueItem?.mergeability?.takeIf { it.isNotBlank() }
+        val signals = listOfNotNull(
+            "providerBlockReason" toNonBlank issue.providerBlockReason,
+            "transitionReason" toNonBlank (transitionReasonOverride ?: issue.transitionReason),
+            "run.error" toNonBlank latestRun?.error,
+            "publish.error" toNonBlank publishError,
+            "checksSummary" toNonBlank checksSummary,
+            "mergeability" toNonBlank mergeability,
+            "review.status" toNonBlank reviewQueueItem?.status?.name,
+            "qaVerdict" toNonBlank issue.qaVerdict,
+            "ceoVerdict" toNonBlank issue.ceoVerdict,
+            "sourceSignal" toNonBlank issue.sourceSignal,
+            "approvalPauseId" toNonBlank (issue.approvalPauseId ?: reviewQueueItem?.approvalPauseId),
+            "blockedBy" toNonBlank issue.blockedBy.takeIf { it.isNotEmpty() }?.joinToString(",")
+        )
+        val combined = signals.joinToString("\n") { it.second }.lowercase()
+        val detail = blockedReasonDetail(signals)
+
+        fun has(vararg needles: String): Boolean = needles.any { combined.contains(it.lowercase()) }
+        fun source(vararg preferred: String): String =
+            preferred.firstNotNullOfOrNull { name ->
+                signals.firstOrNull { it.first == name }?.first
+            } ?: signals.firstOrNull()?.first ?: "classifier"
+        fun snapshot(
+            code: BlockedReasonCode,
+            summary: String,
+            source: String,
+            retryable: Boolean
+        ) = BlockedReasonSnapshot(
+            code = code,
+            summary = summary,
+            detail = detail,
+            source = source,
+            retryable = retryable
+        )
+
+        return when {
+            issue.status == IssueStatus.WAITING_FOR_APPROVAL ||
+                issue.approvalPauseId != null ||
+                reviewQueueItem?.approvalPauseId != null ||
+                has("requires approval", "approval required", "waiting for approval", "github_pr_create requires approval") ->
+                snapshot(
+                    code = BlockedReasonCode.CAPABILITY_APPROVAL_REQUIRED,
+                    summary = "Capability approval is required before execution can continue.",
+                    source = source("approvalPauseId", "providerBlockReason", "publish.error", "run.error", "transitionReason"),
+                    retryable = true
+                )
+            has(INTERRUPTED_RUN_ERROR, INTERRUPTED_ISSUE_REASON, "app-server stopped", "runtime stopped while execution") ->
+                snapshot(
+                    code = BlockedReasonCode.RUNTIME_INTERRUPTED,
+                    summary = "Execution was interrupted by runtime shutdown.",
+                    source = source("run.error", "providerBlockReason", "transitionReason"),
+                    retryable = true
+                )
+            issue.sourceSignal == "github-readiness" ||
+                has("github is not connected", "no github remote", "origin remote", "no history in common", "gh auth", "github cli is not authenticated") ||
+                (has("github") && has("not authenticated", "not configured", "not ready", "missing remote", "pull request create failed")) ->
+                snapshot(
+                    code = BlockedReasonCode.GITHUB_NOT_READY,
+                    summary = "GitHub publishing is not ready.",
+                    source = source("sourceSignal", "transitionReason", "providerBlockReason", "publish.error", "run.error"),
+                    retryable = true
+                )
+            mergeability.equals("DIRTY", ignoreCase = true) ||
+                has("merge conflict", "does not merge cleanly", "not mergeable", "cannot be cleanly created") ->
+                snapshot(
+                    code = BlockedReasonCode.MERGE_CONFLICT,
+                    summary = "The branch does not merge cleanly with the base branch.",
+                    source = source("mergeability", "transitionReason", "providerBlockReason", "publish.error", "run.error"),
+                    retryable = true
+                )
+            reviewQueueItem?.status == ReviewQueueStatus.FAILED_CHECKS || checksFailing(checksSummary) ->
+                snapshot(
+                    code = BlockedReasonCode.CI_FAILED,
+                    summary = "Pull request checks failed.",
+                    source = source("checksSummary", "review.status", "providerBlockReason", "transitionReason"),
+                    retryable = true
+                )
+            has("test failed", "tests failed", "failing test", "gradlew test", "test task failed") ->
+                snapshot(
+                    code = BlockedReasonCode.TEST_FAILED,
+                    summary = "Automated tests failed.",
+                    source = source("run.error", "providerBlockReason", "transitionReason"),
+                    retryable = true
+                )
+            signals.any { isNoChangesToPublishError(it.second) } ||
+                has("no new diff", "no changes to publish", "produced no new diff") ->
+                snapshot(
+                    code = BlockedReasonCode.NO_CHANGES,
+                    summary = "Execution produced no publishable changes.",
+                    source = source("publish.error", "run.error", "transitionReason", "providerBlockReason"),
+                    retryable = false
+                )
+            has("not found on path", "command not found", "executable not found", "no such file or directory", "tool unavailable") ->
+                snapshot(
+                    code = BlockedReasonCode.TOOL_UNAVAILABLE,
+                    summary = "A required local tool is unavailable.",
+                    source = source("run.error", "providerBlockReason", "transitionReason"),
+                    retryable = true
+                )
+            has("budget", "daily budget", "monthly budget", "cost limit", "spend limit") ->
+                snapshot(
+                    code = BlockedReasonCode.BUDGET_LIMIT,
+                    summary = "The company budget limit blocked execution.",
+                    source = source("providerBlockReason", "transitionReason", "run.error"),
+                    retryable = false
+                )
+            issue.qaVerdict.equals("CHANGES_REQUESTED", ignoreCase = true) ||
+                has("qa requested changes", "qa_verdict: changes_requested") ->
+                snapshot(
+                    code = BlockedReasonCode.QA_CHANGES_REQUESTED,
+                    summary = "QA requested changes before this can proceed.",
+                    source = source("qaVerdict", "transitionReason", "providerBlockReason", "review.status"),
+                    retryable = true
+                )
+            issue.ceoVerdict.equals("CHANGES_REQUESTED", ignoreCase = true) ||
+                has("ceo requested changes", "ceo_verdict: changes_requested") ->
+                snapshot(
+                    code = BlockedReasonCode.CEO_REJECTED,
+                    summary = "CEO review rejected the current work.",
+                    source = source("ceoVerdict", "transitionReason", "providerBlockReason", "review.status"),
+                    retryable = true
+                )
+            issue.blockedBy.isNotEmpty() || has("blocked by dependency", "dependency blocked", "waiting on dependency") ->
+                snapshot(
+                    code = BlockedReasonCode.DEPENDENCY_BLOCKED,
+                    summary = "A dependency is blocking this issue.",
+                    source = source("blockedBy", "transitionReason", "providerBlockReason"),
+                    retryable = true
+                )
+            has("not authenticated", "unauthorized", "oauth", "login required", "api key", "token missing", "auth missing") ->
+                snapshot(
+                    code = BlockedReasonCode.AUTH_MISSING,
+                    summary = "Authentication is missing for a required provider.",
+                    source = source("providerBlockReason", "run.error", "publish.error", "transitionReason"),
+                    retryable = true
+                )
+            has("opencode execution failed", "codex execution failed", "provider error", "model_not_found", "invalid_request_error") ->
+                snapshot(
+                    code = BlockedReasonCode.PROVIDER_ERROR,
+                    summary = "The execution provider failed.",
+                    source = source("run.error", "providerBlockReason", "transitionReason"),
+                    retryable = true
+                )
+            else ->
+                snapshot(
+                    code = BlockedReasonCode.UNKNOWN,
+                    summary = "Blocked reason is unknown.",
+                    source = source("providerBlockReason", "transitionReason", "run.error", "publish.error"),
+                    retryable = false
+                )
+        }
+    }
+
+    private infix fun String.toNonBlank(value: String?): Pair<String, String>? =
+        value?.trim()?.takeIf { it.isNotBlank() }?.let { this to it }
+
+    private fun blockedReasonDetail(signals: List<Pair<String, String>>): String? {
+        val detail = signals.joinToString("\n") { (source, value) ->
+            "$source: ${value.take(1_000)}"
+        }.trim()
+        return detail.takeIf { it.isNotBlank() }?.let { text ->
+            if (text.length <= 2_000) text else text.take(2_000) + "\n[truncated after 2000 characters]"
+        }
     }
 
     private fun issueAttentionSeverity(status: IssueStatus): String =
@@ -3744,10 +4416,13 @@ class DesktopAppService(
         val taskIds = tasks.map { it.id }.toSet()
         val runs = state.runs.filter { it.taskId in taskIds }
         val profiles = state.orgProfiles.associateBy { it.id }
+        val reviewQueueByIssueId = state.reviewQueue.associateBy { it.issueId }
         return issues.sortedByDescending { it.updatedAt }.map { issue ->
             val issueTasks = tasks.filter { it.issueId == issue.id }.sortedByDescending { it.updatedAt }
             val issueRuns = runs.filter { it.taskId in issueTasks.map { t -> t.id }.toSet() }.sortedByDescending { it.updatedAt }
             val assignee = issue.assigneeProfileId?.let { profiles[it] }
+            val reviewQueueItem = reviewQueueByIssueId[issue.id]
+            val issueBlockedReason = classifyBlockedReason(issue, issueRuns.firstOrNull(), reviewQueueItem)
             mapOf(
                 "issueId" to issue.id,
                 "issueTitle" to issue.title,
@@ -3758,6 +4433,12 @@ class DesktopAppService(
                 "pullRequestUrl" to issue.pullRequestUrl,
                 "qaVerdict" to issue.qaVerdict,
                 "ceoVerdict" to issue.ceoVerdict,
+                "blockedReason" to issueBlockedReason?.summary,
+                "blockedReasonCode" to issueBlockedReason?.code?.name,
+                "blockedReasonSummary" to issueBlockedReason?.summary,
+                "blockedReasonDetail" to issueBlockedReason?.detail,
+                "blockedReasonSource" to issueBlockedReason?.source,
+                "blockedRetryable" to issueBlockedReason?.retryable,
                 "tasks" to issueTasks.map { task ->
                     val taskRuns = issueRuns.filter { it.taskId == task.id }
                     mapOf(
@@ -3766,6 +4447,7 @@ class DesktopAppService(
                         "createdAt" to task.createdAt,
                         "updatedAt" to task.updatedAt,
                         "runs" to taskRuns.map { run ->
+                            val runBlockedReason = classifyBlockedReason(issue, run, reviewQueueItem)
                             mapOf(
                                 "runId" to run.id,
                                 "agent" to run.agentName,
@@ -3780,6 +4462,8 @@ class DesktopAppService(
                                 "pullRequestUrl" to run.publish?.pullRequestUrl,
                                 "publishError" to effectiveExecutionLogPublishError(run)?.take(200),
                                 "failureClass" to classifyExecutionLogFailure(issue, run),
+                                "blockedReasonCode" to runBlockedReason?.code?.name,
+                                "blockedReasonDetail" to runBlockedReason?.detail,
                                 "createdAt" to run.createdAt,
                                 "updatedAt" to run.updatedAt
                             )
@@ -4150,9 +4834,7 @@ class DesktopAppService(
     private suspend fun buildOperatorCompanySummary(companyId: String): OperatorCompanySummary {
         val state = stateStore.load().withDerivedMetrics()
         val company = state.companies.firstOrNull { it.id == companyId }
-        if (company == null) {
-            throw IllegalArgumentException("Company not found: $companyId")
-        }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
         val runtime = runtimeStatus(companyId)
         val companyWorkspaceIds = state.workspaces
             .filter { it.repositoryId == company.repositoryId }
@@ -4372,7 +5054,8 @@ class DesktopAppService(
         containsAny(text, "runtime stop", "stop runtime", "런타임 중지", "실행 중지", "정지")
 
     private fun looksLikeBlockedIssueRetry(text: String): Boolean =
-        containsAny(text, "blocked", "막힌", "블록") && containsAny(text, "retry", "reassign", "requeue", "다시", "재시도", "재배정", "굴려")
+        containsAny(text, "blocked", "막힌", "블록") &&
+            containsAny(text, "retry", "reassign", "requeue", "다시", "재시도", "재배정", "굴려")
 
     private fun looksLikeGitHubSync(text: String): Boolean =
         text.contains("github") && containsAny(text, "sync", "status", "확인", "동기화", "resync")
@@ -4399,10 +5082,9 @@ class DesktopAppService(
             containsAny(text, "비용 상한", "budget cap", "cost cap", "unlimited budget", "무제한 비용") &&
                 containsAny(text, "해제", "없애", "remove", "disable", "unlock", "무제한") ->
                 "Budget cap removal blocked"
-            (
-                containsAny(text, "배포", "deploy", "deployment", "merge", "머지") && containsAny(text, "정책", "policy") &&
-                    containsAny(text, "해제", "disable", "unlock", "없애", "끄")
-                ) ->
+            containsAny(text, "배포", "deploy", "deployment", "merge", "머지") &&
+                containsAny(text, "정책", "policy") &&
+                containsAny(text, "해제", "disable", "unlock", "없애", "끄") ->
                 "Deployment or merge policy unlock blocked"
             else -> null
         } ?: return null
@@ -6503,7 +7185,11 @@ class DesktopAppService(
                 actions += "archived-recursive-goals:$archivedRecursiveGoals"
             }
             synthesizeAutonomousFollowUpGoal(companyId)?.let { synthesizedGoal ->
-                actions += "goal-added:${synthesizedGoal.id}"
+                actions += if (synthesizedGoal.operatingPolicy.orEmpty().startsWith("auto-discovery:")) {
+                    "discovery-triage-created:${synthesizedGoal.id}"
+                } else {
+                    "goal-added:${synthesizedGoal.id}"
+                }
             }
 
             val current = stateStore.load()
@@ -6629,7 +7315,14 @@ class DesktopAppService(
                         !recoveredInterruptedIssueDuringThisTick
                 }
             if (autonomousGoals.isEmpty() && runnableIssues.isEmpty()) {
-                actions += "idle-no-autonomous-goals"
+                val hasOpenProblemSignals = executionSnapshot.problemSignals.any {
+                    it.companyId == companyId && it.status == CompanyProblemSignalStatus.OPEN
+                }
+                actions += if (hasOpenProblemSignals) {
+                    "idle-open-problem-signals"
+                } else {
+                    "idle-no-discovered-problems"
+                }
             }
             val delegatedRunnableIssues = runnableIssues.map { candidate ->
                 val delegated = if (candidate.assigneeProfileId == null || candidate.status != IssueStatus.DELEGATED) {
@@ -10290,6 +10983,26 @@ class DesktopAppService(
             )
         }
 
+    private fun computeAgentPerformance(
+        state: DesktopAppState,
+        companyId: String?,
+        orgProfiles: List<OrgAgentProfile>,
+        scopedIssues: List<CompanyIssue> = state.issues.filter { companyId == null || it.companyId == companyId },
+        scopedTasks: List<AgentTask> = state.tasks.filter { task ->
+            task.issueId == null || scopedIssues.any { it.id == task.issueId }
+        },
+        scopedReviewQueue: List<ReviewQueueItem> = state.reviewQueue.filter { item ->
+            scopedIssues.any { it.id == item.issueId }
+        }
+    ): List<AgentPerformanceSnapshot> = AgentPerformanceCalculator.compute(
+        state = state,
+        companyId = companyId,
+        orgProfiles = orgProfiles,
+        scopedIssues = scopedIssues,
+        scopedTasks = scopedTasks,
+        scopedReviewQueue = scopedReviewQueue
+    )
+
     private fun computeRunningAgentSessions(
         state: DesktopAppState,
         orgProfiles: List<OrgAgentProfile>
@@ -10735,6 +11448,88 @@ class DesktopAppService(
     private fun sameRepositoryRoot(savedPath: String, repositoryRoot: Path): Boolean =
         Path.of(savedPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
 
+    private fun a2aEndpoint(): String =
+        System.getenv("COTOR_APP_SERVER_URL")?.takeIf { it.isNotBlank() }?.trim()?.removeSuffix("/")
+            ?.let { "$it/api/a2a" }
+            ?: "http://127.0.0.1:8787/api/a2a"
+
+    private fun buildA2aRunEnvironment(
+        company: Company?,
+        issue: CompanyIssue,
+        task: AgentTask,
+        run: AgentRun
+    ): Map<String, String> = buildMap {
+        put("COTOR_A2A_ENDPOINT", run.a2aEndpoint ?: a2aEndpoint())
+        run.a2aSessionId?.let { put("COTOR_A2A_SESSION_ID", it) }
+        put("COTOR_A2A_COMPANY_ID", issue.companyId)
+        issue.projectContextId?.let { put("COTOR_A2A_PROJECT_CONTEXT_ID", it) }
+        put("COTOR_A2A_GOAL_ID", issue.goalId)
+        put("COTOR_A2A_ISSUE_ID", issue.id)
+        put("COTOR_A2A_TASK_ID", task.id)
+        put("COTOR_A2A_RUN_ID", run.id)
+        put("COTOR_A2A_AGENT_NAME", run.agentName)
+        put("COTOR_A2A_BRANCH", run.branchName)
+        company?.name?.let { put("COTOR_A2A_COMPANY_NAME", it) }
+        System.getenv("COTOR_APP_TOKEN")?.takeIf { it.isNotBlank() }?.let { put("COTOR_A2A_TOKEN", it) }
+    }
+
+    private suspend fun recordA2aRunBridgeEvent(
+        company: Company,
+        issue: CompanyIssue,
+        task: AgentTask,
+        run: AgentRun,
+        kind: String,
+        detail: String
+    ) {
+        val now = System.currentTimeMillis()
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val context = AgentContextEntry(
+                id = UUID.randomUUID().toString(),
+                companyId = company.id,
+                issueId = issue.id,
+                goalId = issue.goalId,
+                agentName = run.agentName,
+                kind = kind,
+                title = "A2A bridge ${kind.substringAfterLast('.')}",
+                content = buildString {
+                    appendLine(detail)
+                    appendLine("task=${task.id}")
+                    appendLine("run=${run.id}")
+                    run.a2aSessionId?.let { appendLine("session=$it") }
+                    run.a2aEndpoint?.let { appendLine("endpoint=$it") }
+                }.trim(),
+                visibility = "company",
+                createdAt = now
+            )
+            val artifactContext = if (kind == "a2a-run.finished") {
+                AgentContextEntry(
+                    id = UUID.randomUUID().toString(),
+                    companyId = company.id,
+                    issueId = issue.id,
+                    goalId = issue.goalId,
+                    agentName = run.agentName,
+                    kind = "a2a-artifact",
+                    title = "A2A run artifact",
+                    content = listOfNotNull(
+                        "branch=${run.branchName}",
+                        "worktree=${run.worktreePath.takeIf { it.isNotBlank() }}",
+                        run.publish?.pullRequestUrl?.let { "pullRequest=$it" }
+                    ).joinToString("\n"),
+                    visibility = "company",
+                    createdAt = now
+                )
+            } else {
+                null
+            }
+            stateStore.save(
+                state.copy(
+                    agentContextEntries = state.agentContextEntries + listOfNotNull(context, artifactContext)
+                ).withDerivedMetrics()
+            )
+        }
+    }
+
     private suspend fun executeTask(taskId: String) {
         var snapshot = stateStore.load()
         val task = snapshot.tasks.firstOrNull { it.id == taskId } ?: return
@@ -10862,6 +11657,8 @@ class DesktopAppService(
             val run = provisionalRun.copy(
                 branchName = binding.branchName,
                 worktreePath = binding.worktreePath.toString(),
+                a2aSessionId = issue?.let { provisionalRun.a2aSessionId ?: UUID.randomUUID().toString() },
+                a2aEndpoint = issue?.let { a2aEndpoint() },
                 updatedAt = System.currentTimeMillis()
             )
             replaceRun(run)
@@ -10891,15 +11688,35 @@ class DesktopAppService(
                 backendKind = preferredBackendKind,
                 updatedAt = System.currentTimeMillis()
             )
+            val bridgedAgent = issue?.let { linkedIssue ->
+                effectiveAgent.copy(
+                    environment = effectiveAgent.environment + buildA2aRunEnvironment(
+                        company = company,
+                        issue = linkedIssue,
+                        task = task,
+                        run = startedRun
+                    )
+                )
+            } ?: effectiveAgent
             replaceRun(startedRun)
-            issue?.let {
-                bindIssueToDurableRun(it.id, startedRun.id)
+            issue?.let { linkedIssue ->
+                bindIssueToDurableRun(linkedIssue.id, startedRun.id)
                 provenanceService.recordIssueRunLink(
-                    companyId = it.companyId,
-                    goalId = it.goalId,
-                    issueId = it.id,
+                    companyId = linkedIssue.companyId,
+                    goalId = linkedIssue.goalId,
+                    issueId = linkedIssue.id,
                     runId = startedRun.id
                 )
+                company?.let { linkedCompany ->
+                    recordA2aRunBridgeEvent(
+                        company = linkedCompany,
+                        issue = linkedIssue,
+                        task = task,
+                        run = startedRun,
+                        kind = "a2a-run.started",
+                        detail = "A2A bridge session ${startedRun.a2aSessionId ?: "none"} started for ${effectiveAgent.name}."
+                    )
+                }
             }
             if (durablePipelineContext != null) {
                 durableRuntimeService.beginPipelineRun(durablePipeline, durablePipelineContext)
@@ -10978,7 +11795,7 @@ class DesktopAppService(
                         }
                         localExecutionBackend.execute(
                             ExecutionBackendRequest(
-                                agent = effectiveAgent,
+                                agent = bridgedAgent,
                                 prompt = assignedPrompt,
                                 effectiveConfig = localBackendConfig(currentState),
                                 metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
@@ -10987,7 +11804,7 @@ class DesktopAppService(
                     } else {
                         val remoteResult = executionBackend.execute(
                             ExecutionBackendRequest(
-                                agent = effectiveAgent,
+                                agent = bridgedAgent,
                                 prompt = assignedPrompt,
                                 effectiveConfig = effectiveBackendConfig,
                                 metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
@@ -11004,7 +11821,7 @@ class DesktopAppService(
                             }
                             localExecutionBackend.execute(
                                 ExecutionBackendRequest(
-                                    agent = effectiveAgent,
+                                    agent = bridgedAgent,
                                     prompt = assignedPrompt,
                                     effectiveConfig = localBackendConfig(currentState),
                                     metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
@@ -11017,7 +11834,7 @@ class DesktopAppService(
                 } else {
                     executionBackend.execute(
                         ExecutionBackendRequest(
-                            agent = effectiveAgent,
+                            agent = bridgedAgent,
                             prompt = assignedPrompt,
                             effectiveConfig = backendConfig,
                             metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
@@ -11088,21 +11905,22 @@ class DesktopAppService(
                     )
                 }
             }
-            val estimatedCostCents = estimateRunCostCents(effectiveAgent, assignedPrompt, result)
+            val estimatedCostCents = estimateRunCostCents(bridgedAgent, assignedPrompt, result)
 
+            val settledRun = startedRun.copy(
+                status = if (result.isSuccess && finalError == null) AgentRunStatus.COMPLETED else AgentRunStatus.FAILED,
+                processId = result.processId,
+                model = effectiveAgent.parameters["model"],
+                backendKind = preferredBackendKind,
+                output = result.output,
+                error = finalError,
+                publish = publish,
+                durationMs = result.duration.takeIf { it > 0 },
+                estimatedCostCents = estimatedCostCents.takeIf { it > 0 },
+                updatedAt = System.currentTimeMillis()
+            )
             replaceRun(
-                startedRun.copy(
-                    status = if (result.isSuccess && finalError == null) AgentRunStatus.COMPLETED else AgentRunStatus.FAILED,
-                    processId = result.processId,
-                    model = effectiveAgent.parameters["model"],
-                    backendKind = preferredBackendKind,
-                    output = result.output,
-                    error = finalError,
-                    publish = publish,
-                    durationMs = result.duration.takeIf { it > 0 },
-                    estimatedCostCents = estimatedCostCents.takeIf { it > 0 },
-                    updatedAt = System.currentTimeMillis()
-                )
+                settledRun
             )
             company?.let {
                 if (estimatedCostCents > 0) {
@@ -11129,6 +11947,20 @@ class DesktopAppService(
                     issueId = issue?.id,
                     runId = startedRun.id
                 )
+                issue?.let { linkedIssue ->
+                    recordA2aRunBridgeEvent(
+                        company = it,
+                        issue = linkedIssue,
+                        task = task,
+                        run = settledRun,
+                        kind = if (result.isSuccess && finalError == null) "a2a-run.finished" else "a2a-run.failed",
+                        detail = if (result.isSuccess && finalError == null) {
+                            "A2A bridge recorded run completion. ${successDetail ?: "No concise output was captured."}"
+                        } else {
+                            "A2A bridge recorded run failure. ${finalError ?: result.error ?: publish?.error ?: "No error detail."}"
+                        }
+                    )
+                }
             }
             heartbeatJob?.cancel()
         } catch (cancelled: CancellationException) {
@@ -11248,7 +12080,9 @@ class DesktopAppService(
             val nextTasks = if (run.status == AgentRunStatus.COMPLETED || run.status == AgentRunStatus.FAILED) {
                 val taskRuns = nextRuns.filter { it.taskId == run.taskId }
                 val hasActiveRun = taskRuns.any { it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.QUEUED }
-                if (hasActiveRun) {
+                val task = state.tasks.firstOrNull { it.id == run.taskId }
+                val expectedRunCount = task?.agents?.distinctBy { it.trim().lowercase() }?.size ?: taskRuns.size
+                if (hasActiveRun || taskRuns.size < expectedRunCount) {
                     state.tasks
                 } else {
                     val finalStatus = finalTaskStatus(taskRuns)
@@ -13089,6 +13923,97 @@ class DesktopAppService(
         )
     }
 
+    private suspend fun synthesizeDiscoveryTriageGoal(
+        companyId: String,
+        state: DesktopAppState,
+        company: Company
+    ): CompanyGoal? {
+        val scan = autonomousDiscoveryService.scan(state, companyId)
+        if (scan.signals != state.problemSignals) {
+            stateMutex.withLock {
+                val latest = stateStore.load()
+                val latestScan = autonomousDiscoveryService.scan(latest, companyId)
+                stateStore.save(
+                    latest.copy(problemSignals = latestScan.signals)
+                        .recordSignal(
+                            source = "autonomous-discovery",
+                            message = if (latestScan.changedCount > 0) {
+                                "Autonomous discovery recorded ${latestScan.changedCount} problem signal(s)."
+                            } else {
+                                "Autonomous discovery found no new internal quality problems."
+                            },
+                            severity = if (latestScan.changedCount > 0) "warning" else "info",
+                            companyId = companyId
+                        )
+                        .withDerivedMetrics()
+                )
+            }
+        }
+        val latestState = stateStore.load()
+        val latestScan = autonomousDiscoveryService.scan(latestState, companyId)
+        val signal = latestScan.actionableSignal ?: return null
+        val title = "CEO triage for ${signal.title}"
+        val description = buildString {
+            appendLine("CEO generated this goal from an internal quality discovery signal.")
+            appendLine()
+            appendLine("Company: ${company.name}")
+            appendLine("Signal: ${signal.title}")
+            appendLine("Kind: ${signal.kind}")
+            appendLine("Severity: ${signal.severity}")
+            appendLine("Confidence: ${"%.2f".format(signal.confidence)}")
+            signal.issueId?.let { appendLine("Issue: $it") }
+            signal.reviewQueueItemId?.let { appendLine("Review queue item: $it") }
+            signal.runId?.let { appendLine("Run: $it") }
+            appendLine()
+            appendLine("Problem detail:")
+            appendLine(signal.detail)
+            appendLine()
+            appendLine("CEO directive:")
+            appendLine("- Decide whether this signal represents real work or should be dismissed.")
+            appendLine("- If real, create branchable remediation/validation issues with explicit acceptance criteria.")
+            appendLine("- Require evidence before marking the remediation complete.")
+            appendLine("- Update project/team/agent memory with the decision and residual risk.")
+        }
+        val goal = createGoal(
+            companyId = companyId,
+            title = title,
+            description = description,
+            successMetrics = listOf(
+                "The discovery signal is triaged into a concrete decision.",
+                "Real problems become scoped remediation or validation issues.",
+                "The outcome is recorded in company memory with evidence and residual risk."
+            ),
+            autonomyEnabled = true,
+            priority = when (signal.severity.lowercase()) {
+                "critical", "high" -> 1
+                "medium" -> 2
+                else -> 3
+            },
+            operatingPolicy = "auto-discovery:${signal.id}",
+            startRuntimeIfNeeded = false
+        )
+        stateMutex.withLock {
+            val latest = stateStore.load()
+            stateStore.save(
+                latest.copy(
+                    problemSignals = autonomousDiscoveryService.markTriaged(
+                        latest.problemSignals,
+                        signal.id,
+                        goal.id
+                    )
+                ).recordSignal(
+                    source = "autonomous-discovery",
+                    message = "Created CEO triage goal for discovery signal: ${signal.title}",
+                    severity = "warning",
+                    companyId = companyId,
+                    goalId = goal.id,
+                    issueId = signal.issueId
+                ).withDerivedMetrics()
+            )
+        }
+        return goal
+    }
+
     internal suspend fun synthesizeAutonomousFollowUpGoalForTesting(companyId: String): CompanyGoal? =
         synthesizeAutonomousFollowUpGoal(companyId)
 
@@ -13544,6 +14469,8 @@ class DesktopAppService(
 
     private data class CompanyMemorySnapshot(
         val companyMemory: String,
+        val projectMemory: String,
+        val teamMemory: String,
         val workflowMemory: String,
         val agentMemory: String
     )
@@ -13551,14 +14478,31 @@ class DesktopAppService(
     private fun CompanyMemorySnapshot.toResponse(): CompanyMemorySnapshotResponse = CompanyMemorySnapshotResponse(
         companyMemory = sanitizeUserFacingMemoryText(companyMemory),
         workflowMemory = sanitizeUserFacingMemoryText(workflowMemory),
-        agentMemory = sanitizeUserFacingMemoryText(agentMemory)
+        agentMemory = sanitizeUserFacingMemoryText(agentMemory),
+        projectMemory = sanitizeUserFacingMemoryText(projectMemory),
+        teamMemory = sanitizeUserFacingMemoryText(teamMemory)
     )
 
     private fun CompanyMemorySnapshot.toInternalResponse(): CompanyMemorySnapshotResponse = CompanyMemorySnapshotResponse(
         companyMemory = companyMemory,
         workflowMemory = workflowMemory,
-        agentMemory = agentMemory
+        agentMemory = agentMemory,
+        projectMemory = projectMemory,
+        teamMemory = teamMemory
     )
+
+    private data class CompanyMemoryFact(
+        val layer: CompanyMemoryLayer,
+        val key: String,
+        val value: String,
+        val source: String,
+        val confidence: Double,
+        val freshness: Long,
+        val conflictStatus: String = "CLEAR"
+    ) {
+        fun render(): String =
+            "$key=$value | source=$source | confidence=${"%.2f".format(confidence)} | freshness=$freshness | conflict=$conflictStatus"
+    }
 
     private fun sanitizeUserFacingMemoryText(text: String): String =
         text.lineSequence()
@@ -13573,7 +14517,7 @@ class DesktopAppService(
             .joinToString("\n")
 
     private fun sanitizeUserFacingMemoryLine(line: String): String {
-        var sanitized = line
+        var sanitized = line.replace(Regex(" \\| source=.*$"), "")
             .replace("Created infra issue:", "Created connection issue:")
             .replace("Blocked code issue:", "Code work is waiting:")
             .replace("Created CEO planning issue:", "Prepared CEO work plan:")
@@ -13602,6 +14546,12 @@ class DesktopAppService(
         appendLine()
         appendLine("Workflow memory:")
         appendLine(summarizeForPrompt(memory.workflowMemory, 320))
+        appendLine()
+        appendLine("Project memory:")
+        appendLine(summarizeForPrompt(memory.projectMemory, 260))
+        appendLine()
+        appendLine("Team memory:")
+        appendLine(summarizeForPrompt(memory.teamMemory, 260))
         appendLine()
         appendLine("Agent memory:")
         appendLine(summarizeForPrompt(memory.agentMemory, 220))
@@ -13653,79 +14603,138 @@ class DesktopAppService(
             .filter { it.companyId == company.id && it.id in collaboratorIds }
             .map { it.title }
         val agentDefinition = resolveCompanyAgentDefinition(state, issue, profile, profile.executionAgentName)
+        val now = System.currentTimeMillis()
+        fun fact(
+            layer: CompanyMemoryLayer,
+            key: String,
+            value: String,
+            source: String,
+            confidence: Double,
+            freshness: Long = now,
+            conflictStatus: String = "CLEAR"
+        ): CompanyMemoryFact =
+            CompanyMemoryFact(layer, key, value, source, confidence, freshness, conflictStatus)
+        fun renderFacts(layer: CompanyMemoryLayer, facts: List<CompanyMemoryFact>): String =
+            facts.filter { it.layer == layer && it.value.isNotBlank() }
+                .joinToString("\n") { it.render() }
+                .ifBlank { "No ${layer.name.lowercase()} memory recorded yet." }
+
+        val memoryFacts = buildList {
+            add(fact(CompanyMemoryLayer.COMPANY, "company", company.name, "company-state", 1.0, company.updatedAt))
+            add(fact(CompanyMemoryLayer.COMPANY, "rootPath", company.rootPath, "company-state", 1.0, company.updatedAt))
+            add(fact(CompanyMemoryLayer.COMPANY, "defaultBaseBranch", company.defaultBaseBranch, "company-state", 0.95, company.updatedAt))
+            add(fact(CompanyMemoryLayer.COMPANY, "activeGoals", companyGoals.joinToString { it.title }, "goal-state", 0.85))
+            add(
+                fact(
+                    CompanyMemoryLayer.COMPANY,
+                    "recentActivity",
+                    recentActivity.joinToString(" | ") { "${it.title}${it.detail?.let { detail -> ": $detail" } ?: ""}" },
+                    "activity-feed",
+                    0.8
+                )
+            )
+            add(fact(CompanyMemoryLayer.PROJECT, "projectContext", projectContext?.name.orEmpty(), "project-context", 0.85, projectContext?.lastUpdatedAt ?: now))
+            goal?.let {
+                add(fact(CompanyMemoryLayer.PROJECT, "goal", it.title, "goal-state", 0.9, it.updatedAt))
+                add(fact(CompanyMemoryLayer.PROJECT, "goalDescription", it.description.lineSequence().firstOrNull().orEmpty(), "goal-state", 0.75, it.updatedAt))
+            }
+            add(fact(CompanyMemoryLayer.PROJECT, "issue", issue.title, "issue-state", 0.9, issue.updatedAt))
+            add(fact(CompanyMemoryLayer.PROJECT, "issueStatus", issue.status.name, "issue-state", 0.95, issue.updatedAt))
+            add(
+                fact(
+                    CompanyMemoryLayer.PROJECT,
+                    "goalIssues",
+                    goalIssues.joinToString(" | ") { "${it.title} [${it.status}]" },
+                    "issue-graph",
+                    0.8
+                )
+            )
+            add(fact(CompanyMemoryLayer.PROJECT, "graphify", graphifyKnowledgeGuidance(), "graphify", 0.7))
+            if (retrievedKnowledge.isNotEmpty()) {
+                add(
+                    fact(
+                        CompanyMemoryLayer.PROJECT,
+                        "knowledge",
+                        retrievedKnowledge.joinToString(" | ") {
+                            "${it.kind}:${summarizeForPrompt(it.content, 120)}"
+                        },
+                        "knowledge-store",
+                        retrievedKnowledge.maxOfOrNull { it.confidence } ?: 0.6,
+                        retrievedKnowledge.maxOfOrNull { it.freshness } ?: now,
+                        retrievedKnowledge.map { it.conflictStatus.name }.distinct().joinToString("+")
+                    )
+                )
+            }
+            add(
+                fact(
+                    CompanyMemoryLayer.TEAM,
+                    "recentDecisions",
+                    recentDecisions.joinToString(" | ") { it.summary },
+                    "ceo-decisions",
+                    0.8
+                )
+            )
+            if (recentContextEntries.isNotEmpty()) {
+                add(
+                    fact(
+                        CompanyMemoryLayer.TEAM,
+                        "handoffs",
+                        recentContextEntries.joinToString(" | ") { "${it.agentName}:${it.kind}:${summarizeForPrompt(it.content, 120)}" },
+                        "agent-context",
+                        0.85,
+                        recentContextEntries.maxOf { it.createdAt }
+                    )
+                )
+            }
+            if (recentMessages.isNotEmpty()) {
+                add(
+                    fact(
+                        CompanyMemoryLayer.TEAM,
+                        "recentMessages",
+                        recentMessages.joinToString(" | ") { "${it.fromAgentName}->${it.toAgentName ?: "all"}:${summarizeForPrompt(it.body, 120)}" },
+                        "agent-message",
+                        0.8,
+                        recentMessages.maxOf { it.createdAt }
+                    )
+                )
+            }
+            add(fact(CompanyMemoryLayer.AGENT, "role", profile.roleName, "agent-profile", 0.95))
+            add(fact(CompanyMemoryLayer.AGENT, "agentCli", profile.executionAgentName, "agent-profile", 0.95))
+            add(fact(CompanyMemoryLayer.AGENT, "capabilities", profile.capabilities.joinToString(), "agent-profile", 0.85))
+            agentDefinition?.roleSummary?.takeIf { it.isNotBlank() }?.let {
+                add(fact(CompanyMemoryLayer.AGENT, "roleSummary", it, "agent-definition", 0.85, agentDefinition.updatedAt))
+            }
+            agentDefinition?.memoryNotes?.takeIf { it.isNotBlank() }?.let {
+                add(fact(CompanyMemoryLayer.AGENT, "memoryNotes", summarizeForPrompt(it, 160), "agent-definition", 0.75, agentDefinition.updatedAt))
+            }
+            add(
+                fact(
+                    CompanyMemoryLayer.AGENT,
+                    "assignedIssues",
+                    assignedIssues.joinToString(" | ") { "${it.title} [${it.status}]" },
+                    "issue-assignment",
+                    0.8
+                )
+            )
+            if (collaboratorNames.isNotEmpty()) {
+                add(fact(CompanyMemoryLayer.AGENT, "preferredCollaborators", collaboratorNames.joinToString(), "agent-definition", 0.8))
+            }
+        }
+        val companyMemory = renderFacts(CompanyMemoryLayer.COMPANY, memoryFacts)
+        val projectMemory = renderFacts(CompanyMemoryLayer.PROJECT, memoryFacts)
+        val teamMemory = renderFacts(CompanyMemoryLayer.TEAM, memoryFacts)
+        val agentMemory = renderFacts(CompanyMemoryLayer.AGENT, memoryFacts)
+        val workflowMemory = buildString {
+            appendLine(projectMemory)
+            appendLine(teamMemory)
+        }.trim()
 
         return CompanyMemorySnapshot(
-            companyMemory = buildString {
-                appendLine("company=${company.name}")
-                appendLine("rootPath=${company.rootPath}")
-                appendLine("defaultBaseBranch=${company.defaultBaseBranch}")
-                appendLine("activeGoals=${companyGoals.joinToString { it.title }}")
-                appendLine(
-                    "recentActivity=${
-                        recentActivity.joinToString(" | ") { "${it.title}${it.detail?.let { detail -> ": $detail" } ?: ""}" }
-                    }"
-                )
-            }.trim(),
-            workflowMemory = buildString {
-                appendLine(graphifyKnowledgeGuidance())
-                projectContext?.let { appendLine("projectContext=${it.name}") }
-                goal?.let {
-                    appendLine("goal=${it.title}")
-                    appendLine("goalDescription=${it.description.lineSequence().firstOrNull().orEmpty()}")
-                }
-                appendLine("issue=${issue.title}")
-                appendLine("issueStatus=${issue.status}")
-                appendLine(
-                    "goalIssues=${
-                        goalIssues.joinToString(" | ") { "${it.title} [${it.status}]" }
-                    }"
-                )
-                appendLine(
-                    "recentDecisions=${
-                        recentDecisions.joinToString(" | ") { it.summary }
-                    }"
-                )
-                if (recentContextEntries.isNotEmpty()) {
-                    appendLine(
-                        "handoffs=${
-                            recentContextEntries.joinToString(" | ") { "${it.agentName}:${it.kind}:${summarizeForPrompt(it.content, 120)}" }
-                        }"
-                    )
-                }
-                if (retrievedKnowledge.isNotEmpty()) {
-                    appendLine(
-                        "knowledge=${
-                            retrievedKnowledge.joinToString(" | ") { "${it.kind}:${summarizeForPrompt(it.content, 120)}" }
-                        }"
-                    )
-                }
-            }.trim(),
-            agentMemory = buildString {
-                appendLine("role=${profile.roleName}")
-                appendLine("agentCli=${profile.executionAgentName}")
-                appendLine("capabilities=${profile.capabilities.joinToString()}")
-                agentDefinition?.roleSummary?.takeIf { it.isNotBlank() }?.let {
-                    appendLine("roleSummary=$it")
-                }
-                agentDefinition?.memoryNotes?.takeIf { it.isNotBlank() }?.let {
-                    appendLine("memoryNotes=${summarizeForPrompt(it, 160)}")
-                }
-                appendLine(
-                    "assignedIssues=${
-                        assignedIssues.joinToString(" | ") { "${it.title} [${it.status}]" }
-                    }"
-                )
-                if (collaboratorNames.isNotEmpty()) {
-                    appendLine("preferredCollaborators=${collaboratorNames.joinToString()}")
-                }
-                if (recentMessages.isNotEmpty()) {
-                    appendLine(
-                        "recentMessages=${
-                            recentMessages.joinToString(" | ") { "${it.fromAgentName}->${it.toAgentName ?: "all"}:${summarizeForPrompt(it.body, 120)}" }
-                        }"
-                    )
-                }
-            }.trim()
+            companyMemory = companyMemory,
+            projectMemory = projectMemory,
+            teamMemory = teamMemory,
+            workflowMemory = workflowMemory,
+            agentMemory = agentMemory
         )
     }
 
@@ -13802,6 +14811,14 @@ class DesktopAppService(
             .filter { it.isNotBlank() }
             .joinToString("\n")
         return if (compact.length <= maxChars) compact else compact.take(maxChars).trimEnd() + "…"
+    }
+
+    private fun problemSignalSeverityRank(severity: String): Int = when (severity.lowercase()) {
+        "critical" -> 4
+        "high" -> 3
+        "medium" -> 2
+        "low" -> 1
+        else -> 0
     }
 
     private fun readMemoryFile(path: Path): String =
@@ -13934,9 +14951,9 @@ class DesktopAppService(
             ),
             SeededRole(
                 title = "Marketing Operator",
-                roleSummary = "operate delegated owned web, CMS, and organic social marketing channels",
-                specialties = listOf("marketing", "cms", "organic social", "analytics"),
-                collaborationInstructions = "Use browser-driven marketing only inside a saved delegation policy; deny policy-outside work and replan smaller.",
+                roleSummary = "operate delegated owned web, CMS, organic social, and marketing analytics workflows under policy",
+                specialties = listOf("marketing", "content", "social", "analytics"),
+                collaborationInstructions = "Use browser-driven marketing actions only inside an explicit MarketingDelegationPolicy; deny and re-scope anything outside it.",
                 preferredCollaborators = listOf("CEO", "Product Strategist", "Release Manager")
             ),
             SeededRole(
@@ -14063,12 +15080,34 @@ class DesktopAppService(
         definition: CompanyAgentDefinition
     ): Map<CapabilityKey, AgentCapabilitySetting> {
         val base = repositoryScopedCompanyAgentCapabilitySettings(company.rootPath)
-        return if (isChiefAgentDefinition(definition)) {
-            base + chiefAgentApprovalSettings()
-        } else {
-            base
+        return when {
+            isChiefAgentDefinition(definition) -> base + chiefAgentApprovalSettings()
+            isMarketingOperatorDefinition(definition) -> base + marketingOperatorSkillSettings()
+            else -> base
         }
     }
+
+    private fun isMarketingOperatorDefinition(definition: CompanyAgentDefinition): Boolean =
+        definition.title.equals("Marketing Operator", ignoreCase = true) ||
+            definition.specialties.any { it.equals("marketing", ignoreCase = true) }
+
+    private fun marketingOperatorSkillSettings(): Map<CapabilityKey, AgentCapabilitySetting> =
+        mapOf(
+            CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                skillAllowlist = listOf(
+                    "marketing-operator",
+                    "audience-scout",
+                    "content-publisher",
+                    "social-publisher",
+                    "analytics-reporter"
+                ),
+                requiresEvidence = true,
+                requiresReview = false,
+                notes = "Marketing skill execution is available, but browser publishing still requires a MarketingDelegationPolicy."
+            )
+        )
 
     private fun repositoryScopedCompanyAgentCapabilitySettings(rootPath: String): Map<CapabilityKey, AgentCapabilitySetting> {
         val repositoryRoot = Path.of(rootPath).toAbsolutePath().normalize().toString()
@@ -14331,13 +15370,13 @@ class DesktopAppService(
         val latestRuns = snapshot.runs.filter { it.taskId == taskId }
         val primaryRun = latestRuns.firstOrNull { it.publish?.pullRequestUrl != null } ?: latestRuns.firstOrNull()
         val issue = snapshot.issues.firstOrNull { it.id == issueId } ?: return
+        runCatching { ingestLegacyStdoutCommunicationFallback(issue, primaryRun) }
         when (issue.kind.lowercase()) {
             "planning" -> syncPlanningIssueFromTask(task, issue, primaryRun, finalStatus)
             "review" -> syncReviewIssueFromTask(task, issue, primaryRun, finalStatus)
             "approval" -> syncApprovalIssueFromTask(task, issue, primaryRun, finalStatus)
             else -> syncExecutionIssueFromTask(task, issue, primaryRun, finalStatus)
         }
-        runCatching { ingestLegacyStdoutCommunicationFallback(issue, primaryRun) }
         stimulateAutonomousCompanyProgress(issue.companyId)
     }
 
@@ -14421,15 +15460,21 @@ class DesktopAppService(
         }
     }
 
-    private suspend fun hasCanonicalCommunicationForRun(issue: CompanyIssue, run: AgentRun): Boolean {
-        val state = stateStore.load()
+    private suspend fun hasCanonicalCommunicationForRun(issue: CompanyIssue, run: AgentRun): Boolean =
+        hasCanonicalCommunicationForRun(stateStore.load(), issue, run)
+
+    private fun hasCanonicalCommunicationForRun(
+        state: DesktopAppState,
+        issue: CompanyIssue,
+        run: AgentRun
+    ): Boolean {
         val relevantContextKinds = setOf("note", "handoff", "warning")
         val relevantMessageKinds = setOf("feedback", "escalation")
         val hasContext = state.agentContextEntries.any { entry ->
             entry.companyId == issue.companyId &&
                 entry.issueId == issue.id &&
                 entry.agentName == run.agentName &&
-                entry.kind in relevantContextKinds &&
+                (entry.kind in relevantContextKinds || entry.kind.startsWith("a2a-")) &&
                 entry.createdAt >= run.createdAt
         }
         val hasMessages = state.agentMessages.any { message ->
@@ -14752,7 +15797,31 @@ class DesktopAppService(
             } else {
                 state.tasks
             }
-            if (nextIssueStatus == currentIssue.status && !hasPublishMetadata) {
+            val completionCandidate =
+                finalStatus == DesktopTaskStatus.COMPLETED &&
+                    nextIssueStatus == IssueStatus.DONE &&
+                    primaryRun != null
+            val collaborationGateApplies =
+                completionCandidate &&
+                    (primaryRun?.a2aSessionId != null || primaryRun?.a2aEndpoint != null)
+            val collaborationMissing =
+                collaborationGateApplies &&
+                    primaryRun?.let { !hasCanonicalCommunicationForRun(state, currentIssue, it) } == true
+            val verificationDecision = if (completionCandidate && !collaborationMissing) {
+                companyVerifierService.verifyIssueCompletion(state, currentIssue, primaryRun)
+            } else {
+                null
+            }
+            val verificationBlocked = completionCandidate && verificationDecision?.passed == false
+            val completionGateReason = when {
+                collaborationMissing ->
+                    "Execution completed, but A2A collaboration evidence was not recorded; completion is blocked until a handoff, context note, message, or bridge artifact exists."
+                verificationBlocked ->
+                    verificationDecision?.summary ?: "Execution completed, but verification evidence was insufficient."
+                else -> null
+            }
+            val gatedIssueStatus = if (completionGateReason != null) IssueStatus.BLOCKED else nextIssueStatus
+            if (gatedIssueStatus == currentIssue.status && !hasPublishMetadata) {
                 if (runsWithMissingRequiredPublishFailure != state.runs || tasksWithMissingRequiredPublishFailure != state.tasks) {
                     stateStore.save(
                         state.copy(
@@ -14764,7 +15833,7 @@ class DesktopAppService(
                 return@withLock
             }
             val updatedIssue = currentIssue.copy(
-                status = nextIssueStatus,
+                status = gatedIssueStatus,
                 executionIntent = when {
                     publishMergeConflict -> ExecutionIntent.MERGE_CONFLICT_REMEDIATION
                     else ->
@@ -14783,12 +15852,29 @@ class DesktopAppService(
                 pullRequestState = if (completedWithoutPublish) null else primaryRun?.publish?.pullRequestState ?: currentIssue.pullRequestState,
                 durableRunId = primaryRun?.id ?: currentIssue.durableRunId,
                 approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
-                providerBlockReason = providerBlockReasonForIssue(nextIssueStatus, primaryRun),
+                providerBlockReason = completionGateReason ?: providerBlockReasonForIssue(gatedIssueStatus, primaryRun),
+                verificationStatus = when {
+                    collaborationMissing -> "BLOCKED"
+                    verificationDecision != null -> verificationDecision.status
+                    else -> currentIssue.verificationStatus
+                },
+                verificationSummary = when {
+                    collaborationMissing -> completionGateReason
+                    verificationDecision != null -> verificationDecision.summary
+                    else -> currentIssue.verificationSummary
+                },
+                lastVerifiedAt = when {
+                    collaborationMissing || verificationDecision != null -> now
+                    else -> currentIssue.lastVerifiedAt
+                },
+                runtimeDisposition = if (completionGateReason != null) "collaboration-gate-blocked" else currentIssue.runtimeDisposition,
                 qaVerdict = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.qaVerdict,
                 qaFeedback = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.qaFeedback,
                 ceoVerdict = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.ceoVerdict,
                 ceoFeedback = if (hasPublishMetadata || completedWithoutPublish) null else currentIssue.ceoFeedback,
                 transitionReason = when {
+                    completionGateReason != null ->
+                        completionGateReason
                     publishMergeConflict ->
                         "Execution completed on branch ${primaryRun?.branchName}, but PR ${primaryRun?.publish?.pullRequestUrl ?: primaryRun?.publish?.pullRequestNumber} does not merge cleanly with the latest base branch. Re-running on a refreshed base."
                     publishApprovalRequired ->
@@ -14809,6 +15895,7 @@ class DesktopAppService(
             )
             if (updatedIssue.status != currentIssue.status) {
                 val reason = when {
+                    completionGateReason != null -> completionGateReason
                     publishMergeConflict -> "Task completed, but GitHub reported that the published PR no longer merges cleanly with the base branch."
                     publishApprovalRequired -> "Task reached PR creation and is waiting for explicit approval before publishing."
                     finalStatus == DesktopTaskStatus.COMPLETED && pullRequestRequired && hasPublishMetadata -> "Task completed and published a pull request."
@@ -14920,7 +16007,7 @@ class DesktopAppService(
                     ceoReviewedAt = null,
                     approvalIssueId = if (clearWorkflowBindings) null else existing?.approvalIssueId,
                     approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
-                    providerBlockReason = providerBlockReasonForIssue(nextIssueStatus, primaryRun),
+                    providerBlockReason = providerBlockReasonForIssue(gatedIssueStatus, primaryRun),
                     createdAt = if (publishedReviewIdentityChanged) now else existing?.createdAt ?: now,
                     updatedAt = now,
                     workflowLineage = workflowLineage
@@ -15850,8 +16937,15 @@ class DesktopAppService(
         latestTask: AgentTask? = null,
         latestRun: AgentRun? = null,
         retryEligible: Boolean? = null
-    ): CompanyAutomationTraceEvent =
-        CompanyAutomationTraceEvent(
+    ): CompanyAutomationTraceEvent {
+        val blockedReason = classifyBlockedReason(
+            issue = issue.copy(
+                status = newStatus,
+                transitionReason = reason
+            ),
+            latestRun = latestRun
+        )
+        return CompanyAutomationTraceEvent(
             timestamp = System.currentTimeMillis(),
             companyId = issue.companyId,
             projectContextId = issue.projectContextId,
@@ -15871,8 +16965,13 @@ class DesktopAppService(
             latestRunStatus = latestRun?.status?.name,
             latestRunUpdatedAt = latestRun?.updatedAt,
             retryEligible = retryEligible,
-            runErrorSnippet = latestRun?.error?.take(300) ?: latestRun?.publish?.error?.take(300)
+            runErrorSnippet = latestRun?.error?.take(300) ?: latestRun?.publish?.error?.take(300),
+            blockedReasonCode = blockedReason?.code,
+            blockedReasonSummary = blockedReason?.summary,
+            blockedReasonDetail = blockedReason?.detail,
+            blockedRetryable = blockedReason?.retryable
         )
+    }
 
     private fun appendCompanyAutomationTrace(event: CompanyAutomationTraceEvent) {
         runCatching {
@@ -15897,15 +16996,7 @@ class DesktopAppService(
                 append('|')
                 append(event.reason)
                 append('|')
-                append(event.latestTaskId ?: "")
-                append('|')
-                append(event.latestTaskStatus ?: "")
-                append('|')
-                append(event.latestRunId ?: "")
-                append('|')
-                append(event.latestRunStatus ?: "")
-                append('|')
-                append(event.retryEligible?.toString().orEmpty())
+                append(event.blockedReasonCode?.name.orEmpty())
             }
             val now = System.currentTimeMillis()
             recentCompanyAutomationTraceKeys.entries.removeIf { now - it.value > COMPANY_TRACE_DEDUP_WINDOW_MS }
@@ -16596,7 +17687,7 @@ class DesktopAppService(
     }
 }
 
-private fun defaultCommandAvailability(command: String): Boolean {
+internal fun defaultCommandAvailability(command: String): Boolean {
     return resolveExecutablePath(resolveBuiltinExecutableAlias(command)) != null
 }
 

@@ -257,6 +257,14 @@ data class AgentMessage(
     val createdAt: Long
 )
 
+@Serializable
+enum class CompanyMemoryLayer {
+    COMPANY,
+    PROJECT,
+    TEAM,
+    AGENT
+}
+
 /**
  * Minimal user-authored agent definition. The system derives hierarchy and
  * routing hints from these inputs instead of requiring users to encode a full
@@ -311,6 +319,85 @@ data class CompanyActivityItem(
     val severity: String = "info",
     val createdAt: Long
 )
+
+@Serializable
+data class CompanyDailyReportItem(
+    val id: String,
+    val title: String,
+    val detail: String? = null,
+    val issueId: String? = null,
+    val goalId: String? = null,
+    val runId: String? = null,
+    val pullRequestUrl: String? = null,
+    val status: String? = null,
+    val severity: String = "info",
+    val timestamp: Long? = null
+)
+
+@Serializable
+data class CompanyDailyReportCostSummary(
+    val estimatedRunCostCents: Int = 0,
+    val todaySpentCents: Int = 0,
+    val monthSpentCents: Int = 0,
+    val dailyBudgetCents: Int? = null,
+    val monthlyBudgetCents: Int? = null,
+    val budgetPaused: Boolean = false
+)
+
+@Serializable
+data class CompanyDailyReportSummary(
+    val id: String,
+    val companyId: String,
+    val date: String,
+    val generatedAt: Long,
+    val periodStart: Long,
+    val periodEnd: Long,
+    val summary: String,
+    val completedCount: Int = 0,
+    val blockedCount: Int = 0,
+    val qaPassedCount: Int = 0,
+    val changesRequestedCount: Int = 0,
+    val pullRequestCount: Int = 0,
+    val estimatedRunCostCents: Int = 0,
+    val activityCount: Int = 0
+)
+
+@Serializable
+data class CompanyDailyReport(
+    val id: String,
+    val companyId: String,
+    val date: String,
+    val generatedAt: Long,
+    val periodStart: Long,
+    val periodEnd: Long,
+    val summary: String,
+    val highlights: List<CompanyDailyReportItem> = emptyList(),
+    val completedItems: List<CompanyDailyReportItem> = emptyList(),
+    val pullRequests: List<CompanyDailyReportItem> = emptyList(),
+    val reviewItems: List<CompanyDailyReportItem> = emptyList(),
+    val blockedItems: List<CompanyDailyReportItem> = emptyList(),
+    val autoRecoveredItems: List<CompanyDailyReportItem> = emptyList(),
+    val recommendedNextActions: List<CompanyDailyReportItem> = emptyList(),
+    val costSummary: CompanyDailyReportCostSummary = CompanyDailyReportCostSummary(),
+    val activityCount: Int = 0
+) {
+    fun toSummary(): CompanyDailyReportSummary = CompanyDailyReportSummary(
+        id = id,
+        companyId = companyId,
+        date = date,
+        generatedAt = generatedAt,
+        periodStart = periodStart,
+        periodEnd = periodEnd,
+        summary = summary,
+        completedCount = completedItems.size,
+        blockedCount = blockedItems.size,
+        qaPassedCount = reviewItems.count { it.status.equals("QA_PASS", ignoreCase = true) },
+        changesRequestedCount = reviewItems.count { it.status.equals("CHANGES_REQUESTED", ignoreCase = true) },
+        pullRequestCount = pullRequests.size,
+        estimatedRunCostCents = costSummary.estimatedRunCostCents,
+        activityCount = activityCount
+    )
+}
 
 @Serializable
 data class AgentCollaborationEdge(
@@ -417,6 +504,34 @@ enum class IssueStatus {
     CANCELED
 }
 
+@Serializable
+enum class BlockedReasonCode {
+    AUTH_MISSING,
+    CAPABILITY_APPROVAL_REQUIRED,
+    GITHUB_NOT_READY,
+    MERGE_CONFLICT,
+    CI_FAILED,
+    TEST_FAILED,
+    NO_CHANGES,
+    TOOL_UNAVAILABLE,
+    PROVIDER_ERROR,
+    BUDGET_LIMIT,
+    DEPENDENCY_BLOCKED,
+    QA_CHANGES_REQUESTED,
+    CEO_REJECTED,
+    RUNTIME_INTERRUPTED,
+    UNKNOWN
+}
+
+@Serializable
+data class BlockedReasonSnapshot(
+    val code: BlockedReasonCode,
+    val summary: String,
+    val detail: String? = null,
+    val source: String,
+    val retryable: Boolean
+)
+
 /**
  * Review-queue status attached to issue-linked pull requests.
  */
@@ -481,6 +596,39 @@ enum class FollowUpFailureClass {
     MERGE_CONFLICT,
     BLOCKED_EXECUTION
 }
+
+@Serializable
+enum class CompanyProblemSignalStatus {
+    OPEN,
+    TRIAGED,
+    RESOLVED,
+    DISMISSED
+}
+
+@Serializable
+data class CompanyProblemSignal(
+    val id: String,
+    val companyId: String,
+    val projectContextId: String? = null,
+    val kind: String,
+    val title: String,
+    val detail: String,
+    val severity: String = "medium",
+    val confidence: Double = 0.5,
+    val source: String,
+    val dedupeKey: String,
+    val status: CompanyProblemSignalStatus = CompanyProblemSignalStatus.OPEN,
+    val goalId: String? = null,
+    val issueId: String? = null,
+    val reviewQueueItemId: String? = null,
+    val runId: String? = null,
+    val triageGoalId: String? = null,
+    val cooldownUntil: Long? = null,
+    val firstSeenAt: Long,
+    val lastSeenAt: Long,
+    val createdAt: Long,
+    val updatedAt: Long
+)
 
 @Serializable
 data class FollowUpContextSnapshot(
@@ -582,6 +730,8 @@ data class AgentRun(
     val publish: PublishMetadata? = null,
     val durationMs: Long? = null,
     val estimatedCostCents: Int? = null,
+    val a2aSessionId: String? = null,
+    val a2aEndpoint: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
     val workflowLineage: WorkflowLineageSnapshot? = null
@@ -724,6 +874,39 @@ data class ReviewQueueItem(
     val createdAt: Long,
     val updatedAt: Long,
     val workflowLineage: WorkflowLineageSnapshot? = null
+)
+
+@Serializable
+enum class AgentPerformanceDataSufficiency {
+    SUFFICIENT,
+    INSUFFICIENT_DATA
+}
+
+/**
+ * Derived per-agent performance snapshot for the company HR evaluation panel.
+ *
+ * This is intentionally not persisted. It is recalculated from issues, runs,
+ * review queue state, org profiles, and company agent definitions.
+ */
+@Serializable
+data class AgentPerformanceSnapshot(
+    val agentId: String,
+    val agentName: String,
+    val roleName: String,
+    val agentCli: String,
+    val model: String? = null,
+    val score: Int? = null,
+    val completedIssues: Int = 0,
+    val activeIssues: Int = 0,
+    val blockedIssues: Int = 0,
+    val runSuccessRate: Double? = null,
+    val qaPassRate: Double? = null,
+    val reviewRejectionCount: Int = 0,
+    val retryCount: Int = 0,
+    val averageDurationMs: Long? = null,
+    val estimatedCostCents: Int? = null,
+    val lastActivityAt: Long? = null,
+    val dataSufficiency: AgentPerformanceDataSufficiency = AgentPerformanceDataSufficiency.INSUFFICIENT_DATA
 )
 
 /**
@@ -1045,7 +1228,8 @@ data class DesktopAppState(
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
     val agentMessages: List<AgentMessage> = emptyList(),
     val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
-    val marketingRuns: List<MarketingRunRecord> = emptyList()
+    val marketingRuns: List<MarketingRunRecord> = emptyList(),
+    val problemSignals: List<CompanyProblemSignal> = emptyList()
 )
 
 private fun defaultBackendConfigs(): List<BackendConnectionConfig> = listOf(
