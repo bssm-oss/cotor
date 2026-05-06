@@ -36,7 +36,7 @@ Current subcommand support:
 
 - `agent add`, `agent list`
 - `auth codex-oauth login|status|logout`
-- `company ...` for company/agent/goal/issue/review/runtime/backend/linear/context/message operations
+- `company ...` for company/agent/goal/issue/review/runtime/backend/linear/context/message/autonomy operations, including `company autonomy scan <company-id>` and `company problem-signals <company-id>`
 - `plugin init`
 - `checkpoint gc`
 - `policy validate`, `policy simulate`
@@ -150,6 +150,10 @@ Current desktop model:
 - dedicated `Company Operator` navigation surface with an operations chat, automation mode control, runtime/approval status, command result cards, and internal CEO/QA/Reviewer approval routing
 - `Company` summary keeps runtime health, blocked workflow count, review attention, and the latest error/action inside the main summary banner instead of a separate tall status card
 - `Company` summary now also shows estimated spend plus daily/monthly cost guardrails for the selected company runtime
+- dedicated `Reports` navigation surface shows deterministic previous-day morning reports with completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
+- dedicated `Performance` navigation surface shows derived per-agent scores, success rates, QA pass rates, retries, duration, and known estimated cost from existing company execution data
+- company memory snapshots now separate company, project, team, and agent memory; the older workflow memory field remains as a compatibility alias for project + team context
+- autonomous runtime discovery scans internal quality signals before creating new work, so idle loops produce observable `idle-no-discovered-problems` or `discovery-triage-created` states instead of random continuous prompts
 - `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
 - desktop backend launch, health checks, shutdown, and client requests use the same `COTOR_APP_TOKEN` source so token-protected local sessions stay aligned
 - embedded desktop backends start with a sanitized environment so incidental API keys, provider tokens, and password-like parent-shell variables are not passed into the local app-server
@@ -187,7 +191,10 @@ The current build includes a working local operations layer:
 - create company goals
 - decompose goals into issues
 - delegate and run issues
+- open A2A bridge metadata for issue-linked agent runs, inject `COTOR_A2A_*` environment variables, and require bridge/context evidence before direct execution completion can become `DONE`
+- run internal discovery scans that persist `CompanyProblemSignal` records for repeated failures, stale blocked work, review failures, verification gaps, runtime errors, stale follow-ups, and repository-graph warnings
 - inspect completed company issue runs through `cotor resume inspect <run-id>` without enabling the experimental pipeline replay flag
+- inspect per-agent performance derived from existing company issues, runs, reviews, org profiles, and agent definitions, with insufficient-data agents shown separately
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page with a default repository `Map`, a visible `Agent Meeting` table for live coordination, synthesized runtime/backend/review/session wall events, and animated agent presence in the floor view
 - use the Company Operator surface to ask for status, change all selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
@@ -195,6 +202,7 @@ The current build includes a working local operations layer:
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel
 - inspect compact runtime status, blocked/review attention, and recent company activity from the company summary page
 - inspect estimated company spend and adjust daily/monthly runtime guardrails without leaving the company console
+- inspect stored morning reports for the previous local day; reports are generated from local runtime, activity, issue, run, and review data rather than LLM-generated prose
 - start and stop a local autonomous runtime loop per company
 - let the CEO reopen planning after one wave finishes so active goals can generate the next wave instead of freezing after the first batch of issues
 - bias autonomous continuous-improvement goals toward multi-issue portfolios and parallel branchable slices instead of a single narrow follow-up
@@ -211,7 +219,7 @@ Current limits in this build:
 - policy engine is v1 and currently focuses on readably simulating and enforcing action-level allow/deny/approval decisions rather than a full external policy language
 - risk approval is v1 and currently uses action-kind/path/network heuristics rather than a full repository diff risk model
 - GitHub control plane is v1 and currently syncs PR state, mergeability, and status-check summaries through `gh`, not a webhook-driven GitHub App
-- verification bundles persist contract/outcome state locally, but verifier-agent enforcement is still prompt-driven rather than a separate verifier runtime
+- verification bundles persist contract/outcome state locally, and company issue completion now records `verificationStatus` / `verificationSummary`; deeper verifier-agent continuation is still prompt-driven rather than a separate verifier runtime
 - runtime projection surfaces expose issue-level `runtimeDisposition`, but the runtime scheduler is still heuristic rather than fully market/simulation driven
 - company context persistence now includes structured evidence and knowledge stores under `.cotor/provenance/` and `.cotor/knowledge/`, but retrieval is still read-oriented
 - company issue execution creates inspectable durable run snapshots by default; `resume continue/fork/approve` for generic pipeline replay remains experimental behind `COTOR_EXPERIMENTAL_DURABLE_RUNTIME_V2=1`

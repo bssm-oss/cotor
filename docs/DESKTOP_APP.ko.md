@@ -122,6 +122,10 @@ cotor delete
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
 - 자연어 운영 채팅, 자동화 모드, 런타임/승인 상태, 명령 결과 카드, 상위 에이전트 내부 승인 라우팅을 보여주는 전용 `운영 채팅` 탐색 surface
+- 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 집계한 아침 보고서 전용 `보고서` surface
+- 별도 평가 이력을 저장하지 않고 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 에이전트별 점수, 성공률, QA 통과율, 재시도, 평균 시간, 확인된 추정 비용을 계산하는 전용 `인사평가` surface
+- 회사 메모리 스냅샷 카드는 company/project/team/agent 4계층을 보여주며, backend contract의 `workflowMemory`는 예전 client를 위한 호환 필드로 유지
+- 자율 discovery scan은 CEO triage goal을 만들기 전에 내부 품질 신호를 먼저 수집하고, 저장된 problem signal은 app-server와 CLI에서 확인 가능
 - CEO 채팅 인테이크: 대충 쓴 채팅 요청도 확인 후 CEO 소유 목표, 정리된 브리프, 담당 하위 이슈로 만들며 GitHub 저장소를 자동 생성하지 않음
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
 - 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영
@@ -168,6 +172,7 @@ cotor delete
 - `GET /api/app/companies/{companyId}/agents`
 - `POST /api/app/companies/{companyId}/agents`
 - `PATCH /api/app/companies/{companyId}/agents/{agentId}`
+- `GET /api/app/companies/{companyId}/agents/performance`
 - `GET /api/app/companies/{companyId}/projects`
 - `GET /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/goals`
@@ -177,6 +182,12 @@ cotor delete
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
 - `GET /api/app/companies/{companyId}/dashboard`
+- `GET /api/app/companies/{companyId}/reports`
+- `GET /api/app/companies/{companyId}/reports/{date}`
+- `POST /api/app/companies/{companyId}/reports/generate`
+- `GET /api/app/companies/{companyId}/memory-snapshot`
+- `GET /api/app/companies/{companyId}/problem-signals`
+- `POST /api/app/companies/{companyId}/autonomy/discovery-scan`
 - `GET /api/app/companies/{companyId}/contexts`
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
@@ -205,8 +216,12 @@ cotor delete
 - 회사 목표 생성
 - 목표를 이슈로 자동 분해
 - 이슈 위임 및 실행
+- issue-linked agent run에 A2A bridge metadata와 `COTOR_A2A_*` 환경 변수를 주입하고, bridge/context artifact를 canonical collaboration evidence로 사용
+- 직접 완료되는 실행 이슈는 collaboration evidence 또는 verification evidence가 부족하면 일반 실행 실패가 아니라 issue verification/runtime 필드에 이유를 남기고 차단
+- 내부 품질 신호를 `CompanyProblemSignal`로 저장하고, actionable/dedupe/cooldown 조건을 통과한 신호만 CEO triage goal로 전환
 - 회사 단위 Linear sync가 켜져 있으면 바깥 Linear로 이슈/진행 상태 미러링
 - 연결된 태스크와 실행 이력 조회
+- 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 아이템 생성 및 머지 처리
 - 기본 저장소 `지도`와 runtime/backend/review/session 상태를 합성한 실시간 활동, 실행 현황/리뷰 요약을 함께 제공하는 전용 상황실 보기
 - 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 명령 채팅으로 실행
@@ -216,6 +231,7 @@ cotor delete
 - 정상적인 회사 모드에서는 수동 새로고침 없이 회사 활동 조회
 - 압축형 회사 요약 배너에서 런타임 건강도, CEO 승인/차단/리뷰 주의, 최근 런타임 신호 조회
 - 회사 콘솔 안에서 추정 비용을 확인하고 일/월 비용 상한을 조정
+- 전날 로컬 런타임, 활동, 이슈, 실행, 리뷰 데이터를 기반으로 생성된 결정적 아침 보고서 조회. 활동이 없는 날도 빈 보고서로 남김
 - GitHub PR 발행이 필요한데 `gh`/`origin` 준비가 안 된 저장소는 회사 생성 시 경고
 - PR 모드가 `gh` CLI, `gh` 인증, 또는 `origin` 누락으로 막히면 회사 사이드바에 간단한 GitHub 빠른 연결 패널 표시
 - `origin`이 없는 경우 GitHub 저장소를 자동 생성하지 않고, GitHub 설정 패널에서 기존 저장소 URL을 연결

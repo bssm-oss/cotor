@@ -88,6 +88,17 @@ The company automation layer has stricter workflow invariants than the generic p
 - merge-conflict follow-up must reuse the existing PR branch/worktree and synthesize remediation plus validation work, not invent a new handoff PR cycle
 - no-diff retries on an existing PR lineage must converge by refreshing the current PR state and reopening the right lane instead of dead-ending as a generic publish failure
 
+## 7) Autonomous company runtime v1
+
+The v1 autonomous runtime is intentionally internal-quality focused. It does not perform external market or competitor discovery.
+
+- company memory is modeled as company/project/team/agent layers; `workflowMemory` remains a compatibility alias for project + team memory
+- issue-linked agent runs receive A2A bridge metadata and `COTOR_A2A_*` environment variables, and run bridge events create canonical collaboration evidence
+- direct execution completion is gated by collaboration evidence and a verifier bundle summary; verification blocks update issue fields instead of becoming generic execution failures
+- autonomous discovery scans repeated failures, stale blocked work, review failures, verification gaps, runtime errors, stale follow-ups, and graphify/repository structure warnings into `CompanyProblemSignal`
+- runtime ticks synthesize CEO triage goals only from actionable, deduped, cooldown-safe problem signals; otherwise idle ticks record observable idle states such as `idle-no-discovered-problems`
+- A2A session, artifact, and dedupe stores are bounded/pruned locally, while active company work and recent evidence remain part of the local-first state model
+
 ---
 
 관련 문서:

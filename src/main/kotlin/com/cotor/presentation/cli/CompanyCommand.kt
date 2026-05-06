@@ -43,6 +43,8 @@ class CompanyCommand : CliktCommand(
             CompanyIssueCommand(),
             CompanyReviewCommand(),
             CompanyRuntimeCommand(),
+            CompanyAutonomyCommand(),
+            CompanyProblemSignalsCommand(),
             CompanyBackendCommand(),
             CompanyLinearCommand(),
             CompanyContextCommand(),
@@ -576,6 +578,27 @@ private class CompanyRuntimeStopCommand : CompanyServiceCommand(name = "stop") {
     private val companyId by option("--company-id").required()
     override fun run() = runBlocking {
         printJson(desktopService.stopCompanyRuntime(companyId), CompanyRuntimeSnapshot.serializer())
+    }
+}
+
+private class CompanyAutonomyCommand : CliktCommand(name = "autonomy", help = "Run autonomous company operating checks") {
+    init {
+        subcommands(CompanyAutonomyScanCommand())
+    }
+    override fun run() = Unit
+}
+
+private class CompanyAutonomyScanCommand : CompanyServiceCommand(name = "scan") {
+    private val companyId by argument("companyId")
+    override fun run() = runBlocking {
+        printJsonList(desktopService.runAutonomyDiscoveryScan(companyId), CompanyProblemSignal.serializer())
+    }
+}
+
+private class CompanyProblemSignalsCommand : CompanyServiceCommand(name = "problem-signals") {
+    private val companyId by argument("companyId")
+    override fun run() = runBlocking {
+        printJsonList(desktopService.listProblemSignals(companyId), CompanyProblemSignal.serializer())
     }
 }
 

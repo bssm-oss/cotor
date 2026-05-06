@@ -225,6 +225,7 @@ final class DesktopStore: ObservableObject {
     @Published var ports: [PortEntryPayload] = []
     @Published var browserURL: URL?
     @Published var companyMemorySnapshot: CompanyMemorySnapshotPayload?
+    @Published var companyProblemSignals: [CompanyProblemSignalRecord] = []
     @Published var selectedCompanyGitHubStatus: GitHubPublishStatusPayload?
     @Published var language: AppLanguage
     @Published var theme: AppTheme
@@ -308,6 +309,10 @@ final class DesktopStore: ObservableObject {
     @Published var marketingRuns: [MarketingRunRecord] = []
     @Published var operatorCommandDraft = ""
     @Published var operatorCommandResponses: [OperatorCommandResponsePayload] = []
+    @Published var companyReports: [CompanyDailyReportSummaryRecord] = []
+    @Published var selectedCompanyReportDate: String?
+    @Published var selectedCompanyReport: CompanyDailyReportRecord?
+    @Published var isGeneratingCompanyReport = false
 
     let api = DesktopAPI()
     private var statusState: StatusState = .connecting
@@ -442,6 +447,22 @@ final class DesktopStore: ObservableObject {
             }
     }
 
+    var agentPerformance: [AgentPerformanceSnapshotRecord] {
+        let visibleAgentIDs = Set(companyAgentDefinitions.map(\.id))
+        return dashboard.agentPerformance
+            .filter { selectedCompanyID == nil || visibleAgentIDs.contains($0.agentId) }
+            .sorted { lhs, rhs in
+                if (lhs.score ?? -1) == (rhs.score ?? -1) {
+                    return lhs.roleName < rhs.roleName
+                }
+                return (lhs.score ?? -1) > (rhs.score ?? -1)
+            }
+    }
+
+    var scoreableAgentPerformanceCount: Int {
+        agentPerformance.filter { $0.score != nil && $0.dataSufficiency == "SUFFICIENT" }.count
+    }
+
     var projectContexts: [CompanyProjectContextRecord] {
         dashboard.projectContexts
             .filter { selectedCompanyID == nil || $0.companyId == selectedCompanyID }
@@ -452,6 +473,17 @@ final class DesktopStore: ObservableObject {
         dashboard.activity
             .filter { selectedCompanyID == nil || $0.companyId == selectedCompanyID }
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    var selectedCompanyReports: [CompanyDailyReportSummaryRecord] {
+        companyReports
+            .filter { selectedCompanyID == nil || $0.companyId == selectedCompanyID }
+            .sorted {
+                if $0.date == $1.date {
+                    return $0.generatedAt > $1.generatedAt
+                }
+                return $0.date > $1.date
+            }
     }
 
     var companyRuntimes: [CompanyRuntimeSnapshotRecord] {
@@ -955,6 +987,8 @@ final class DesktopStore: ObservableObject {
             reconcileSelection()
             syncIssueComposerState()
             syncBackendFormState()
+            await refreshCompanyReports()
+            await refreshCompanyProblemSignals()
             await refreshAvailableBranches()
             await refreshTaskDetails()
             await refreshTuiSessionList()
@@ -1017,6 +1051,8 @@ final class DesktopStore: ObservableObject {
             applyCompanyDashboard(fresh, companyId: companyID)
             availableSkills = skillCatalog
             await refreshMarketingState(companyId: companyID)
+            await refreshCompanyReports(companyId: companyID)
+            await refreshCompanyProblemSignals(companyId: companyID)
             syncDefaultCompanyAgentSkillsIfNeeded()
             errorMessage = nil
             isOffline = false
@@ -1068,6 +1104,9 @@ final class DesktopStore: ObservableObject {
         let mergedCompanyRuntimes = dashboard.companyRuntimes.filter { $0.companyId != companyId } + [snapshot.runtime]
         let mergedContextEntries = dashboard.agentContextEntries.filter { $0.companyId != companyId } + snapshot.agentContextEntries
         let mergedAgentMessages = dashboard.agentMessages.filter { $0.companyId != companyId } + snapshot.agentMessages
+        let mergedAgentPerformance = dashboard.agentPerformance.filter { performance in
+            !snapshot.companyAgentDefinitions.contains { $0.id == performance.agentId }
+        } + snapshot.agentPerformance
         let mergedBackendStatuses = mergeBackendStatuses(current: dashboard.backendStatuses, incoming: snapshot.backendStatuses)
 
         dashboard = DashboardPayload(
@@ -1096,7 +1135,8 @@ final class DesktopStore: ObservableObject {
             activity: mergedActivity.sorted { $0.createdAt > $1.createdAt },
             companyRuntimes: mergedCompanyRuntimes.sorted { ($0.lastTickAt ?? 0) > ($1.lastTickAt ?? 0) },
             agentContextEntries: mergedContextEntries.sorted { $0.createdAt > $1.createdAt },
-            agentMessages: mergedAgentMessages.sorted { $0.createdAt > $1.createdAt }
+            agentMessages: mergedAgentMessages.sorted { $0.createdAt > $1.createdAt },
+            agentPerformance: mergedAgentPerformance
         )
         companyStreamStatusMessage = nil
         reconcileWorkflowLeadAgent()
@@ -1140,6 +1180,69 @@ final class DesktopStore: ObservableObject {
             }
         } catch {
             AppLogger.error("Marketing state refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshCompanyReports(companyId: String? = nil) async {
+        guard let scopedCompanyId = companyId ?? selectedCompanyID else {
+            companyReports = []
+            selectedCompanyReportDate = nil
+            selectedCompanyReport = nil
+            return
+        }
+        do {
+            let summaries = try await runWithEmbeddedBackendRecovery {
+                try await api.companyReports(companyId: scopedCompanyId)
+            }
+            companyReports = companyReports.filter { $0.companyId != scopedCompanyId } + summaries
+            let sortedSummaries = summaries.sorted {
+                if $0.date == $1.date {
+                    return $0.generatedAt > $1.generatedAt
+                }
+                return $0.date > $1.date
+            }
+            if let selectedCompanyReportDate,
+               sortedSummaries.contains(where: { $0.date == selectedCompanyReportDate }) {
+                await selectCompanyReport(date: selectedCompanyReportDate)
+            } else if let latest = sortedSummaries.first {
+                await selectCompanyReport(date: latest.date)
+            } else {
+                selectedCompanyReportDate = nil
+                selectedCompanyReport = nil
+            }
+        } catch {
+            AppLogger.error("Company report refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    func selectCompanyReport(date: String) async {
+        guard let companyID = selectedCompanyID else { return }
+        do {
+            selectedCompanyReportDate = date
+            selectedCompanyReport = try await runWithEmbeddedBackendRecovery {
+                try await api.companyReport(companyId: companyID, date: date)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            AppLogger.error("Company report load failed: \(error.localizedDescription)")
+        }
+    }
+
+    func generateCompanyReport() async {
+        guard let companyID = selectedCompanyID else { return }
+        isGeneratingCompanyReport = true
+        defer { isGeneratingCompanyReport = false }
+        do {
+            let report = try await runWithEmbeddedBackendRecovery {
+                try await api.generateCompanyReport(companyId: companyID)
+            }
+            selectedCompanyReportDate = report.date
+            selectedCompanyReport = report
+            await refreshCompanyReports(companyId: companyID)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+            AppLogger.error("Company report generation failed: \(error.localizedDescription)")
         }
     }
 
@@ -2338,6 +2441,43 @@ final class DesktopStore: ObservableObject {
         }
     }
 
+    func refreshCompanyProblemSignals(companyId explicitCompanyId: String? = nil) async {
+        guard let companyId = explicitCompanyId ?? selectedCompanyID ?? selectedCompany?.id else {
+            companyProblemSignals = []
+            return
+        }
+
+        do {
+            let signals = try await runWithEmbeddedBackendRecovery {
+                try await api.companyProblemSignals(companyId: companyId)
+            }
+            guard (explicitCompanyId != nil) || (selectedCompanyID ?? selectedCompany?.id) == companyId else { return }
+            companyProblemSignals = signals
+        } catch is CancellationError {
+            return
+        } catch {
+            AppLogger.error("Company problem signal refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    func runSelectedCompanyDiscoveryScan() async {
+        guard let companyId = selectedCompanyID ?? selectedCompany?.id else { return }
+
+        do {
+            let signals = try await runWithEmbeddedBackendRecovery {
+                try await api.runCompanyDiscoveryScan(companyId: companyId)
+            }
+            guard (selectedCompanyID ?? selectedCompany?.id) == companyId else { return }
+            companyProblemSignals = signals
+            await refreshDashboard()
+        } catch is CancellationError {
+            return
+        } catch {
+            actionErrorMessage = error.localizedDescription
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func createIssue() async {
         guard let company = issueComposerCompany else { return }
         let title = newIssueTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3203,6 +3343,7 @@ final class DesktopStore: ObservableObject {
         syncIssueComposerState()
         syncSelectedCompanyBudgetFormState()
         syncSelectedCompanyLinearFormState()
+        await refreshCompanyReports(companyId: company.id)
         await restartCompanyEventStream()
     }
 
@@ -3303,7 +3444,8 @@ final class DesktopStore: ObservableObject {
                 activity: dashboard.activity,
                 companyRuntimes: dashboard.companyRuntimes,
                 agentContextEntries: dashboard.agentContextEntries,
-                agentMessages: dashboard.agentMessages
+                agentMessages: dashboard.agentMessages,
+                agentPerformance: dashboard.agentPerformance
             )
             syncBackendFormState()
         } catch {

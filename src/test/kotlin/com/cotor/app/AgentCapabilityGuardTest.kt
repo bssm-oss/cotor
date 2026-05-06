@@ -448,6 +448,69 @@ class AgentCapabilityGuardTest : FunSpec({
         lookalike.allowed shouldBe false
     }
 
+    test("marketing capabilities honor delegated domain and channel allowlists") {
+        val appHome = Files.createTempDirectory("capability-guard-marketing-home")
+        val store = DesktopStateStore { appHome }
+        val marketingSetting = AgentCapabilitySetting(
+            enabled = true,
+            mode = CapabilityMode.AUTO,
+            domainAllowlist = listOf("example.com"),
+            channelAllowlist = listOf("web", "linkedin")
+        )
+        store.save(
+            DesktopAppState(
+                companies = listOf(testCompany()),
+                companyAgentDefinitions = listOf(testAgent()),
+                agentCapabilityProfiles = listOf(
+                    AgentCapabilityProfile(
+                        companyId = "company-1",
+                        agentId = "agent-1",
+                        settings = defaultAgentCapabilitySettings() + mapOf(
+                            CapabilityKey.WEB_PUBLISH to marketingSetting,
+                            CapabilityKey.SOCIAL_POST_CREATE to marketingSetting,
+                            CapabilityKey.MARKETING_ANALYTICS_READ to marketingSetting
+                        )
+                    )
+                )
+            )
+        )
+        val guard = AgentCapabilityGuard(store)
+
+        val allowed = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.WEB_PUBLISH,
+                label = "web.publish:cms",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                networkTarget = "cms.example.com",
+                metadata = mapOf("channel" to "web")
+            )
+        )
+        val wrongChannel = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.WEB_PUBLISH,
+                label = "web.publish:cms",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                networkTarget = "cms.example.com",
+                metadata = mapOf("channel" to "tiktok")
+            )
+        )
+        val wrongDomain = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.SOCIAL_POST_CREATE,
+                label = "social.post-create:linkedin",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                networkTarget = "evil.example.net",
+                metadata = mapOf("channel" to "linkedin")
+            )
+        )
+
+        allowed.capability shouldBe CapabilityKey.WEB_PUBLISH
+        allowed.mode shouldBe CapabilityMode.AUTO
+        allowed.allowed shouldBe true
+        wrongChannel.allowed shouldBe false
+        wrongDomain.allowed shouldBe false
+    }
+
     test("capability profiles survive desktop state persistence") {
         val appHome = Files.createTempDirectory("capability-state-home")
         val store = DesktopStateStore { appHome }

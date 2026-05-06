@@ -13,6 +13,96 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func selectedCompanyAgentPerformanceFiltersAndCountsScoreableAgents() {
+        let store = DesktopStore()
+        store.selectedCompanyID = "company"
+        let visibleAgent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "Build work")
+        let hiddenAgent = CompanyAgentDefinitionRecord(
+            id: "agent-hidden",
+            companyId: "other-company",
+            title: "Other",
+            agentCli: "opencode",
+            model: nil,
+            roleSummary: "Other company",
+            specialties: [],
+            collaborationInstructions: nil,
+            preferredCollaboratorIds: [],
+            memoryNotes: nil,
+            enabled: true,
+            displayOrder: 0,
+            createdAt: 0,
+            updatedAt: 0
+        )
+
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DashboardPayload.empty.settings,
+            companies: [],
+            companyAgentDefinitions: [visibleAgent, hiddenAgent],
+            agentCapabilityProfiles: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: [],
+            agentPerformance: [
+                AgentPerformanceSnapshotRecord(
+                    agentId: visibleAgent.id,
+                    agentName: "Builder",
+                    roleName: "Builder",
+                    agentCli: "opencode",
+                    model: "opencode/nemotron-3-super-free",
+                    score: 91,
+                    completedIssues: 3,
+                    activeIssues: 1,
+                    blockedIssues: 0,
+                    runSuccessRate: 0.9,
+                    qaPassRate: 0.8,
+                    reviewRejectionCount: 0,
+                    retryCount: 1,
+                    averageDurationMs: 90_000,
+                    estimatedCostCents: 42,
+                    lastActivityAt: 100,
+                    dataSufficiency: "SUFFICIENT"
+                ),
+                AgentPerformanceSnapshotRecord(
+                    agentId: hiddenAgent.id,
+                    agentName: "Other",
+                    roleName: "Other",
+                    agentCli: "opencode",
+                    model: nil,
+                    score: nil,
+                    completedIssues: 0,
+                    activeIssues: 0,
+                    blockedIssues: 0,
+                    runSuccessRate: nil,
+                    qaPassRate: nil,
+                    reviewRejectionCount: 0,
+                    retryCount: 0,
+                    averageDurationMs: nil,
+                    estimatedCostCents: nil,
+                    lastActivityAt: nil,
+                    dataSufficiency: "INSUFFICIENT_DATA"
+                )
+            ]
+        )
+
+        #expect(store.agentPerformance.map(\.agentId) == [visibleAgent.id])
+        #expect(store.scoreableAgentPerformanceCount == 1)
+    }
+
+    @Test
     func orgProfileShiftSelectionAndClearWorkAcrossRanges() {
         let store = DesktopStore()
         store.dashboard = DashboardPayload(
@@ -40,7 +130,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
 
         store.toggleOrgProfileSelection(id: "a", shiftKey: false)
@@ -131,7 +222,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
 
         store.toggleCompanyAgentSelection(id: "agent-qa", shiftKey: false)
@@ -195,7 +287,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
 
         store.selectNewCompanyAgentCli("opencode")
@@ -254,7 +347,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
 
         store.newCompanyAgentCli = ""
@@ -308,7 +402,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
 
         store.selectNewCompanyAgentCli("codex")
@@ -364,7 +459,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
 
         store.selectNewCompanyAgentCli("gemma4")
@@ -419,7 +515,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
 
         #expect(store.activeGitHubConnectionReady == false)
@@ -617,7 +714,8 @@ struct DesktopStoreTests {
             activity: DashboardPayload.empty.activity,
             companyRuntimes: DashboardPayload.empty.companyRuntimes,
             agentContextEntries: DashboardPayload.empty.agentContextEntries,
-            agentMessages: DashboardPayload.empty.agentMessages
+            agentMessages: DashboardPayload.empty.agentMessages,
+            agentPerformance: DashboardPayload.empty.agentPerformance
         )
 
         let proposal = store.chatAgentProposal(from: "Create a QA agent for this company.")
@@ -724,7 +822,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
         store.marketingDelegationPolicies = [
             MarketingDelegationPolicyRecord(
@@ -792,6 +891,94 @@ struct DesktopStoreTests {
         #expect(store.marketingPolicyBrandTone == "Helpful and precise")
         #expect(store.marketingPolicyConnectionSummary.contains("Session/secret refs configured"))
         #expect(store.recentMarketingRunsForEditedAgent.map(\.id) == ["run-new", "run-old"])
+    }
+
+    @Test
+    func agentSkillCardShowsSelectedSkillAllowlist() {
+        let agent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "implementation")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "AUTO",
+                skillAllowlist: ["graphify", "browser-smoke"]
+            )
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["SKILL_RUN", "KNOWLEDGE_GRAPH_READ"]),
+                skillEntry(name: "browser-smoke", displayName: "Browser Tester", requiredCapabilities: ["SKILL_RUN", "BROWSER_READ"]),
+            ]
+        )
+
+        #expect(card.selectedSkills.map(\.displayName) == ["Browser Tester", "Repository Mapper"])
+        #expect(card.capabilityScopes.contains(.browserQA))
+        #expect(card.capabilityScopes.contains(.repositoryMap))
+        #expect(card.policyChips.contains(.auto))
+    }
+
+    @Test
+    func agentSkillCardDerivesMarketingVideoBrowserAndRepositoryScopes() {
+        let agent = agentDefinition(id: "agent-operator", title: "Operator", roleSummary: "marketing and video workflows")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "APPROVAL_REQUIRED",
+                skillAllowlist: ["graphify", "browser-smoke", "marketing-operator", "video-plan"]
+            ),
+            "WEB_PUBLISH": AgentCapabilitySettingRecord(enabled: true, mode: "APPROVAL_REQUIRED"),
+            "VIDEO_UPLOAD": AgentCapabilitySettingRecord(enabled: true, mode: "APPROVAL_REQUIRED"),
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"]),
+                skillEntry(name: "browser-smoke", displayName: "Browser Tester", requiredCapabilities: ["BROWSER_SCREENSHOT"]),
+                skillEntry(name: "marketing-operator", displayName: "Marketing Operator", requiredCapabilities: ["WEB_PUBLISH", "SOCIAL_POST_CREATE"]),
+                skillEntry(name: "video-plan", displayName: "Video Builder", requiredCapabilities: ["VIDEO_SCRIPT_WRITE"]),
+            ]
+        )
+        let scopes = Set(card.capabilityScopes)
+
+        #expect(scopes.isSuperset(of: [.repositoryMap, .browserQA, .marketing, .video, .videoUpload]))
+        #expect(card.policyChips.contains(.approvalRequired))
+    }
+
+    @Test
+    func agentSkillCardSurvivesEmptySkillCatalogWithSpecialtiesAndCapabilities() {
+        let agent = agentDefinition(
+            id: "agent-qa",
+            title: "QA",
+            roleSummary: "review verification",
+            specialties: ["qa", "verification"]
+        )
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "BROWSER_READ": AgentCapabilitySettingRecord(enabled: true, mode: "READ_ONLY"),
+            "KNOWLEDGE_GRAPH_READ": AgentCapabilitySettingRecord(enabled: true, mode: "READ_ONLY"),
+            "TEST_RUN": AgentCapabilitySettingRecord(enabled: true, mode: "AUTO"),
+        ])
+        let card = AgentSkillCardRecord(agent: agent, profile: profile, skillCatalog: [])
+        let scopes = Set(card.capabilityScopes)
+
+        #expect(card.selectedSkills.isEmpty)
+        #expect(scopes.isSuperset(of: [.browserQA, .repositoryMap, .buildTest, .qaReview]))
+        #expect(card.policyChips.contains(.readOnly))
+        #expect(card.policyChips.contains(.auto))
+    }
+
+    @Test
+    func agentSkillCardMarksDisabledAgent() {
+        let agent = agentDefinition(id: "agent-paused", title: "Paused QA", roleSummary: "qa", enabled: false)
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(enabled: false, mode: "DISABLED")
+        ])
+        let card = AgentSkillCardRecord(agent: agent, profile: profile, skillCatalog: [])
+
+        #expect(!card.enabled)
+        #expect(card.policyChips.contains(.disabled))
+        #expect(card.capabilityScopes.contains(.qaReview))
     }
 
     @Test
@@ -886,7 +1073,8 @@ struct DesktopStoreTests {
             activity: [],
             companyRuntimes: [],
             agentContextEntries: [],
-            agentMessages: []
+            agentMessages: [],
+            agentPerformance: []
         )
     }
 
@@ -916,5 +1104,52 @@ struct DesktopStoreTests {
 
     private func reviewQueueItem(id: String, companyId: String, issueId: String, status: String) -> ReviewQueueItemRecord {
         ReviewQueueItemRecord(id: id, companyId: companyId, projectContextId: nil, issueId: issueId, runId: "run-\(id)", branchName: nil, worktreePath: nil, pullRequestNumber: nil, pullRequestUrl: nil, pullRequestState: nil, status: status, checksSummary: nil, mergeability: nil, requestedReviewers: [], qaVerdict: nil, qaFeedback: nil, qaReviewedAt: nil, qaIssueId: nil, ceoVerdict: nil, ceoFeedback: nil, ceoReviewedAt: nil, approvalIssueId: nil, mergeCommitSha: nil, mergedAt: nil, createdAt: 0, updatedAt: 0)
+    }
+
+    private func agentDefinition(
+        id: String,
+        title: String,
+        roleSummary: String,
+        specialties: [String] = [],
+        enabled: Bool = true
+    ) -> CompanyAgentDefinitionRecord {
+        CompanyAgentDefinitionRecord(
+            id: id,
+            companyId: "company",
+            title: title,
+            agentCli: "opencode",
+            model: "opencode/nemotron-3-super-free",
+            roleSummary: roleSummary,
+            specialties: specialties,
+            collaborationInstructions: nil,
+            preferredCollaboratorIds: [],
+            memoryNotes: nil,
+            enabled: enabled,
+            displayOrder: 0,
+            createdAt: 0,
+            updatedAt: 0
+        )
+    }
+
+    private func capabilityProfile(
+        agentId: String,
+        settings: [String: AgentCapabilitySettingRecord]
+    ) -> AgentCapabilityProfileRecord {
+        AgentCapabilityProfileRecord(companyId: "company", agentId: agentId, settings: settings, updatedAt: 0)
+    }
+
+    private func skillEntry(
+        name: String,
+        displayName: String,
+        requiredCapabilities: [String]
+    ) -> SkillCatalogEntryRecord {
+        SkillCatalogEntryRecord(
+            name: name,
+            displayName: displayName,
+            description: displayName,
+            requiredCapabilities: requiredCapabilities,
+            localOnly: true,
+            dangerous: false
+        )
     }
 }
