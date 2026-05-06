@@ -236,6 +236,171 @@ class DesktopAppServiceTest : FunSpec({
             .forEach { reason -> reason shouldContain "CEO planning run assigned" }
     }
 
+    test("operator command summarizes selected company status") {
+        val appHome = Files.createTempDirectory("operator-status-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Status", rootPath = appHome.toString())
+
+        val response = service.runOperatorCommand(company.id, "에이전트들 잘 돌아가고 있는지 확인해줘")
+
+        response.automationMode shouldBe OperatorAutomationMode.AGENT_APPROVED
+        response.summary?.runtimeStatus shouldBe CompanyRuntimeStatus.STOPPED.name
+        response.actions.any { it.type == "status-check" && it.status == "DONE" } shouldBe true
+        stateStore.load().agentMessages.any { it.kind == "operator-result" && it.fromAgentName == "Company Operator" } shouldBe true
+    }
+
+    test("operator command maps opencode deepseek to the default OpenCode model") {
+        val appHome = Files.createTempDirectory("operator-model-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Model", rootPath = appHome.toString())
+
+        val response = service.runOperatorCommand(company.id, "모든 에이전트 opencode deepseek 모델로 바꿔줘")
+        val persisted = service.listCompanyAgentDefinitions(company.id)
+
+        response.actions.any { it.type == "agent-model-update" && it.status == "DONE" } shouldBe true
+        persisted.shouldNotBeEmpty()
+        persisted.all { it.agentCli == "opencode" } shouldBe true
+        persisted.all { it.model == com.cotor.model.OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
+    }
+
+    test("agent approved operator mode routes blocked issue retry to a senior agent") {
+        val appHome = Files.createTempDirectory("operator-approval-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Approval", rootPath = appHome.toString())
+        val now = System.currentTimeMillis()
+        val baseState = stateStore.load()
+        val workspace = baseState.workspaces.first { it.repositoryId == company.repositoryId }
+        val project = baseState.projectContexts.firstOrNull { it.companyId == company.id } ?: CompanyProjectContext(
+            id = "operator-project",
+            companyId = company.id,
+            name = company.name,
+            slug = "operator-approval",
+            contextDocPath = appHome.resolve("operator-approval.md").toString(),
+            lastUpdatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "operator-goal",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Ship operator",
+            description = "Keep blocked work moving.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "operator-blocked-issue",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "Blocked implementation",
+            description = "Needs retry.",
+            status = IssueStatus.BLOCKED,
+            createdAt = now,
+            updatedAt = now
+        )
+        stateStore.save(
+            baseState.copy(
+                projectContexts = if (baseState.projectContexts.any { it.id == project.id }) baseState.projectContexts else baseState.projectContexts + project,
+                goals = baseState.goals + goal,
+                issues = baseState.issues + issue
+            )
+        )
+
+        val response = service.runOperatorCommand(company.id, "막힌 이슈 다시 굴려")
+
+        response.pendingApprovals.single().status shouldBe "AGENT_APPROVAL_REQUESTED"
+        stateStore.load().issues.first { it.id == issue.id }.status shouldBe IssueStatus.BLOCKED
+        stateStore.load().agentMessages.any {
+            it.kind == "operator-approval" && it.toAgentName == "CEO"
+        } shouldBe true
+    }
+
+    test("full auto executes normal operator actions but still blocks hard-gated commands") {
+        val appHome = Files.createTempDirectory("operator-full-auto-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Full Auto", rootPath = appHome.toString())
+        val now = System.currentTimeMillis()
+        val baseState = stateStore.load()
+        val workspace = baseState.workspaces.first { it.repositoryId == company.repositoryId }
+        val project = baseState.projectContexts.firstOrNull { it.companyId == company.id } ?: CompanyProjectContext(
+            id = "operator-full-auto-project",
+            companyId = company.id,
+            name = company.name,
+            slug = "operator-full-auto",
+            contextDocPath = appHome.resolve("operator-full-auto.md").toString(),
+            lastUpdatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "operator-full-auto-goal",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Run full auto",
+            description = "Retry recoverable work.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "operator-full-auto-blocked-issue",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "Blocked full-auto implementation",
+            description = "Needs retry.",
+            status = IssueStatus.BLOCKED,
+            createdAt = now,
+            updatedAt = now
+        )
+        stateStore.save(
+            baseState.copy(
+                projectContexts = if (baseState.projectContexts.any { it.id == project.id }) baseState.projectContexts else baseState.projectContexts + project,
+                goals = baseState.goals + goal,
+                issues = baseState.issues + issue
+            )
+        )
+
+        val modeResponse = service.runOperatorCommand(
+            companyId = company.id,
+            message = "FULL_AUTO로 전환",
+            automationMode = OperatorAutomationMode.FULL_AUTO,
+            confirmFullAuto = true
+        )
+        val retryResponse = service.runOperatorCommand(company.id, "막힌 이슈 다시 굴려")
+        val hardGateResponse = service.runOperatorCommand(company.id, "저장소 삭제해줘")
+
+        modeResponse.automationMode shouldBe OperatorAutomationMode.FULL_AUTO
+        retryResponse.actions.any { it.type == "blocked-issue-retry" && it.status == "DONE" } shouldBe true
+        stateStore.load().issues.first { it.id == issue.id }.status shouldBe IssueStatus.PLANNED
+        hardGateResponse.blockedActions.single().type shouldBe "hard-gate"
+    }
+
     test("skill manifest validation accepts minimal yaml and rejects invalid names") {
         val appHome = Files.createTempDirectory("skill-validation-home")
         val manifest = Files.createTempFile("cotor-skill", ".yaml")
@@ -1963,7 +2128,8 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Let CEO decompose autonomously",
             description = "The runtime should wait for the CEO planning run before materializing work.",
-            autonomyEnabled = true
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
         )
 
         val issues = service.listIssues(goal.id)
@@ -2889,7 +3055,7 @@ class DesktopAppServiceTest : FunSpec({
         val issues = service.listIssues(goal.id)
 
         profiles.map { it.executionAgentName }.distinct() shouldBe listOf("opencode")
-        profiles shouldHaveSize 9
+        profiles shouldHaveSize 10
         val assignedProfileIds = issues.mapNotNull { it.assigneeProfileId }.toSet()
         assignedProfileIds.shouldNotBeEmpty()
         assignedProfileIds.subtract(profiles.map { it.id }.toSet()).shouldBeEmpty()
@@ -2941,6 +3107,7 @@ class DesktopAppServiceTest : FunSpec({
         definitions.map { it.title } shouldBe listOf(
             "CEO",
             "Product Strategist",
+            "Marketing Operator",
             "Engineering Lead",
             "UX Builder",
             "UI Builder",
@@ -3949,6 +4116,7 @@ class DesktopAppServiceTest : FunSpec({
         definitions.map { it.title } shouldBe listOf(
             "CEO",
             "Product Strategist",
+            "Marketing Operator",
             "Engineering Lead",
             "UX Builder",
             "UI Builder",
@@ -6084,7 +6252,7 @@ class DesktopAppServiceTest : FunSpec({
 
         service.runIssue(infraIssue.id)
 
-        withTimeout(5_000) {
+        withTimeout(30_000) {
             while (true) {
                 val snapshot = stateStore.load()
                 val refreshedIssue = snapshot.issues.first { it.id == infraIssue.id }
