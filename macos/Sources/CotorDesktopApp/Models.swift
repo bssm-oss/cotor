@@ -53,6 +53,7 @@ struct CompanyRecord: Codable, Identifiable, Hashable {
     let monthlyBudgetCents: Int?
     let createdAt: Int64
     let updatedAt: Int64
+    let operatorAutomationMode: String?
 }
 
 struct CompanyMemorySnapshotPayload: Codable, Hashable {
@@ -173,6 +174,7 @@ struct AgentCapabilitySettingRecord: Codable, Hashable {
     let costLimitMonthly: Int?
     let maxRuntimeSeconds: Int?
     let domainAllowlist: [String]
+    let channelAllowlist: [String]
     let pathAllowlist: [String]
     let skillAllowlist: [String]
     let secretRefs: [String]
@@ -189,6 +191,7 @@ struct AgentCapabilitySettingRecord: Codable, Hashable {
         costLimitMonthly: Int? = nil,
         maxRuntimeSeconds: Int? = nil,
         domainAllowlist: [String] = [],
+        channelAllowlist: [String] = [],
         pathAllowlist: [String] = [],
         skillAllowlist: [String] = [],
         secretRefs: [String] = [],
@@ -204,12 +207,50 @@ struct AgentCapabilitySettingRecord: Codable, Hashable {
         self.costLimitMonthly = costLimitMonthly
         self.maxRuntimeSeconds = maxRuntimeSeconds
         self.domainAllowlist = domainAllowlist
+        self.channelAllowlist = channelAllowlist
         self.pathAllowlist = pathAllowlist
         self.skillAllowlist = skillAllowlist
         self.secretRefs = secretRefs
         self.requiresEvidence = requiresEvidence
         self.requiresReview = requiresReview
         self.notes = notes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled
+        case mode
+        case providerId
+        case modelOverride
+        case costLimitDaily
+        case costLimitMonthly
+        case maxRuntimeSeconds
+        case domainAllowlist
+        case channelAllowlist
+        case pathAllowlist
+        case skillAllowlist
+        case secretRefs
+        case requiresEvidence
+        case requiresReview
+        case notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeValue(Bool.self, forKey: .enabled, default: true)
+        mode = try container.decodeValue(String.self, forKey: .mode, default: "DISABLED")
+        providerId = try container.decodeIfPresent(String.self, forKey: .providerId)
+        modelOverride = try container.decodeIfPresent(String.self, forKey: .modelOverride)
+        costLimitDaily = try container.decodeIfPresent(Int.self, forKey: .costLimitDaily)
+        costLimitMonthly = try container.decodeIfPresent(Int.self, forKey: .costLimitMonthly)
+        maxRuntimeSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRuntimeSeconds)
+        domainAllowlist = try container.decodeValue([String].self, forKey: .domainAllowlist, default: [])
+        channelAllowlist = try container.decodeValue([String].self, forKey: .channelAllowlist, default: [])
+        pathAllowlist = try container.decodeValue([String].self, forKey: .pathAllowlist, default: [])
+        skillAllowlist = try container.decodeValue([String].self, forKey: .skillAllowlist, default: [])
+        secretRefs = try container.decodeValue([String].self, forKey: .secretRefs, default: [])
+        requiresEvidence = try container.decodeValue(Bool.self, forKey: .requiresEvidence, default: true)
+        requiresReview = try container.decodeValue(Bool.self, forKey: .requiresReview, default: false)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
     }
 
     func withSkillAllowlist(_ skillIDs: [String]) -> AgentCapabilitySettingRecord {
@@ -222,6 +263,7 @@ struct AgentCapabilitySettingRecord: Codable, Hashable {
             costLimitMonthly: costLimitMonthly,
             maxRuntimeSeconds: maxRuntimeSeconds,
             domainAllowlist: domainAllowlist,
+            channelAllowlist: channelAllowlist,
             pathAllowlist: pathAllowlist,
             skillAllowlist: skillIDs,
             secretRefs: secretRefs,
@@ -230,6 +272,79 @@ struct AgentCapabilitySettingRecord: Codable, Hashable {
             notes: notes
         )
     }
+}
+
+struct MarketingChannelAccountRecord: Codable, Hashable {
+    let channel: String
+    let accountRef: String?
+    let allowedDomains: [String]
+    let secretRefs: [String]
+}
+
+struct MarketingDelegationPolicyRecord: Codable, Identifiable, Hashable {
+    let id: String
+    let companyId: String
+    let agentId: String
+    let name: String
+    let allowedDomains: [String]
+    let channelAccounts: [MarketingChannelAccountRecord]
+    let dailyPostLimit: Int
+    let forbiddenTerms: [String]
+    let brandTone: String?
+    let prohibitedActions: [String]
+    let secretRefs: [String]
+    let browserSessionRef: String?
+    let maxRuntimeSeconds: Int
+    let createdAt: Int64
+    let updatedAt: Int64
+}
+
+struct UpsertMarketingDelegationPolicyPayload: Codable {
+    let id: String?
+    let companyId: String
+    let agentId: String
+    let name: String?
+    let allowedDomains: [String]
+    let channelAccounts: [MarketingChannelAccountRecord]
+    let dailyPostLimit: Int
+    let forbiddenTerms: [String]
+    let brandTone: String?
+    let prohibitedActions: [String]
+    let secretRefs: [String]
+    let browserSessionRef: String?
+    let maxRuntimeSeconds: Int
+}
+
+struct MarketingActionRecord: Codable, Identifiable, Hashable {
+    let id: String
+    let channel: String
+    let action: String
+    let targetUrl: String
+    let inputSummary: String
+    let postedUrl: String?
+    let screenshotPath: String?
+    let utm: String?
+    let status: String
+    let idempotencyKey: String
+    let createdAt: Int64
+    let updatedAt: Int64
+    let error: String?
+}
+
+struct MarketingRunRecord: Codable, Identifiable, Hashable {
+    let id: String
+    let companyId: String
+    let agentId: String
+    let objective: String
+    let channels: [String]
+    let delegationPolicyId: String
+    let status: String
+    let actions: [MarketingActionRecord]
+    let message: String?
+    let error: String?
+    let createdAt: Int64
+    let updatedAt: Int64
+    let completedAt: Int64?
 }
 
 struct AgentCapabilityProfileRecord: Codable, Hashable {
@@ -365,6 +480,42 @@ struct ChatIntakeResponsePayload: Codable, Hashable {
     let ceoBrief: String
     let assignmentPreview: [ChatAssignmentPreviewPayload]
     let message: AgentMessageRecord
+}
+
+struct OperatorCommandRequestPayload: Codable {
+    let message: String
+    let automationMode: String?
+    let confirmFullAuto: Bool
+}
+
+struct OperatorCommandActionPayload: Codable, Hashable, Identifiable {
+    var id: String { "\(type)-\(title)-\(status)-\(detail)" }
+
+    let type: String
+    let title: String
+    let detail: String
+    let status: String
+}
+
+struct OperatorCompanySummaryPayload: Codable, Hashable {
+    let runtimeStatus: String
+    let backendHealth: String
+    let activeAgentCount: Int
+    let blockedIssueCount: Int
+    let reviewQueueCount: Int
+    let pendingApprovalCount: Int
+    let budgetPaused: Bool
+}
+
+struct OperatorCommandResponsePayload: Codable, Hashable, Identifiable {
+    var id: String { "\(message)-\(automationMode)-\(actions.count)-\(pendingApprovals.count)-\(blockedActions.count)" }
+
+    let message: String
+    let automationMode: String
+    let actions: [OperatorCommandActionPayload]
+    let pendingApprovals: [OperatorCommandActionPayload]
+    let blockedActions: [OperatorCommandActionPayload]
+    let summary: OperatorCompanySummaryPayload?
 }
 
 /// User-authored task record shown in the center pane.
@@ -611,6 +762,7 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
     let monthSpentCents: Int
     let budgetPausedAt: Int64?
     let budgetResetDate: String?
+    let waitingApprovalCount: Int
 
     private enum CodingKeys: String, CodingKey {
         case companyId
@@ -635,6 +787,7 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         case monthSpentCents
         case budgetPausedAt
         case budgetResetDate
+        case waitingApprovalCount
     }
 
     init(
@@ -659,7 +812,8 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         todaySpentCents: Int = 0,
         monthSpentCents: Int = 0,
         budgetPausedAt: Int64? = nil,
-        budgetResetDate: String? = nil
+        budgetResetDate: String? = nil,
+        waitingApprovalCount: Int = 0
     ) {
         self.companyId = companyId
         self.status = status
@@ -683,6 +837,7 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         self.monthSpentCents = monthSpentCents
         self.budgetPausedAt = budgetPausedAt
         self.budgetResetDate = budgetResetDate
+        self.waitingApprovalCount = waitingApprovalCount
     }
 
     init(from decoder: Decoder) throws {
@@ -709,6 +864,7 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         monthSpentCents = try container.decodeValue(Int.self, forKey: .monthSpentCents, default: 0)
         budgetPausedAt = try container.decodeIfPresent(Int64.self, forKey: .budgetPausedAt)
         budgetResetDate = try container.decodeIfPresent(String.self, forKey: .budgetResetDate)
+        waitingApprovalCount = try container.decodeValue(Int.self, forKey: .waitingApprovalCount, default: 0)
     }
 
     var isManuallyStopped: Bool {
@@ -1370,7 +1526,8 @@ struct MockSeed {
                 dailyBudgetCents: 2500,
                 monthlyBudgetCents: 20000,
                 createdAt: 0,
-                updatedAt: 0
+                updatedAt: 0,
+                operatorAutomationMode: "AGENT_APPROVED"
             )
         ],
         companyAgentDefinitions: [

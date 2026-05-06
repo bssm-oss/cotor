@@ -76,7 +76,8 @@ struct DesktopStoreTests {
                     dailyBudgetCents: nil,
                     monthlyBudgetCents: nil,
                     createdAt: 0,
-                    updatedAt: 0
+                    updatedAt: 0,
+                    operatorAutomationMode: "AGENT_APPROVED"
                 )
             ],
             companyAgentDefinitions: [
@@ -645,6 +646,155 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func marketingSkillsStayOptInAndPolicyFormLoadsForOperator() {
+        let store = DesktopStore()
+        store.availableSkills = [
+            SkillCatalogEntryRecord(
+                name: "repository-mapper",
+                displayName: "Repository Mapper",
+                description: "Map repository structure.",
+                requiredCapabilities: ["GRAPH_READ"],
+                localOnly: true,
+                dangerous: false
+            ),
+            SkillCatalogEntryRecord(
+                name: "marketing-operator",
+                displayName: "Marketing Operator",
+                description: "Operate delegated owned and social channels.",
+                requiredCapabilities: ["BROWSER_READ", "WEB_PUBLISH"],
+                localOnly: true,
+                dangerous: true
+            ),
+            SkillCatalogEntryRecord(
+                name: "social-publisher",
+                displayName: "Social Publisher",
+                description: "Publish organic social posts.",
+                requiredCapabilities: ["SOCIAL_POST_CREATE"],
+                localOnly: true,
+                dangerous: true
+            )
+        ]
+        let agent = CompanyAgentDefinitionRecord(
+            id: "agent-marketing",
+            companyId: "company",
+            title: "Marketing Operator",
+            agentCli: "opencode",
+            model: "opencode/nemotron-3-super-free",
+            roleSummary: "owned and social publishing",
+            specialties: ["marketing"],
+            collaborationInstructions: nil,
+            preferredCollaboratorIds: [],
+            memoryNotes: nil,
+            enabled: true,
+            displayOrder: 1,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DashboardPayload.empty.settings,
+            companies: [],
+            companyAgentDefinitions: [agent],
+            agentCapabilityProfiles: [
+                AgentCapabilityProfileRecord(
+                    companyId: "company",
+                    agentId: "agent-marketing",
+                    settings: [
+                        "SKILL_RUN": AgentCapabilitySettingRecord(
+                            enabled: true,
+                            mode: "AUTO",
+                            skillAllowlist: ["marketing-operator", "social-publisher"]
+                        )
+                    ],
+                    updatedAt: 1
+                )
+            ],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: []
+        )
+        store.marketingDelegationPolicies = [
+            MarketingDelegationPolicyRecord(
+                id: "policy-1",
+                companyId: "company",
+                agentId: "agent-marketing",
+                name: "Owned+Social",
+                allowedDomains: ["cms.example.com"],
+                channelAccounts: [
+                    MarketingChannelAccountRecord(channel: "web", accountRef: "web", allowedDomains: ["cms.example.com"], secretRefs: []),
+                    MarketingChannelAccountRecord(channel: "linkedin", accountRef: "linkedin", allowedDomains: ["linkedin.com"], secretRefs: [])
+                ],
+                dailyPostLimit: 2,
+                forbiddenTerms: ["unapproved"],
+                brandTone: "Helpful and precise",
+                prohibitedActions: ["paid-ad", "bulk-email"],
+                secretRefs: ["secret://cms/session"],
+                browserSessionRef: "profile://marketing",
+                maxRuntimeSeconds: 600,
+                createdAt: 1,
+                updatedAt: 2
+            )
+        ]
+        store.marketingRuns = [
+            MarketingRunRecord(
+                id: "run-old",
+                companyId: "company",
+                agentId: "agent-marketing",
+                objective: "Old update",
+                channels: ["web"],
+                delegationPolicyId: "policy-1",
+                status: "COMPLETED",
+                actions: [],
+                message: nil,
+                error: nil,
+                createdAt: 1,
+                updatedAt: 1,
+                completedAt: 1
+            ),
+            MarketingRunRecord(
+                id: "run-new",
+                companyId: "company",
+                agentId: "agent-marketing",
+                objective: "New update",
+                channels: ["linkedin"],
+                delegationPolicyId: "policy-1",
+                status: "COMPLETED",
+                actions: [],
+                message: nil,
+                error: nil,
+                createdAt: 2,
+                updatedAt: 3,
+                completedAt: 3
+            )
+        ]
+
+        #expect(store.defaultCompanyAgentSkillIDs == Set(["repository-mapper"]))
+
+        store.beginEditingCompanyAgent(agent)
+
+        #expect(store.isMarketingOperatorSelected)
+        #expect(store.marketingPolicyAllowedDomains == "cms.example.com")
+        #expect(store.marketingPolicyChannels == "web, linkedin")
+        #expect(store.marketingPolicyDailyPostLimit == "2")
+        #expect(store.marketingPolicyBrandTone == "Helpful and precise")
+        #expect(store.marketingPolicyConnectionSummary.contains("Session/secret refs configured"))
+        #expect(store.recentMarketingRunsForEditedAgent.map(\.id) == ["run-new", "run-old"])
+    }
+
+    @Test
     func chatDelegationProposalRecognizesDelegateIssueRequest() {
         let store = DesktopStore()
 
@@ -749,7 +899,7 @@ struct DesktopStoreTests {
     }
 
     private func company(id: String, repositoryId: String, name: String) -> CompanyRecord {
-        CompanyRecord(id: id, name: name, rootPath: "/tmp/\(name)", repositoryId: repositoryId, defaultBaseBranch: "master", backendKind: "LOCAL_COTOR", linearSyncEnabled: false, linearConfigOverride: nil, autonomyEnabled: true, dailyBudgetCents: nil, monthlyBudgetCents: nil, createdAt: 0, updatedAt: 0)
+        CompanyRecord(id: id, name: name, rootPath: "/tmp/\(name)", repositoryId: repositoryId, defaultBaseBranch: "master", backendKind: "LOCAL_COTOR", linearSyncEnabled: false, linearConfigOverride: nil, autonomyEnabled: true, dailyBudgetCents: nil, monthlyBudgetCents: nil, createdAt: 0, updatedAt: 0, operatorAutomationMode: "AGENT_APPROVED")
     }
 
     private func goal(id: String, companyId: String, title: String, status: String) -> GoalRecord {
