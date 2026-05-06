@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import CotorDesktopApp
 
@@ -416,6 +417,170 @@ struct MeetingRoomProjectionTests {
         #expect(activePlan.shouldAnimate)
         #expect(activePlan.frameInterval == 1.0 / 15.0)
     }
+
+    @Test
+    func sceneReducerMapsRunningAgentToTypingSprite() throws {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [agent(id: "builder", title: "Builder")],
+            issues: [issue(id: "issue-active", title: "Active work", status: "IN_PROGRESS", assigneeProfileId: "Builder")],
+            runningSessions: [session(agentId: "builder", agentName: "opencode", issueId: "issue-active", status: "RUNNING")],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: []
+        )
+        let state = sceneState(projection)
+        let builder = try #require(state.agents.first)
+
+        #expect(builder.projection.expression == .focused)
+        #expect(builder.action == .typing)
+        #expect(builder.targetPoint == state.layout.deskPoint(for: builder.projection, index: 0, count: 1))
+        #expect(state.keyframes.contains { $0.kind == .agentTyping })
+    }
+
+    @Test
+    func sceneReducerCreatesA2AKeyframeBetweenSenderAndReceiver() throws {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [
+                agent(id: "builder", title: "Builder"),
+                agent(id: "qa", title: "QA"),
+            ],
+            issues: [issue(id: "issue-1", title: "Coordinate work", status: "IN_PROGRESS", assigneeProfileId: "builder")],
+            runningSessions: [],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: [
+                message(id: "msg-1", from: "Builder", to: "QA", issueId: "issue-1", body: "Please review.")
+            ]
+        )
+        let state = sceneState(projection)
+        let message = try #require(state.keyframes.first { $0.kind == .a2aMessage })
+
+        #expect(message.fromAgentId == "builder")
+        #expect(message.toAgentId == "qa")
+        #expect(message.usesScheduler)
+        #expect(state.agents.first { $0.id == "builder" }?.projection.expression == .talking)
+    }
+
+    @Test
+    func sceneReducerMapsIssueStatusesToOfficeZones() throws {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [agent(id: "builder", title: "Builder")],
+            issues: [
+                issue(id: "planned", title: "Planned work", status: "PLANNED", assigneeProfileId: "builder"),
+                issue(id: "progress", title: "Running work", status: "IN_PROGRESS", assigneeProfileId: "builder"),
+                issue(id: "review", title: "Review work", status: "IN_REVIEW", assigneeProfileId: "builder", pullRequestState: "OPEN"),
+                issue(id: "blocked", title: "Blocked work", status: "BLOCKED", assigneeProfileId: "builder"),
+                issue(id: "done", title: "Done work", status: "DONE", assigneeProfileId: "builder", pullRequestState: "MERGED", mergeResult: "MERGED"),
+            ],
+            runningSessions: [],
+            reviewQueue: [review(issueId: "review", status: "READY_FOR_QA", pullRequestState: "OPEN")],
+            runtime: runtime(),
+            activity: [],
+            messages: []
+        )
+        let state = sceneState(projection)
+        let cards = Dictionary(uniqueKeysWithValues: state.issueCards.map { ($0.id, $0.zone) })
+
+        #expect(cards["planned"] == .planningBoard)
+        #expect(cards["progress"] == .agentDesk)
+        #expect(cards["review"] == .reviewDesk)
+        #expect(cards["blocked"] == .blockerZone)
+        #expect(cards["done"] == .mergeLane)
+    }
+
+    @Test
+    func sceneReducerDisablesSchedulerForReducedMotionBackgroundAndLowResource() {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [agent(id: "active-builder", title: "Builder")],
+            issues: [issue(id: "issue-active", title: "Active work", status: "IN_PROGRESS", assigneeProfileId: "Builder")],
+            runningSessions: [session(agentId: "active-builder", agentName: "opencode", issueId: "issue-active", status: "RUNNING")],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: []
+        )
+        let active = sceneState(projection)
+        let reduced = sceneState(projection, reduceMotion: true)
+        let low = sceneState(projection, lowResourceMode: true)
+        let background = sceneState(projection, isSceneActive: false)
+
+        #expect(active.shouldAnimate)
+        #expect(active.frameInterval == 1.0 / 15.0)
+        #expect(!reduced.shouldAnimate)
+        #expect(!low.shouldAnimate)
+        #expect(!background.shouldAnimate)
+        #expect(reduced.frameInterval == 1.0)
+        #expect(low.frameInterval == 1.0)
+        #expect(background.frameInterval == 1.0)
+    }
+
+    @Test
+    func renderPlanUsesSimplifiedAtTwentyAndGroupedAtFiftyAgents() {
+        let twentyProjection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: (0..<20).map { agent(id: "agent-\($0)", title: "Agent \($0)") },
+            issues: [],
+            runningSessions: [],
+            reviewQueue: [],
+            runtime: runtime(),
+            activity: [],
+            messages: []
+        )
+        let fiftyProjection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: (0..<50).map { agent(id: "agent-\($0)", title: "Agent \($0)") },
+            issues: [],
+            runningSessions: [],
+            reviewQueue: [],
+            runtime: runtime(),
+            activity: [],
+            messages: []
+        )
+
+        let twenty = sceneState(twentyProjection)
+        let fifty = sceneState(fiftyProjection)
+
+        #expect(twenty.renderPlan.mode == .simplified)
+        #expect(twenty.renderPlan.visibleAgents.count == 20)
+        #expect(!twenty.shouldAnimate)
+        #expect(fifty.renderPlan.mode == .grouped)
+        #expect(fifty.renderPlan.visibleAgents.count == 12)
+        #expect(fifty.renderPlan.hiddenAgentCount == 38)
+        #expect(!fifty.shouldAnimate)
+    }
+}
+
+private func sceneState(
+    _ projection: MeetingRoomProjection,
+    isCompact: Bool = false,
+    reduceMotion: Bool = false,
+    lowResourceMode: Bool = false,
+    isSceneActive: Bool = true
+) -> MeetingRoomSceneState {
+    let plan = MeetingRoomRenderPlan.build(
+        projection: projection,
+        isCompact: isCompact,
+        reduceMotion: reduceMotion,
+        lowResourceMode: lowResourceMode,
+        isSceneActive: isSceneActive
+    )
+    let layout = PixelOfficeLayout(size: CGSize(width: 1000, height: 640), isCompact: isCompact, mode: plan.mode)
+    return MeetingRoomSceneReducer.reduce(
+        previous: nil,
+        projection: projection,
+        layout: layout,
+        isCompact: isCompact,
+        reduceMotion: reduceMotion,
+        lowResourceMode: lowResourceMode,
+        isSceneActive: isSceneActive,
+        now: 100
+    )
 }
 
 private func agent(id: String, title: String) -> CompanyAgentDefinitionRecord {
