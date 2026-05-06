@@ -117,27 +117,8 @@ class DesktopAppServiceRequeueOrphanedTest : FunSpec({
                     )
                 )
             )
-            service.prepareCompanyAutomationStateForTesting(company.id)
-
-            val settledState = withTimeout(30_000) {
-                while (true) {
-                    val current = stateStore.load()
-                    val currentIssue = current.issues.first { it.id == issue.id }
-                    val issueTasks = current.tasks.filter { it.issueId == issue.id }
-                    val requeueRecorded = current.companyActivity.any {
-                        it.issueId == issue.id && it.source == "requeueRecoverableBlockedIssues"
-                    }
-                    if (
-                        requeueRecorded &&
-                        currentIssue.updatedAt > issue.updatedAt &&
-                        (currentIssue.status != IssueStatus.BLOCKED || issueTasks.isNotEmpty())
-                    ) {
-                        return@withTimeout current
-                    }
-                    delay(25)
-                }
-                error("Unreachable")
-            }
+            service.requeueRecoverableBlockedIssuesForTesting(company.id) shouldBe 1
+            val settledState = stateStore.load()
             val latestIssue = settledState.issues.first { it.id == issue.id }
             val issueTasks = settledState.tasks.filter { it.issueId == issue.id }
 
@@ -382,7 +363,8 @@ private fun requeueTestService(
         gitWorkspaceService = gitWorkspaceService,
         configRepository = mockk<ConfigRepository>(relaxed = true),
         agentExecutor = mockk<AgentExecutor>(relaxed = true),
-        linearTracker = NoopLinearTrackerAdapter()
+        linearTracker = NoopLinearTrackerAdapter(),
+        autoStartAutomationRefresh = false
     )
 }
 
