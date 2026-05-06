@@ -140,4 +140,3 @@ fun defaultMarketingProhibitedActions(): List<String> = listOf(
     "payment",
     "credential-storage"
 )
-
