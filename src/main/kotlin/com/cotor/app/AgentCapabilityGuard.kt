@@ -132,6 +132,12 @@ class AgentCapabilityGuard(
                 return false
             }
         }
+        if (setting.channelAllowlist.isNotEmpty()) {
+            val channel = request.metadata["channel"] ?: request.metadata["marketingChannel"]
+            if (channel.isNullOrBlank() || setting.channelAllowlist.none { it.equals(channel.trim(), ignoreCase = true) }) {
+                return false
+            }
+        }
         if (setting.skillAllowlist.isNotEmpty()) {
             val skill = request.metadata["skill"] ?: request.metadata["skillName"]
             if (skill.isNullOrBlank() || setting.skillAllowlist.none { it.equals(skill.trim(), ignoreCase = true) }) {
@@ -154,6 +160,9 @@ class AgentCapabilityGuard(
         ActionKind.BROWSER_RECORD -> CapabilityKey.BROWSER_RECORD
         ActionKind.BROWSER_EXTERNAL_DOMAIN -> CapabilityKey.BROWSER_EXTERNAL_DOMAIN
         ActionKind.BROWSER_LOGIN_FLOW -> CapabilityKey.BROWSER_LOGIN_FLOW
+        ActionKind.WEB_PUBLISH -> CapabilityKey.WEB_PUBLISH
+        ActionKind.SOCIAL_POST_CREATE -> CapabilityKey.SOCIAL_POST_CREATE
+        ActionKind.MARKETING_ANALYTICS_READ -> CapabilityKey.MARKETING_ANALYTICS_READ
         ActionKind.VIDEO_SCRIPT_WRITE -> CapabilityKey.VIDEO_SCRIPT_WRITE
         ActionKind.VIDEO_RENDER_LOCAL -> CapabilityKey.VIDEO_RENDER_LOCAL
         ActionKind.VIDEO_GENERATE_REMOTE -> CapabilityKey.VIDEO_GENERATE_REMOTE
@@ -196,6 +205,7 @@ class AgentCapabilityGuard(
     private fun isReadAction(kind: ActionKind): Boolean = when (kind) {
         ActionKind.BROWSER_READ,
         ActionKind.HTTP_REQUEST,
+        ActionKind.MARKETING_ANALYTICS_READ,
         ActionKind.SECRET_READ -> true
         else -> false
     }
@@ -204,7 +214,10 @@ class AgentCapabilityGuard(
         ActionKind.GIT_PUBLISH,
         ActionKind.GITHUB_REVIEW,
         ActionKind.GITHUB_COMMENT,
-        ActionKind.GITHUB_MERGE -> true
+        ActionKind.GITHUB_MERGE,
+        ActionKind.WEB_PUBLISH,
+        ActionKind.SOCIAL_POST_CREATE,
+        ActionKind.MARKETING_ANALYTICS_READ -> true
         else -> false
     }
 

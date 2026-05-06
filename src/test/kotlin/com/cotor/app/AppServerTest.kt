@@ -503,6 +503,90 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("marketing policy and run routes delegate to backend service") {
+        val policy = MarketingDelegationPolicy(
+            id = "policy-1",
+            companyId = "company-1",
+            agentId = "agent-1",
+            allowedDomains = listOf("cms.example.com"),
+            channelAccounts = listOf(MarketingChannelAccount(channel = "web", allowedDomains = listOf("cms.example.com"))),
+            dailyPostLimit = 1,
+            createdAt = 1L,
+            updatedAt = 2L
+        )
+        val run = MarketingRunRecord(
+            id = "marketing-run-1",
+            companyId = "company-1",
+            agentId = "agent-1",
+            objective = "Publish launch notes",
+            channels = listOf("web"),
+            delegationPolicyId = "policy-1",
+            status = MarketingRunStatus.COMPLETED,
+            createdAt = 1L,
+            updatedAt = 2L,
+            completedAt = 2L
+        )
+        coEvery {
+            desktopService.listMarketingDelegationPolicies(companyId = "company-1", agentId = "agent-1")
+        } returns listOf(policy)
+        coEvery {
+            desktopService.upsertMarketingDelegationPolicy(any())
+        } returns policy
+        coEvery {
+            desktopService.createMarketingRun(any())
+        } returns run
+        coEvery {
+            desktopService.marketingRun("marketing-run-1")
+        } returns run
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val policies = client.get("/api/app/marketing/policies?companyId=company-1&agentId=agent-1") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val upsert = client.post("/api/app/marketing/policies") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody(
+                    """
+                    {
+                      "companyId":"company-1",
+                      "agentId":"agent-1",
+                      "allowedDomains":["cms.example.com"],
+                      "channelAccounts":[{"channel":"web","allowedDomains":["cms.example.com"]}],
+                      "dailyPostLimit":1
+                    }
+                    """.trimIndent()
+                )
+            }
+            val created = client.post("/api/app/marketing/runs") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"companyId":"company-1","agentId":"agent-1","objective":"Publish launch notes","channels":["web"],"delegationPolicyId":"policy-1"}""")
+            }
+            val inspected = client.get("/api/app/marketing/runs/marketing-run-1") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            policies.status shouldBe HttpStatusCode.OK
+            policies.bodyAsText() shouldContain "cms.example.com"
+            upsert.status shouldBe HttpStatusCode.OK
+            upsert.bodyAsText() shouldContain "\"id\":\"policy-1\""
+            created.status shouldBe HttpStatusCode.OK
+            created.bodyAsText() shouldContain "\"status\":\"COMPLETED\""
+            inspected.status shouldBe HttpStatusCode.OK
+            inspected.bodyAsText() shouldContain "marketing-run-1"
+            coVerify(exactly = 1) { desktopService.createMarketingRun(any()) }
+        }
+    }
+
     test("video plan route delegates to guarded backend planner") {
         coEvery {
             desktopService.planVideoScript(
@@ -2091,6 +2175,60 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"kind\":\"ceo-plan\""
             coVerify(exactly = 1) {
                 desktopService.createChatIntake("company-1", "대충 채팅만으로 다 되게 해줘", false)
+            }
+        }
+    }
+
+    test("company operator command route forwards automation mode and command text") {
+        coEvery {
+            desktopService.runOperatorCommand(
+                companyId = "company-1",
+                message = "에이전트들 잘 돌아가?",
+                automationMode = OperatorAutomationMode.AGENT_APPROVED,
+                confirmFullAuto = false
+            )
+        } returns OperatorCommandResponse(
+            message = "Company status checked.",
+            automationMode = OperatorAutomationMode.AGENT_APPROVED,
+            actions = listOf(
+                OperatorCommandAction(
+                    type = "status-check",
+                    title = "Company status checked",
+                    detail = "runtime=stopped",
+                    status = "DONE"
+                )
+            ),
+            summary = OperatorCompanySummary(
+                runtimeStatus = "STOPPED",
+                backendHealth = "unknown",
+                activeAgentCount = 0,
+                blockedIssueCount = 0,
+                reviewQueueCount = 0,
+                pendingApprovalCount = 0,
+                budgetPaused = false
+            )
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/companies/company-1/operator/commands") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"message":"에이전트들 잘 돌아가?","automationMode":"AGENT_APPROVED","confirmFullAuto":false}""")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"automationMode\":\"AGENT_APPROVED\""
+            response.bodyAsText() shouldContain "\"type\":\"status-check\""
+            coVerify(exactly = 1) {
+                desktopService.runOperatorCommand("company-1", "에이전트들 잘 돌아가?", OperatorAutomationMode.AGENT_APPROVED, false)
             }
         }
     }

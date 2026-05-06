@@ -153,6 +153,9 @@ class ActionExecutionService(
         ActionKind.BROWSER_RECORD -> SideEffectKind.BROWSER_RECORD
         ActionKind.BROWSER_EXTERNAL_DOMAIN -> SideEffectKind.BROWSER_EXTERNAL_DOMAIN
         ActionKind.BROWSER_LOGIN_FLOW -> SideEffectKind.BROWSER_LOGIN_FLOW
+        ActionKind.WEB_PUBLISH -> SideEffectKind.WEB_PUBLISH
+        ActionKind.SOCIAL_POST_CREATE -> SideEffectKind.SOCIAL_POST_CREATE
+        ActionKind.MARKETING_ANALYTICS_READ -> SideEffectKind.MARKETING_ANALYTICS_READ
         ActionKind.VIDEO_SCRIPT_WRITE -> SideEffectKind.VIDEO_SCRIPT_WRITE
         ActionKind.VIDEO_RENDER_LOCAL -> SideEffectKind.VIDEO_RENDER_LOCAL
         ActionKind.VIDEO_GENERATE_REMOTE -> SideEffectKind.VIDEO_GENERATE_REMOTE

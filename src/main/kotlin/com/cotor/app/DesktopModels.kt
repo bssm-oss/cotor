@@ -83,6 +83,13 @@ enum class CodePublishMode {
 }
 
 @Serializable
+enum class OperatorAutomationMode {
+    ASK_ME,
+    AGENT_APPROVED,
+    FULL_AUTO
+}
+
+@Serializable
 data class GitHubPublishStatus(
     val policy: CodePublishMode = CodePublishMode.REQUIRE_GITHUB_PR,
     val ghInstalled: Boolean = false,
@@ -179,7 +186,8 @@ data class Company(
     val dailyBudgetCents: Int? = null,
     val monthlyBudgetCents: Int? = null,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val operatorAutomationMode: OperatorAutomationMode = OperatorAutomationMode.AGENT_APPROVED
 )
 
 /**
@@ -1035,7 +1043,9 @@ data class DesktopAppState(
     val companyRuntimes: List<CompanyRuntimeSnapshot> = emptyList(),
     val workflowPipelines: List<WorkflowPipelineDefinition> = emptyList(),
     val agentContextEntries: List<AgentContextEntry> = emptyList(),
-    val agentMessages: List<AgentMessage> = emptyList()
+    val agentMessages: List<AgentMessage> = emptyList(),
+    val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
+    val marketingRuns: List<MarketingRunRecord> = emptyList()
 )
 
 private fun defaultBackendConfigs(): List<BackendConnectionConfig> = listOf(
