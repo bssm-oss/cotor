@@ -5994,37 +5994,64 @@ private struct CenterPaneView: View {
     private var companyMeetingRoomPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                meetingRoomSurfaceButton(
-                    surface: .map,
-                    title: l("Map", "지도"),
-                    systemImage: "point.3.connected.trianglepath.dotted"
-                )
-                meetingRoomSurfaceButton(
-                    surface: .meeting,
-                    title: l("Agent Meeting", "에이전트 회의"),
-                    systemImage: "person.3.sequence"
-                )
-                meetingRoomSurfaceButton(
-                    surface: .floor,
-                    title: l("Live Floor", "라이브 플로어"),
-                    systemImage: "person.2.wave.2"
-                )
+                ShellTag(text: l("Live Office", "라이브 오피스"), tint: ShellPalette.accent)
+                ShellTag(text: "\(meetingRoomProjection.agents.count) \(l("agents", "에이전트"))", tint: ShellPalette.accentWarm)
+                ShellTag(text: "\(meetingRoomProjection.reviewCount) \(l("reviews", "리뷰"))", tint: ShellPalette.warning)
                 Spacer(minLength: 0)
+                Button {
+                    withAnimation(ShellMotion.spring) {
+                        detailDrawerOpen.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "sidebar.right")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(detailDrawerOpen ? l("Hide Activity", "활동 숨김") : l("Activity", "활동"))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(detailDrawerOpen ? ShellPalette.text : ShellPalette.muted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(detailDrawerOpen ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                            .stroke(detailDrawerOpen ? ShellPalette.accent.opacity(0.42) : ShellPalette.line, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(detailDrawerOpen ? l("Hide activity drawer", "활동 drawer 숨기기") : l("Show activity drawer", "활동 drawer 보기"))
             }
 
             meetingRoomAgendaStrip
 
-            switch meetingRoomSurface {
-            case .map:
-                meetingRoomMapSurface
-            case .meeting:
-                meetingRoomMeetingSurface
-            case .floor:
-                meetingRoomFloorSurface
+            if layoutMode == .wide {
+                HStack(alignment: .top, spacing: 12) {
+                    meetingRoomFloorSurface
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+                    if detailDrawerOpen {
+                        meetingRoomActivityDrawer
+                            .frame(width: 340, alignment: .topLeading)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    meetingRoomFloorSurface
+                    if detailDrawerOpen {
+                        meetingRoomActivityDrawer
+                    }
+                }
             }
         }
         .padding(12)
         .shellInset()
+    }
+
+    private var meetingRoomActivityDrawer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            meetingRoomEventWallZone
+            meetingRoomReviewDeskZone
+        }
     }
 
     @ViewBuilder
