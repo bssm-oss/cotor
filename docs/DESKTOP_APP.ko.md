@@ -121,7 +121,8 @@ cotor delete
 - Marketing Operator skill을 선택하면 channel, domain, 일일 게시 한도, 브랜드 규칙, session/secret reference, 최근 marketing run log를 설정하는 위임 정책 패널 표시
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
-- 자연어 운영 채팅, 자동화 모드, 런타임/승인 상태, 명령 결과 카드, 상위 에이전트 내부 승인 라우팅을 보여주는 전용 `운영 채팅` 탐색 surface
+- 자연어 회사 명령을 메시지 스레드처럼 처리하는 전용 `운영 채팅` 탐색 surface. 자동화 모드, 승인, 런타임 동작은 지속 노출되는 상태/제어 패널이 아니라 채팅 명령으로 노출
+- 회사와 이슈 surface는 점진적 공개 구조를 사용해서 첫 화면에는 현재 회사 신호와 핵심 이슈 큐만 보이고, 백엔드 health, 경로, 비용 상한, 메타데이터, 실행 로그, Linear 링크, 에이전트 대화는 펼치는 상세 화면 안에 둠
 - 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 집계한 아침 보고서 전용 `보고서` surface
 - 별도 평가 이력을 저장하지 않고 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 에이전트별 점수, 성공률, QA 통과율, 재시도, 평균 시간, 확인된 추정 비용을 계산하는 전용 `인사평가` surface
 - 회사 메모리 스냅샷 카드는 company/project/team/agent 4계층을 보여주며, backend contract의 `workflowMemory`는 예전 client를 위한 호환 필드로 유지
@@ -224,9 +225,9 @@ cotor delete
 - 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 아이템 생성 및 머지 처리
 - 기본 저장소 `지도`와 runtime/backend/review/session 상태를 합성한 실시간 활동, 실행 현황/리뷰 요약을 함께 제공하는 전용 상황실 보기
-- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 명령 채팅으로 실행
+- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
 - 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
-- `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO` 자동화 모드를 선택할 수 있고 기본값은 `AGENT_APPROVED`. 복구 가능한 민감 작업은 사용자 확인 rail 대신 CEO/QA/Reviewer 승인으로 라우팅
+- `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO` 자동화 모드를 채팅 명령으로 바꿀 수 있고 기본값은 `AGENT_APPROVED`. 복구 가능한 민감 작업은 사용자 확인 rail 대신 CEO/QA/Reviewer 승인으로 라우팅
 - 저장소 삭제, 대량 파일 삭제, secret 작업, 비용 상한 해제, 배포/머지 정책 해제 같은 hard-gate 작업은 모든 모드에서 차단
 - 정상적인 회사 모드에서는 수동 새로고침 없이 회사 활동 조회
 - 압축형 회사 요약 배너에서 런타임 건강도, CEO 승인/차단/리뷰 주의, 최근 런타임 신호 조회

@@ -147,9 +147,9 @@ Current desktop model:
 
 - top-level `Company` and `TUI` shell modes
 - `Company` mode for multi-company operations, agent team, goals, issue board/canvas, activity feed, runtime controls, and a dedicated `Meeting Room` surface
-- dedicated `Company Operator` navigation surface with an operations chat, automation mode control, runtime/approval status, command result cards, and internal CEO/QA/Reviewer approval routing
-- `Company` summary keeps runtime health, blocked workflow count, review attention, and the latest error/action inside the main summary banner instead of a separate tall status card
-- `Company` summary now also shows estimated spend plus daily/monthly cost guardrails for the selected company runtime
+- dedicated `Operator Chat` navigation surface that behaves like a message thread for natural-language company commands, with automation modes, approvals, and runtime actions handled through chat commands instead of always-visible control rails
+- `Company` summary keeps only the immediate company signal and recent issues visible by default; team work, live runs, CEO decisions, Linear state, and activity history sit behind an expandable detail section
+- `Company` and issue surfaces use progressive disclosure so paths, backend health, cost guardrails, metadata, execution logs, and agent conversation details appear only after opening deeper detail views
 - dedicated `Reports` navigation surface shows deterministic previous-day morning reports with completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
 - dedicated `Performance` navigation surface shows derived per-agent scores, success rates, QA pass rates, retries, duration, and known estimated cost from existing company execution data
 - company memory snapshots now separate company, project, team, and agent memory; the older workflow memory field remains as a compatibility alias for project + team context
@@ -197,11 +197,11 @@ The current build includes a working local operations layer:
 - inspect per-agent performance derived from existing company issues, runs, reviews, org profiles, and agent definitions, with insufficient-data agents shown separately
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page with a default repository `Map`, a visible `Agent Meeting` table for live coordination, synthesized runtime/backend/review/session wall events, and animated agent presence in the floor view
-- use the Company Operator surface to ask for status, change all selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
+- use the Operator Chat surface to ask for status, change all selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel
-- inspect compact runtime status, blocked/review attention, and recent company activity from the company summary page
-- inspect estimated company spend and adjust daily/monthly runtime guardrails without leaving the company console
+- inspect compact runtime status and recent issues from the company summary page, then open advanced details only when needed
+- inspect estimated company spend and adjust daily/monthly runtime guardrails from deeper company settings instead of the default summary
 - inspect stored morning reports for the previous local day; reports are generated from local runtime, activity, issue, run, and review data rather than LLM-generated prose
 - start and stop a local autonomous runtime loop per company
 - let the CEO reopen planning after one wave finishes so active goals can generate the next wave instead of freezing after the first batch of issues
