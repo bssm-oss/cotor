@@ -153,6 +153,7 @@ cotor delete    # 삭제
 - 자연어 운영 채팅, 자동화 모드, 런타임/승인 상태, 명령 결과 카드, CEO/QA/Reviewer 내부 승인 라우팅을 담은 전용 `운영 채팅` 탐색 surface 제공
 - `Company` 요약은 별도 긴 상태 카드 대신 메인 요약 배너 안에서 런타임 건강도, 차단 수, 리뷰 주의 수, 최근 오류/동작을 함께 보여줌
 - `Company` 요약은 선택한 회사의 추정 비용과 일/월 비용 상한도 함께 보여줌
+- 전용 `보고서` 탐색 surface에서 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 모은 결정적 아침 보고서를 보여줌
 - `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
 - 데스크톱 backend launch, health check, shutdown, client request가 같은 `COTOR_APP_TOKEN` source를 사용해서 token-protected local session이 어긋나지 않음
 - embedded 데스크톱 backend는 정리된 최소 환경으로 시작해서, 우연히 부모 shell에 있던 API key, provider token, password 계열 변수를 로컬 app-server로 넘기지 않음
@@ -201,6 +202,7 @@ cotor delete    # 삭제
 - 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 팀이 한두 개 이슈로만 수렴하지 않게 함
 - 회사 런타임을 수동으로 중지하면 앱 재실행, dashboard 조회, 실시간 재연결 뒤에도 시작을 다시 누르기 전까지 그대로 중지 상태 유지
 - 회사 요약 페이지에서 압축된 런타임 상태, 차단/리뷰 주의, 활동 피드 조회
+- 전날 로컬 날짜 기준 아침 보고서 조회. 보고서는 LLM 생성 문장이 아니라 로컬 런타임, 활동, 이슈, 실행, 리뷰 데이터 집계로 생성
 - 회사별 로컬 자율 런타임 시작/중지
 - active task/run이 남아 있으면 회사 런타임이 느린 idle backoff로 내려가지 않고 빠른 monitoring cadence를 유지해서 죽은 `RUNNING` 상태를 더 빨리 정리
 - app-server가 active company work 도중 종료되면, 현재 빌드는 일반 process-exit 실패로 굳히지 않고 해당 이슈를 다시 큐에 올려 재개 가능하게 유지

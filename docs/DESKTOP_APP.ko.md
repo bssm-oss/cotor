@@ -122,6 +122,7 @@ cotor delete
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
 - 자연어 운영 채팅, 자동화 모드, 런타임/승인 상태, 명령 결과 카드, 상위 에이전트 내부 승인 라우팅을 보여주는 전용 `운영 채팅` 탐색 surface
+- 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 집계한 아침 보고서 전용 `보고서` surface
 - CEO 채팅 인테이크: 대충 쓴 채팅 요청도 확인 후 CEO 소유 목표, 정리된 브리프, 담당 하위 이슈로 만들며 GitHub 저장소를 자동 생성하지 않음
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
 - 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영
@@ -177,6 +178,9 @@ cotor delete
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
 - `GET /api/app/companies/{companyId}/dashboard`
+- `GET /api/app/companies/{companyId}/reports`
+- `GET /api/app/companies/{companyId}/reports/{date}`
+- `POST /api/app/companies/{companyId}/reports/generate`
 - `GET /api/app/companies/{companyId}/contexts`
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
@@ -216,6 +220,7 @@ cotor delete
 - 정상적인 회사 모드에서는 수동 새로고침 없이 회사 활동 조회
 - 압축형 회사 요약 배너에서 런타임 건강도, CEO 승인/차단/리뷰 주의, 최근 런타임 신호 조회
 - 회사 콘솔 안에서 추정 비용을 확인하고 일/월 비용 상한을 조정
+- 전날 로컬 런타임, 활동, 이슈, 실행, 리뷰 데이터를 기반으로 생성된 결정적 아침 보고서 조회. 활동이 없는 날도 빈 보고서로 남김
 - GitHub PR 발행이 필요한데 `gh`/`origin` 준비가 안 된 저장소는 회사 생성 시 경고
 - PR 모드가 `gh` CLI, `gh` 인증, 또는 `origin` 누락으로 막히면 회사 사이드바에 간단한 GitHub 빠른 연결 패널 표시
 - `origin`이 없는 경우 GitHub 저장소를 자동 생성하지 않고, GitHub 설정 패널에서 기존 저장소 URL을 연결

@@ -150,6 +150,7 @@ Current desktop model:
 - dedicated `Company Operator` navigation surface with an operations chat, automation mode control, runtime/approval status, command result cards, and internal CEO/QA/Reviewer approval routing
 - `Company` summary keeps runtime health, blocked workflow count, review attention, and the latest error/action inside the main summary banner instead of a separate tall status card
 - `Company` summary now also shows estimated spend plus daily/monthly cost guardrails for the selected company runtime
+- dedicated `Reports` navigation surface shows deterministic previous-day morning reports with completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
 - `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
 - desktop backend launch, health checks, shutdown, and client requests use the same `COTOR_APP_TOKEN` source so token-protected local sessions stay aligned
 - embedded desktop backends start with a sanitized environment so incidental API keys, provider tokens, and password-like parent-shell variables are not passed into the local app-server
@@ -195,6 +196,7 @@ The current build includes a working local operations layer:
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel
 - inspect compact runtime status, blocked/review attention, and recent company activity from the company summary page
 - inspect estimated company spend and adjust daily/monthly runtime guardrails without leaving the company console
+- inspect stored morning reports for the previous local day; reports are generated from local runtime, activity, issue, run, and review data rather than LLM-generated prose
 - start and stop a local autonomous runtime loop per company
 - let the CEO reopen planning after one wave finishes so active goals can generate the next wave instead of freezing after the first batch of issues
 - bias autonomous continuous-improvement goals toward multi-issue portfolios and parallel branchable slices instead of a single narrow follow-up
