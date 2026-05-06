@@ -458,6 +458,7 @@ class DesktopStateStore(
                 companyActivity = companyActivity.sortedByDescending { it.createdAt }.take(200),
                 signals = signals.sortedByDescending { it.createdAt }.take(150),
                 goalDecisions = goalDecisions.sortedByDescending { it.createdAt }.take(150),
+                marketingRuns = marketingRuns.sortedByDescending { it.createdAt }.take(200),
                 problemSignals = problemSignals.sortedByDescending { it.updatedAt }.take(200)
             )
         }
