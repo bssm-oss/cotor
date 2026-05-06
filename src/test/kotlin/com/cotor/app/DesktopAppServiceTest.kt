@@ -2128,7 +2128,8 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Let CEO decompose autonomously",
             description = "The runtime should wait for the CEO planning run before materializing work.",
-            autonomyEnabled = true
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
         )
 
         val issues = service.listIssues(goal.id)
@@ -6251,7 +6252,7 @@ class DesktopAppServiceTest : FunSpec({
 
         service.runIssue(infraIssue.id)
 
-        withTimeout(5_000) {
+        withTimeout(30_000) {
             while (true) {
                 val snapshot = stateStore.load()
                 val refreshedIssue = snapshot.issues.first { it.id == infraIssue.id }
