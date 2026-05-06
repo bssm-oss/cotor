@@ -252,6 +252,43 @@ struct ModelsTests {
     }
 
     @Test
+    func operatorChatMapsRawModesAndStatusesForDisplay() {
+        #expect(operatorAutomationModeDisplayName("FULL_AUTO", language: .korean) == "완전 자동")
+        #expect(operatorAutomationModeDisplayName("AGENT_APPROVED", language: .korean) == "내부 승인")
+        #expect(operatorAutomationModeDisplayName("ASK_ME", language: .korean) == "확인 후 실행")
+        #expect(operatorActionStatusDisplayName("USER_CONFIRMATION_REQUIRED", language: .korean) == "확인 필요")
+        #expect(operatorActionStatusDisplayName("AGENT_APPROVAL_REQUESTED", language: .korean) == "내부 승인 대기")
+    }
+
+    @Test
+    func operatorChatSanitizesMachineSummaryText() {
+        let sanitized = sanitizeOperatorUserText(
+            "FULL_AUTO changed: DONE runtime=stopped, backend=healthy, status=AGENT_APPROVAL_REQUESTED",
+            language: .korean
+        )
+
+        #expect(sanitized.contains("완전 자동"))
+        #expect(sanitized.contains("runtime=") == false)
+        #expect(sanitized.contains("backend=") == false)
+        #expect(sanitized.contains("FULL_AUTO") == false)
+        #expect(sanitized.contains("AGENT_APPROVAL_REQUESTED") == false)
+    }
+
+    @Test
+    func operatorChatMessageKeepsAssistantCommandsWithUserFacingLabels() {
+        let command = OperatorChatCommand(
+            title: "완전 자동 켜기",
+            prompt: "완전 자동으로 바꿔줘",
+            kind: .confirmFullAuto
+        )
+        let message = OperatorChatMessage(role: .assistant, text: "켜려면 확인하세요.", commands: [command])
+
+        #expect(message.role == .assistant)
+        #expect(message.commands.first?.kind == .confirmFullAuto)
+        #expect(message.commands.first?.title == "완전 자동 켜기")
+    }
+
+    @Test
     func batchUpdatePayloadEncodesSelectedFields() throws {
         let payload = BatchUpdateCompanyAgentsPayload(
             agentIds: ["agent-1", "agent-2"],
