@@ -19,6 +19,10 @@ struct MeetingRoomView: View {
     @State private var selectedFlow: MeetingRoomFlowItem?
     @State private var selectedZone: MeetingRoomOfficeZone?
 
+    private var sceneMemoryKey: String {
+        projection.companyId ?? "all-companies"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -32,6 +36,7 @@ struct MeetingRoomView: View {
                     isSceneActive: scenePhase == .active
                 )
                 let layout = PixelOfficeLayout(size: geometry.size, isCompact: isCompact, mode: plan.mode)
+                let ledger = MeetingRoomSceneMemoryStore.ledger(for: sceneMemoryKey)
                 let state = MeetingRoomSceneReducer.reduce(
                     previous: sceneState,
                     projection: projection,
@@ -39,15 +44,18 @@ struct MeetingRoomView: View {
                     isCompact: isCompact,
                     reduceMotion: reduceMotion,
                     lowResourceMode: lowResourceMode,
-                    isSceneActive: scenePhase == .active
+                    isSceneActive: scenePhase == .active,
+                    ledger: ledger
                 )
 
                 officeStage(state: state)
                     .onAppear {
                         sceneState = state
+                        MeetingRoomSceneMemoryStore.remember(state.nextLedger, for: sceneMemoryKey)
                     }
                     .onChange(of: state.cacheKey) { _, _ in
                         sceneState = state
+                        MeetingRoomSceneMemoryStore.remember(state.nextLedger, for: sceneMemoryKey)
                     }
             }
             .frame(height: isCompact ? 380 : 560)
@@ -137,6 +145,12 @@ struct MeetingRoomView: View {
 
     private func spriteLayer(state: MeetingRoomSceneState, time: TimeInterval) -> some View {
         ZStack {
+            ForEach(state.interactions) { interaction in
+                PixelOfficeInteractionRouteView(interaction: interaction)
+                    .frame(width: state.layout.size.width, height: state.layout.size.height)
+                    .zIndex(1)
+            }
+
             ForEach(state.keyframes) { keyframe in
                 PixelOfficeKeyframeView(
                     keyframe: keyframe,
@@ -154,7 +168,7 @@ struct MeetingRoomView: View {
                 PixelIssueCardView(card: card, language: language) {
                     selectedIssue = projection.issues.first { $0.id == card.id }
                 }
-                .position(card.point)
+                .position(card.point(at: time, animate: state.shouldAnimate && card.interaction != nil))
                 .zIndex(2)
             }
 
@@ -502,6 +516,47 @@ private struct PixelOfficeCanvas: View {
     }
 }
 
+private struct PixelOfficeInteractionRouteView: View {
+    let interaction: MeetingRoomSceneInteraction
+
+    var body: some View {
+        Canvas { context, _ in
+            var path = Path()
+            path.move(to: interaction.fromPoint)
+            let mid = CGPoint(
+                x: (interaction.fromPoint.x + interaction.toPoint.x) / 2,
+                y: min(interaction.fromPoint.y, interaction.toPoint.y) - 24
+            )
+            path.addQuadCurve(to: interaction.toPoint, control: mid)
+            context.stroke(
+                path,
+                with: .color(tint.opacity(interaction.isFresh ? 0.64 : 0.24)),
+                style: StrokeStyle(lineWidth: interaction.isFresh ? 2 : 1, lineCap: .round, dash: interaction.isFresh ? [7, 4] : [3, 5])
+            )
+            if interaction.isFresh {
+                context.fill(Path(ellipseIn: CGRect(x: interaction.toPoint.x - 4, y: interaction.toPoint.y - 4, width: 8, height: 8)), with: .color(tint.opacity(0.8)))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var tint: Color {
+        switch interaction.event.kind {
+        case .ceoApprovalRequested, .approvalGranted, .costPaused:
+            return ShellPalette.warning
+        case .qaReviewRequested, .changesRequested:
+            return ShellPalette.accentWarm
+        case .blockedEscalation:
+            return ShellPalette.danger
+        case .mergeCompleted:
+            return ShellPalette.success
+        case .issueAssigned, .handoff, .meeting, .workStarted:
+            return ShellPalette.accent
+        }
+    }
+}
+
 private struct PixelOfficeKeyframeView: View {
     let keyframe: MeetingRoomSceneKeyframe
     let language: AppLanguage
@@ -663,7 +718,7 @@ private struct PixelAgentSprite: View {
         Button(action: action) {
             VStack(spacing: 4) {
                 if showsBubble {
-                    Text(roomLine(agent.actionLine, limit: sceneAgent.isSimplified ? 12 : 18))
+                    Text(roomLine(bubbleText, limit: sceneAgent.isSimplified ? 12 : 18))
                         .font(.system(size: 8, weight: .heavy, design: .monospaced))
                         .foregroundStyle(ShellPalette.text)
                         .padding(.horizontal, 5)
@@ -702,9 +757,9 @@ private struct PixelAgentSprite: View {
     }
 
     private var bodyPixels: some View {
-        let step = animate ? CGFloat(sin(phase * 9 + Double(abs(agent.id.hashValue % 13)))) : 0
+        let step = animate ? keyframeStep : 0
         let blink = animate && Int(phase * 2 + Double(abs(agent.id.hashValue % 5))).isMultiple(of: 9)
-        let typing = animate && sceneAgent.action == .typing
+        let typing = sceneAgent.action == .typing
 
         return ZStack(alignment: .bottom) {
             if sceneAgent.action == .sitting || sceneAgent.action == .typing {
@@ -915,11 +970,80 @@ private struct PixelAgentSprite: View {
     }
 
     private var showsBubble: Bool {
+        if sceneAgent.speechText != nil {
+            return true
+        }
         switch sceneAgent.action {
-        case .blocked, .reviewing, .talking:
+        case .blocked, .reviewing, .talking, .listening, .approving, .celebrating:
             return true
         case .typing, .walking, .sitting:
             return agent.visualState == .failed || agent.visualState == .costBlocked
+        }
+    }
+
+    private var bubbleText: String {
+        guard let speech = sceneAgent.speechText else {
+            return agent.actionLine
+        }
+        switch speech {
+        case "Approval requested":
+            return language("Approval requested", "승인 요청합니다")
+        case "Reviewing approval":
+            return language("Reviewing approval", "승인 검토 중")
+        case "Please review":
+            return language("Please review", "검토 부탁합니다")
+        case "Reviewing now":
+            return language("Reviewing now", "검토합니다")
+        case "Changes requested":
+            return language("Changes requested", "수정 요청합니다")
+        case "Please revise":
+            return language("Please revise", "수정해 주세요")
+        case "Need help":
+            return language("Need help", "도움이 필요합니다")
+        case "Checking blocker":
+            return language("Checking blocker", "막힘 확인 중")
+        case "Handoff update":
+            return language("Handoff update", "인수인계합니다")
+        case "Received":
+            return language("Received", "확인했습니다")
+        case "Feedback sync":
+            return language("Feedback sync", "피드백 공유")
+        case "Plan sync":
+            return language("Plan sync", "계획 회의")
+        case "Syncing":
+            return language("Syncing", "회의 중")
+        case "Taking this":
+            return language("Taking this", "맡겠습니다")
+        case "Assigned":
+            return language("Assigned", "배정됨")
+        case "Working on it":
+            return language("Working on it", "작업 중")
+        case "Approved":
+            return language("Approved", "승인했습니다")
+        case "Merged":
+            return language("Merged", "머지 완료")
+        case "Cost pause":
+            return language("Cost pause", "비용 일시정지")
+        case "Paused":
+            return language("Paused", "일시정지")
+        default:
+            return speech
+        }
+    }
+
+    private var keyframeStep: CGFloat {
+        switch sceneAgent.action {
+        case .walking:
+            guard sceneAgent.movementDuration > 0 else { return 0 }
+            let raw = CGFloat((phase - sceneAgent.movementStartedAt) / sceneAgent.movementDuration)
+            let progress = min(1, max(0, raw))
+            return progress < 0.5 ? progress * 2 : (1 - progress) * -2
+        case .typing:
+            return Int(phase * 6).isMultiple(of: 2) ? 1 : -1
+        case .talking, .listening, .approving, .reviewing:
+            return Int(phase * 3).isMultiple(of: 2) ? 0.5 : 0
+        case .sitting, .blocked, .celebrating:
+            return 0
         }
     }
 
@@ -950,7 +1074,7 @@ private struct PixelAgentSprite: View {
         case .running:
             return sceneAgent.action == .typing ? language("TYPE", "타이핑") : language("RUN", "작업")
         case .review:
-            return language("REVIEW", "리뷰")
+            return sceneAgent.action == .approving ? language("APPROVE", "승인") : language("REVIEW", "리뷰")
         case .blocked:
             return language("BLOCK", "차단")
         case .failed:

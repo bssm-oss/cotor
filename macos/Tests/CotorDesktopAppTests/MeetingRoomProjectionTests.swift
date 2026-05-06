@@ -440,7 +440,7 @@ struct MeetingRoomProjectionTests {
     }
 
     @Test
-    func sceneReducerCreatesA2AKeyframeBetweenSenderAndReceiver() throws {
+    func sceneReducerMovesSenderForA2AInteractionInsteadOfEnvelopeKeyframe() throws {
         let projection = MeetingRoomProjection.build(
             companyId: "company",
             agents: [
@@ -457,12 +457,14 @@ struct MeetingRoomProjectionTests {
             ]
         )
         let state = sceneState(projection)
-        let message = try #require(state.keyframes.first { $0.kind == .a2aMessage })
+        let message = try #require(state.interactions.first { $0.event.kind == .handoff })
 
-        #expect(message.fromAgentId == "builder")
-        #expect(message.toAgentId == "qa")
+        #expect(message.event.fromAgentId == "builder")
+        #expect(message.event.toAgentId == "qa")
         #expect(message.usesScheduler)
-        #expect(state.agents.first { $0.id == "builder" }?.projection.expression == .talking)
+        #expect(state.keyframes.allSatisfy { $0.kind != .a2aMessage })
+        #expect(state.agents.first { $0.id == "builder" }?.action == .walking)
+        #expect(state.agents.first { $0.id == "builder" }?.speechText == "Handoff update")
     }
 
     @Test
@@ -521,6 +523,123 @@ struct MeetingRoomProjectionTests {
     }
 
     @Test
+    func readyForCeoReviewCreatesApprovalInteractionAndMovesRequesterToCeo() throws {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [
+                agent(id: "ceo", title: "CEO"),
+                agent(id: "builder", title: "Builder"),
+            ],
+            issues: [
+                issue(id: "issue-approval", title: "Approve PR", status: "READY_FOR_CEO", assigneeProfileId: "builder", pullRequestState: "OPEN")
+            ],
+            runningSessions: [],
+            reviewQueue: [
+                review(issueId: "issue-approval", status: "READY_FOR_CEO", pullRequestState: "OPEN", approvalIssueId: "approval-issue")
+            ],
+            runtime: runtime(),
+            activity: [],
+            messages: []
+        )
+        let approval = try #require(projection.interactions.first { $0.kind == .ceoApprovalRequested })
+        let state = sceneState(projection)
+        let builder = try #require(state.agents.first { $0.id == "builder" })
+        let ceo = try #require(state.agents.first { $0.id == "ceo" })
+
+        #expect(approval.fromAgentId == "builder")
+        #expect(approval.toAgentId == "ceo")
+        #expect(approval.speechText == "Approval requested")
+        #expect(builder.action == .walking)
+        #expect(builder.speechText == "Approval requested")
+        #expect(ceo.speechText == "Reviewing approval")
+        #expect(state.issueCards.first { $0.id == "issue-approval" }?.interaction?.kind == .ceoApprovalRequested)
+    }
+
+    @Test
+    func messageKindsMapToRuntimeFloorInteractions() throws {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [
+                agent(id: "ceo", title: "CEO"),
+                agent(id: "builder", title: "Builder"),
+                agent(id: "qa", title: "QA"),
+            ],
+            issues: [issue(id: "issue-1", title: "Coordinate work", status: "IN_PROGRESS", assigneeProfileId: "builder")],
+            runningSessions: [],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: [
+                message(id: "handoff", from: "Builder", to: "QA", issueId: "issue-1", body: "handoff", kind: "handoff"),
+                message(id: "escalation", from: "Builder", to: nil, issueId: "issue-1", body: "blocked", kind: "escalation"),
+                message(id: "feedback", from: "QA", to: "Builder", issueId: "issue-1", body: "feedback", kind: "feedback"),
+                message(id: "review-request", from: "Builder", to: "QA", issueId: "issue-1", body: "review", kind: "review.request"),
+            ]
+        )
+
+        #expect(projection.interactions.contains { $0.kind == .handoff && $0.messageId == "handoff" })
+        #expect(projection.interactions.contains { $0.kind == .blockedEscalation && $0.messageId == "escalation" })
+        #expect(projection.interactions.contains { $0.kind == .meeting && $0.messageId == "feedback" })
+        #expect(projection.interactions.contains { $0.kind == .qaReviewRequested && $0.messageId == "review-request" })
+    }
+
+    @Test
+    func goalDecisionAssignmentsCreatePlanningMeetingInteraction() throws {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [
+                agent(id: "ceo", title: "CEO"),
+                agent(id: "builder", title: "Builder"),
+                agent(id: "ux", title: "UX"),
+            ],
+            goals: [goal(id: "goal", title: "Ship feature")],
+            goalDecisions: [
+                decision(id: "decision-1", assignments: ["Build API -> Builder", "Sketch flow -> UX"], issueId: "issue-1")
+            ],
+            issues: [issue(id: "issue-1", title: "Build API", status: "PLANNED", assigneeProfileId: "builder")],
+            runningSessions: [],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: []
+        )
+        let meeting = try #require(projection.interactions.first { $0.kind == .meeting && $0.id == "meeting-decision-1" })
+        let state = sceneState(projection)
+
+        #expect(meeting.participantAgentIds.contains("ceo"))
+        #expect(meeting.participantAgentIds.contains("builder"))
+        #expect(meeting.participantAgentIds.contains("ux"))
+        #expect(state.agents.filter { $0.focusEvent?.id == "meeting-decision-1" }.count == 3)
+    }
+
+    @Test
+    func seenInteractionDoesNotReplayOnSceneReentry() throws {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [
+                agent(id: "builder", title: "Builder"),
+                agent(id: "qa", title: "QA"),
+            ],
+            issues: [issue(id: "issue-1", title: "Coordinate work", status: "IN_PROGRESS", assigneeProfileId: "builder")],
+            runningSessions: [],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: [
+                message(id: "msg-1", from: "Builder", to: "QA", issueId: "issue-1", body: "Please review.")
+            ]
+        )
+        let firstEntry = sceneState(projection)
+        let secondEntry = sceneState(projection, ledger: firstEntry.nextLedger)
+
+        #expect(firstEntry.shouldAnimate)
+        #expect(firstEntry.agents.first { $0.id == "builder" }?.action == .walking)
+        #expect(!secondEntry.shouldAnimate)
+        #expect(secondEntry.agents.first { $0.id == "builder" }?.action != .walking)
+        #expect(secondEntry.frameInterval == 1.0)
+    }
+
+    @Test
     func renderPlanUsesSimplifiedAtTwentyAndGroupedAtFiftyAgents() {
         let twentyProjection = MeetingRoomProjection.build(
             companyId: "company",
@@ -554,6 +673,28 @@ struct MeetingRoomProjectionTests {
         #expect(fifty.renderPlan.hiddenAgentCount == 38)
         #expect(!fifty.shouldAnimate)
     }
+
+    @Test
+    func groupedModeKeepsActiveInteractionParticipantsVisible() {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: (0..<50).map { agent(id: "agent-\($0)", title: "Agent \($0)") },
+            issues: [],
+            runningSessions: [],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: [
+                message(id: "late-handoff", from: "Agent 49", to: "Agent 48", issueId: nil, body: "Need a sync.")
+            ]
+        )
+        let state = sceneState(projection)
+
+        #expect(state.renderPlan.mode == .grouped)
+        #expect(state.agents.contains { $0.id == "agent-49" })
+        #expect(state.agents.contains { $0.id == "agent-48" })
+        #expect(!state.shouldAnimate)
+    }
 }
 
 private func sceneState(
@@ -561,14 +702,16 @@ private func sceneState(
     isCompact: Bool = false,
     reduceMotion: Bool = false,
     lowResourceMode: Bool = false,
-    isSceneActive: Bool = true
+    isSceneActive: Bool = true,
+    ledger: MeetingRoomSceneLedger = .empty
 ) -> MeetingRoomSceneState {
     let plan = MeetingRoomRenderPlan.build(
         projection: projection,
         isCompact: isCompact,
         reduceMotion: reduceMotion,
         lowResourceMode: lowResourceMode,
-        isSceneActive: isSceneActive
+        isSceneActive: isSceneActive,
+        seenEventIds: ledger.seenEventIds
     )
     let layout = PixelOfficeLayout(size: CGSize(width: 1000, height: 640), isCompact: isCompact, mode: plan.mode)
     return MeetingRoomSceneReducer.reduce(
@@ -579,6 +722,7 @@ private func sceneState(
         reduceMotion: reduceMotion,
         lowResourceMode: lowResourceMode,
         isSceneActive: isSceneActive,
+        ledger: ledger,
         now: 100
     )
 }
@@ -617,6 +761,21 @@ private func goal(id: String, title: String) -> GoalRecord {
         autonomyEnabled: true,
         createdAt: 0,
         updatedAt: 1
+    )
+}
+
+private func decision(id: String, assignments: [String], issueId: String? = nil) -> GoalOrchestrationDecisionRecord {
+    GoalOrchestrationDecisionRecord(
+        id: id,
+        companyId: "company",
+        goalId: "goal",
+        issueId: issueId,
+        title: "Planning sync",
+        summary: "CEO planned assigned work.",
+        createdIssues: [],
+        assignments: assignments,
+        escalations: [],
+        createdAt: 20
     )
 }
 
@@ -709,7 +868,8 @@ private func review(
     checksSummary: String? = nil,
     mergeability: String? = nil,
     qaVerdict: String? = nil,
-    ceoVerdict: String? = nil
+    ceoVerdict: String? = nil,
+    approvalIssueId: String? = nil
 ) -> ReviewQueueItemRecord {
     ReviewQueueItemRecord(
         id: "review-\(issueId)",
@@ -733,7 +893,7 @@ private func review(
         ceoVerdict: ceoVerdict,
         ceoFeedback: nil,
         ceoReviewedAt: nil,
-        approvalIssueId: nil,
+        approvalIssueId: approvalIssueId,
         mergeCommitSha: nil,
         mergedAt: nil,
         createdAt: 0,
@@ -741,7 +901,7 @@ private func review(
     )
 }
 
-private func message(id: String, from: String, to: String?, issueId: String?, body: String) -> AgentMessageRecord {
+private func message(id: String, from: String, to: String?, issueId: String?, body: String, kind: String = "handoff") -> AgentMessageRecord {
     AgentMessageRecord(
         id: id,
         companyId: "company",
@@ -749,7 +909,7 @@ private func message(id: String, from: String, to: String?, issueId: String?, bo
         toAgentName: to,
         issueId: issueId,
         goalId: "goal",
-        kind: "handoff",
+        kind: kind,
         subject: "A2A handoff",
         body: body,
         status: "SENT",
