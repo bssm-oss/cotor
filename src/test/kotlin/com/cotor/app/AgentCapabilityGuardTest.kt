@@ -153,6 +153,86 @@ class AgentCapabilityGuardTest : FunSpec({
         video.allowed shouldBe false
     }
 
+    test("marketing operator auto capabilities require delegated domain and channel allowlists") {
+        val appHome = Files.createTempDirectory("capability-guard-marketing-home")
+        val store = DesktopStateStore { appHome }
+        val marketingSetting = AgentCapabilitySetting(
+            enabled = true,
+            mode = CapabilityMode.AUTO,
+            domainAllowlist = listOf("cms.example.com"),
+            channelAllowlist = listOf("web"),
+            secretRefs = listOf("secret://cms/session")
+        )
+        store.save(
+            DesktopAppState(
+                companies = listOf(testCompany()),
+                companyAgentDefinitions = listOf(testAgent().copy(title = "Marketing Operator", roleSummary = "marketing")),
+                agentCapabilityProfiles = listOf(
+                    AgentCapabilityProfile(
+                        companyId = "company-1",
+                        agentId = "agent-1",
+                        settings = defaultAgentCapabilitySettings() + mapOf(
+                            CapabilityKey.BROWSER_READ to marketingSetting,
+                            CapabilityKey.BROWSER_INTERACT to marketingSetting,
+                            CapabilityKey.BROWSER_EXTERNAL_DOMAIN to marketingSetting,
+                            CapabilityKey.BROWSER_LOGIN_FLOW to marketingSetting,
+                            CapabilityKey.WEB_PUBLISH to marketingSetting,
+                            CapabilityKey.SOCIAL_POST_CREATE to marketingSetting,
+                            CapabilityKey.MARKETING_ANALYTICS_READ to marketingSetting
+                        )
+                    )
+                )
+            )
+        )
+        val guard = AgentCapabilityGuard(store)
+
+        val allowed = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.WEB_PUBLISH,
+                label = "web.publish:cms",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                networkTarget = "https://cms.example.com/posts/new",
+                metadata = mapOf("channel" to "web")
+            )
+        )
+        val outsideDomain = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.WEB_PUBLISH,
+                label = "web.publish:outside",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                networkTarget = "https://evil.example.net/posts/new",
+                metadata = mapOf("channel" to "web")
+            )
+        )
+        val outsideChannel = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.SOCIAL_POST_CREATE,
+                label = "social.post-create:x",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                networkTarget = "https://cms.example.com/social",
+                metadata = mapOf("channel" to "x")
+            )
+        )
+        val defaultAgent = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.SOCIAL_POST_CREATE,
+                label = "social.post-create:ordinary",
+                subject = ActionSubject(companyId = "company-1", agentName = "unknown"),
+                networkTarget = "https://cms.example.com/social",
+                metadata = mapOf("channel" to "web")
+            )
+        )
+
+        allowed.capability shouldBe CapabilityKey.WEB_PUBLISH
+        allowed.mode shouldBe CapabilityMode.AUTO
+        allowed.allowed shouldBe true
+        outsideDomain.allowed shouldBe false
+        outsideChannel.allowed shouldBe false
+        defaultAgent.capability shouldBe CapabilityKey.SOCIAL_POST_CREATE
+        defaultAgent.mode shouldBe CapabilityMode.DISABLED
+        defaultAgent.allowed shouldBe false
+    }
+
     test("git shell mutations map to git write instead of git read") {
         val appHome = Files.createTempDirectory("capability-guard-git-home")
         val store = DesktopStateStore { appHome }
