@@ -57,6 +57,46 @@ fun skillCatalog(): List<SkillCatalogEntry> = listOf(
         requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_SCREENSHOT)
     ),
     SkillCatalogEntry(
+        name = "marketing-operator",
+        displayName = "Marketing Operator",
+        description = "Operate owned web, CMS, and organic social channels inside a delegation policy.",
+        requiredCapabilities = listOf(
+            CapabilityKey.SKILL_RUN,
+            CapabilityKey.BROWSER_READ,
+            CapabilityKey.BROWSER_INTERACT,
+            CapabilityKey.BROWSER_EXTERNAL_DOMAIN,
+            CapabilityKey.BROWSER_LOGIN_FLOW,
+            CapabilityKey.WEB_PUBLISH,
+            CapabilityKey.SOCIAL_POST_CREATE,
+            CapabilityKey.MARKETING_ANALYTICS_READ
+        )
+    ),
+    SkillCatalogEntry(
+        name = "audience-scout",
+        displayName = "Audience Scout",
+        description = "Research owned and organic-channel audience signals without publishing.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.MARKETING_ANALYTICS_READ)
+    ),
+    SkillCatalogEntry(
+        name = "content-publisher",
+        displayName = "Content Publisher",
+        description = "Draft and publish owned web or CMS content through the Marketing Operator policy.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_INTERACT, CapabilityKey.WEB_PUBLISH)
+    ),
+    SkillCatalogEntry(
+        name = "social-publisher",
+        displayName = "Social Publisher",
+        description = "Create organic social posts through delegated channel accounts.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_INTERACT, CapabilityKey.SOCIAL_POST_CREATE)
+    ),
+    SkillCatalogEntry(
+        name = "analytics-reporter",
+        displayName = "Analytics Reporter",
+        description = "Read delegated marketing analytics and summarize channel performance.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.MARKETING_ANALYTICS_READ),
+        dangerous = false
+    ),
+    SkillCatalogEntry(
         name = "video-plan",
         displayName = "Video Builder",
         description = "Plan local video work with Remotion or FFmpeg without rendering or uploading by default.",
