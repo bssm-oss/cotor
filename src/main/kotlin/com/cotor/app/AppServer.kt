@@ -575,63 +575,6 @@ internal fun Application.cotorAppModule(
                 }
             }
 
-            route("/marketing") {
-                get("/policies") {
-                    if (!requireToken(token)) return@get
-                    call.respond(
-                        desktopService.listMarketingDelegationPolicies(
-                            companyId = call.request.queryParameters["companyId"],
-                            agentId = call.request.queryParameters["agentId"]
-                        )
-                    )
-                }
-
-                post("/policies") {
-                    if (!requireToken(token)) return@post
-                    val request = call.receive<UpsertMarketingDelegationPolicyRequest>()
-                    respondDesktopRequest {
-                        desktopService.upsertMarketingDelegationPolicy(request)
-                    }
-                }
-
-                patch("/policies/{policyId}") {
-                    if (!requireToken(token)) return@patch
-                    val policyId = call.parameters["policyId"]
-                        ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "policyId is required"))
-                    val request = call.receive<UpsertMarketingDelegationPolicyRequest>()
-                    respondDesktopRequest {
-                        desktopService.upsertMarketingDelegationPolicy(request.copy(id = policyId))
-                    }
-                }
-
-                get("/runs") {
-                    if (!requireToken(token)) return@get
-                    call.respond(
-                        desktopService.listMarketingRuns(
-                            companyId = call.request.queryParameters["companyId"],
-                            agentId = call.request.queryParameters["agentId"]
-                        )
-                    )
-                }
-
-                post("/runs") {
-                    if (!requireToken(token)) return@post
-                    val request = call.receive<MarketingRunRequest>()
-                    respondDesktopRequest {
-                        desktopService.runMarketing(request)
-                    }
-                }
-
-                get("/runs/{runId}") {
-                    if (!requireToken(token)) return@get
-                    val runId = call.parameters["runId"]
-                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "runId is required"))
-                    respondDesktopRequest {
-                        desktopService.marketingRun(runId)
-                    }
-                }
-            }
-
             route("/repositories") {
                 get {
                     if (!requireToken(token)) return@get
