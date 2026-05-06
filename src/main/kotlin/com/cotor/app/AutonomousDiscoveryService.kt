@@ -242,6 +242,7 @@ class AutonomousDiscoveryService(
         return signals
             .filter { it.companyId == companyId && it.status == CompanyProblemSignalStatus.OPEN }
             .filter { it.confidence >= 0.6 }
+            .filter { severityRank(it.severity) >= 2 }
             .filter { it.cooldownUntil == null || it.cooldownUntil <= now }
             .filter { "auto-discovery:${it.id}" !in activeDiscoveryGoalPolicies }
             .maxWithOrNull(compareBy<CompanyProblemSignal> { severityRank(it.severity) }.thenBy { it.firstSeenAt })
