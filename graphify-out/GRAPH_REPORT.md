@@ -1,7 +1,7 @@
 # Graph Report - cotor  (2026-05-07)
 
 ## Corpus Check
-- 341 files · ~549,561 words
+- 341 files · ~549,576 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -314,14 +314,14 @@
 10. `GoalDrivenTaskPlanner` - 25 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `main()` --calls--> `close`  [INFERRED]
-  src/main/resources/desktop/pty_bridge.py → macos/Sources/CotorDesktopApp/Localization.swift
-- `userFacingIssueKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `userFacingDecisionTitle()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `localizedSourceKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
+- `close` --calls--> `main()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → src/main/resources/desktop/pty_bridge.py
+- `language` --calls--> `userFacingIssueKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `userFacingDecisionTitle()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `localizedSourceKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
 - `sceneState()` --calls--> `PixelOfficeLayout`  [INFERRED]
   macos/Tests/CotorDesktopAppTests/MeetingRoomProjectionTests.swift → macos/Sources/CotorDesktopApp/MeetingRoomScene.swift
 
