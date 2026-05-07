@@ -46,6 +46,15 @@ enum AgentSkillPolicy: String, CaseIterable, Identifiable, Hashable {
     case disabled = "DISABLED"
 
     var id: String { rawValue }
+
+    func label(_ language: AppLanguage) -> String {
+        switch self {
+        case .auto: return language("Auto", "자동 실행")
+        case .approvalRequired: return language("Approval Required", "확인 후 실행")
+        case .readOnly: return language("Read Only", "읽기 전용")
+        case .disabled: return language("Disabled", "비활성")
+        }
+    }
 }
 
 struct AgentSkillCardRecord: Identifiable, Hashable {
@@ -59,6 +68,7 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
     let selectedSkills: [AgentSkillChipRecord]
     let capabilityScopes: [AgentSkillScope]
     let policyChips: [AgentSkillPolicy]
+    let hasDisabledCapabilities: Bool
 
     init(
         agent: CompanyAgentDefinitionRecord,
@@ -113,19 +123,20 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
         capabilityScopes = scopes
 
         var policies = Set<AgentSkillPolicy>()
-        if !agent.enabled {
-            policies.insert(.disabled)
-        }
+        var disabledCapabilitiesFound = false
         if let skillRun = settings["SKILL_RUN"] {
-            policies.insert(Self.policy(for: skillRun))
+            let p = Self.policy(for: skillRun)
+            if p == .disabled { disabledCapabilitiesFound = true } else { policies.insert(p) }
         }
         for (capability, setting) in settings {
             let normalized = Self.normalizedCapability(capability)
             guard activeCapabilityKeys.contains(normalized), !["SKILL_RUN"].contains(normalized) else { continue }
             guard !Self.scopes(forCapability: normalized).isEmpty else { continue }
-            policies.insert(Self.policy(for: setting))
+            let p = Self.policy(for: setting)
+            if p == .disabled { disabledCapabilitiesFound = true } else { policies.insert(p) }
         }
         policyChips = AgentSkillPolicy.allCases.filter { policies.contains($0) }
+        hasDisabledCapabilities = agent.enabled && disabledCapabilitiesFound
     }
 
     private static func selectedSkillIDs(
