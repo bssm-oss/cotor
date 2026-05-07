@@ -216,8 +216,8 @@ The current build includes a working local operations layer:
 - inspect per-agent performance derived from existing company issues, runs, reviews, org profiles, and agent definitions, with insufficient-data agents shown separately
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page as a `Live Office` runtime projection with event-driven agent sprites, issue movement, review flow, runtime/backend/review/session summaries, and click-through agent/issue/zone detail sheets
-- use the Operator Chat surface to ask for status, change all selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
-- ask the HR Manager through Operator Chat to hire missing specialists or assign mentors; HR uses `opencode/nemotron-3-super-free`, avoids duplicate roles, and caps automatic hiring so teams do not grow without bounds
+- use the Operator Chat surface to ask for status, change all selected-company agents to the free OpenCode default (`opencode/nemotron-3-super-free`), explicitly choose DeepSeek only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
+- ask the HR Manager through Operator Chat to hire missing specialists or assign mentors; HR hires inherit the company execution model policy, avoid duplicate roles, and cap automatic hiring so teams do not grow without bounds
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel
 - inspect compact runtime status and recent issues from the company summary page, then open advanced details only when needed

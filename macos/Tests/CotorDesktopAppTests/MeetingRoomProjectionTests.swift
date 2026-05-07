@@ -51,6 +51,33 @@ struct MeetingRoomProjectionTests {
     }
 
     @Test
+    func sharedCliNameDoesNotMakeEveryAgentLookRunning() {
+        let projection = MeetingRoomProjection.build(
+            companyId: "company",
+            agents: [
+                agent(id: "ceo", title: "CEO"),
+                agent(id: "builder", title: "Builder"),
+                agent(id: "qa", title: "QA"),
+            ],
+            issues: [
+                issue(id: "issue-1", title: "Build feature", status: "IN_PROGRESS", assigneeProfileId: "builder")
+            ],
+            runningSessions: [
+                session(agentId: "builder", agentName: "opencode", issueId: "issue-1", status: "RUNNING")
+            ],
+            reviewQueue: [],
+            runtime: runtime(status: "RUNNING"),
+            activity: [],
+            messages: []
+        )
+
+        #expect(projection.runningSessionCount == 1)
+        #expect(projection.agents.filter { $0.visualState == .running }.map(\.id) == ["builder"])
+        #expect(projection.agents.first { $0.id == "ceo" }?.visualState == .idle)
+        #expect(projection.agents.first { $0.id == "qa" }?.visualState == .idle)
+    }
+
+    @Test
     func orgProfileAssignmentMapsIssueToCompanyAgent() {
         let projection = MeetingRoomProjection.build(
             companyId: "company",

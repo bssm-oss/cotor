@@ -219,8 +219,8 @@ cotor delete    # 삭제
 - 기존 회사 이슈, 실행, 리뷰, 조직 프로필, 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 생성
 - `라이브 오피스` 런타임 projection에서 이벤트 기반 에이전트 sprite, 이슈 이동, 리뷰 흐름, runtime/backend/review/session 요약, agent/issue/zone 상세 sheet를 제공하는 전용 미팅룸 보기
-- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
-- 운영 채팅에서 HR Manager에게 필요한 specialist 고용이나 사수 지정을 맡길 수 있음. HR은 `opencode/nemotron-3-super-free`를 쓰고, 중복 역할과 무제한 고용은 막음
+- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트를 무료 OpenCode 기본값(`opencode/nemotron-3-super-free`)으로 변경, 명시적으로 요청한 경우에만 DeepSeek 선택, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
+- 운영 채팅에서 HR Manager에게 필요한 specialist 고용이나 사수 지정을 맡길 수 있음. HR 고용은 회사의 현재 실행 모델 정책을 상속하고, 중복 역할과 무제한 고용은 막음
 - 느슨하게 쓴 채팅 요청도 CEO가 목표, 성공 기준, 담당 하위 이슈로 정리하게 하되 GitHub 저장소는 자동 생성하지 않음
 - `AGENT_APPROVED` 모드에서는 복구 가능한 민감 작업을 사용자 확인 패널 대신 상위 회사 에이전트 승인으로 라우팅
 - 한 wave가 끝나면 CEO planning lane을 다시 열어서 active goal이 첫 batch 이후에도 다음 이슈 wave를 이어서 만들 수 있음

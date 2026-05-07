@@ -237,6 +237,123 @@ class DesktopAppServiceExecutionLogFailureClassTest : FunSpec({
             runLog["failureClass"] shouldBe "no-diff"
         }
     }
+
+    test("company execution log classifies runtime stop exit 143 as interrupted") {
+        val appHome = Files.createTempDirectory("desktop-runtime-interrupted-home")
+        val repoRoot = Files.createTempDirectory("desktop-runtime-interrupted-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val repository = ManagedRepository(
+            id = "repo-runtime-interrupted",
+            name = "repo",
+            localPath = repoRoot.toString(),
+            sourceKind = RepositorySourceKind.LOCAL,
+            defaultBranch = "master",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val workspace = Workspace(
+            id = "workspace-runtime-interrupted",
+            repositoryId = repository.id,
+            name = "repo · master",
+            baseBranch = "master",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val company = Company(
+            id = "company-runtime-interrupted",
+            name = "Runtime Interrupted Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = repository.id,
+            defaultBaseBranch = "master",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val projectContext = CompanyProjectContext(
+            id = "context-runtime-interrupted",
+            companyId = company.id,
+            name = company.name,
+            slug = "runtime-interrupted",
+            contextDocPath = appHome.resolve("context.md").toString(),
+            lastUpdatedAt = 1L
+        )
+        val goal = CompanyGoal(
+            id = "goal-runtime-interrupted",
+            companyId = company.id,
+            projectContextId = projectContext.id,
+            title = "Review runtime stop",
+            description = "Runtime stop should not look like QA changes requested.",
+            status = GoalStatus.ACTIVE,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val issue = CompanyIssue(
+            id = "issue-runtime-interrupted",
+            companyId = company.id,
+            projectContextId = projectContext.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "QA review stopped run",
+            description = "A stopped QA run.",
+            status = IssueStatus.BLOCKED,
+            kind = "review",
+            providerBlockReason = "opencode run exited with code 143",
+            transitionReason = "Runtime stopped while execution was in progress; the issue was returned to the queue.",
+            createdAt = 1L,
+            updatedAt = 2L
+        )
+        val task = AgentTask(
+            id = "task-runtime-interrupted",
+            workspaceId = workspace.id,
+            issueId = issue.id,
+            title = issue.title,
+            prompt = issue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.FAILED,
+            createdAt = 1L,
+            updatedAt = 2L
+        )
+        val run = AgentRun(
+            id = "run-runtime-interrupted",
+            taskId = task.id,
+            workspaceId = workspace.id,
+            repositoryId = repository.id,
+            agentName = "opencode",
+            repoRoot = repoRoot.toString(),
+            baseBranch = "master",
+            status = AgentRunStatus.FAILED,
+            error = "opencode run exited with code 143",
+            branchName = "codex/runtime-interrupted",
+            worktreePath = repoRoot.toString(),
+            createdAt = 1L,
+            updatedAt = 2L
+        )
+        stateStore.save(
+            DesktopAppState(
+                repositories = listOf(repository),
+                workspaces = listOf(workspace),
+                companies = listOf(company),
+                projectContexts = listOf(projectContext),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                tasks = listOf(task),
+                runs = listOf(run)
+            )
+        )
+
+        val issueLog = service.executionLog(company.id).single { it["issueId"] == issue.id }
+        issueLog["blockedReasonCode"] shouldBe BlockedReasonCode.RUNTIME_INTERRUPTED.name
+        val runLog = (issueLog["tasks"] as List<Map<String, Any?>>)
+            .flatMap { taskLog -> taskLog["runs"] as List<Map<String, Any?>> }
+            .single()
+        runLog["blockedReasonCode"] shouldBe BlockedReasonCode.RUNTIME_INTERRUPTED.name
+    }
 })
 
 private object ArtifactQualityFailingExecutor : AgentExecutor {

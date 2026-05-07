@@ -3244,7 +3244,7 @@ class DesktopAppService(
                     source = source("approvalPauseId", "providerBlockReason", "publish.error", "run.error", "transitionReason"),
                     retryable = true
                 )
-            has(INTERRUPTED_RUN_ERROR, INTERRUPTED_ISSUE_REASON, "app-server stopped", "runtime stopped while execution") ->
+            has(INTERRUPTED_RUN_ERROR, INTERRUPTED_ISSUE_REASON, "app-server stopped", "runtime stopped while execution", "exit=143", "exit 143", "exit code 143", "exited with code 143") ->
                 snapshot(
                     code = BlockedReasonCode.RUNTIME_INTERRUPTED,
                     summary = "Execution was interrupted by runtime shutdown.",
@@ -4690,16 +4690,31 @@ class DesktopAppService(
             handled = true
         }
 
-        if (looksLikeDeepSeekModelUpdate(normalized)) {
+        resolveOperatorModelUpdate(trimmedMessage)?.let { modelUpdate ->
             actions += updateOperatorAgentModels(
                 companyId = companyId,
-                includeAllCompanies = referencesAllCompanies(normalized)
+                includeAllCompanies = referencesAllCompanies(normalized),
+                requestedModel = modelUpdate.requestedModel,
+                appliedModel = modelUpdate.appliedModel
             )
             summary = buildOperatorCompanySummary(companyId)
             handled = true
         }
 
-        if (looksLikeHrStaffingRequest(normalized)) {
+        val companyWorkIntakeRequest = looksLikeCompanyWorkIntakeRequest(normalized)
+        if (companyWorkIntakeRequest) {
+            val goal = createOperatorWorkIntakeGoal(companyId = companyId, message = trimmedMessage)
+            actions += OperatorCommandAction(
+                type = "company-work-intake",
+                title = "CEO work intake created",
+                detail = "Created goal: ${goal.title}. CEO planning will split this request into assigned issues when the company runtime runs.",
+                status = "DONE"
+            )
+            summary = buildOperatorCompanySummary(companyId)
+            handled = true
+        }
+
+        if (!companyWorkIntakeRequest && looksLikeHrStaffingRequest(normalized)) {
             if (activeMode == OperatorAutomationMode.ASK_ME && !confirmStaffing) {
                 pendingApprovals += OperatorCommandAction(
                     type = "hr-staffing",
@@ -5171,6 +5186,21 @@ class DesktopAppService(
         stateStore.load().companies.firstOrNull { it.id == companyId }?.operatorAutomationMode
             ?: throw IllegalArgumentException("Company not found: $companyId")
 
+    private suspend fun createOperatorWorkIntakeGoal(companyId: String, message: String): CompanyGoal {
+        val company = stateStore.load().companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val draft = buildCeoChatIntakeDraft(company, message)
+        return createGoal(
+            companyId = companyId,
+            title = draft.title,
+            description = draft.description,
+            successMetrics = draft.successMetrics,
+            autonomyEnabled = true,
+            operatingPolicy = "Company Operator work intake: CEO planning must produce the execution graph before downstream work starts.",
+            startRuntimeIfNeeded = false
+        )
+    }
+
     private suspend fun buildOperatorCompanySummary(companyId: String): OperatorCompanySummary {
         val state = stateStore.load().withDerivedMetrics()
         val company = state.companies.firstOrNull { it.id == companyId }
@@ -5259,9 +5289,16 @@ class DesktopAppService(
         return "$main ${formatOperatorStatusBrief(summary)}"
     }
 
+    private data class OperatorModelUpdate(
+        val requestedModel: String,
+        val appliedModel: String
+    )
+
     private suspend fun updateOperatorAgentModels(
         companyId: String,
-        includeAllCompanies: Boolean
+        includeAllCompanies: Boolean,
+        requestedModel: String,
+        appliedModel: String
     ): OperatorCommandAction = stateMutex.withLock {
         val state = stateStore.load()
         val selectedCompany = state.companies.firstOrNull { it.id == companyId }
@@ -5284,7 +5321,7 @@ class DesktopAppService(
             if (definition.id in updatedDefinitionIds && definition.companyId in targetCompanyIds) {
                 definition.copy(
                     agentCli = "opencode",
-                    model = OpenCodeDefaults.DEFAULT_MODEL,
+                    model = appliedModel,
                     updatedAt = now
                 )
             } else {
@@ -5301,7 +5338,7 @@ class DesktopAppService(
                 companyId = company.id,
                 source = "operator",
                 title = "Updated agent models",
-                detail = "opencode · ${OpenCodeDefaults.DEFAULT_MODEL}"
+                detail = "requested=$requestedModel, applied=opencode · $appliedModel"
             )
         }.withDerivedMetrics()
         stateStore.save(nextState)
@@ -5314,7 +5351,7 @@ class DesktopAppService(
         OperatorCommandAction(
             type = "agent-model-update",
             title = "Agent models updated",
-            detail = "${targetDefinitions.size} agent(s) were moved to opencode with ${OpenCodeDefaults.DEFAULT_MODEL} across ${targetCompanies.size} company scope(s).",
+            detail = "${targetDefinitions.size} agent(s) were moved to opencode with $appliedModel across ${targetCompanies.size} company scope(s). Requested model: $requestedModel. Applied model: $appliedModel.",
             status = "DONE"
         )
     }
@@ -5338,6 +5375,11 @@ class DesktopAppService(
         val mentorAssignments: List<HrMentorAssignment>,
         val capped: Boolean,
         val noOpReason: String?
+    )
+
+    private data class CompanyAgentExecutionModel(
+        val agentCli: String,
+        val model: String?
     )
 
     private suspend fun runHrStaffingReviewAsOperator(
@@ -5373,6 +5415,7 @@ class DesktopAppService(
             .sortedWith(compareBy<CompanyAgentDefinition> { it.displayOrder }.thenBy { it.title.lowercase() })
         val activeDefinitions = companyDefinitions.filter { it.enabled }
         val activeDefinitionCount = activeDefinitions.size
+        val inheritedExecutionModel = dominantCompanyExecutionModel(activeDefinitions)
         val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
             .filter { it.companyId == companyId && it.enabled }
         val occupiedProfileIds = occupiedCompanyProfileIds(state, companyId)
@@ -5432,8 +5475,8 @@ class DesktopAppService(
                 id = UUID.randomUUID().toString(),
                 companyId = companyId,
                 title = uniqueHrHireTitle(need.title, nextCompanyDefinitions + hiredDefinitions),
-                agentCli = "opencode",
-                model = OpenCodeDefaults.DEFAULT_MODEL,
+                agentCli = inheritedExecutionModel.agentCli,
+                model = inheritedExecutionModel.model,
                 roleSummary = need.roleSummary,
                 specialties = need.specialties,
                 collaborationInstructions = "Work with ${mentor?.title ?: "the company lead"} as mentor and keep HR Manager informed about onboarding blockers.",
@@ -5582,6 +5625,30 @@ class DesktopAppService(
             mentorAssignments.isNotEmpty() -> "Assigned mentors for ${mentorAssignments.joinToString { it.agentTitle }}."
             else -> "No staffing change needed."
         }
+
+    private fun dominantCompanyExecutionModel(definitions: List<CompanyAgentDefinition>): CompanyAgentExecutionModel {
+        val activeModels = definitions
+            .filter { it.enabled }
+            .map { definition ->
+                CompanyAgentExecutionModel(
+                    agentCli = definition.agentCli.trim().ifBlank { "opencode" },
+                    model = OpenCodeDefaults.normalizeModel(definition.model)
+                )
+            }
+        if (activeModels.isEmpty()) {
+            return CompanyAgentExecutionModel("opencode", OpenCodeDefaults.DEFAULT_MODEL)
+        }
+        return activeModels
+            .groupingBy { it }
+            .eachCount()
+            .maxWithOrNull(
+                compareBy<Map.Entry<CompanyAgentExecutionModel, Int>> { it.value }
+                    .thenBy { if (it.key.agentCli.equals("opencode", ignoreCase = true)) 1 else 0 }
+                    .thenBy { if (it.key.model == OpenCodeDefaults.DEFAULT_MODEL) 1 else 0 }
+            )
+            ?.key
+            ?: CompanyAgentExecutionModel("opencode", OpenCodeDefaults.DEFAULT_MODEL)
+    }
 
     private fun occupiedCompanyProfileIds(state: DesktopAppState, companyId: String): Set<String> {
         val issueCompanyById = state.issues.associate { it.id to it.companyId }
@@ -5885,11 +5952,74 @@ class DesktopAppService(
     private fun looksLikeStatusRequest(text: String): Boolean =
         containsAny(text, "status", "health", "잘 돌아", "잘돌", "상태", "확인", "점검", "보고")
 
-    private fun looksLikeDeepSeekModelUpdate(text: String): Boolean =
-        text.contains("opencode") && (text.contains("deepseek") || text.contains("모델") || text.contains("model"))
+    private fun resolveOperatorModelUpdate(rawText: String): OperatorModelUpdate? {
+        val text = rawText.lowercase()
+        val mentionsOpenCode = text.contains("opencode")
+        val mentionsModelChange =
+            containsAny(text, "model", "모델", "바꿔", "변경", "change", "set", "update", "deepseek", "nemotron", "free", "무료")
+        if (!mentionsOpenCode || !mentionsModelChange) {
+            return null
+        }
+
+        Regex("""\b(?:opencode|opencode-go|deepseek)/[a-z0-9._:-]+""")
+            .find(text)
+            ?.value
+            ?.let { explicit ->
+                val normalized = OpenCodeDefaults.normalizeModel(explicit)
+                if (normalized?.let(OpenCodeDefaults::isSelectableModel) == true) {
+                    return OperatorModelUpdate(requestedModel = explicit, appliedModel = normalized)
+                }
+            }
+
+        if (text.contains("deepseek")) {
+            return OperatorModelUpdate(
+                requestedModel = "opencode deepseek",
+                appliedModel = OpenCodeDefaults.DEEPSEEK_FLASH_MODEL
+            )
+        }
+
+        if (containsAny(text, "nemotron", "free", "무료")) {
+            return OperatorModelUpdate(
+                requestedModel = "opencode free",
+                appliedModel = OpenCodeDefaults.DEFAULT_MODEL
+            )
+        }
+
+        return OperatorModelUpdate(
+            requestedModel = "opencode default",
+            appliedModel = OpenCodeDefaults.DEFAULT_MODEL
+        )
+    }
 
     private fun looksLikeHrStaffingRequest(text: String): Boolean =
         containsAny(text, "hr", "hiring", "hire", "staff", "mentor", "팀 보강", "사수", "고용", "채용", "사람 붙", "필요한 사람", "인력")
+
+    private fun looksLikeCompanyWorkIntakeRequest(text: String): Boolean {
+        val asksForWork = containsAny(
+            text,
+            "create", "build", "implement", "write", "fix", "plan", "launch", "improve", "deliver",
+            "goal", "objective", "work", "task",
+            "만들", "생성", "구현", "작성", "고쳐", "수정", "계획", "런칭", "개선", "목표", "작업"
+        )
+        if (!asksForWork) {
+            return false
+        }
+        val mentionsCompanyExecution = containsAny(
+            text,
+            "cross-functional", "company", "agent", "agents", "ceo", "qa", "review", "builder",
+            "marketing", "hr", "hire", "staff", "collaborate", "collaboration",
+            "회사", "에이전트", "마케팅", "검증", "리뷰", "협업", "배분", "분배", "영입", "채용"
+        )
+        val hasConcreteDeliverable = containsAny(
+            text,
+            "docs/", ".md", "readme", "report", "plan", "launch", "evidence", "pr", "merge",
+            "문서", "보고서", "증거", "계획서", "런칭", "머지"
+        )
+        val hrOnly = looksLikeHrStaffingRequest(text) &&
+            !hasConcreteDeliverable &&
+            !containsAny(text, "qa", "review", "builder", "marketing", "ceo", "검증", "리뷰", "마케팅", "빌더")
+        return (mentionsCompanyExecution || hasConcreteDeliverable || text.length >= 96) && !hrOnly
+    }
 
     private fun looksLikeRuntimeStart(text: String): Boolean =
         containsAny(text, "runtime start", "start runtime", "런타임 시작", "실행 시작", "가동")
@@ -5915,7 +6045,7 @@ class DesktopAppService(
 
     private fun looksLikeDeterministicOperatorCommand(text: String): Boolean =
         requestsFullAutoMode(text) ||
-            looksLikeDeepSeekModelUpdate(text) ||
+            resolveOperatorModelUpdate(text) != null ||
             looksLikeHrStaffingRequest(text) ||
             looksLikeRuntimeStart(text) ||
             looksLikeRuntimeStop(text) ||
@@ -7356,6 +7486,36 @@ class DesktopAppService(
         return reviewMatches && executionMatches && queueMatches && approvalMatches
     }
 
+    private fun qaPassAlreadyAdvanced(queueItem: ReviewQueueItem, executionIssue: CompanyIssue): Boolean =
+        queueItem.status == ReviewQueueStatus.READY_FOR_CEO &&
+            queueItem.qaVerdict.equals("PASS", ignoreCase = true) &&
+            executionIssue.status in setOf(IssueStatus.READY_FOR_CEO, IssueStatus.DONE) &&
+            executionIssue.qaVerdict.equals("PASS", ignoreCase = true)
+
+    private fun qaReviewResultMatchesQueue(
+        reviewIssue: CompanyIssue,
+        executionIssue: CompanyIssue,
+        queueItem: ReviewQueueItem
+    ): Boolean {
+        val verdict = queueItem.qaVerdict?.takeIf { it.isNotBlank() } ?: return false
+        val reviewMatchesVerdict = reviewIssue.qaVerdict.equals(verdict, ignoreCase = true)
+        val executionMatchesVerdict = executionIssue.qaVerdict.equals(verdict, ignoreCase = true)
+        if (!reviewMatchesVerdict || !executionMatchesVerdict) {
+            return false
+        }
+        return when {
+            verdict.equals("PASS", ignoreCase = true) ->
+                queueItem.status in setOf(ReviewQueueStatus.READY_FOR_CEO, ReviewQueueStatus.READY_TO_MERGE, ReviewQueueStatus.MERGED) &&
+                    reviewIssue.status == IssueStatus.DONE &&
+                    executionIssue.status in setOf(IssueStatus.READY_FOR_CEO, IssueStatus.DONE)
+            verdict.equals("CHANGES_REQUESTED", ignoreCase = true) ->
+                queueItem.status == ReviewQueueStatus.CHANGES_REQUESTED &&
+                    reviewIssue.status == IssueStatus.BLOCKED &&
+                    executionIssue.status == IssueStatus.PLANNED
+            else -> false
+        }
+    }
+
     private fun approvalTaskAlreadyApplied(
         approvalIssue: CompanyIssue,
         executionIssue: CompanyIssue,
@@ -7380,6 +7540,30 @@ class DesktopAppService(
                 queueItem.ceoVerdict == verdict.value &&
                 normalizedReviewFeedback(queueItem.ceoFeedback) == normalizedFeedback
         return approvalMatches && executionMatches && queueMatches
+    }
+
+    private fun ceoApprovalResultMatchesQueue(
+        approvalIssue: CompanyIssue,
+        executionIssue: CompanyIssue,
+        queueItem: ReviewQueueItem
+    ): Boolean {
+        val verdict = queueItem.ceoVerdict?.takeIf { it.isNotBlank() } ?: return false
+        val approvalMatchesVerdict = approvalIssue.ceoVerdict.equals(verdict, ignoreCase = true)
+        val executionMatchesVerdict = executionIssue.ceoVerdict.equals(verdict, ignoreCase = true)
+        if (!approvalMatchesVerdict || !executionMatchesVerdict) {
+            return false
+        }
+        return when {
+            verdict.equals("APPROVE", ignoreCase = true) ->
+                queueItem.status in setOf(ReviewQueueStatus.READY_FOR_CEO, ReviewQueueStatus.READY_TO_MERGE, ReviewQueueStatus.MERGED) &&
+                    approvalIssue.status in setOf(IssueStatus.IN_PROGRESS, IssueStatus.DONE) &&
+                    executionIssue.status in setOf(IssueStatus.READY_FOR_CEO, IssueStatus.DONE)
+            verdict.equals("CHANGES_REQUESTED", ignoreCase = true) ->
+                queueItem.status == ReviewQueueStatus.CHANGES_REQUESTED &&
+                    approvalIssue.status == IssueStatus.BLOCKED &&
+                    executionIssue.status == IssueStatus.PLANNED
+            else -> false
+        }
     }
 
     private suspend fun completeApprovalIssueAfterMerge(issueId: String) {
@@ -8028,7 +8212,8 @@ class DesktopAppService(
     }
 
     suspend fun stopCompanyRuntime(companyId: String): CompanyRuntimeSnapshot {
-        val terminatedBeforeStop = terminateActiveCompanyRunProcesses(companyId)
+        val interruptedBeforeStop = interruptActiveCompanyTasksForRuntimeStop(companyId)
+        val terminatedBeforeStop = terminateProcessIds(interruptedBeforeStop.processIds)
         val runtimeJob = companyRuntimeJobs.remove(companyId)
         runtimeJob?.cancel()
         if (runtimeJob != null) {
@@ -8079,6 +8264,101 @@ class DesktopAppService(
         return snapshot
     }
 
+    private data class RuntimeStopInterruption(
+        val taskCount: Int,
+        val processIds: List<Long>
+    )
+
+    private suspend fun interruptActiveCompanyTasksForRuntimeStop(companyId: String): RuntimeStopInterruption {
+        val traceEvents = mutableListOf<CompanyAutomationTraceEvent>()
+        val result = stateMutex.withLock {
+            val state = stateStore.load()
+            val now = System.currentTimeMillis()
+            val issuesById = state.issues.associateBy { it.id }
+            val goalsById = state.goals.associateBy { it.id }
+            val activeTasks = state.tasks.filter { task ->
+                task.status in setOf(DesktopTaskStatus.RUNNING, DesktopTaskStatus.QUEUED) &&
+                    task.issueId?.let { issueId -> issuesById[issueId]?.companyId == companyId } == true
+            }
+            if (activeTasks.isEmpty()) {
+                return@withLock RuntimeStopInterruption(taskCount = 0, processIds = emptyList())
+            }
+
+            val interruptedTaskIds = activeTasks.mapTo(linkedSetOf()) { it.id }
+            intentionallyInterruptedTaskIds.addAll(interruptedTaskIds)
+            val activeProcessIds = state.runs
+                .filter { run ->
+                    run.taskId in interruptedTaskIds &&
+                        run.status in setOf(AgentRunStatus.RUNNING, AgentRunStatus.QUEUED)
+                }
+                .mapNotNull { it.processId }
+                .distinct()
+
+            val updatedRuns = state.runs.map { run ->
+                if (run.taskId in interruptedTaskIds &&
+                    run.status in setOf(AgentRunStatus.RUNNING, AgentRunStatus.QUEUED)
+                ) {
+                    run.copy(
+                        status = AgentRunStatus.FAILED,
+                        error = INTERRUPTED_RUN_ERROR,
+                        updatedAt = now
+                    )
+                } else {
+                    run
+                }
+            }
+            val updatedTasks = state.tasks.map { task ->
+                if (task.id in interruptedTaskIds) {
+                    task.copy(status = DesktopTaskStatus.FAILED, updatedAt = now)
+                } else {
+                    task
+                }
+            }
+            val latestRunsByTaskId = updatedRuns
+                .groupBy { it.taskId }
+                .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
+            val updatedIssues = state.issues.map { issue ->
+                val task = activeTasks.firstOrNull { it.issueId == issue.id }
+                if (task == null || issue.status in setOf(IssueStatus.DONE, IssueStatus.CANCELED)) {
+                    issue
+                } else {
+                    val updatedIssue = issue.copy(
+                        status = IssueStatus.BLOCKED,
+                        providerBlockReason = INTERRUPTED_RUN_ERROR,
+                        transitionReason = INTERRUPTED_ISSUE_REASON,
+                        updatedAt = now
+                    )
+                    traceEvents += buildCompanyAutomationTraceEvent(
+                        issue = issue,
+                        goal = issue.goalId?.let(goalsById::get),
+                        oldStatus = issue.status,
+                        newStatus = updatedIssue.status,
+                        source = "stopCompanyRuntime",
+                        reason = INTERRUPTED_ISSUE_REASON,
+                        latestTask = task.copy(status = DesktopTaskStatus.FAILED, updatedAt = now),
+                        latestRun = latestRunsByTaskId[task.id],
+                        retryEligible = true
+                    )
+                    updatedIssue
+                }
+            }
+            val nextState = state.copy(
+                issues = updatedIssues,
+                tasks = updatedTasks,
+                runs = updatedRuns
+            ).recordSignal(
+                source = "runtime",
+                message = "Interrupted ${activeTasks.size} active task(s) during runtime stop.",
+                companyId = companyId,
+                severity = "warning"
+            ).withDerivedMetrics()
+            stateStore.save(nextState)
+            RuntimeStopInterruption(taskCount = activeTasks.size, processIds = activeProcessIds)
+        }
+        traceEvents.forEach(::appendCompanyAutomationTrace)
+        return result
+    }
+
     private suspend fun terminateActiveCompanyRunProcesses(companyId: String): Int {
         val processIds = stateStore.load().let { state ->
             val tasksById = state.tasks.associateBy { it.id }
@@ -8095,8 +8375,15 @@ class DesktopAppService(
         if (processIds.isEmpty()) {
             return 0
         }
+        return terminateProcessIds(processIds)
+    }
+
+    private suspend fun terminateProcessIds(processIds: List<Long>): Int {
+        if (processIds.isEmpty()) {
+            return 0
+        }
         return withContext(Dispatchers.IO) {
-            processIds.count { processId -> terminateProcessTree(processId) }
+            processIds.distinct().count { processId -> terminateProcessTree(processId) }
         }
     }
 
@@ -10560,6 +10847,10 @@ class DesktopAppService(
                                     reviewIssue.status == IssueStatus.DONE
                                 else -> false
                             }
+                    val reviewResultAlreadyReflected =
+                        reviewIssue != null &&
+                            latestReviewTask != null &&
+                            qaReviewResultMatchesQueue(reviewIssue, executionIssue, queueItem)
                     val reviewAssigneeMismatch =
                         reviewIssue != null &&
                             qaProfile != null &&
@@ -10569,7 +10860,11 @@ class DesktopAppService(
                             (
                                 reviewAssigneeMismatch ||
                                     (!reviewIssueCanAdoptQueueStateWithoutTask && latestReviewTask == null) ||
-                                    (!reviewLineageCanBeAdopted && (reviewIssueReopenedAfterTask || reviewLineageExplicitMismatch))
+                                    (
+                                        !reviewResultAlreadyReflected &&
+                                            !reviewLineageCanBeAdopted &&
+                                            (reviewIssueReopenedAfterTask || reviewLineageExplicitMismatch)
+                                        )
                                 )
                     val noDiffPullRequestReusePending =
                         latestExecutionRun?.let { isExistingPrNoDiffReuseCandidate(executionIssue, it) } == true
@@ -10779,6 +11074,10 @@ class DesktopAppService(
                                             approvalIssue.status in setOf(IssueStatus.PLANNED, IssueStatus.DELEGATED, IssueStatus.IN_PROGRESS)
                                         )
                                 )
+                    val approvalResultAlreadyReflected =
+                        approvalIssue != null &&
+                            latestApprovalTask != null &&
+                            ceoApprovalResultMatchesQueue(approvalIssue, executionIssue, refreshedQueue)
                     val approvalAssigneeMismatch =
                         approvalIssue != null &&
                             chiefProfile != null &&
@@ -10788,7 +11087,11 @@ class DesktopAppService(
                             (
                                 approvalAssigneeMismatch ||
                                     (!approvalIssueCanAdoptQueueStateWithoutTask && latestApprovalTask == null) ||
-                                    (!approvalLineageCanBeAdopted && (approvalIssueReopenedAfterTask || approvalLineageExplicitMismatch))
+                                    (
+                                        !approvalResultAlreadyReflected &&
+                                            !approvalLineageCanBeAdopted &&
+                                            (approvalIssueReopenedAfterTask || approvalLineageExplicitMismatch)
+                                        )
                                 )
                     if (refreshedQueue.status == ReviewQueueStatus.READY_FOR_CEO && (approvalIssue == null || staleApprovalLineage)) {
                         if (chiefProfile != null) {
@@ -15394,6 +15697,7 @@ class DesktopAppService(
             queueItem = scopedQueueItems.maxByOrNull { it.updatedAt }
         )
         val userFacingDesignWork = issueNeedsStrongDesignGuidance(issue, profile)
+        val ownedMarketingWork = issueNeedsOwnedMarketingGuardrails(issue, profile)
         val promptBody = when (issue.kind.lowercase()) {
             "planning" -> buildCeoPlanningPrompt(state, issue, profile)
             "review" -> buildString {
@@ -15446,6 +15750,7 @@ class DesktopAppService(
                 appendLine("- Do not modify repository files unless a tiny fix is absolutely required to unblock the flow.")
                 appendLine("- No publish is required for a pure review step.")
                 appendLine("- If the provided execution evidence is sufficient and you do not find a concrete defect, mark the work ready instead of asking for speculative follow-up.")
+                appendLine("- If the work is marketing-related, reject generic templates and any out-of-scope paid ads, mass email, DMs, third-party groups, or non-owned-channel posting.")
                 appendLine("- The first line of your response must be exactly `QA_VERDICT: PASS` or `QA_VERDICT: CHANGES_REQUESTED`.")
                 appendLine("- After the verdict line, return concise feedback, residual risks, and whether the work is ready for CEO approval.")
                 memoryBundle?.let { memory ->
@@ -15524,6 +15829,9 @@ class DesktopAppService(
                     if (userFacingDesignWork) {
                         appendLine("- Design: Berkeley Mono, warm dark surfaces, crisp borders, restrained accents, flat hierarchy, strong spacing rhythm.")
                     }
+                    if (ownedMarketingWork) {
+                        appendLine("- Marketing guardrails: make the output Cotor-specific, tied to this repository/product evidence, and limited to owned website/CMS plus owned organic social. Do not propose paid ads, mass email, DMs, third-party community/group posting, or generic hashtag/tagging filler.")
+                    }
                     appendLine("- Run one targeted validation command after the change, report the result, and stop.")
                     return@buildString
                 }
@@ -15593,6 +15901,14 @@ class DesktopAppService(
                     appendLine("- Use an OpenCode-style visual system: Berkeley Mono, warm dark surfaces, crisp borders, restrained accent colors, flat hierarchy, and strong spacing rhythm.")
                     appendLine("- Avoid generic gradients, glassmorphism, oversized radii, random ornaments, and placeholder demo copy.")
                 }
+                if (!validationOnlyFollowUp && ownedMarketingWork) {
+                    appendLine()
+                    appendLine("Marketing quality requirements:")
+                    appendLine("- Make the deliverable specific to Cotor, the selected company, and the repository evidence visible in this worktree.")
+                    appendLine("- Stay inside owned website/CMS and owned organic social channels only.")
+                    appendLine("- Do not propose or perform paid ads, budget changes, mass email, DMs, third-party group/community posting, scraping, or account changes.")
+                    appendLine("- Avoid generic launch-plan filler, vague relevant groups, and empty hashtag/tagging lists unless the owned channel policy explicitly names them.")
+                }
                 issue.qaFeedback?.takeIf { it.isNotBlank() }?.let { feedback ->
                     appendLine()
                     appendLine("Latest QA feedback:")
@@ -15649,6 +15965,21 @@ class DesktopAppService(
             "page", "web", "website", "html", "hero", "layout", "interaction"
         )
         return designKeywords.any { it in issueText }
+    }
+
+    private fun issueNeedsOwnedMarketingGuardrails(issue: CompanyIssue, profile: OrgAgentProfile): Boolean {
+        val issueText = buildString {
+            append(issue.title)
+            append(' ')
+            append(issue.description)
+            append(' ')
+            append(profile.roleName)
+            append(' ')
+            append(profile.capabilities.joinToString(" "))
+            append(' ')
+            append(issue.acceptanceCriteria.joinToString(" "))
+        }.lowercase()
+        return listOf("marketing", "content", "social", "owned", "launch", "마케팅", "콘텐츠", "소셜").any { it in issueText }
     }
 
     private data class CompanyMemorySnapshot(
@@ -16768,6 +17099,30 @@ class DesktopAppService(
             .take(1_000)
             .ifBlank { "No assistant planning text was recorded." }
 
+    private fun isRuntimeInterruptedTaskResult(
+        task: AgentTask,
+        finalStatus: DesktopTaskStatus,
+        run: AgentRun?
+    ): Boolean {
+        if (finalStatus == DesktopTaskStatus.COMPLETED) {
+            return false
+        }
+        if (task.id in intentionallyInterruptedTaskIds) {
+            return true
+        }
+        val text = listOfNotNull(run?.error, run?.output, run?.publish?.error, task.status.name, finalStatus.name)
+            .joinToString("\n")
+            .lowercase()
+        return text.contains(INTERRUPTED_RUN_ERROR.lowercase()) ||
+            text.contains(INTERRUPTED_ISSUE_REASON.lowercase()) ||
+            text.contains("app-server stopped") ||
+            text.contains("runtime stopped while execution") ||
+            text.contains("exit=143") ||
+            text.contains("exit 143") ||
+            text.contains("exit code 143") ||
+            text.contains("exited with code 143")
+    }
+
     private fun buildCeoPlanningRepairTask(
         state: DesktopAppState,
         issue: CompanyIssue,
@@ -16840,6 +17195,44 @@ class DesktopAppService(
             val company = state.companies.firstOrNull { it.id == currentIssue.companyId } ?: return@withLock
             val workspace = state.workspaces.firstOrNull { it.id == currentIssue.workspaceId } ?: return@withLock
             val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+            if (isRuntimeInterruptedTaskResult(task, finalStatus, primaryRun)) {
+                val interruptedPlanningIssue = currentIssue.copy(
+                    status = IssueStatus.PLANNED,
+                    providerBlockReason = null,
+                    transitionReason = INTERRUPTED_ISSUE_REASON,
+                    blockedBy = emptyList(),
+                    updatedAt = now
+                )
+                traceEvents += buildCompanyAutomationTraceEvent(
+                    issue = currentIssue,
+                    goal = goal,
+                    oldStatus = currentIssue.status,
+                    newStatus = interruptedPlanningIssue.status,
+                    source = "syncPlanningIssueFromTask",
+                    reason = INTERRUPTED_ISSUE_REASON,
+                    latestTask = task,
+                    latestRun = primaryRun,
+                    retryEligible = true
+                )
+                stateStore.save(
+                    state.copy(
+                        issues = state.issues.map { existing -> if (existing.id == currentIssue.id) interruptedPlanningIssue else existing }
+                    ).recordCompanyActivity(
+                        companyId = company.id,
+                        projectContextId = currentIssue.projectContextId,
+                        goalId = goal.id,
+                        issueId = currentIssue.id,
+                        source = "runtime",
+                        title = "CEO planning interrupted",
+                        detail = INTERRUPTED_ISSUE_REASON,
+                        severity = "warning"
+                    ).withDerivedMetrics()
+                )
+                if (state.companyRuntimes.firstOrNull { it.companyId == currentIssue.companyId }?.status == CompanyRuntimeStatus.RUNNING) {
+                    runtimeContinuationCompanyId = currentIssue.companyId
+                }
+                return@withLock
+            }
             val existingNonPlanning = state.issues.filter {
                 it.goalId == goal.id && !it.kind.equals("planning", ignoreCase = true)
             }
@@ -17057,11 +17450,14 @@ class DesktopAppService(
                     currentIssue.status == IssueStatus.BLOCKED &&
                         currentIssue.transitionReason == blockedTransition &&
                         currentIssue.providerBlockReason == invalidPlanningReason
+                if (unchangedBlockedIssue) {
+                    return@withLock
+                }
                 val blockedPlanningIssue = currentIssue.copy(
                     status = IssueStatus.BLOCKED,
                     transitionReason = blockedTransition,
                     providerBlockReason = invalidPlanningReason,
-                    updatedAt = if (unchangedBlockedIssue) currentIssue.updatedAt else now
+                    updatedAt = now
                 )
                 traceEvents += buildCompanyAutomationTraceEvent(
                     issue = currentIssue,
@@ -17876,6 +18272,79 @@ class DesktopAppService(
                 }
             }
             val reviewPassed = finalStatus == DesktopTaskStatus.COMPLETED && verdict.value == "PASS"
+            if (!reviewPassed && verdict.value.equals("PASS", ignoreCase = true) && qaPassAlreadyAdvanced(targetQueueItem, executionIssue)) {
+                val restoredReviewIssue = currentIssue.copy(
+                    status = IssueStatus.DONE,
+                    durableRunId = primaryRun?.id ?: currentIssue.durableRunId,
+                    approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
+                    providerBlockReason = null,
+                    qaVerdict = "PASS",
+                    qaFeedback = targetQueueItem.qaFeedback ?: currentIssue.qaFeedback ?: verdict.feedback,
+                    transitionReason = "Ignored an interrupted QA replay because this pull request had already passed QA and advanced to CEO approval.",
+                    updatedAt = now,
+                    workflowLineage = expectedLineage
+                )
+                informationalTraceEvents += buildCompanyAutomationTraceEvent(
+                    issue = currentIssue,
+                    goal = state.goals.firstOrNull { it.id == currentIssue.goalId },
+                    oldStatus = currentIssue.status,
+                    newStatus = restoredReviewIssue.status,
+                    source = "syncReviewIssueFromTask",
+                    reason = restoredReviewIssue.transitionReason.orEmpty(),
+                    latestTask = task,
+                    latestRun = primaryRun
+                )
+                stateStore.save(
+                    state.copy(
+                        issues = state.issues.map { existing ->
+                            if (existing.id == currentIssue.id) restoredReviewIssue else existing
+                        },
+                        tasks = state.tasks.map { existing ->
+                            if (existing.id == effectiveTask.id) effectiveTask else existing
+                        },
+                        runs = effectiveRun?.let { run ->
+                            state.runs.map { existing -> if (existing.id == run.id) run else existing }
+                        } ?: state.runs
+                    ).withDerivedMetrics()
+                )
+                return@withLock
+            }
+            if (isRuntimeInterruptedTaskResult(task, finalStatus, primaryRun)) {
+                val interruptedReviewIssue = currentIssue.copy(
+                    status = IssueStatus.BLOCKED,
+                    durableRunId = primaryRun?.id ?: currentIssue.durableRunId,
+                    approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
+                    providerBlockReason = INTERRUPTED_RUN_ERROR,
+                    transitionReason = INTERRUPTED_ISSUE_REASON,
+                    updatedAt = now,
+                    workflowLineage = expectedLineage
+                )
+                informationalTraceEvents += buildCompanyAutomationTraceEvent(
+                    issue = currentIssue,
+                    goal = state.goals.firstOrNull { it.id == currentIssue.goalId },
+                    oldStatus = currentIssue.status,
+                    newStatus = interruptedReviewIssue.status,
+                    source = "syncReviewIssueFromTask",
+                    reason = INTERRUPTED_ISSUE_REASON,
+                    latestTask = task,
+                    latestRun = primaryRun,
+                    retryEligible = true
+                )
+                stateStore.save(
+                    state.copy(
+                        issues = state.issues.map { existing ->
+                            if (existing.id == currentIssue.id) interruptedReviewIssue else existing
+                        },
+                        tasks = state.tasks.map { existing ->
+                            if (existing.id == effectiveTask.id) effectiveTask else existing
+                        },
+                        runs = effectiveRun?.let { run ->
+                            state.runs.map { existing -> if (existing.id == run.id) run else existing }
+                        } ?: state.runs
+                    ).withDerivedMetrics()
+                )
+                return@withLock
+            }
             val companyProfiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
                 .filter { it.companyId == currentIssue.companyId }
             val chiefProfile = findChiefProfile(currentIssue.companyId, companyProfiles)
@@ -18217,6 +18686,42 @@ class DesktopAppService(
                 } else {
                     run
                 }
+            }
+            if (isRuntimeInterruptedTaskResult(task, finalStatus, primaryRun)) {
+                val interruptedApprovalIssue = currentIssue.copy(
+                    status = IssueStatus.BLOCKED,
+                    durableRunId = primaryRun?.id ?: currentIssue.durableRunId,
+                    approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
+                    providerBlockReason = INTERRUPTED_RUN_ERROR,
+                    transitionReason = INTERRUPTED_ISSUE_REASON,
+                    updatedAt = now,
+                    workflowLineage = expectedLineage
+                )
+                informationalTraceEvents += buildCompanyAutomationTraceEvent(
+                    issue = currentIssue,
+                    goal = state.goals.firstOrNull { it.id == currentIssue.goalId },
+                    oldStatus = currentIssue.status,
+                    newStatus = interruptedApprovalIssue.status,
+                    source = "syncApprovalIssueFromTask",
+                    reason = INTERRUPTED_ISSUE_REASON,
+                    latestTask = task,
+                    latestRun = primaryRun,
+                    retryEligible = true
+                )
+                stateStore.save(
+                    state.copy(
+                        issues = state.issues.map { existing ->
+                            if (existing.id == currentIssue.id) interruptedApprovalIssue else existing
+                        },
+                        tasks = state.tasks.map { existing ->
+                            if (existing.id == effectiveTask.id) effectiveTask else existing
+                        },
+                        runs = effectiveRun?.let { run ->
+                            state.runs.map { existing -> if (existing.id == run.id) run else existing }
+                        } ?: state.runs
+                    ).withDerivedMetrics()
+                )
+                return@withLock
             }
             if (
                 approvalTaskAlreadyApplied(

@@ -222,8 +222,8 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect derived per-agent performance from existing issues, runs, reviews, org profiles, and company agent definitions, with insufficient-data agents called out separately
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to the `Live Office` runtime projection, with synthesized runtime/backend/review/session summaries, event-driven movement, and agent/issue/zone detail sheets
-- use the Operator Chat surface to ask for status, bulk switch selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one message-style command chat
-- use Operator Chat for HR staffing requests such as hiring missing specialists or assigning mentors. HR hires use `opencode/nemotron-3-super-free`, avoid duplicate role coverage, and stay capped per chat command and runtime tick.
+- use the Operator Chat surface to ask for status, bulk switch selected-company agents to the free OpenCode default (`opencode/nemotron-3-super-free`), explicitly select DeepSeek only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one message-style command chat
+- use Operator Chat for HR staffing requests such as hiring missing specialists or assigning mentors. HR hires inherit the current company execution model policy, avoid duplicate role coverage, and stay capped per chat command and runtime tick.
 - turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step
 - choose `ASK_ME`, `AGENT_APPROVED`, or `FULL_AUTO` automation; `AGENT_APPROVED` is the default and routes recoverable sensitive actions to CEO/QA/Reviewer approval instead of a user confirmation rail
 - keep hard-gated actions blocked in every mode, including repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks

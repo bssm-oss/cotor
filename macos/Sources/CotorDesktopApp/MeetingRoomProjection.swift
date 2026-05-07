@@ -152,6 +152,7 @@ struct MeetingRoomProjection: Hashable {
     let reviews: [MeetingRoomReviewSummary]
     let runtimeStatus: String
     let runtimeBackendHealth: String
+    let runningSessionCount: Int
     let todaySpentCents: Int
     let monthSpentCents: Int
     let isCostBlocked: Bool
@@ -226,7 +227,6 @@ struct MeetingRoomProjection: Hashable {
                 ?? profileByRole[agent.agentCli.normalizedMeetingRoomKey]
             let session = sessionByAgentId[agent.id]
                 ?? sessionByAgentName[agent.title.lowercased()]
-                ?? sessionByAgentName[agent.agentCli.lowercased()]
             let assignmentKeys = [agent.id, agent.title, agent.agentCli, profile?.id, profile?.roleName, profile?.executionAgentName]
                 .compactMap { $0 }
             let assignedIssue = assignmentKeys.lazy.compactMap { latestIssueByAssignee[$0] }.first
@@ -299,6 +299,7 @@ struct MeetingRoomProjection: Hashable {
             reviews: reviewSummaries,
             runtimeStatus: runtime.status,
             runtimeBackendHealth: runtime.backendHealth,
+            runningSessionCount: scopedSessions.count,
             todaySpentCents: runtime.todaySpentCents,
             monthSpentCents: runtime.monthSpentCents,
             isCostBlocked: isCostBlocked,

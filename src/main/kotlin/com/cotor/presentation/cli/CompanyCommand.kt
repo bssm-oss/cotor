@@ -314,17 +314,19 @@ private class CompanyAgentUpdateCommand : CompanyServiceCommand(name = "update")
 
 private class CompanyAgentBatchUpdateCommand : CompanyServiceCommand(name = "batch-update") {
     private val companyId by option("--company-id").required()
-    private val agentIds by option("--agent-id").multiple(required = true)
+    private val agentIds by option("--agent-id").multiple()
     private val agentCli by option("--agent-cli")
     private val model by option("--model")
     private val specialties by option("--specialty").multiple()
     private val enabled by option("--enabled").choice("true", "false")
 
     override fun run() = runBlocking {
+        val resolvedAgentIds = agentIds.takeIf { it.isNotEmpty() }
+            ?: desktopService.listCompanyAgentDefinitions(companyId).map { it.id }
         printJsonList(
             desktopService.batchUpdateCompanyAgentDefinitions(
                 companyId = companyId,
-                agentIds = agentIds,
+                agentIds = resolvedAgentIds,
                 agentCli = agentCli,
                 model = model,
                 specialties = specialties.takeIf { it.isNotEmpty() },

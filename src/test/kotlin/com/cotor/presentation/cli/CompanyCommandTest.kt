@@ -115,6 +115,58 @@ class CompanyCommandTest : FunSpec({
         result.output shouldContain "\"enabled\": false"
     }
 
+    test("company agent batch-update defaults to all company agents when no agent id is provided") {
+        coEvery { service.listCompanyAgentDefinitions("company-1") } returns listOf(
+            CompanyAgentDefinition(
+                id = "agent-1",
+                companyId = "company-1",
+                title = "Builder",
+                agentCli = "opencode",
+                roleSummary = "build",
+                displayOrder = 0,
+                createdAt = 1L,
+                updatedAt = 1L
+            ),
+            CompanyAgentDefinition(
+                id = "agent-2",
+                companyId = "company-1",
+                title = "QA",
+                agentCli = "opencode",
+                roleSummary = "review",
+                displayOrder = 1,
+                createdAt = 1L,
+                updatedAt = 1L
+            )
+        )
+        coEvery {
+            service.batchUpdateCompanyAgentDefinitions(
+                companyId = "company-1",
+                agentIds = listOf("agent-1", "agent-2"),
+                agentCli = "opencode",
+                model = "opencode/nemotron-3-super-free"
+            )
+        } returns listOf(
+            CompanyAgentDefinition(
+                id = "agent-1",
+                companyId = "company-1",
+                title = "Builder",
+                agentCli = "opencode",
+                model = "opencode/nemotron-3-super-free",
+                roleSummary = "build",
+                displayOrder = 0,
+                createdAt = 1L,
+                updatedAt = 2L
+            )
+        )
+
+        val result = CompanyCommand().test(
+            "agent batch-update --company-id company-1 --agent-cli opencode --model opencode/nemotron-3-super-free"
+        )
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "\"model\": \"opencode/nemotron-3-super-free\""
+    }
+
     test("company agent capabilities prints backend profile") {
         coEvery { service.agentCapabilities("company-1", "agent-1") } returns com.cotor.app.AgentCapabilityProfile(
             companyId = "company-1",

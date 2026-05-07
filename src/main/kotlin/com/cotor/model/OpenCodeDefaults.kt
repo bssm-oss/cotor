@@ -8,6 +8,7 @@ package com.cotor.model
  */
 object OpenCodeDefaults {
     const val DEFAULT_MODEL = "opencode/nemotron-3-super-free"
+    const val DEEPSEEK_FLASH_MODEL = "opencode-go/deepseek-v4-flash"
     const val LOCAL_OLLAMA_GEMMA_MODEL = "ollama/gemma3:4b"
     const val LOCAL_OLLAMA_EXECUTION_MODE = "local-ollama-opencode"
     const val LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
