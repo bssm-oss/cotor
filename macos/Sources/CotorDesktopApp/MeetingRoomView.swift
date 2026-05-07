@@ -1281,12 +1281,22 @@ private struct MeetingRoomZoneButton {
 private struct MeetingRoomProjectionAgentSheet: View {
     let agent: MeetingRoomProjectionAgent
     let language: AppLanguage
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(agent.role)
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .foregroundStyle(ShellPalette.text)
+            HStack(alignment: .top) {
+                Text(agent.role)
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundStyle(ShellPalette.text)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                MeetingRoomSheetCloseButton(
+                    label: language("Close agent detail", "에이전트 상세 닫기"),
+                    identifier: "meeting-room-agent-sheet-close"
+                ) { dismiss() }
+            }
             HStack(spacing: 8) {
                 ShellTag(text: agent.visualState.rawValue.uppercased(), tint: ShellPalette.accent)
                 ShellTag(text: agent.zone.rawValue, tint: ShellPalette.warning)
@@ -1304,6 +1314,7 @@ private struct MeetingRoomProjectionAgentSheet: View {
         .padding(22)
         .frame(width: 420, alignment: .topLeading)
         .background(ShellPalette.panel)
+        .onExitCommand { dismiss() }
     }
 
     private func detail(_ title: String, _ value: String) -> some View {
@@ -1326,12 +1337,22 @@ private struct MeetingRoomProjectionAgentSheet: View {
 private struct MeetingRoomProjectionIssueSheet: View {
     let issue: MeetingRoomIssueSummary
     let language: AppLanguage
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(issue.title)
-                .font(.system(size: 17, weight: .bold, design: .monospaced))
-                .foregroundStyle(ShellPalette.text)
+            HStack(alignment: .top) {
+                Text(issue.title)
+                    .font(.system(size: 17, weight: .bold, design: .monospaced))
+                    .foregroundStyle(ShellPalette.text)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                MeetingRoomSheetCloseButton(
+                    label: language("Close issue detail", "이슈 상세 닫기"),
+                    identifier: "meeting-room-issue-sheet-close"
+                ) { dismiss() }
+            }
             HStack(spacing: 8) {
                 ShellTag(text: issue.status, tint: issue.status.uppercased().contains("BLOCK") ? ShellPalette.danger : ShellPalette.accent)
                 ShellTag(text: issue.kind, tint: ShellPalette.accentWarm)
@@ -1352,6 +1373,7 @@ private struct MeetingRoomProjectionIssueSheet: View {
         .padding(22)
         .frame(width: 480, height: 340)
         .background(ShellPalette.panel)
+        .onExitCommand { dismiss() }
     }
 
     private var pullRequestSummary: String? {
@@ -1387,12 +1409,22 @@ private struct MeetingRoomProjectionFlowSheet: View {
     let flow: MeetingRoomFlowItem
     let issue: MeetingRoomIssueSummary?
     let language: AppLanguage
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(issue?.title ?? flow.title)
-                .font(.system(size: 17, weight: .bold, design: .monospaced))
-                .foregroundStyle(ShellPalette.text)
+            HStack(alignment: .top) {
+                Text(issue?.title ?? flow.title)
+                    .font(.system(size: 17, weight: .bold, design: .monospaced))
+                    .foregroundStyle(ShellPalette.text)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                MeetingRoomSheetCloseButton(
+                    label: language("Close flow detail", "흐름 상세 닫기"),
+                    identifier: "meeting-room-flow-sheet-close"
+                ) { dismiss() }
+            }
             HStack(spacing: 8) {
                 ShellTag(text: flow.kind.rawValue, tint: ShellPalette.accentWarm)
                 if let issue {
@@ -1415,6 +1447,7 @@ private struct MeetingRoomProjectionFlowSheet: View {
         .padding(22)
         .frame(width: 500, height: 380)
         .background(ShellPalette.panel)
+        .onExitCommand { dismiss() }
     }
 
     private var issueSummary: String {
@@ -1464,12 +1497,22 @@ private struct MeetingRoomProjectionZoneSheet: View {
     let zone: MeetingRoomOfficeZone
     let projection: MeetingRoomProjection
     let language: AppLanguage
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(title)
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .foregroundStyle(ShellPalette.text)
+            HStack(alignment: .top) {
+                Text(title)
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundStyle(ShellPalette.text)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                MeetingRoomSheetCloseButton(
+                    label: language("Close zone detail", "구역 상세 닫기"),
+                    identifier: "meeting-room-zone-sheet-close"
+                ) { dismiss() }
+            }
             Text(summary)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(ShellPalette.muted)
@@ -1495,6 +1538,7 @@ private struct MeetingRoomProjectionZoneSheet: View {
         .padding(22)
         .frame(width: 480, height: 360)
         .background(ShellPalette.panel)
+        .onExitCommand { dismiss() }
     }
 
     private var title: String {
@@ -1580,6 +1624,25 @@ private struct MeetingRoomProjectionZoneSheet: View {
         case .mergeLane:
             return Array(projection.issues.filter { $0.status.uppercased() == "DONE" || $0.pullRequestState?.uppercased() == "MERGED" }.map { $0.title }.prefix(8))
         }
+    }
+}
+
+private struct MeetingRoomSheetCloseButton: View {
+    let label: String
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .background(ShellPalette.panelAlt)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(identifier)
+        .keyboardShortcut(.cancelAction)
     }
 }
 
