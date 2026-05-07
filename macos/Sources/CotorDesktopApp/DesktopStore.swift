@@ -465,6 +465,9 @@ final class DesktopStore: ObservableObject {
     private var companyEventTask: Task<Void, Never>?
     private var companyPollingTask: Task<Void, Never>?
     private var backendWatchdogTask: Task<Void, Never>?
+    private var isBootstrapping = false
+    private var isRefreshingDashboard = false
+    private var companyEventStreamGeneration = 0
     private var polledTuiSessionID: String?
     private var didInitializeShellMode = false
 
@@ -1072,6 +1075,9 @@ final class DesktopStore: ObservableObject {
 
     /// Entry point invoked by the app scene once the window becomes active.
     func bootstrap() async {
+        guard !isBootstrapping else { return }
+        isBootstrapping = true
+        defer { isBootstrapping = false }
         // Bootstrap intentionally starts local background observers before the first network call.
         // That way a just-launched app can recover embedded backend state, begin polling, and only
         // then decide whether the shell should present live data or an offline fallback.
@@ -1094,8 +1100,15 @@ final class DesktopStore: ObservableObject {
         }
     }
 
+    func handleAppBecameActive() async {
+        await bootstrap()
+    }
+
     /// Reload the top-level dashboard payload and preserve/repair selection state.
     func refreshDashboard(restartEventStream: Bool = true) async {
+        guard !isRefreshingDashboard else { return }
+        isRefreshingDashboard = true
+        defer { isRefreshingDashboard = false }
         if shouldUseCompanyScopedRefresh {
             await refreshCompanyDashboard(restartEventStream: restartEventStream)
             return
@@ -1122,6 +1135,8 @@ final class DesktopStore: ObservableObject {
                 try await api.skills()
             }
             dashboard = fresh
+            marketingDelegationPolicies = fresh.marketingDelegationPolicies
+            marketingRuns = fresh.marketingRuns
             availableSkills = skillCatalog
             await refreshMarketingState()
             syncDefaultCompanyAgentSkillsIfNeeded()
@@ -1175,6 +1190,7 @@ final class DesktopStore: ObservableObject {
             await refreshAvailableBranches()
             stopTuiPolling()
             companyEventTask?.cancel()
+            companyEventTask = nil
             tuiSessions = []
             tuiSession = nil
             selectedTuiSessionID = nil
@@ -1230,6 +1246,7 @@ final class DesktopStore: ObservableObject {
             selectedAgentName = selectedTask?.agents.first
             stopTuiPolling()
             companyEventTask?.cancel()
+            companyEventTask = nil
         }
     }
 
@@ -1253,6 +1270,8 @@ final class DesktopStore: ObservableObject {
         let mergedCompanyRuntimes = dashboard.companyRuntimes.filter { $0.companyId != companyId } + [snapshot.runtime]
         let mergedContextEntries = dashboard.agentContextEntries.filter { $0.companyId != companyId } + snapshot.agentContextEntries
         let mergedAgentMessages = dashboard.agentMessages.filter { $0.companyId != companyId } + snapshot.agentMessages
+        let mergedMarketingPolicies = marketingDelegationPolicies.filter { $0.companyId != companyId } + snapshot.marketingDelegationPolicies
+        let mergedMarketingRuns = marketingRuns.filter { $0.companyId != companyId } + snapshot.marketingRuns
         let mergedAgentPerformance = dashboard.agentPerformance.filter { performance in
             !snapshot.companyAgentDefinitions.contains { $0.id == performance.agentId }
         } + snapshot.agentPerformance
@@ -1285,8 +1304,12 @@ final class DesktopStore: ObservableObject {
             companyRuntimes: mergedCompanyRuntimes.sorted { ($0.lastTickAt ?? 0) > ($1.lastTickAt ?? 0) },
             agentContextEntries: mergedContextEntries.sorted { $0.createdAt > $1.createdAt },
             agentMessages: mergedAgentMessages.sorted { $0.createdAt > $1.createdAt },
+            marketingDelegationPolicies: mergedMarketingPolicies.sorted { $0.name < $1.name },
+            marketingRuns: mergedMarketingRuns.sorted { $0.createdAt > $1.createdAt },
             agentPerformance: mergedAgentPerformance
         )
+        marketingDelegationPolicies = dashboard.marketingDelegationPolicies
+        marketingRuns = dashboard.marketingRuns
         companyStreamStatusMessage = nil
         reconcileWorkflowLeadAgent()
         reconcileCompanySelection()
@@ -4152,6 +4175,8 @@ final class DesktopStore: ObservableObject {
                 companyRuntimes: dashboard.companyRuntimes,
                 agentContextEntries: dashboard.agentContextEntries,
                 agentMessages: dashboard.agentMessages,
+                marketingDelegationPolicies: dashboard.marketingDelegationPolicies,
+                marketingRuns: dashboard.marketingRuns,
                 agentPerformance: dashboard.agentPerformance
             )
             syncBackendFormState()
@@ -4274,45 +4299,66 @@ final class DesktopStore: ObservableObject {
         // company snapshot so the store can patch live state without forcing a heavyweight global
         // dashboard refresh on every runtime transition.
         companyEventTask?.cancel()
+        companyEventTask = nil
         guard !isOffline, shellMode == .company, let companyID = selectedCompanyID else { return }
+        companyEventStreamGeneration += 1
+        let generation = companyEventStreamGeneration
         companyEventTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                for try await envelope in api.companyEvents(companyId: companyID) {
-                    await MainActor.run {
-                        self.companyStreamStatusMessage = nil
-                        if let companyDashboard = envelope.companyDashboard {
-                            self.applyCompanyDashboard(companyDashboard, companyId: companyID)
-                        } else if let dashboard = envelope.dashboard {
-                            self.dashboard = dashboard
-                            self.reconcileWorkflowLeadAgent()
-                            self.reconcileSelection()
-                            self.syncBackendFormState()
+            defer {
+                Task { @MainActor [weak self] in
+                    guard let self, self.companyEventStreamGeneration == generation else { return }
+                    self.companyEventTask = nil
+                }
+            }
+            while !Task.isCancelled {
+                do {
+                    for try await envelope in api.companyEvents(companyId: companyID) {
+                        let shouldApply = await MainActor.run { () -> Bool in
+                            self.companyEventStreamGeneration == generation &&
+                                self.selectedCompanyID == companyID &&
+                                self.shellMode == .company
+                        }
+                        guard shouldApply else { return }
+                        await MainActor.run {
+                            self.companyStreamStatusMessage = nil
+                            if let companyDashboard = envelope.companyDashboard {
+                                self.applyCompanyDashboard(companyDashboard, companyId: companyID)
+                            } else if let dashboard = envelope.dashboard {
+                                self.dashboard = dashboard
+                                self.marketingDelegationPolicies = dashboard.marketingDelegationPolicies
+                                self.marketingRuns = dashboard.marketingRuns
+                                self.reconcileWorkflowLeadAgent()
+                                self.reconcileSelection()
+                                self.syncBackendFormState()
+                            }
+                        }
+                        if envelope.companyDashboard == nil && envelope.dashboard == nil {
+                            await self.refreshCompanyDashboard(restartEventStream: false)
                         }
                     }
-                    if envelope.companyDashboard == nil && envelope.dashboard == nil {
-                        await self.refreshCompanyDashboard(restartEventStream: false)
+                    return
+                } catch is CancellationError {
+                    return
+                } catch {
+                    let expectedInterruption = isExpectedCompanyEventStreamInterruption(error)
+                    if expectedInterruption {
+                        AppLogger.info("Company event stream reconnecting after expected interruption: \(error.localizedDescription)")
+                    } else {
+                        AppLogger.error("Company event stream failed: \(error.localizedDescription)")
                     }
+                    let shouldRetry = await MainActor.run { () -> Bool in
+                        guard self.companyEventStreamGeneration == generation,
+                              self.selectedCompanyID == companyID,
+                              self.shellMode == .company else { return false }
+                        self.companyStreamStatusMessage = expectedInterruption ? nil : self.companyStreamRecoveryMessage()
+                        self.errorMessage = nil
+                        return true
+                    }
+                    guard shouldRetry else { return }
+                    await self.refreshCompanyDashboard(restartEventStream: false)
+                    try? await Task.sleep(for: .seconds(1))
                 }
-            } catch is CancellationError {
-            } catch {
-                let expectedInterruption = isExpectedCompanyEventStreamInterruption(error)
-                if expectedInterruption {
-                    AppLogger.info("Company event stream reconnecting after expected interruption: \(error.localizedDescription)")
-                } else {
-                    AppLogger.error("Company event stream failed: \(error.localizedDescription)")
-                }
-                let shouldRetry = await MainActor.run { () -> Bool in
-                    guard self.selectedCompanyID == companyID, self.shellMode == .company else { return false }
-                    self.companyStreamStatusMessage = expectedInterruption ? nil : self.companyStreamRecoveryMessage()
-                    self.errorMessage = nil
-                    return true
-                }
-                guard shouldRetry else { return }
-                await self.refreshCompanyDashboard(restartEventStream: false)
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else { return }
-                await self.restartCompanyEventStream()
             }
         }
     }
@@ -4380,7 +4426,9 @@ final class DesktopStore: ObservableObject {
             stopTuiPolling()
             await restartCompanyEventStream()
         case .tui:
+            companyEventStreamGeneration += 1
             companyEventTask?.cancel()
+            companyEventTask = nil
             await refreshTuiSessionList(suppressErrors: true)
             selectWorkspaceForTuiIfNeeded()
             if let session = activeTuiSession {

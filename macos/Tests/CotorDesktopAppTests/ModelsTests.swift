@@ -89,15 +89,94 @@ struct ModelsTests {
         #expect(dashboard.reviewQueue.isEmpty)
         #expect(dashboard.settings.availableAgents.isEmpty)
         #expect(dashboard.agentPerformance.isEmpty)
+        #expect(dashboard.marketingDelegationPolicies.isEmpty)
+        #expect(dashboard.marketingRuns.isEmpty)
     }
 
     @Test
-    func performancePayloadsDecodeMissingFieldsAsEmpty() throws {
+    func dashboardPayloadsDecodeMissingOptionalArraysAsEmpty() throws {
         let companyDashboard = try JSONDecoder().decode(CompanyDashboardPayload.self, from: Data("{}".utf8))
         let dashboard = try JSONDecoder().decode(DashboardPayload.self, from: Data("{}".utf8))
 
         #expect(companyDashboard.agentPerformance.isEmpty)
         #expect(dashboard.agentPerformance.isEmpty)
+        #expect(companyDashboard.marketingDelegationPolicies.isEmpty)
+        #expect(companyDashboard.marketingRuns.isEmpty)
+        #expect(dashboard.marketingDelegationPolicies.isEmpty)
+        #expect(dashboard.marketingRuns.isEmpty)
+    }
+
+    @Test
+    func dashboardPayloadsDecodeMarketingStateFromDashboardContract() throws {
+        let data = Data("""
+        {
+          "marketingDelegationPolicies": [
+            {
+              "id": "policy-1",
+              "companyId": "company-1",
+              "agentId": "agent-1",
+              "name": "Owned",
+              "allowedDomains": ["example.com"],
+              "channelAccounts": [],
+              "dailyPostLimit": 1,
+              "forbiddenTerms": [],
+              "brandTone": "direct",
+              "prohibitedActions": ["paid-ad"],
+              "secretRefs": [],
+              "browserSessionRef": null,
+              "maxRuntimeSeconds": 900,
+              "createdAt": 1,
+              "updatedAt": 2
+            }
+          ],
+          "marketingRuns": [
+            {
+              "id": "run-1",
+              "companyId": "company-1",
+              "agentId": "agent-1",
+              "objective": "post",
+              "channels": ["web"],
+              "delegationPolicyId": "policy-1",
+              "status": "COMPLETED",
+              "actions": [],
+              "message": "done",
+              "error": null,
+              "createdAt": 1,
+              "updatedAt": 2,
+              "completedAt": 3
+            }
+          ]
+        }
+        """.utf8)
+        let dashboard = try JSONDecoder().decode(DashboardPayload.self, from: data)
+
+        #expect(dashboard.marketingDelegationPolicies.map(\.id) == ["policy-1"])
+        #expect(dashboard.marketingRuns.map(\.id) == ["run-1"])
+    }
+
+    @Test
+    func companyEventLineDecoderDropsMalformedLineAndKeepsValidEventsDecodable() throws {
+        let invalid = DesktopAPI.decodeCompanyEventLine("{not-json")
+        let valid = DesktopAPI.decodeCompanyEventLine("""
+        {
+          "event": {
+            "id": "event-1",
+            "companyId": "company-1",
+            "type": "runtime.tick",
+            "title": "Tick",
+            "detail": null,
+            "goalId": null,
+            "issueId": null,
+            "runId": null,
+            "createdAt": 1
+          },
+          "dashboard": null,
+          "companyDashboard": null
+        }
+        """)
+
+        #expect(invalid == nil)
+        #expect(try #require(valid).event.companyId == "company-1")
     }
 
     @Test

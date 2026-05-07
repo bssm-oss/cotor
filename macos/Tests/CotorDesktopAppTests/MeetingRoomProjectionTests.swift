@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import CotorDesktopApp
 
@@ -48,6 +49,44 @@ struct MeetingRoomProjectionTests {
         #expect(builder.currentIssueTitle == "Build feature")
         #expect(projection.flows.contains { $0.kind == .goalToIssue && $0.title == "Ship feature" })
         #expect(projection.flows.contains { $0.kind == .agentWorking })
+    }
+
+    @Test
+    @MainActor
+    func meetingRoomSceneMemoryStoreKeepsLedgersCompanyScoped() {
+        let companyLedger = MeetingRoomSceneLedger(
+            seenEventIds: ["company-event"],
+            settledAgentPositions: ["agent": CGPoint(x: 1, y: 2)],
+            lastProjectionFingerprint: 1
+        )
+        let otherLedger = MeetingRoomSceneLedger(
+            seenEventIds: ["other-event"],
+            settledAgentPositions: ["agent": CGPoint(x: 3, y: 4)],
+            lastProjectionFingerprint: 2
+        )
+
+        MeetingRoomSceneMemoryStore.remember(companyLedger, for: "company:one", now: 100)
+        MeetingRoomSceneMemoryStore.remember(otherLedger, for: "company:two", now: 100)
+
+        #expect(MeetingRoomSceneMemoryStore.ledger(for: "company:one", now: 101).seenEventIds == ["company-event"])
+        #expect(MeetingRoomSceneMemoryStore.ledger(for: "company:two", now: 101).seenEventIds == ["other-event"])
+    }
+
+    @Test
+    @MainActor
+    func meetingRoomSceneMemoryStorePrunesByCapacityAndTtl() {
+        for index in 0..<40 {
+            MeetingRoomSceneMemoryStore.remember(
+                MeetingRoomSceneLedger(seenEventIds: ["event-\(index)"], lastProjectionFingerprint: index),
+                for: "capacity:\(index)",
+                now: TimeInterval(index)
+            )
+        }
+
+        #expect(MeetingRoomSceneMemoryStore.countForTesting() <= 32)
+
+        MeetingRoomSceneMemoryStore.pruneExpired(now: 10_000, maxAgeSeconds: 1)
+        #expect(MeetingRoomSceneMemoryStore.countForTesting() == 0)
     }
 
     @Test

@@ -15,6 +15,17 @@ struct DesktopAPI {
     static var appToken: String {
         ProcessInfo.processInfo.environment["COTOR_APP_TOKEN"] ?? embeddedAppToken
     }
+    static func decodeCompanyEventLine(_ line: String) -> CompanyEventEnvelopePayload? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            return try JSONDecoder().decode(CompanyEventEnvelopePayload.self, from: Data(trimmed.utf8))
+        } catch {
+            AppLogger.warning("Dropped malformed company event stream line: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     let baseURL: URL
     let token: String?
 
@@ -704,10 +715,9 @@ struct DesktopAPI {
                         throw URLError(.badServerResponse)
                     }
                     for try await line in bytes.lines {
-                        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { continue }
-                        let data = Data(trimmed.utf8)
-                        continuation.yield(try JSONDecoder().decode(CompanyEventEnvelopePayload.self, from: data))
+                        if let envelope = Self.decodeCompanyEventLine(line) {
+                            continuation.yield(envelope)
+                        }
                     }
                     continuation.finish()
                 } catch {

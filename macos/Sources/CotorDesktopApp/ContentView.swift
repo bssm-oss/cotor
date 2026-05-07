@@ -213,7 +213,7 @@ struct CotorDesktopApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             Task {
-                await store.bootstrap()
+                await store.handleAppBecameActive()
             }
         }
         .windowStyle(.hiddenTitleBar)
@@ -232,18 +232,6 @@ struct CotorDesktopApp: App {
 
 final class DesktopAppLifecycleDelegate: NSObject, NSApplicationDelegate {
     private var terminationInFlight = false
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        Task {
-            await EmbeddedBackendLauncher.shared.ensureRunning()
-        }
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        Task {
-            await EmbeddedBackendLauncher.shared.ensureRunning()
-        }
-    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true

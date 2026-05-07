@@ -1142,6 +1142,8 @@ struct CompanyDashboardPayload: Codable {
     let activity: [CompanyActivityItemRecord]
     let agentContextEntries: [AgentContextEntryRecord]
     let agentMessages: [AgentMessageRecord]
+    var marketingDelegationPolicies: [MarketingDelegationPolicyRecord] = []
+    var marketingRuns: [MarketingRunRecord] = []
     var agentPerformance: [AgentPerformanceSnapshotRecord] = []
 
     private enum CodingKeys: String, CodingKey {
@@ -1165,6 +1167,8 @@ struct CompanyDashboardPayload: Codable {
         case activity
         case agentContextEntries
         case agentMessages
+        case marketingDelegationPolicies
+        case marketingRuns
         case agentPerformance
     }
 
@@ -1190,6 +1194,8 @@ struct CompanyDashboardPayload: Codable {
         activity = try container.decodeValue([CompanyActivityItemRecord].self, forKey: .activity, default: [])
         agentContextEntries = try container.decodeValue([AgentContextEntryRecord].self, forKey: .agentContextEntries, default: [])
         agentMessages = try container.decodeValue([AgentMessageRecord].self, forKey: .agentMessages, default: [])
+        marketingDelegationPolicies = try container.decodeValue([MarketingDelegationPolicyRecord].self, forKey: .marketingDelegationPolicies, default: [])
+        marketingRuns = try container.decodeValue([MarketingRunRecord].self, forKey: .marketingRuns, default: [])
         agentPerformance = try container.decodeValue([AgentPerformanceSnapshotRecord].self, forKey: .agentPerformance, default: [])
     }
 }
@@ -1390,6 +1396,8 @@ struct DashboardPayload: Codable {
     let companyRuntimes: [CompanyRuntimeSnapshotRecord]
     let agentContextEntries: [AgentContextEntryRecord]
     let agentMessages: [AgentMessageRecord]
+    var marketingDelegationPolicies: [MarketingDelegationPolicyRecord] = []
+    var marketingRuns: [MarketingRunRecord] = []
     let agentPerformance: [AgentPerformanceSnapshotRecord]
 }
 
@@ -1446,6 +1454,8 @@ extension DashboardPayload {
         companyRuntimes: [],
         agentContextEntries: [],
         agentMessages: [],
+        marketingDelegationPolicies: [],
+        marketingRuns: [],
         agentPerformance: []
     )
 
@@ -1471,6 +1481,8 @@ extension DashboardPayload {
         case companyRuntimes
         case agentContextEntries
         case agentMessages
+        case marketingDelegationPolicies
+        case marketingRuns
         case agentPerformance
     }
 
@@ -1497,6 +1509,8 @@ extension DashboardPayload {
         companyRuntimes = try container.decodeValue([CompanyRuntimeSnapshotRecord].self, forKey: .companyRuntimes, default: [])
         agentContextEntries = try container.decodeValue([AgentContextEntryRecord].self, forKey: .agentContextEntries, default: [])
         agentMessages = try container.decodeValue([AgentMessageRecord].self, forKey: .agentMessages, default: [])
+        marketingDelegationPolicies = try container.decodeValue([MarketingDelegationPolicyRecord].self, forKey: .marketingDelegationPolicies, default: [])
+        marketingRuns = try container.decodeValue([MarketingRunRecord].self, forKey: .marketingRuns, default: [])
         agentPerformance = try container.decodeValue([AgentPerformanceSnapshotRecord].self, forKey: .agentPerformance, default: [])
     }
 }
