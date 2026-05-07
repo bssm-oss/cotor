@@ -148,7 +148,7 @@ class AgentCommandTest : FunSpec({
         val added = root.resolve(".cotor/agents/opencode.yaml")
         added.exists() shouldBe true
         added.readText() shouldContain "pluginClass: com.cotor.data.plugin.OpenCodePlugin"
-        added.readText() shouldContain "model: \"opencode-go/deepseek-v4-flash\""
+        added.readText() shouldContain "model: \"opencode/nemotron-3-super-free\""
     }
 
     test("agent add gemma4 writes local model provider defaults") {

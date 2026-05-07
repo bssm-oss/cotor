@@ -328,6 +328,43 @@ struct ModelsTests {
     }
 
     @Test
+    func operatorChatResponseDecodesAnswerSources() throws {
+        let json = """
+        {
+          "message": "Builder가 현재 가장 좋은 에이전트입니다.",
+          "automationMode": "AGENT_APPROVED",
+          "actions": [],
+          "pendingApprovals": [],
+          "blockedActions": [],
+          "summary": {
+            "runtimeStatus": "STOPPED",
+            "backendHealth": "healthy",
+            "activeAgentCount": 0,
+            "blockedIssueCount": 0,
+            "reviewQueueCount": 0,
+            "pendingApprovalCount": 0,
+            "budgetPaused": false
+          },
+          "answerSources": [
+            {
+              "type": "agent-performance",
+              "title": "Builder · Builder",
+              "detail": "score=91",
+              "refId": "agent-builder"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(OperatorChatResponsePayload.self, from: json)
+
+        #expect(response.message.contains("Builder"))
+        #expect(response.summary?.runtimeStatus == "STOPPED")
+        #expect(response.answerSources.first?.type == "agent-performance")
+        #expect(response.answerSources.first?.refId == "agent-builder")
+    }
+
+    @Test
     func batchUpdatePayloadEncodesSelectedFields() throws {
         let payload = BatchUpdateCompanyAgentsPayload(
             agentIds: ["agent-1", "agent-2"],

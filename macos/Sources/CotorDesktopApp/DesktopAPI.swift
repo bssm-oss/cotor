@@ -232,6 +232,24 @@ struct DesktopAPI {
         )
     }
 
+    func runOperatorChat(
+        companyId: String,
+        message: String,
+        automationMode: String? = nil,
+        confirmFullAuto: Bool = false,
+        confirmStaffing: Bool = false
+    ) async throws -> OperatorChatResponsePayload {
+        try await post(
+            path: "api/app/companies/\(companyId)/operator/chat",
+            body: OperatorCommandRequestPayload(
+                message: message,
+                automationMode: automationMode,
+                confirmFullAuto: confirmFullAuto,
+                confirmStaffing: confirmStaffing
+            )
+        )
+    }
+
     func skills() async throws -> [SkillCatalogEntryRecord] {
         try await get(path: "api/app/skills")
     }
