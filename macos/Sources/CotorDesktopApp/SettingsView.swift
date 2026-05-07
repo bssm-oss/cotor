@@ -269,12 +269,12 @@ struct SettingsView: View {
                     Button(store.language("Save", "저장")) {
                         Task { await store.saveBackendSettings() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ShellTopBarButtonStyle(prominent: true))
 
                     Button(store.language("Test connection", "연결 테스트")) {
                         Task { await store.testCodexBackendConnection() }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ShellTopBarButtonStyle(prominent: false))
 
                     if let status = store.codexBackendStatus {
                         Text(status.lifecycleState.uppercased())
@@ -326,21 +326,21 @@ struct SettingsView: View {
                     } label: {
                         Label(store.language("Login In Terminal", "터미널에서 로그인"), systemImage: "person.crop.circle.badge.plus")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ShellTopBarButtonStyle(prominent: true))
 
                     Button {
                         store.refreshCodexOAuthStatus()
                     } label: {
                         Label(store.language("Refresh", "새로고침"), systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ShellTopBarButtonStyle(prominent: false))
 
                     Button(role: .destructive) {
                         store.logoutCodexOAuth()
                     } label: {
                         Label(store.language("Logout", "로그아웃"), systemImage: "trash")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ShellTopBarButtonStyle(prominent: false))
                 }
 
                 if let message = store.codexOAuthStatusMessage, !message.isEmpty {
