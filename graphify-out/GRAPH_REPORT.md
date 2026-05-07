@@ -1,7 +1,7 @@
 # Graph Report - cotor-gemma4-routing-pr  (2026-05-07)
 
 ## Corpus Check
-- 335 files · ~548,231 words
+- 335 files · ~548,239 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
