@@ -86,7 +86,7 @@ struct MeetingRoomView: View {
         HStack(spacing: 8) {
             ShellTag(text: language("Live Office", "라이브 오피스"), tint: ShellPalette.accent)
             ShellTag(text: "\(language("Agents", "에이전트")) \(projection.agents.count)", tint: ShellPalette.accentWarm)
-            ShellTag(text: "\(language("Running", "작업 중")) \(projection.agents.filter { $0.visualState == .running }.count)", tint: ShellPalette.success)
+            ShellTag(text: "\(language("Running", "작업 중")) \(projection.runningSessionCount)", tint: ShellPalette.success)
             ShellTag(text: "\(language("Review", "리뷰")) \(projection.reviewCount)", tint: ShellPalette.warning)
             if projection.isCostBlocked {
                 ShellTag(text: language("COST PAUSED", "비용 일시정지"), tint: ShellPalette.warning)
