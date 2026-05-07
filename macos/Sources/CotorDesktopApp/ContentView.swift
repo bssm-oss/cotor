@@ -4952,31 +4952,37 @@ private struct CenterPaneView: View {
 
                 companyCurrentIssuesPanel
 
-                DisclosureGroup(isExpanded: $companyOverviewDetailsExpanded) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        companyAgentWorkPanel
-
-                        if layoutMode == .wide {
-                            HStack(alignment: .top, spacing: 12) {
-                                companyRunningAgentsPanel
-                                companyDecisionPanel
-                            }
-                        } else {
-                            VStack(alignment: .leading, spacing: 12) {
-                                companyRunningAgentsPanel
-                                companyDecisionPanel
-                            }
-                        }
-
-                        companyLinearPanel
-                        companyActivityFeed
-                    }
-                    .padding(.top, 10)
-                } label: {
-                    compactDisclosureLabel(
+                VStack(alignment: .leading, spacing: 10) {
+                    collapsibleDisclosureHeader(
                         title: l("More company detail", "회사 세부정보 더보기"),
-                        subtitle: l("Live runs, CEO decisions, Linear, and activity history.", "실행 현황, CEO 결정, Linear, 활동 기록")
-                    )
+                        subtitle: l("Live runs, CEO decisions, Linear, and activity history.", "실행 현황, CEO 결정, Linear, 활동 기록"),
+                        isExpanded: companyOverviewDetailsExpanded
+                    ) {
+                        companyOverviewDetailsExpanded.toggle()
+                    }
+
+                    if companyOverviewDetailsExpanded {
+                        VStack(alignment: .leading, spacing: 12) {
+                            companyAgentWorkPanel
+
+                            if layoutMode == .wide {
+                                HStack(alignment: .top, spacing: 12) {
+                                    companyRunningAgentsPanel
+                                    companyDecisionPanel
+                                }
+                            } else {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    companyRunningAgentsPanel
+                                    companyDecisionPanel
+                                }
+                            }
+
+                            companyLinearPanel
+                            companyActivityFeed
+                        }
+                        .padding(.top, 2)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
                 .padding(14)
                 .shellInset()
@@ -6482,7 +6488,15 @@ private struct CenterPaneView: View {
                         }
                     }
 
-                    DisclosureGroup(isExpanded: $issueDetailsExpanded) {
+                    collapsibleDisclosureHeader(
+                        title: l("Details", "세부정보"),
+                        subtitle: l("Acceptance, metadata, linked task, and Linear.", "수용 기준, 메타데이터, 연결된 태스크, Linear"),
+                        isExpanded: issueDetailsExpanded
+                    ) {
+                        issueDetailsExpanded.toggle()
+                    }
+
+                    if issueDetailsExpanded {
                         VStack(alignment: .leading, spacing: 10) {
                             if !issue.acceptanceCriteria.isEmpty {
                                 VStack(alignment: .leading, spacing: 6) {
@@ -6533,14 +6547,18 @@ private struct CenterPaneView: View {
                             .buttonStyle(ShellTopBarButtonStyle(prominent: false))
                         }
                         .padding(.top, 8)
-                    } label: {
-                        compactDisclosureLabel(
-                            title: l("Details", "세부정보"),
-                            subtitle: l("Acceptance, metadata, linked task, and Linear.", "수용 기준, 메타데이터, 연결된 태스크, Linear")
-                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
-                    DisclosureGroup(isExpanded: $issueActivityExpanded) {
+                    collapsibleDisclosureHeader(
+                        title: l("Execution activity", "실행 활동"),
+                        subtitle: l("Logs, shared notes, and agent conversation.", "로그, 공유 메모, 에이전트 대화"),
+                        isExpanded: issueActivityExpanded
+                    ) {
+                        issueActivityExpanded.toggle()
+                    }
+
+                    if issueActivityExpanded {
                         VStack(alignment: .leading, spacing: 8) {
                             if store.issueExecutionDetails.isEmpty {
                                 Text(l("No execution details yet.", "아직 실행 상세가 없습니다."))
@@ -6597,11 +6615,7 @@ private struct CenterPaneView: View {
                             }
                         }
                         .padding(.top, 8)
-                    } label: {
-                        compactDisclosureLabel(
-                            title: l("Execution activity", "실행 활동"),
-                            subtitle: l("Logs, shared notes, and agent conversation.", "로그, 공유 메모, 에이전트 대화")
-                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
             } else {
@@ -6617,21 +6631,21 @@ private struct CenterPaneView: View {
         .shellInset()
     }
 
-    private func compactDisclosureLabel(title: String, subtitle: String) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ShellPalette.text)
-                Text(subtitle)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+    private func collapsibleDisclosureHeader(
+        title: String,
+        subtitle: String,
+        isExpanded: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        CollapsibleDisclosureHeader(
+            title: title,
+            subtitle: subtitle,
+            isExpanded: isExpanded,
+            expandedAccessibilityValue: l("Expanded", "펼쳐짐"),
+            collapsedAccessibilityValue: l("Collapsed", "접힘"),
+            accessibilityHint: l("Click to show or hide this section.", "눌러서 이 영역을 열거나 닫습니다."),
+            action: action
+        )
     }
 
     private func issueDebugNote(eyebrow: String, body: String, tint: Color) -> some View {
@@ -8571,6 +8585,60 @@ private struct CloneRepositorySheet: View {
     }
 }
 
+private struct CollapsibleDisclosureHeader: View {
+    let title: String
+    let subtitle: String
+    let isExpanded: Bool
+    let expandedAccessibilityValue: String
+    let collapsedAccessibilityValue: String
+    let accessibilityHint: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            withAnimation(ShellMotion.spring) {
+                action()
+            }
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                    Text(subtitle)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(isHovered ? ShellPalette.text.opacity(0.78) : ShellPalette.muted)
+                    .frame(width: 18, height: 18)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHovered ? ShellPalette.panelRaised.opacity(0.74) : ShellPalette.panelAlt.opacity(0.58))
+            .overlay(
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .stroke(isHovered ? ShellPalette.lineStrong : ShellPalette.line, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(title)
+        .accessibilityValue(isExpanded ? expandedAccessibilityValue : collapsedAccessibilityValue)
+        .accessibilityHint(accessibilityHint)
+    }
+}
+
 private struct IssueExecutionDetailCard: View {
     let detail: IssueAgentExecutionDetailRecord
     let language: AppLanguage
@@ -8621,19 +8689,24 @@ private struct IssueExecutionDetailCard: View {
 
             assignmentSummaryBlock()
 
-            DisclosureGroup(isExpanded: $showInternalPrompt) {
+            CollapsibleDisclosureHeader(
+                title: language == .korean ? "고급 정보 보기" : "Show Advanced Details",
+                subtitle: language == .korean ? "작업 원문" : "Original task prompt",
+                isExpanded: showInternalPrompt,
+                expandedAccessibilityValue: language == .korean ? "펼쳐짐" : "Expanded",
+                collapsedAccessibilityValue: language == .korean ? "접힘" : "Collapsed",
+                accessibilityHint: language == .korean ? "눌러서 고급 정보를 열거나 닫습니다." : "Click to show or hide advanced details."
+            ) {
+                showInternalPrompt.toggle()
+            }
+
+            if showInternalPrompt {
                 executionBlock(
                     title: language == .korean ? "고급 작업 원문" : "Advanced Task Prompt",
                     text: detail.assignedPrompt,
                     tint: ShellPalette.warning
                 )
-            } label: {
-                Label(
-                    language == .korean ? "고급 정보 보기" : "Show Advanced Details",
-                    systemImage: "chevron.right.circle"
-                )
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(ShellPalette.text.opacity(0.78))
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             if let stdout = detail.stdout, !stdout.isEmpty {
