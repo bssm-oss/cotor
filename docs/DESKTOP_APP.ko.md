@@ -228,8 +228,8 @@ cotor delete
 - 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 아이템 생성 및 머지 처리
 - `라이브 오피스` 런타임 projection과 runtime/backend/review/session 요약, 이벤트 기반 움직임, agent/issue/zone 상세 sheet를 함께 제공하는 전용 상황실 보기
-- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
-- 운영 채팅에서 필요한 specialist 고용이나 사수 지정을 HR Manager에게 맡길 수 있음. HR 고용은 `opencode/nemotron-3-super-free`를 사용하고, 중복 역할과 chat/runtime tick별 무제한 고용을 막음
+- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트를 무료 OpenCode 기본값(`opencode/nemotron-3-super-free`)으로 변경, 명시적으로 요청한 경우에만 DeepSeek 선택, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
+- 운영 채팅에서 필요한 specialist 고용이나 사수 지정을 HR Manager에게 맡길 수 있음. HR 고용은 회사의 현재 실행 모델 정책을 상속하고, 중복 역할과 chat/runtime tick별 무제한 고용을 막음
 - 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
 - `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO` 자동화 모드를 채팅 명령으로 바꿀 수 있고 기본값은 `AGENT_APPROVED`. 복구 가능한 민감 작업은 사용자 확인 rail 대신 CEO/QA/Reviewer 승인으로 라우팅
 - 저장소 삭제, 대량 파일 삭제, secret 작업, 비용 상한 해제, 배포/머지 정책 해제 같은 hard-gate 작업은 모든 모드에서 차단
