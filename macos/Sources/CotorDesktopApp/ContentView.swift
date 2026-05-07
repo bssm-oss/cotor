@@ -3483,1547 +3483,363 @@ private struct LocalProposalPreview {
 private struct CompanyChatControlRail: View {
     @EnvironmentObject private var store: DesktopStore
     let layoutMode: DesktopLayoutMode
-    @Binding var draft: String
-    @Binding var applyReviewDraft: String
-    @State private var isApplyingGoalProposal = false
+    @State private var sentMessages: [String] = []
+    @State private var showFullAutoConfirmation = false
 
     private var l: AppLanguage { store.language }
 
-    private var trimmedDraft: String {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var scopedMessages: [AgentMessageRecord] {
-        let companyID = store.selectedCompanyID
-        if let issueID = store.selectedIssue?.id {
-            return store.dashboard.agentMessages
-                .filter { (companyID == nil || $0.companyId == companyID) && $0.issueId == issueID }
-                .sorted { $0.createdAt > $1.createdAt }
-        }
-
-        return store.dashboard.agentMessages
-            .filter { companyID == nil || $0.companyId == companyID }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private var scopedContextEntries: [AgentContextEntryRecord] {
-        let companyID = store.selectedCompanyID
-        if let issueID = store.selectedIssue?.id {
-            return store.dashboard.agentContextEntries
-                .filter { (companyID == nil || $0.companyId == companyID) && ($0.issueId == issueID || $0.visibility == "company") }
-                .sorted { $0.createdAt > $1.createdAt }
-        }
-
-        return store.dashboard.agentContextEntries
-            .filter { companyID == nil || $0.companyId == companyID }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private var conversationHistory: [CompanyConversationHistoryItem] {
-        Array(
-            (scopedMessages.map { CompanyConversationHistoryItem.message($0) } +
-                scopedContextEntries.map { CompanyConversationHistoryItem.context($0) })
-                .sorted { $0.createdAt > $1.createdAt }
-                .prefix(layoutMode == .wide ? 14 : 10)
-        )
-    }
-
-    private var scopeChip: String {
-        if let issue = store.selectedIssue {
-            return l("Issue scope", "이슈 범위") + ": " + userFacingIssueTitle(issue.title, language: l)
-        }
-        if let company = store.selectedCompany {
-            return l("Company scope", "회사 범위") + ": " + company.name
-        }
-        return l("Live company scope", "실시간 회사 범위")
-    }
-
-    private var memorySummaryRows: [(String, String, Color)] {
-        let companyValue = store.companyMemorySnapshot.map {
-            userFacingCompanyMemory($0.companyMemory)
-        } ?? (store.selectedCompany?.name ?? l("No company selected", "선택된 회사 없음"))
-        let projectValue = store.companyMemorySnapshot.map {
-            userFacingWorkflowMemory($0.projectMemory)
-        } ?? {
-            if let issue = store.selectedIssue {
-                return userFacingIssueTitle(issue.title, language: l) + " · " + l.status(issue.status)
-            }
-            if let goal = store.selectedGoal {
-                return goal.title + " · " + l.status(goal.status)
-            }
-            return l("No active goal or issue selected", "활성 목표/이슈 없음")
-        }()
-        let teamValue = store.companyMemorySnapshot.map {
-            userFacingTeamMemory($0.teamMemory)
-        } ?? l("No recent handoff", "최근 인수인계 없음")
-        let agentValue = store.companyMemorySnapshot.map {
-            userFacingAgentMemory($0.agentMemory)
-        } ?? {
-            let lead = store.workflowLeadAgent.isEmpty ? (store.dashboard.settings.availableAgents.first ?? "—") : store.workflowLeadAgent
-            let count = store.dashboard.runningAgentSessions.count
-            return lead + " · " + l("live", "실행중") + " \(count)"
-        }()
-        return [
-            (l("Company memory", "회사 메모리"), companyValue, ShellPalette.accent),
-            (l("Project memory", "프로젝트 메모리"), projectValue, ShellPalette.warning),
-            (l("Team memory", "팀 메모리"), teamValue, ShellPalette.success),
-            (l("Agent memory", "에이전트 메모리"), agentValue, ShellPalette.accentWarm)
-        ]
-    }
-
-    private func userFacingCompanyMemory(_ raw: String) -> String {
-        let fields = memoryFields(from: raw)
-        var rows: [String] = []
-        appendMemoryRow(&rows, label: l("Company", "회사"), value: fields["company"])
-        appendMemoryRow(&rows, label: l("Active goal", "진행 목표"), value: fields["activeGoals"])
-        appendMemoryRow(&rows, label: l("Recent", "최근"), value: friendlyMemoryList(fields["recentActivity"], language: l))
-        return rows.isEmpty ? redactedMemoryFallback(raw) : rows.joined(separator: "\n")
-    }
-
-    private func userFacingWorkflowMemory(_ raw: String) -> String {
-        let fields = memoryFields(from: raw)
-        var rows: [String] = []
-        appendMemoryRow(&rows, label: l("Goal", "목표"), value: fields["goal"])
-        appendMemoryRow(&rows, label: l("Issue", "이슈"), value: fields["issue"].map { userFacingIssueTitle($0, language: l) })
-        appendMemoryRow(&rows, label: l("Status", "상태"), value: fields["issueStatus"].map(l.status))
-        appendMemoryRow(&rows, label: l("Related work", "관련 작업"), value: friendlyMemoryList(fields["goalIssues"], language: l))
-        return rows.isEmpty ? redactedMemoryFallback(raw) : rows.joined(separator: "\n")
-    }
-
-    private func userFacingAgentMemory(_ raw: String) -> String {
-        let fields = memoryFields(from: raw)
-        var rows: [String] = []
-        appendMemoryRow(&rows, label: l("Lead", "담당"), value: fields["role"])
-        appendMemoryRow(&rows, label: l("Tool", "도구"), value: fields["agentCli"])
-        appendMemoryRow(&rows, label: l("Assigned", "맡은 일"), value: friendlyMemoryList(fields["assignedIssues"], language: l))
-        appendMemoryRow(&rows, label: l("Recent message", "최근 메시지"), value: friendlyMemoryList(fields["recentMessages"], language: l))
-        return rows.isEmpty ? redactedMemoryFallback(raw) : rows.joined(separator: "\n")
-    }
-
-    private func userFacingTeamMemory(_ raw: String) -> String {
-        let fields = memoryFields(from: raw)
-        var rows: [String] = []
-        appendMemoryRow(&rows, label: l("Decisions", "결정"), value: friendlyMemoryList(fields["recentDecisions"], language: l))
-        appendMemoryRow(&rows, label: l("Handoffs", "인수인계"), value: friendlyMemoryList(fields["handoffs"], language: l))
-        appendMemoryRow(&rows, label: l("Messages", "메시지"), value: friendlyMemoryList(fields["recentMessages"], language: l))
-        return rows.isEmpty ? redactedMemoryFallback(raw) : rows.joined(separator: "\n")
-    }
-
-    private func memoryFields(from raw: String) -> [String: String] {
-        var fields: [String: String] = [:]
-        for line in raw.split(whereSeparator: \.isNewline) {
-            let parts = line.split(separator: "=", maxSplits: 1).map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            if parts.count == 2, !parts[0].isEmpty, !isInternalMemoryLine(parts[0], parts[1]) {
-                fields[parts[0]] = parts[1]
-            }
-        }
-        return fields
-    }
-
-    private func appendMemoryRow(_ rows: inout [String], label: String, value: String?) {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return }
-        rows.append("\(label): \(value)")
-    }
-
-    private func friendlyMemoryList(_ value: String?, language: AppLanguage) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
-        let items = value.split(separator: "|")
-            .map { item in
-                let cleaned = item.replacingOccurrences(of: #"\s*\[[^\]]+\]"#, with: "", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                return userFacingMemoryEvent(cleaned, language: language)
-            }
-            .filter { !$0.isEmpty && !containsInternalMemoryDetail($0) }
-            .prefix(3)
-        return items.isEmpty ? nil : items.joined(separator: ", ")
-    }
-
-    private func redactedMemoryFallback(_ raw: String) -> String {
-        let lines = raw.split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !containsInternalMemoryDetail($0) }
-            .prefix(3)
-        return lines.isEmpty ? l("No summary yet", "아직 요약 없음") : lines.joined(separator: "\n")
-    }
-
-    private func isInternalMemoryLine(_ key: String, _ value: String) -> Bool {
-        key == "rootPath" || key == "defaultBaseBranch" || key == "graphify" || containsInternalMemoryDetail(value)
-    }
-
-    private func containsInternalMemoryDetail(_ value: String) -> Bool {
-        let lowered = value.lowercased()
-        return lowered.contains("/users/")
-            || lowered.contains("graphify ")
-            || lowered.contains("graphify=")
-            || lowered.contains(".json")
-    }
-
-    private var memorySnapshotRequestKey: String {
-        [store.selectedCompanyID ?? store.selectedCompany?.id ?? "none", store.selectedIssueID ?? "none"].joined(separator: ":")
-    }
-
-    private var stagedProposalPreview: LocalProposalPreview? {
-        let stagedDraft = applyReviewDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !stagedDraft.isEmpty else { return nil }
-
-        let kind = classifyProposal(stagedDraft)
-        return LocalProposalPreview(
-            kind: kind,
-            targetScope: likelyTargetScope(for: kind),
-            riskLevel: proposalRiskLevel(for: kind),
-            nextStep: proposalNextStep(for: kind),
-            confirmationReason: confirmationReason(for: kind)
-        )
-    }
-
-    private var stagedGoalProposal: ChatGoalProposal? {
-        guard stagedProposalPreview?.kind == .goal else { return nil }
-        return store.chatGoalProposal(from: applyReviewDraft)
-    }
-
-    private var stagedCompanyRequestProposal: ChatCompanyRequestProposal? {
-        guard stagedProposalPreview?.kind == .companyRequest else { return nil }
-        return store.chatCompanyRequestProposal(from: applyReviewDraft)
-    }
-
-    private var stagedGoalAutonomyProposal: ChatGoalAutonomyProposal? {
-        guard stagedProposalPreview?.kind == .goalAutonomy else { return nil }
-        return store.chatGoalAutonomyProposal(from: applyReviewDraft)
-    }
-
-    private var stagedGoalDecompositionProposal: ChatGoalDecompositionProposal? {
-        guard stagedProposalPreview?.kind == .decomposition else { return nil }
-        return store.chatGoalDecompositionProposal(from: applyReviewDraft)
-    }
-
-    private var stagedIssueProposal: ChatIssueProposal? {
-        guard stagedProposalPreview?.kind == .issue else { return nil }
-        return store.chatIssueProposal(from: applyReviewDraft)
-    }
-
-    private var stagedDelegationProposal: ChatDelegationProposal? {
-        guard stagedProposalPreview?.kind == .delegation else { return nil }
-        return store.chatDelegationProposal(from: applyReviewDraft)
-    }
-
-    private var stagedReviewProposal: ChatReviewProposal? {
-        guard let preview = stagedProposalPreview else { return nil }
-        switch preview.kind {
-        case .qa:
-            return store.chatReviewProposal(from: applyReviewDraft, kind: "qa")
-        case .review:
-            return store.chatReviewProposal(from: applyReviewDraft, kind: "ceo")
-        default:
-            return nil
-        }
-    }
-
-    private var stagedMergeProposal: ChatMergeProposal? {
-        guard stagedProposalPreview?.kind == .review else { return nil }
-        return store.chatMergeProposal(from: applyReviewDraft)
-    }
-
-    private var stagedRuntimeProposal: ChatRuntimeProposal? {
-        guard stagedProposalPreview?.kind == .runtime else { return nil }
-        return store.chatRuntimeProposal(from: applyReviewDraft)
-    }
-
-    private var stagedAgentProposal: ChatAgentProposal? {
-        guard stagedProposalPreview?.kind == .agent else { return nil }
-        return store.chatAgentProposal(from: applyReviewDraft)
-    }
-
-    private var stagedBackendProposal: ChatBackendProposal? {
-        guard stagedProposalPreview?.kind == .backend else { return nil }
-        return store.chatBackendProposal(from: applyReviewDraft)
-    }
-
-    private var canApplyGoalProposal: Bool {
-        stagedGoalProposal != nil && store.selectedCompany != nil && !isApplyingGoalProposal
-    }
-
-    private var canApplyCompanyRequestProposal: Bool {
-        stagedCompanyRequestProposal != nil && store.selectedCompany != nil && !isApplyingGoalProposal
-    }
-
-    private var canApplyGoalAutonomyProposal: Bool {
-        guard let proposal = stagedGoalAutonomyProposal,
-              let goal = store.selectedGoal,
-              !isApplyingGoalProposal else {
-            return false
-        }
-        return proposal.mode == .enable ? !goal.autonomyEnabled : goal.autonomyEnabled
-    }
-
-    private var canApplyGoalDecompositionProposal: Bool {
-        stagedGoalDecompositionProposal != nil && store.selectedGoal != nil && !isApplyingGoalProposal
-    }
-
-    private var canApplyIssueProposal: Bool {
-        stagedIssueProposal != nil && store.selectedCompany != nil && !isApplyingGoalProposal
-    }
-
-    private var canApplyDelegationProposal: Bool {
-        guard stagedDelegationProposal != nil,
-              let issue = store.selectedIssue,
-              !isApplyingGoalProposal else {
-            return false
-        }
-        let status = issue.status.uppercased()
-        return status != "DELEGATED" && status != "DONE"
-    }
-
-    private var canApplyReviewProposal: Bool {
-        stagedReviewProposal != nil && stagedMergeProposal == nil && store.selectedReviewQueueItem != nil && !isApplyingGoalProposal
-    }
-
-    private var canApplyMergeProposal: Bool {
-        guard stagedMergeProposal != nil,
-              let item = store.selectedReviewQueueItem,
-              !isApplyingGoalProposal else {
-            return false
-        }
-        let prOpen = item.pullRequestState?.uppercased() == "OPEN"
-        let mergeable = item.mergeability?.uppercased()
-        let readyVerdict = item.ceoVerdict?.uppercased() == "APPROVE" || item.status == "READY_TO_MERGE"
-        return prOpen && readyVerdict && (mergeable == nil || mergeable == "CLEAN")
-    }
-
-    private var canApplyRuntimeProposal: Bool {
-        guard let proposal = stagedRuntimeProposal,
-              let company = store.selectedCompany,
-              !isApplyingGoalProposal else {
-            return false
-        }
-        let runtime = store.dashboard.companyRuntimes.first(where: { $0.companyId == company.id })
-        let isRunning = runtime?.status.uppercased() == "RUNNING"
-        switch proposal.action {
-        case .start:
-            return !isRunning
-        case .stop:
-            return isRunning
-        }
-    }
-
-    private var canApplyAgentProposal: Bool {
-        stagedAgentProposal != nil && store.selectedCompany != nil && !isApplyingGoalProposal
-    }
-
-    private var canApplyBackendProposal: Bool {
-        guard let proposal = stagedBackendProposal,
-              store.selectedCompany != nil,
-              !isApplyingGoalProposal else {
-            return false
-        }
-        let status = store.codexBackendStatus ?? store.dashboard.backendStatuses.first
-        let lifecycle = status?.lifecycleState.uppercased()
-        switch proposal.action {
-        case .start:
-            return lifecycle != "RUNNING"
-        case .stop:
-            return lifecycle == "RUNNING"
-        case .restart:
-            return lifecycle == "RUNNING" || lifecycle == "STARTING"
-        }
-    }
-
-    private var selectedLeadAgentLabel: String {
-        store.workflowLeadAgent.isEmpty ? (store.dashboard.settings.availableAgents.first ?? "—") : store.workflowLeadAgent
-    }
-
-    private var selectedWorkerAgentLabel: String {
-        let workers = Array(store.agentSelection.subtracting([selectedLeadAgentLabel])).sorted()
-        return workers.isEmpty ? l("No helpers selected", "선택된 도움 에이전트 없음") : workers.joined(separator: ", ")
-    }
-
-    private var routingParticipants: [(String, String, Color)] {
-        store.dashboard.settings.availableAgents
-            .filter { store.agentSelection.contains($0) || $0 == selectedLeadAgentLabel }
-            .map { agent in
-                let matchingSession = store.dashboard.runningAgentSessions.first {
-                    ($0.agentName == agent) || ($0.roleName == agent)
-                }
-                if let matchingSession {
-                    return (agent, l.status(matchingSession.status), statusTint(for: matchingSession.status))
-                }
-                if agent == selectedLeadAgentLabel {
-                    return (agent, l("Lead", "리더"), ShellPalette.accent)
-                }
-                return (agent, l("Idle", "대기"), ShellPalette.faint)
-            }
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            operatorHeader
-            operatorConversationZone
-            operatorComposerZone
-        }
-        .shellCard(accent: ShellPalette.lineStrong)
-    }
-
-    private var operatorHeader: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(ShellPalette.accent)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(l("Operator Chat", "운영 채팅"))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ShellPalette.text)
-                Text(store.selectedCompany?.name ?? l("No company selected", "선택된 회사 없음"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-            }
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var operatorConversationZone: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if store.operatorChatMessages.isEmpty {
-                        operatorEmptyState
-                    } else {
-                        ForEach(store.operatorChatMessages) { message in
-                            operatorMessageBubble(message)
-                                .id(message.id)
-                        }
-                    }
-                }
-                .padding(.vertical, 8)
-            }
-            .frame(minHeight: layoutMode == .wide ? 430 : 320)
-            .background(ShellPalette.panelDeeper.opacity(0.58))
-            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                    .stroke(ShellPalette.line, lineWidth: 1)
-            )
-            .onChange(of: store.operatorChatMessages.count) { _, _ in
-                guard let last = store.operatorChatMessages.last else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
-            }
-        }
-    }
-
-    private var operatorComposerZone: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            operatorCommandMenu
-
-            ZStack(alignment: .leading) {
-                TextField(l("Ask Cotor to run something...", "Cotor에게 실행할 일을 말하세요..."), text: $store.operatorCommandDraft, axis: .vertical)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(ShellPalette.text)
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(ShellPalette.panelDeeper)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                            .stroke(ShellPalette.line, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
-                    .onSubmit { sendOperatorDraft() }
-            }
-
-            Button {
-                sendOperatorDraft()
-            } label: {
-                Image(systemName: store.isSendingOperatorChatMessage ? "hourglass" : "paperplane.fill")
-                    .frame(width: 30, height: 30)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isSendingOperatorChatMessage)
-        }
-    }
-
-    private var operatorEmptyState: some View {
-        VStack(alignment: .center, spacing: 14) {
-            Spacer(minLength: 48)
-            Image(systemName: "message.fill")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(ShellPalette.accent)
-            VStack(spacing: 5) {
-                Text(l("What should Cotor do?", "무엇을 할까요?"))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(ShellPalette.text)
-                Text(l("Use chat to run the same company actions you would normally click.", "평소 버튼으로 하던 회사 작업을 채팅으로 실행하세요."))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                    .multilineTextAlignment(.center)
-            }
-            operatorQuickCommands
-            Spacer(minLength: 48)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 18)
-    }
-
-    private var operatorQuickCommands: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], alignment: .center, spacing: 8) {
-            ForEach(store.operatorSuggestedCommands()) { command in
-                Button {
-                    Task { await store.submitOperatorChatCommand(command) }
-                } label: {
-                    Text(command.title)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.84)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(ShellPalette.panelAlt)
-                .overlay(
-                    RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                        .stroke(ShellPalette.line, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
-                .foregroundStyle(ShellPalette.text)
-                .font(.system(size: 12, weight: .semibold))
-            }
-        }
-    }
-
-    private var operatorCommandMenu: some View {
-        Menu {
-            ForEach(store.operatorSuggestedCommands()) { command in
-                Button(command.title) {
-                    Task { await store.submitOperatorChatCommand(command) }
-                }
-            }
+        VStack(spacing: 0) {
+            chatHeader
             Divider()
-            Button(l("Create company...", "회사 만들기...")) {
-                Task { await store.submitOperatorChatMessage(l("Create a new company.", "새 회사 만들어줘")) }
-            }
-        } label: {
-            Image(systemName: "plus")
-                .frame(width: 30, height: 30)
+                .background(ShellPalette.line)
+            chatTimeline
+            chatComposer
         }
-        .menuStyle(.borderlessButton)
-    }
-
-    private func operatorMessageBubble(_ message: OperatorChatMessage) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            if message.role == .user {
-                Spacer(minLength: 36)
-            }
-
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                Text(message.text)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(message.role == .user ? Color.white : ShellPalette.text)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !message.commands.isEmpty {
-                    HStack(spacing: 7) {
-                        ForEach(message.commands) { command in
-                            Button {
-                                Task { await store.submitOperatorChatCommand(command) }
-                            } label: {
-                                Text(command.title)
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(command.destructive ? ShellPalette.accentWarm : ShellPalette.accent)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .frame(maxWidth: layoutMode == .wide ? 620 : 420, alignment: message.role == .user ? .trailing : .leading)
-            .background(operatorBubbleBackground(message.role))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(message.role == .user ? ShellPalette.accent.opacity(0.25) : ShellPalette.line, lineWidth: 1)
-            )
-
-            if message.role != .user {
-                Spacer(minLength: 36)
-            }
-        }
-        .padding(.horizontal, 12)
-    }
-
-    private func operatorBubbleBackground(_ role: OperatorChatRole) -> Color {
-        switch role {
-        case .user:
-            return ShellPalette.accent.opacity(0.78)
-        case .assistant:
-            return ShellPalette.panel
-        case .system:
-            return ShellPalette.panel.opacity(0.72)
-        }
-    }
-
-    private func sendOperatorDraft() {
-        let command = store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty else { return }
-        Task { await store.submitOperatorChatMessage(command) }
-    }
-
-    private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(l("Company Operator", "운영 채팅"))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ShellPalette.text)
-                Text(
-                    l(
-                        "Natural-language company operations and internal approval routing.",
-                        "자연어 회사 운영과 내부 승인 라우팅입니다."
-                    )
-                )
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(ShellPalette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-
-            StatusSummaryPill(text: l("LIVE STATE", "실시간 상태"), tint: ShellPalette.accent)
-        }
-    }
-
-    private var sourceStrip: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ShellTag(text: scopeChip, tint: ShellPalette.accent)
-                    ShellTag(text: l("Messages", "메시지") + " \(scopedMessages.count)", tint: ShellPalette.accentWarm)
-                    ShellTag(text: l("Context", "컨텍스트") + " \(scopedContextEntries.count)", tint: ShellPalette.warning)
-                }
-                .padding(.vertical, 2)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(l("Chat Team Assignment", "채팅 팀 배정"))
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(0.7)
-                    .foregroundStyle(ShellPalette.faint)
-
-                Picker(l("Lead AI", "리더 AI"), selection: Binding(
-                    get: { store.workflowLeadAgent.isEmpty ? (store.dashboard.settings.availableAgents.first ?? "") : store.workflowLeadAgent },
-                    set: { store.setWorkflowLeadAgent($0) }
-                )) {
-                    ForEach(store.dashboard.settings.availableAgents, id: \.self) { agent in
-                        Text(agent).tag(agent)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                FlowLayout(items: store.dashboard.settings.availableAgents, selected: store.agentSelection) { agent in
-                    store.toggleWorkflowAgent(agent)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(l("Active participants", "활성 참가자"))
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .tracking(0.6)
-                        .foregroundStyle(ShellPalette.faint)
-
-                    ForEach(routingParticipants, id: \.0) { participant in
-                        HStack(spacing: 8) {
-                            Text(participant.0)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundStyle(ShellPalette.text)
-                            Spacer(minLength: 8)
-                            StatusSummaryPill(text: participant.1, tint: participant.2)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var memoryStrip: some View {
-        MeetingRoomZoneCard(
-            title: l("Memory Snapshot", "메모리 스냅샷"),
-            subtitle: l(
-                "Current company context for the pending request.",
-                "대기 중인 요청에 적용되는 현재 회사 컨텍스트입니다."
-            ),
-            tint: ShellPalette.accentWarm
-        ) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(memorySummaryRows.enumerated()), id: \.offset) { _, row in
-                    proposalSummaryRow(label: row.0, value: row.1, tint: row.2)
-                }
-            }
-            .task(id: memorySnapshotRequestKey) {
-                await store.loadSelectedCompanyMemorySnapshot()
-            }
-        }
-    }
-
-    private var conversationZone: some View {
-        MeetingRoomZoneCard(
-            title: l("Conversation History", "대화 히스토리"),
-            subtitle: l(
-                "Recent messages, context updates, and activity signals.",
-                "최근 메시지, 컨텍스트 업데이트, 활동 신호를 봅니다."
-            ),
-            tint: ShellPalette.accent
-        ) {
-            VStack(alignment: .leading, spacing: 8) {
-                if conversationHistory.isEmpty {
-                    EmptyStateView(
-                        image: "bubble.left.and.text.bubble.right",
-                        title: l("No live conversation yet", "아직 실시간 대화가 없습니다"),
-                        subtitle: l(
-                            "New coordination activity will appear here.",
-                            "새 조율 활동이 여기에 표시됩니다."
-                        )
-                    )
-                    .frame(minHeight: 180)
-                } else {
-                    ForEach(conversationHistory) { item in
-                        historyRow(item)
-                    }
-                }
-            }
-        }
-    }
-
-    private var composerZone: some View {
-        MeetingRoomZoneCard(
-            title: l("Compose Request", "요청 초안"),
-            subtitle: l(
-                "Draft a request and review the action before it changes company state.",
-                "요청을 작성하고 회사 상태 변경 전 액션을 검토합니다."
-            ),
-            tint: ShellPalette.warning
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $draft)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(ShellPalette.text)
-                        .frame(minHeight: layoutMode == .wide ? 124 : 108)
-                        .padding(8)
-                        .scrollContentBackground(.hidden)
-                        .background(ShellPalette.panelDeeper)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                                .stroke(ShellPalette.line, lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
-
-                    if draft.isEmpty {
-                        Text(
-                            l(
-                                "Describe the company action you want Cotor to prepare.",
-                                "Cotor가 준비할 회사 액션을 입력하세요."
-                            )
-                        )
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(ShellPalette.faint)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 20)
-                        .allowsHitTesting(false)
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    Button {
-                        applyReviewDraft = trimmedDraft
-                    } label: {
-                        Label(l("Stage Apply Review", "적용 검토 준비"), systemImage: "checklist.checked")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(ShellTopBarButtonStyle(prominent: false))
-                    .disabled(trimmedDraft.isEmpty)
-
-                    Button {
-                        draft = ""
-                        applyReviewDraft = ""
-                    } label: {
-                        Label(l("Clear", "지우기"), systemImage: "xmark")
-                    }
-                    .buttonStyle(ShellTopBarButtonStyle(prominent: false))
-                    .disabled(draft.isEmpty && applyReviewDraft.isEmpty)
-                }
-
-                applyReviewPanel
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func historyRow(_ item: CompanyConversationHistoryItem) -> some View {
-        switch item {
-        case let .activity(activity):
-            MeetingRoomFeedRow(
-                eyebrow: activity.source.uppercased(),
-                title: userFacingActivityTitle(activity.title, language: l),
-                detail: userFacingActivityDetail(activity.detail ?? activity.source, language: l),
-                meta: relativeTimestamp(activity.createdAt),
-                tint: statusTint(for: activity.severity)
-            )
-        case let .message(message):
-            MeetingRoomFeedRow(
-                eyebrow: message.fromAgentName + " → " + (message.toAgentName ?? l("room", "room")),
-                title: message.subject.isEmpty ? l("Agent message", "에이전트 메시지") : message.subject,
-                detail: message.body,
-                meta: relativeTimestamp(message.createdAt),
-                tint: message.kind.lowercased() == "escalation" ? ShellPalette.warning : ShellPalette.accent
-            )
-        case let .context(entry):
-            MeetingRoomFeedRow(
-                eyebrow: "\(entry.agentName) · \(entry.kind.uppercased())",
-                title: entry.title,
-                detail: entry.content,
-                meta: relativeTimestamp(entry.createdAt),
-                tint: entry.visibility == "company" ? ShellPalette.accentWarm : ShellPalette.warning
-            )
-        }
-    }
-
-    private var applyReviewPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(l("Apply?", "적용할까요?"))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(ShellPalette.text)
-                    Text(
-                        l(
-                            "Review the proposed action before applying it.",
-                            "적용하기 전에 제안된 액션을 검토합니다."
-                        )
-                    )
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(ShellPalette.muted)
-                }
-
-                Spacer(minLength: 8)
-
-                StatusSummaryPill(text: l("CONFIRM FIRST", "확인 우선"), tint: ShellPalette.warning)
-            }
-
-            if applyReviewDraft.isEmpty {
-                Text(
-                    l(
-                        "Prepare a draft to review the proposed action.",
-                        "초안을 준비해 제안된 액션을 검토하세요."
-                    )
-                )
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(ShellPalette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            } else {
-                if let preview = stagedProposalPreview {
-                    proposalSummaryCard(preview)
-                }
-
-                proposalSummaryRow(
-                    label: l("Main agent", "대표 에이전트"),
-                    value: selectedLeadAgentLabel,
-                    tint: ShellPalette.accent
-                )
-                proposalSummaryRow(
-                    label: l("Helper agents", "도움 에이전트"),
-                    value: selectedWorkerAgentLabel,
-                    tint: ShellPalette.success
-                )
-
-                if let companyRequestProposal = stagedCompanyRequestProposal {
-                    proposalSummaryCard(
-                        LocalProposalPreview(
-                            kind: .companyRequest,
-                            targetScope: l("Selected company · \(store.selectedCompany?.name ?? "—")", "선택한 회사 · \(store.selectedCompany?.name ?? "—")"),
-                            riskLevel: l("High · creates a real CEO-owned goal and assigned issues after confirmation.", "높음 · 확인 뒤 실제 CEO 소유 목표와 담당 이슈를 생성합니다."),
-                            nextStep: l("Create one goal, let CEO clarify the request, and generate assigned work items for the company roster.", "목표 하나를 만들고 CEO가 요청을 정리한 뒤 회사 팀에 배정된 작업을 생성합니다."),
-                            confirmationReason: l("The request can be vague, so the app shows the CEO interpretation before changing company state.", "요청이 모호할 수 있으므로 회사 상태를 바꾸기 전에 CEO 해석을 먼저 보여줍니다.")
-                        )
-                    )
-
-                    proposalSummaryRow(
-                        label: l("CEO outcome", "CEO가 정리한 결과"),
-                        value: companyRequestProposal.title,
-                        tint: ShellPalette.success
-                    )
-                    proposalSummaryRow(
-                        label: l("CEO plan", "CEO 계획"),
-                        value: companyRequestProposal.ceoBrief,
-                        tint: ShellPalette.accent
-                    )
-                }
-
-                if let goalProposal = stagedGoalProposal {
-                    proposalSummaryCard(
-                        LocalProposalPreview(
-                            kind: .goal,
-                            targetScope: l("Selected company · \(store.selectedCompany?.name ?? "—")", "선택한 회사 · \(store.selectedCompany?.name ?? "—")"),
-                            riskLevel: l("High · creates a real company goal immediately after confirmation.", "높음 · 확인 직후 실제 회사 목표를 생성합니다."),
-                            nextStep: l("Create one goal with the first draft line as the title and the full draft as the description.", "초안의 첫 줄을 제목으로, 전체 초안을 설명으로 사용해 목표 하나를 생성합니다."),
-                            confirmationReason: l("Cotor inferred this from the draft and current selection. Confirm before creating the goal.", "Cotor가 초안과 현재 선택에서 추론했습니다. 목표 생성 전에 확인하세요.")
-                        )
-                    )
-
-                    proposalSummaryRow(
-                        label: l("Confirmed goal title", "확정될 목표 제목"),
-                        value: goalProposal.title,
-                        tint: ShellPalette.success
-                    )
-                }
-
-                if let goalAutonomyProposal = stagedGoalAutonomyProposal {
-                    proposalSummaryRow(
-                        label: l("Autonomy action", "자율 액션"),
-                        value: goalAutonomyProposal.mode == .enable ? l("Set selected goal to AUTO", "선택한 목표를 자동으로 설정") : l("Set selected goal to MANUAL", "선택한 목표를 수동으로 설정"),
-                        tint: ShellPalette.success
-                    )
-                    proposalSummaryRow(
-                        label: l("Operator note", "운영 메모"),
-                        value: goalAutonomyProposal.summary,
-                        tint: ShellPalette.warning
-                    )
-                }
-
-                if let decompositionProposal = stagedGoalDecompositionProposal {
-                    proposalSummaryRow(
-                        label: l("Decomposition action", "분해 액션"),
-                        value: l("Break the selected goal into explicit issues", "선택한 목표를 명시적인 이슈로 분해"),
-                        tint: ShellPalette.accentWarm
-                    )
-                    proposalSummaryRow(
-                        label: l("Operator note", "운영 메모"),
-                        value: decompositionProposal.summary,
-                        tint: ShellPalette.warning
-                    )
-                }
-
-                if let delegationProposal = stagedDelegationProposal {
-                    proposalSummaryRow(
-                        label: l("Delegation action", "위임 액션"),
-                        value: l("Assign the selected issue to the company team", "선택한 이슈를 회사 팀에 배정"),
-                        tint: ShellPalette.accentWarm
-                    )
-                    proposalSummaryRow(
-                        label: l("Operator note", "운영 메모"),
-                        value: delegationProposal.summary,
-                        tint: ShellPalette.warning
-                    )
-                }
-
-                if let issueProposal = stagedIssueProposal {
-                    proposalSummaryRow(
-                        label: l("Target goal", "대상 목표"),
-                        value: store.dashboard.goals.first(where: { $0.id == issueProposal.goalId })?.title ?? issueProposal.goalId,
-                        tint: ShellPalette.accent
-                    )
-                    proposalSummaryRow(
-                        label: l("Confirmed issue title", "확정될 이슈 제목"),
-                        value: issueProposal.title,
-                        tint: ShellPalette.success
-                    )
-                }
-
-                if let reviewProposal = stagedReviewProposal {
-                    proposalSummaryRow(
-                        label: l("Review stage", "리뷰 단계"),
-                        value: reviewProposal.stage == .qa ? l("QA", "QA") : l("CEO", "CEO"),
-                        tint: ShellPalette.warning
-                    )
-                    proposalSummaryRow(
-                        label: l("Confirmed verdict", "확정될 판정"),
-                        value: l.status(reviewProposal.verdict),
-                        tint: ShellPalette.success
-                    )
-                }
-
-                if let mergeProposal = stagedMergeProposal {
-                    proposalSummaryRow(
-                        label: l("Merge action", "머지 액션"),
-                        value: l("Merge the selected approved pull request", "선택한 승인된 풀 리퀘스트 머지"),
-                        tint: ShellPalette.success
-                    )
-                    proposalSummaryRow(
-                        label: l("Operator note", "운영 메모"),
-                        value: mergeProposal.summary,
-                        tint: ShellPalette.warning
-                    )
-                }
-
-                if let runtimeProposal = stagedRuntimeProposal {
-                    proposalSummaryRow(
-                        label: l("Runtime action", "런타임 액션"),
-                        value: runtimeProposal.action == .start ? l("Start selected company runtime", "선택한 회사 런타임 시작") : l("Stop selected company runtime", "선택한 회사 런타임 중지"),
-                        tint: ShellPalette.accentWarm
-                    )
-                }
-
-                if let agentProposal = stagedAgentProposal {
-                    proposalSummaryRow(
-                        label: l("Agent title", "에이전트 직함"),
-                        value: agentProposal.title,
-                        tint: ShellPalette.accent
-                    )
-                    proposalSummaryRow(
-                        label: l("Specialties", "전문 분야"),
-                        value: agentProposal.specialties.joined(separator: " · "),
-                        tint: ShellPalette.success
-                    )
-                }
-
-                if let backendProposal = stagedBackendProposal {
-                    proposalSummaryRow(
-                        label: l("Backend action", "백엔드 액션"),
-                        value: backendProposal.action.rawValue.uppercased(),
-                        tint: ShellPalette.warning
-                    )
-                }
-
-                Text(applyReviewDraft)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(ShellPalette.text)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(
-                    stagedCompanyRequestProposal != nil
-                        ? l(
-                            "Confirming creates the goal, asks the CEO to refine the request, and generates assigned issues.",
-                            "확인하면 목표를 만들고 CEO가 요청을 정리한 뒤 담당 이슈를 생성합니다."
-                        )
-                        : stagedGoalProposal != nil
-                        ? l(
-                            "Confirming creates one goal in the selected company.",
-                            "확인하면 선택한 회사에 목표 하나를 생성합니다."
-                        )
-                        : stagedGoalAutonomyProposal != nil
-                        ? l(
-                            "Confirming updates the selected goal's AUTO/MANUAL mode.",
-                            "확인하면 선택한 목표의 자동/수동 모드를 변경합니다."
-                        )
-                        : stagedGoalDecompositionProposal != nil
-                        ? l(
-                            "Confirming breaks the selected goal into assigned issues.",
-                            "확인하면 선택한 목표를 담당 이슈로 분해합니다."
-                        )
-                        : stagedDelegationProposal != nil
-                        ? l(
-                            "Confirming assigns the selected issue to the company team.",
-                            "확인하면 선택한 이슈를 회사 팀에 배정합니다."
-                        )
-                        : stagedMergeProposal != nil
-                        ? l(
-                            "Confirming merges the approved pull request.",
-                            "확인하면 승인된 풀 리퀘스트를 머지합니다."
-                        )
-                        : stagedRuntimeProposal != nil
-                        ? l(
-                            "Confirming starts or stops the selected company runtime.",
-                            "확인하면 선택한 회사 런타임을 시작하거나 중지합니다."
-                        )
-                        : stagedAgentProposal != nil
-                        ? l(
-                            "Confirming creates or updates the selected company team member.",
-                            "확인하면 선택한 회사 팀원을 생성하거나 변경합니다."
-                        )
-                        : stagedBackendProposal != nil
-                        ? l(
-                            "Confirming changes the selected company backend process.",
-                            "확인하면 선택한 회사 백엔드 프로세스를 변경합니다."
-                        )
-                        : stagedReviewProposal != nil
-                        ? l(
-                            "Confirming submits the selected review verdict.",
-                            "확인하면 선택한 리뷰 판정을 제출합니다."
-                        )
-                        : stagedIssueProposal != nil
-                        ? l(
-                            "Confirming creates one issue under the selected goal.",
-                            "확인하면 선택한 목표 아래에 이슈 하나를 생성합니다."
-                        )
-                        : l(
-                            "This request needs a supported action before it can be applied.",
-                            "이 요청은 지원되는 액션으로 정리된 뒤 적용할 수 있습니다."
-                        )
-                )
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(ShellPalette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: 8) {
-                    Button {
-                        applyReviewDraft = ""
-                    } label: {
-                        Label(l("Discard Review", "검토 취소"), systemImage: "trash")
-                    }
-                    .buttonStyle(ShellTopBarButtonStyle(prominent: false))
-
-                    Button {
-                        Task {
-                            isApplyingGoalProposal = true
-                            defer { isApplyingGoalProposal = false }
-                            if let companyRequestProposal = stagedCompanyRequestProposal {
-                                let saved = await store.applyChatCompanyRequestProposal(companyRequestProposal)
-                                guard saved != nil else { return }
-                            } else if let goalProposal = stagedGoalProposal {
-                                let saved = await store.applyChatGoalProposal(goalProposal)
-                                guard saved != nil else { return }
-                            } else if let goalAutonomyProposal = stagedGoalAutonomyProposal {
-                                let saved = await store.applyChatGoalAutonomyProposal(goalAutonomyProposal)
-                                guard saved != nil else { return }
-                            } else if let decompositionProposal = stagedGoalDecompositionProposal {
-                                let saved = await store.applyChatGoalDecompositionProposal(decompositionProposal)
-                                guard saved != nil else { return }
-                            } else if let delegationProposal = stagedDelegationProposal {
-                                let saved = await store.applyChatDelegationProposal(delegationProposal)
-                                guard saved != nil else { return }
-                            } else if let issueProposal = stagedIssueProposal {
-                                let saved = await store.applyChatIssueProposal(issueProposal)
-                                guard saved != nil else { return }
-                            } else if let mergeProposal = stagedMergeProposal {
-                                let saved = await store.applyChatMergeProposal(mergeProposal)
-                                guard saved != nil else { return }
-                            } else if let runtimeProposal = stagedRuntimeProposal {
-                                let saved = await store.applyChatRuntimeProposal(runtimeProposal)
-                                guard saved != nil else { return }
-                            } else if let agentProposal = stagedAgentProposal {
-                                let saved = await store.applyChatAgentProposal(agentProposal)
-                                guard saved != nil else { return }
-                            } else if let backendProposal = stagedBackendProposal {
-                                let saved = await store.applyChatBackendProposal(backendProposal)
-                                guard saved != nil else { return }
-                            } else if let reviewProposal = stagedReviewProposal {
-                                let saved = await store.applyChatReviewProposal(reviewProposal)
-                                guard saved != nil else { return }
-                            } else {
-                                return
-                            }
-                            draft = ""
-                            applyReviewDraft = ""
-                        }
-                    } label: {
-                        Label(
-                            stagedCompanyRequestProposal != nil
-                                ? (isApplyingGoalProposal ? l("CEO Planning…", "CEO 계획 중…") : l("Confirm & Let CEO Plan", "확인 후 CEO 계획"))
-                                : stagedGoalProposal != nil
-                                ? (isApplyingGoalProposal ? l("Creating Goal…", "목표 생성 중…") : l("Confirm & Create Goal", "확인 후 목표 생성"))
-                                : stagedGoalAutonomyProposal != nil
-                                ? (isApplyingGoalProposal ? l("Updating Goal Mode…", "목표 모드 변경 중…") : l("Confirm Goal Mode", "목표 모드 확인"))
-                                : stagedGoalDecompositionProposal != nil
-                                ? (isApplyingGoalProposal ? l("Decomposing Goal…", "목표 분해 중…") : l("Confirm & Decompose Goal", "확인 후 목표 분해"))
-                                : stagedDelegationProposal != nil
-                                ? (isApplyingGoalProposal ? l("Delegating Issue…", "이슈 위임 중…") : l("Confirm & Delegate Issue", "확인 후 이슈 위임"))
-                                : stagedIssueProposal != nil
-                                ? (isApplyingGoalProposal ? l("Creating Issue…", "이슈 생성 중…") : l("Confirm & Create Issue", "확인 후 이슈 생성"))
-                                : stagedMergeProposal != nil
-                                ? (isApplyingGoalProposal ? l("Merging PR…", "PR 머지 중…") : l("Confirm & Merge PR", "확인 후 PR 머지"))
-                                : stagedRuntimeProposal != nil
-                                ? (isApplyingGoalProposal
-                                    ? (stagedRuntimeProposal?.action == .start ? l("Starting Runtime…", "런타임 시작 중…") : l("Stopping Runtime…", "런타임 중지 중…"))
-                                    : (stagedRuntimeProposal?.action == .start ? l("Confirm & Start Runtime", "확인 후 런타임 시작") : l("Confirm & Stop Runtime", "확인 후 런타임 중지")))
-                                : stagedAgentProposal != nil
-                                ? (isApplyingGoalProposal ? l("Creating Agent…", "에이전트 생성 중…") : l("Confirm & Create Agent", "확인 후 에이전트 생성"))
-                                : stagedBackendProposal != nil
-                                ? (isApplyingGoalProposal
-                                    ? (stagedBackendProposal?.action == .restart ? l("Restarting Backend…", "백엔드 재시작 중…") : stagedBackendProposal?.action == .stop ? l("Stopping Backend…", "백엔드 중지 중…") : l("Starting Backend…", "백엔드 시작 중…"))
-                                    : (stagedBackendProposal?.action == .restart ? l("Confirm & Restart Backend", "확인 후 백엔드 재시작") : stagedBackendProposal?.action == .stop ? l("Confirm & Stop Backend", "확인 후 백엔드 중지") : l("Confirm & Start Backend", "확인 후 백엔드 시작")))
-                                : stagedReviewProposal != nil
-                                ? (isApplyingGoalProposal ? l("Submitting Verdict…", "판정 제출 중…") : l("Confirm & Submit Verdict", "확인 후 판정 제출"))
-                                : l("Confirm & Apply (future)", "확인 후 적용 (추후)"),
-                            systemImage: (stagedCompanyRequestProposal != nil || stagedGoalProposal != nil || stagedGoalAutonomyProposal != nil || stagedGoalDecompositionProposal != nil || stagedDelegationProposal != nil || stagedReviewProposal != nil) ? "checkmark.circle.fill" : "lock.fill"
-                        )
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(ShellTopBarButtonStyle(prominent: true))
-                    .disabled(!(canApplyCompanyRequestProposal || canApplyGoalProposal || canApplyGoalAutonomyProposal || canApplyGoalDecompositionProposal || canApplyDelegationProposal || canApplyIssueProposal || canApplyReviewProposal || canApplyMergeProposal || canApplyRuntimeProposal || canApplyAgentProposal || canApplyBackendProposal))
-                }
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .background(ShellPalette.panelDeeper)
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusMedium, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusMedium, style: .continuous)
                 .stroke(ShellPalette.line, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
-    }
-
-    private func proposalSummaryCard(_ preview: LocalProposalPreview) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(l("Proposal Preview", "제안 미리보기").uppercased())
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .tracking(0.8)
-                        .foregroundStyle(ShellPalette.text)
-                    Text(preview.kind.summary(l))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(ShellPalette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 8)
-
-                StatusSummaryPill(text: preview.kind.label(l).uppercased(), tint: preview.kind.tint)
+        .confirmationDialog(
+            l("Enable FULL_AUTO?", "FULL_AUTO를 켤까요?"),
+            isPresented: $showFullAutoConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(l("Enable FULL_AUTO", "FULL_AUTO 켜기")) {
+                Task { await store.setSelectedCompanyOperatorAutomationMode("FULL_AUTO", confirmFullAuto: true) }
             }
-
-            proposalSummaryRow(
-                label: l("Type", "유형"),
-                value: preview.kind.label(l),
-                tint: preview.kind.tint
-            )
-
-            proposalSummaryRow(
-                label: l("Likely target scope", "예상 대상 범위"),
-                value: preview.targetScope,
-                tint: ShellPalette.accent
-            )
-
-            proposalSummaryRow(
-                label: l("Risk level", "위험도"),
-                value: preview.riskLevel,
-                tint: ShellPalette.warning
-            )
-
-            proposalSummaryRow(
-                label: l("Next step after approval", "승인 후 다음 단계"),
-                value: preview.nextStep,
-                tint: ShellPalette.success
-            )
-
-            proposalSummaryRow(
-                label: l("Review required", "검토 필요"),
-                value: preview.confirmationReason,
-                tint: ShellPalette.warning
-            )
+            Button(l("Cancel", "취소"), role: .cancel) {}
+        } message: {
+            Text(l("Routine approvals will stop. Hard-gated actions remain blocked.", "일반 승인 요청은 줄어들지만 hard-gate 작업은 계속 차단됩니다."))
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ShellPalette.panelAlt)
-        .overlay(
-            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
-                .stroke(preview.kind.tint.opacity(0.24), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
     }
 
-    private func proposalSummaryRow(label: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+    // MARK: - Header
+
+    private var chatHeader: some View {
+        HStack(spacing: 10) {
+            ZStack {
                 Circle()
-                    .fill(tint)
-                    .frame(width: 6, height: 6)
-                Text(label.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .tracking(0.7)
-                    .foregroundStyle(ShellPalette.faint)
+                    .fill(ShellPalette.accent.opacity(0.18))
+                    .frame(width: 36, height: 36)
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(ShellPalette.accent)
             }
 
-            Text(value)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(ShellPalette.text)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(l("운영 채팅", "운영 채팅"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                if let company = store.selectedCompany {
+                    Text(company.name)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if let runtime = store.selectedRuntime {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(runtimeTint(runtime.status))
+                        .frame(width: 7, height: 7)
+                    Text(runtime.status.uppercased() == "RUNNING" ? l("실행 중", "실행 중") : l("정지", "정지"))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ShellPalette.muted)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    // MARK: - Timeline
+
+    private var chatTimeline: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if store.operatorCommandResponses.isEmpty && sentMessages.isEmpty {
+                        emptyChatState
+                    } else {
+                        let responses = store.operatorCommandResponses
+                        ForEach(Array(sentMessages.enumerated()), id: \.offset) { idx, msg in
+                            userBubble(msg)
+                            let responseIdx = responses.count - 1 - idx
+                            if responseIdx >= 0 && responseIdx < responses.count {
+                                assistantBubble(responses[responseIdx])
+                            }
+                        }
+                        Color.clear.frame(height: 1).id("chat-bottom")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+            }
+            .onChange(of: sentMessages.count) { _ in
+                withAnimation(ShellMotion.spring) { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+            }
+            .onChange(of: store.operatorCommandResponses.count) { _ in
+                withAnimation(ShellMotion.spring) { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+            }
+        }
+    }
+
+    private var emptyChatState: some View {
+        VStack(spacing: 0) {
+            Spacer().frame(minHeight: 32)
+            HStack(alignment: .top, spacing: 8) {
+                cotorAvatar
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Cotor")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(ShellPalette.muted)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(l("무엇을 도와드릴까요?", "무엇을 도와드릴까요?"))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(ShellPalette.text)
+                        FlowLayout(
+                            items: quickCommands.map(\.label),
+                            selected: []
+                        ) { label in
+                            if let cmd = quickCommands.first(where: { $0.label == label }) {
+                                store.operatorCommandDraft = cmd.message
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(ShellPalette.panelRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func userBubble(_ text: String) -> some View {
+        HStack {
+            Spacer(minLength: bubbleMinSpacer)
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(ChatPalette.userText)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(ChatPalette.userBubble)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(maxWidth: bubbleMaxWidth, alignment: .trailing)
         }
     }
 
-    private func classifyProposal(_ draft: String) -> LocalProposalKind {
-        let normalized = " " + draft.lowercased()
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\t", with: " ") + " "
+    private func assistantBubble(_ response: OperatorCommandResponsePayload) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            cotorAvatar
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Cotor")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ShellPalette.muted)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(response.message)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(ShellPalette.text)
+                        .fixedSize(horizontal: false, vertical: true)
 
-        let qaScore = keywordScore(in: normalized, keywords: [
-            " qa ", " test", " verify", " verification", " regression", " acceptance", " pass", " fail"
-        ])
-        let reviewScore = keywordScore(in: normalized, keywords: [
-            " review", " approve", " approval", " reviewer", " sign-off", " sign off", " merge", " pull request", " review queue"
-        ])
-        let runtimeScore = keywordScore(in: normalized, keywords: [
-            " runtime", " start company", " stop company", " pause runtime", " resume runtime"
-        ])
-        let agentScore = keywordScore(in: normalized, keywords: [
-            " agent ", " qa agent", " review agent", " reviewer ", " tester "
-        ])
-        let backendScore = keywordScore(in: normalized, keywords: [
-            " backend ", " app server ", " codex backend ", " restart backend ", " stop backend ", " start backend "
-        ])
-        let goalAutonomyScore = keywordScore(in: normalized, keywords: [
-            " enable autonomy ", " disable autonomy ", " turn autonomy on ", " turn autonomy off ", " enable auto mode ", " disable auto mode ", " make this goal autonomous ", " make this goal manual "
-        ])
-        let decompositionScore = keywordScore(in: normalized, keywords: [
-            " break this goal ", " decompose this goal ", " split this goal ", " generate issues for this goal ", " break selected goal "
-        ])
-        let delegationScore = keywordScore(in: normalized, keywords: [
-            " delegate this issue ", " assign this issue ", " route this issue ", " delegate selected issue ", " assign selected issue "
-        ])
-        let goalScore = keywordScore(in: normalized, keywords: [
-            " goal", " objective", " roadmap", " milestone", " outcome", " strategy", " north star", " plan"
-        ])
-        let issueScore = keywordScore(in: normalized, keywords: [
-            " issue", " task", " bug", " blocker", " implement", " fix", " ship", " ticket"
-        ])
+                    let allActions = response.actions + response.pendingApprovals + response.blockedActions
+                    if !allActions.isEmpty {
+                        responseActionChips(response)
+                    }
 
-        if qaScore > 0 && qaScore >= reviewScore && qaScore >= goalScore && qaScore >= issueScore {
-            return .qa
+                    if let summary = response.summary,
+                       summary.activeAgentCount + summary.blockedIssueCount + summary.reviewQueueCount > 0 {
+                        responseSummaryChips(summary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(ShellPalette.panelRaised)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
+            }
+            Spacer(minLength: 0)
         }
-        if reviewScore > 0 && reviewScore >= goalScore && reviewScore >= issueScore {
-            return .review
-        }
-        if runtimeScore > 0 && runtimeScore >= goalScore && runtimeScore >= issueScore {
-            return .runtime
-        }
-        if agentScore > 0 && agentScore >= goalScore && agentScore >= issueScore {
-            return .agent
-        }
-        if backendScore > 0 && backendScore >= goalScore && backendScore >= issueScore {
-            return .backend
-        }
-        if goalAutonomyScore > 0 && goalAutonomyScore >= goalScore && goalAutonomyScore >= issueScore {
-            return .goalAutonomy
-        }
-        if decompositionScore > 0 && decompositionScore >= goalScore && decompositionScore >= issueScore {
-            return .decomposition
-        }
-        if delegationScore > 0 && delegationScore >= goalScore && delegationScore >= issueScore {
-            return .delegation
-        }
-        if goalScore > 0 && goalScore >= issueScore {
-            return .goal
-        }
-        if issueScore > 0 {
-            return .issue
-        }
-        return .companyRequest
     }
 
-    private func keywordScore(in text: String, keywords: [String]) -> Int {
-        keywords.reduce(into: 0) { partialResult, keyword in
-            if text.contains(keyword) {
-                partialResult += 1
+    private var cotorAvatar: some View {
+        ZStack {
+            Circle()
+                .fill(ShellPalette.accent.opacity(0.16))
+                .frame(width: 30, height: 30)
+            Text("C")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(ShellPalette.accent)
+        }
+    }
+
+    private func responseActionChips(_ response: OperatorCommandResponsePayload) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach((response.actions + response.pendingApprovals + response.blockedActions).prefix(4)) { action in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(actionTint(for: action, in: response))
+                        .frame(width: 5, height: 5)
+                    Text(action.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text(action.status)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(1)
+                }
             }
         }
     }
 
-    private func likelyTargetScope(for kind: LocalProposalKind) -> String {
-        switch kind {
-        case .companyRequest:
-            if let company = store.selectedCompany {
-                return l("CEO intake · \(company.name)", "CEO 인테이크 · \(company.name)")
+    private func responseSummaryChips(_ summary: OperatorCompanySummaryPayload) -> some View {
+        HStack(spacing: 6) {
+            if summary.activeAgentCount > 0 {
+                miniChip(l("에이전트", "에이전트"), "\(summary.activeAgentCount)", ShellPalette.accent)
             }
-        case .goal:
-            if let goal = store.selectedGoal {
-                return l("Selected goal · \(goal.title)", "선택한 목표 · \(goal.title)")
+            if summary.blockedIssueCount > 0 {
+                miniChip(l("막힘", "막힘"), "\(summary.blockedIssueCount)", ShellPalette.warning)
             }
-            if let issue = store.selectedIssue,
-               let goal = store.dashboard.goals.first(where: { $0.id == issue.goalId }) {
-                return l("Parent goal · \(goal.title)", "상위 목표 · \(goal.title)")
+            if summary.reviewQueueCount > 0 {
+                miniChip(l("리뷰", "리뷰"), "\(summary.reviewQueueCount)", ShellPalette.accentWarm)
             }
-            if let company = store.selectedCompany {
-                return l("Company roadmap · \(company.name)", "회사 로드맵 · \(company.name)")
-            }
-        case .goalAutonomy:
-            if let goal = store.selectedGoal {
-                return l("Selected goal autonomy · \(goal.title)", "선택한 목표 자율 · \(goal.title)")
-            }
-        case .decomposition:
-            if let goal = store.selectedGoal {
-                return l("Selected goal breakdown · \(goal.title)", "선택한 목표 분해 · \(goal.title)")
-            }
-        case .issue:
-            if let issue = store.selectedIssue {
-                let title = userFacingIssueTitle(issue.title, language: l)
-                return l("Selected issue · \(title)", "선택한 이슈 · \(title)")
-            }
-            if let goal = store.selectedGoal {
-                return l("Issue lane under goal · \(goal.title)", "목표 아래 이슈 레인 · \(goal.title)")
-            }
-        case .delegation:
-            if let issue = store.selectedIssue {
-                let title = userFacingIssueTitle(issue.title, language: l)
-                return l("Selected issue assignment · \(title)", "선택한 이슈 배정 · \(title)")
-            }
-        case .execution:
-            if let issue = store.selectedIssue {
-                let title = userFacingIssueTitle(issue.title, language: l)
-                return l("Selected issue execution · \(title)", "선택한 이슈 실행 · \(title)")
-            }
-        case .qa:
-            if let issue = store.selectedIssue {
-                let title = userFacingIssueTitle(issue.title, language: l)
-                return l("QA pass on issue · \(title)", "이슈 QA 패스 · \(title)")
-            }
-            if let goal = store.selectedGoal {
-                return l("Goal verification pass · \(goal.title)", "목표 검증 패스 · \(goal.title)")
-            }
-        case .review:
-            if let issue = store.selectedIssue, store.selectedReviewQueueItem != nil {
-                let title = userFacingIssueTitle(issue.title, language: l)
-                return l("Selected review item · \(title)", "선택한 리뷰 항목 · \(title)")
-            }
-            if let issue = store.selectedIssue {
-                let title = userFacingIssueTitle(issue.title, language: l)
-                return l("Selected issue review lane · \(title)", "선택한 이슈 리뷰 레인 · \(title)")
-            }
-        case .runtime:
-            if let company = store.selectedCompany {
-                return l("Selected company runtime · \(company.name)", "선택한 회사 런타임 · \(company.name)")
-            }
-        case .agent:
-            if let company = store.selectedCompany {
-                return l("Selected company team · \(company.name)", "선택한 회사 팀 · \(company.name)")
-            }
-        case .backend:
-            if let company = store.selectedCompany {
-                return l("Selected company backend · \(company.name)", "선택한 회사 백엔드 · \(company.name)")
-            }
-        case .generalNote:
-            if let issue = store.selectedIssue {
-                let title = userFacingIssueTitle(issue.title, language: l)
-                return l("Current issue room · \(title)", "현재 이슈 룸 · \(title)")
-            }
-            if let goal = store.selectedGoal {
-                return l("Current goal room · \(goal.title)", "현재 목표 룸 · \(goal.title)")
-            }
-        }
-
-        if let company = store.selectedCompany {
-            return l("Current company room · \(company.name)", "현재 회사 룸 · \(company.name)")
-        }
-
-        return l("Current live company selection", "현재 라이브 회사 선택 범위")
-    }
-
-    private func confirmationReason(for kind: LocalProposalKind) -> String {
-        switch kind {
-        case .companyRequest:
-            return l(
-                "Creates a goal and assigned issues after confirmation.",
-                "확인 후 목표와 담당 이슈를 생성합니다."
-            )
-        case .goal:
-            return l(
-                "Creates a goal from the draft and current company selection.",
-                "초안과 현재 회사 선택을 기준으로 목표를 생성합니다."
-            )
-        case .goalAutonomy:
-            return l(
-                "Updates the selected goal's autonomous follow-up mode.",
-                "선택한 목표의 자율 후속 진행 모드를 변경합니다."
-            )
-        case .decomposition:
-            return l(
-                "Breaks the selected goal into executable issues.",
-                "선택한 목표를 실행 가능한 이슈로 분해합니다."
-            )
-        case .issue:
-            return l(
-                "Creates an issue from the draft under the selected goal.",
-                "선택한 목표 아래에 초안 기반 이슈를 생성합니다."
-            )
-        case .delegation:
-            return l(
-                "Assigns the selected issue to a company agent.",
-                "선택한 이슈를 회사 에이전트에게 배정합니다."
-            )
-        case .execution:
-            return l(
-                "Starts work on the selected issue.",
-                "선택한 이슈의 실행을 시작합니다."
-            )
-        case .qa:
-            return l(
-                "Submits a QA verdict for the selected work.",
-                "선택한 작업의 QA 판정을 제출합니다."
-            )
-        case .review:
-            return l(
-                "Submits a CEO review verdict for the selected item.",
-                "선택한 항목의 CEO 리뷰 판정을 제출합니다."
-            )
-        case .runtime:
-            return l(
-                "Starts or stops the selected company runtime.",
-                "선택한 회사 런타임을 시작하거나 중지합니다."
-            )
-        case .agent:
-            return l(
-                "Creates a company agent from the draft.",
-                "초안 기반 회사 에이전트를 생성합니다."
-            )
-        case .backend:
-            return l(
-                "Changes the selected company backend process state.",
-                "선택한 회사 백엔드 프로세스 상태를 변경합니다."
-            )
-        case .generalNote:
-            return l(
-                "No supported action has been detected yet.",
-                "아직 지원되는 액션이 감지되지 않았습니다."
-            )
         }
     }
 
-    private func proposalRiskLevel(for kind: LocalProposalKind) -> String {
-        switch kind {
-        case .companyRequest:
-            return l("High · creates a goal and several assigned work items.", "높음 · 목표와 여러 담당 작업을 생성합니다.")
-        case .goal:
-            return l("High · changes company direction and can spawn many downstream actions.", "높음 · 회사 방향과 하위 작업 다수를 바꿀 수 있습니다.")
-        case .goalAutonomy:
-            return l("Medium · changes whether the selected goal keeps generating autonomous follow-up work.", "중간 · 선택한 목표가 자율 후속 작업을 계속 생성할지 바꿉니다.")
-        case .decomposition:
-            return l("High · expands one goal into multiple new execution issues.", "높음 · 하나의 목표를 여러 새 실행 이슈로 확장합니다.")
-        case .issue:
-            return l("Medium · likely creates or reshapes one execution item.", "중간 · 하나의 실행 이슈를 만들거나 바꿀 가능성이 큽니다.")
-        case .delegation:
-            return l("Medium · changes who owns the selected issue next.", "중간 · 다음에 누가 선택한 이슈를 맡는지 바꿉니다.")
-        case .execution:
-            return l("High · starts real work on the selected issue.", "높음 · 선택한 이슈에서 실제 작업을 시작합니다.")
-        case .qa, .review:
-            return l("Medium · can alter review or approval state for existing work.", "중간 · 기존 작업의 리뷰/승인 상태를 바꿀 수 있습니다.")
-        case .runtime:
-            return l("Medium · changes whether the selected company loop is running.", "중간 · 선택한 회사 루프의 실행 여부를 바꿉니다.")
-        case .agent:
-            return l("Medium · changes the selected company team.", "중간 · 선택한 회사의 인력 구성을 바꿉니다.")
-        case .backend:
-            return l("Medium · changes the selected company backend process state.", "중간 · 선택한 회사 백엔드 프로세스 상태를 바꿉니다.")
-        case .generalNote:
-            return l("Low · usually captured as a note until you explicitly apply it.", "낮음 · 명시적으로 적용하기 전까지는 메모로 남을 가능성이 큽니다.")
+    private func miniChip(_ label: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(ShellPalette.faint)
+            Text(value)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(ShellPalette.panelDeeper)
+        .clipShape(Capsule())
+    }
+
+    // MARK: - Composer
+
+    private var chatComposer: some View {
+        VStack(spacing: 0) {
+            Divider().background(ShellPalette.line)
+            HStack(alignment: .bottom, spacing: 8) {
+                quickCommandMenu
+                composerField
+                sendButton
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
     }
 
-    private func proposalNextStep(for kind: LocalProposalKind) -> String {
-        switch kind {
-        case .companyRequest:
-            return l("Ask CEO to clarify the chat request, create the goal, and split it into assigned issues.", "CEO에게 채팅 요청을 정리하게 하고 목표와 담당 이슈로 나눕니다.")
-        case .goal:
-            return l("Review the goal proposal, then create the company goal.", "목표 제안을 검토한 뒤 회사 목표를 생성합니다.")
-        case .goalAutonomy:
-            return l("Review the goal autonomy action, then change the selected goal's AUTO/MANUAL mode.", "목표 자율 액션을 검토한 뒤 선택한 목표의 자동/수동 모드를 변경합니다.")
-        case .decomposition:
-            return l("Review the decomposition action, then break the selected goal into issues.", "분해 액션을 검토한 뒤 선택한 목표를 이슈로 분해합니다.")
-        case .issue:
-            return l("Review the issue draft, then create the issue.", "이슈 초안을 검토한 뒤 이슈를 생성합니다.")
-        case .delegation:
-            return l("Review the delegation action, then assign the selected issue.", "위임 액션을 검토한 뒤 선택한 이슈를 배정합니다.")
-        case .execution:
-            return l("Review the execution action, then run the selected issue.", "실행 액션을 검토한 뒤 선택한 이슈를 실행합니다.")
-        case .qa:
-            return l("Review the QA action, then submit the verdict.", "QA 액션을 검토한 뒤 판정을 제출합니다.")
-        case .review:
-            return l("Review the approval action, then submit the CEO verdict.", "승인 액션을 검토한 뒤 CEO 판정을 제출합니다.")
-        case .runtime:
-            return l("Review the runtime action, then start or stop the selected company loop.", "런타임 액션을 검토한 뒤 선택한 회사 루프를 시작하거나 중지합니다.")
-        case .agent:
-            return l("Review the staffing action, then create the company agent.", "인력 배치 액션을 검토한 뒤 회사 에이전트를 생성합니다.")
-        case .backend:
-            return l("Review the backend action, then start, stop, or restart the selected company backend.", "백엔드 액션을 검토한 뒤 선택한 회사 백엔드를 시작, 중지, 재시작합니다.")
-        case .generalNote:
-            return l("Preview a room note and keep it read-only until you intentionally turn it into an action.", "방 메모로 미리 보여주고, 의도적으로 액션으로 바꾸기 전까지는 읽기 전용으로 둡니다.")
+    private var quickCommandMenu: some View {
+        Menu {
+            ForEach(quickCommands, id: \.label) { cmd in
+                Button(cmd.label) {
+                    store.operatorCommandDraft = cmd.message
+                }
+            }
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 26))
+                .foregroundStyle(ShellPalette.accent)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var composerField: some View {
+        ZStack(alignment: .leading) {
+            if store.operatorCommandDraft.isEmpty {
+                Text(l("Cotor에게 실행할 일을 말하세요...", "Cotor에게 실행할 일을 말하세요..."))
+                    .font(.system(size: 13))
+                    .foregroundStyle(ShellPalette.faint)
+                    .padding(.horizontal, 14)
+                    .allowsHitTesting(false)
+            }
+            TextField("", text: $store.operatorCommandDraft, axis: .vertical)
+                .lineLimit(1...5)
+                .font(.system(size: 13))
+                .foregroundStyle(ShellPalette.text)
+                .padding(.horizontal, 14)
+        }
+        .frame(minHeight: 36)
+        .padding(.vertical, 6)
+        .background(ShellPalette.panelAlt)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(ShellPalette.line, lineWidth: 1))
+    }
+
+    private var sendButton: some View {
+        Button(action: sendMessage) {
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(canSend ? ShellPalette.accent : ShellPalette.faint)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSend)
+    }
+
+    // MARK: - Helpers
+
+    private var bubbleMaxWidth: CGFloat { layoutMode == .wide ? 340 : 280 }
+    private var bubbleMinSpacer: CGFloat { layoutMode == .wide ? 80 : 60 }
+
+    private var canSend: Bool {
+        store.selectedCompany != nil &&
+        !store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func sendMessage() {
+        let command = store.operatorCommandDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty, store.selectedCompany != nil else { return }
+        sentMessages.append(command)
+        store.operatorCommandDraft = ""
+        Task { _ = await store.runCompanyOperatorCommand(message: command) }
+    }
+
+    private func runtimeTint(_ status: String) -> Color {
+        switch status.uppercased() {
+        case "RUNNING": return ShellPalette.success
+        case "ERROR": return ShellPalette.danger
+        default: return ShellPalette.faint
         }
     }
+
+    private func actionTint(for action: OperatorCommandActionPayload, in response: OperatorCommandResponsePayload) -> Color {
+        if response.pendingApprovals.contains(where: { $0.id == action.id }) { return ShellPalette.warning }
+        if response.blockedActions.contains(where: { $0.id == action.id }) { return ShellPalette.danger }
+        return ShellPalette.accent
+    }
+
+    private struct QuickCommand { let label: String; let message: String }
+
+    private var quickCommands: [QuickCommand] {[
+        QuickCommand(label: l("상태 확인", "상태 확인"), message: "에이전트들 잘 돌아가고 있는지 확인해줘"),
+        QuickCommand(label: l("회사 시작", "회사 시작"), message: "회사 런타임 시작해줘"),
+        QuickCommand(label: l("DeepSeek로 변경", "DeepSeek로 변경"), message: "모든 에이전트 opencode deepseek 모델로 바꿔줘"),
+        QuickCommand(label: l("막힌 일 재시도", "막힌 일 재시도"), message: "막힌 이슈 다시 굴려")
+    ]}
+}
+
+private enum ChatPalette {
+    static let userBubble = Color(nsColor: NSColor(red: 0.95, green: 0.76, blue: 0.20, alpha: 1))
+    static let userText = Color(nsColor: NSColor.black.withAlphaComponent(0.85))
 }
 
 private struct OrgChartNode: View {
@@ -5540,8 +4356,6 @@ private struct CenterPaneView: View {
     @State private var issueDetailsExpanded = false
     @State private var issueActivityExpanded = false
     @State private var presentedGoal: GoalRecord?
-    @State private var companyChatDraft = ""
-    @State private var companyChatApplyReviewDraft = ""
     private var l: AppLanguage { store.language }
 
     private var workflowLeader: String {
@@ -5996,11 +4810,7 @@ private struct CenterPaneView: View {
                 title: l("Company Operator", "운영 채팅"),
                 subtitle: l("Run selected-company operations through a command chat.", "선택된 회사 운영을 명령 채팅으로 실행합니다.")
             )
-            CompanyChatControlRail(
-                layoutMode: layoutMode,
-                draft: $companyChatDraft,
-                applyReviewDraft: $companyChatApplyReviewDraft
-            )
+            CompanyChatControlRail(layoutMode: layoutMode)
         }
     }
 
