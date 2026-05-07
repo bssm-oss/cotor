@@ -203,6 +203,7 @@ enum OperatorChatRole: String, Equatable {
 enum OperatorChatCommandKind: String, Equatable {
     case sendPrompt
     case confirmFullAuto
+    case confirmHrStaffing
     case confirmCompanyDelete
     case confirmMerge
     case cancelConfirmation
@@ -385,6 +386,7 @@ final class DesktopStore: ObservableObject {
     @Published var newCompanyAgentCollaborationNotes = ""
     @Published var newCompanyAgentMemoryNotes = ""
     @Published var newCompanyAgentPreferredCollaboratorIDs: Set<String> = []
+    @Published var newCompanyAgentMentorID = ""
     @Published var newCompanyAgentSkillIDs: Set<String> = []
     @Published var marketingPolicyAllowedDomains = ""
     @Published var marketingPolicyChannels = "web"
@@ -577,6 +579,10 @@ final class DesktopStore: ObservableObject {
 
     var availableCompanyAgentCollaborators: [CompanyAgentDefinitionRecord] {
         companyAgentDefinitions.filter { $0.id != editingCompanyAgentID }
+    }
+
+    var availableCompanyAgentMentors: [CompanyAgentDefinitionRecord] {
+        companyAgentDefinitions.filter { $0.id != editingCompanyAgentID && $0.enabled }
     }
 
     var companyAgentDefinitions: [CompanyAgentDefinitionRecord] {
@@ -2380,6 +2386,7 @@ final class DesktopStore: ObservableObject {
                     specialties: proposal.specialties,
                     collaborationInstructions: proposal.collaborationInstructions,
                     preferredCollaboratorIds: [],
+                    mentorAgentId: nil,
                     memoryNotes: proposal.memoryNotes,
                     enabled: proposal.enabled
                 )
@@ -2903,6 +2910,7 @@ final class DesktopStore: ObservableObject {
         let collaborationNotes = trimmedOptional(newCompanyAgentCollaborationNotes)
         let memoryNotes = trimmedOptional(newCompanyAgentMemoryNotes)
         let preferredCollaboratorIds = Array(newCompanyAgentPreferredCollaboratorIDs).sorted()
+        let mentorAgentId = newCompanyAgentMentorID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, !cli.isEmpty, !role.isEmpty else { return }
         do {
             actionErrorMessage = nil
@@ -2921,6 +2929,7 @@ final class DesktopStore: ObservableObject {
                         specialties: specialties,
                         collaborationInstructions: collaborationNotes,
                         preferredCollaboratorIds: preferredCollaboratorIds,
+                        mentorAgentId: mentorAgentId,
                         memoryNotes: memoryNotes,
                         enabled: newCompanyAgentEnabled
                     )
@@ -2936,6 +2945,7 @@ final class DesktopStore: ObservableObject {
                         specialties: specialties,
                         collaborationInstructions: collaborationNotes,
                         preferredCollaboratorIds: preferredCollaboratorIds,
+                        mentorAgentId: mentorAgentId.isEmpty ? nil : mentorAgentId,
                         memoryNotes: memoryNotes,
                         enabled: newCompanyAgentEnabled
                     )
@@ -3079,6 +3089,7 @@ final class DesktopStore: ObservableObject {
         newCompanyAgentCollaborationNotes = agent.collaborationInstructions ?? ""
         newCompanyAgentMemoryNotes = agent.memoryNotes ?? ""
         newCompanyAgentPreferredCollaboratorIDs = Set(agent.preferredCollaboratorIds)
+        newCompanyAgentMentorID = agent.mentorAgentId ?? ""
         newCompanyAgentSkillIDs = skillIDs(for: agent)
         syncMarketingPolicyForm(forAgentId: agent.id)
         newCompanyAgentEnabled = agent.enabled
@@ -3091,7 +3102,8 @@ final class DesktopStore: ObservableObject {
     func runCompanyOperatorCommand(
         message: String,
         automationMode: String? = nil,
-        confirmFullAuto: Bool = false
+        confirmFullAuto: Bool = false,
+        confirmStaffing: Bool = false
     ) async -> OperatorCommandResponsePayload? {
         guard let company = selectedCompany else { return nil }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3104,7 +3116,8 @@ final class DesktopStore: ObservableObject {
                     companyId: company.id,
                     message: trimmed,
                     automationMode: automationMode,
-                    confirmFullAuto: confirmFullAuto
+                    confirmFullAuto: confirmFullAuto,
+                    confirmStaffing: confirmStaffing
                 )
             }
             operatorCommandResponses.insert(response, at: 0)
@@ -3133,6 +3146,8 @@ final class DesktopStore: ObservableObject {
     func operatorSuggestedCommands() -> [OperatorChatCommand] {
         [
             OperatorChatCommand(title: language("Check status", "상태 확인"), prompt: language("Check whether the agents are running well.", "에이전트들 잘 돌아가고 있는지 확인해줘")),
+            OperatorChatCommand(title: language("Staff team", "팀 보강"), prompt: language("Ask HR Manager to hire missing agents and assign mentors.", "HR 매니저가 필요한 사람을 고용하고 사수를 지정하게 해줘")),
+            OperatorChatCommand(title: language("Assign mentors", "사수 지정"), prompt: language("Ask HR Manager to assign mentors for agents that need one.", "사수가 없는 에이전트들에게 사수를 지정해줘")),
             OperatorChatCommand(title: language("Start company", "회사 시작"), prompt: language("Start this company.", "회사 시작해줘")),
             OperatorChatCommand(title: language("Stop company", "회사 중지"), prompt: language("Stop this company.", "회사 중지해줘")),
             OperatorChatCommand(title: language("Use DeepSeek", "DeepSeek로 변경"), prompt: language("Change every agent to opencode deepseek.", "모든 에이전트 opencode deepseek 모델로 바꿔줘")),
@@ -3158,6 +3173,13 @@ final class DesktopStore: ObservableObject {
                 message: command.prompt,
                 automationMode: "FULL_AUTO",
                 confirmFullAuto: true
+            )
+            appendOperatorChatMessage(role: .assistant, text: reply)
+        case .confirmHrStaffing:
+            appendOperatorChatMessage(role: .user, text: command.title)
+            let reply = await runOperatorCommandAsChatReply(
+                message: command.prompt,
+                confirmStaffing: true
             )
             appendOperatorChatMessage(role: .assistant, text: reply)
         case .confirmCompanyDelete:
@@ -3237,6 +3259,29 @@ final class DesktopStore: ObservableObject {
                         prompt: trimmed,
                         kind: .confirmCompanyDelete,
                         destructive: true
+                    ),
+                    OperatorChatCommand(
+                        title: language("Cancel", "취소"),
+                        prompt: "",
+                        kind: .cancelConfirmation
+                    )
+                ]
+            )
+            return
+        }
+        if selectedOperatorAutomationMode.uppercased() == "ASK_ME",
+           looksLikeHrStaffingChatRequest(normalized) {
+            appendOperatorChatMessage(
+                role: .assistant,
+                text: language(
+                    "HR Manager can hire missing agents or assign mentors. Confirm to run this staffing change.",
+                    "HR 매니저가 필요한 에이전트를 고용하거나 사수를 지정할 수 있습니다. 실행하려면 확인하세요."
+                ),
+                commands: [
+                    OperatorChatCommand(
+                        title: language("Run HR staffing", "HR 보강 실행"),
+                        prompt: trimmed,
+                        kind: .confirmHrStaffing
                     ),
                     OperatorChatCommand(
                         title: language("Cancel", "취소"),
@@ -3395,12 +3440,14 @@ final class DesktopStore: ObservableObject {
     private func runOperatorCommandAsChatReply(
         message: String,
         automationMode: String? = nil,
-        confirmFullAuto: Bool = false
+        confirmFullAuto: Bool = false,
+        confirmStaffing: Bool = false
     ) async -> String {
         guard let response = await runCompanyOperatorCommand(
             message: message,
             automationMode: automationMode,
-            confirmFullAuto: confirmFullAuto
+            confirmFullAuto: confirmFullAuto,
+            confirmStaffing: confirmStaffing
         ) else {
             return operatorFailureFallback()
         }
@@ -3523,6 +3570,10 @@ final class DesktopStore: ObservableObject {
 
     private func looksLikeBackendChatRequest(_ text: String) -> Bool {
         text.contains("backend") || text.contains("백엔드")
+    }
+
+    private func looksLikeHrStaffingChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["hr", "hiring", "hire", "staff", "mentor", "팀 보강", "사수", "고용", "채용", "필요한 사람", "사람 붙"])
     }
 
     private func looksLikeGoalCreationChatRequest(_ text: String) -> Bool {
@@ -3686,6 +3737,7 @@ final class DesktopStore: ObservableObject {
         newCompanyAgentCollaborationNotes = ""
         newCompanyAgentMemoryNotes = ""
         newCompanyAgentPreferredCollaboratorIDs = []
+        newCompanyAgentMentorID = ""
         newCompanyAgentSkillIDs = defaultCompanyAgentSkillIDs
         resetMarketingPolicyForm()
         newCompanyAgentEnabled = true

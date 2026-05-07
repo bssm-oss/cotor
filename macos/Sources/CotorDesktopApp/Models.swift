@@ -203,6 +203,7 @@ struct CompanyAgentDefinitionRecord: Codable, Identifiable, Hashable {
     let specialties: [String]
     let collaborationInstructions: String?
     let preferredCollaboratorIds: [String]
+    let mentorAgentId: String?
     let memoryNotes: String?
     let enabled: Bool
     let displayOrder: Int
@@ -541,6 +542,7 @@ struct OperatorCommandRequestPayload: Codable {
     let message: String
     let automationMode: String?
     let confirmFullAuto: Bool
+    let confirmStaffing: Bool
 }
 
 struct OperatorCommandActionPayload: Codable, Hashable, Identifiable {
@@ -1570,6 +1572,7 @@ struct CreateCompanyAgentPayload: Codable {
     let specialties: [String]
     let collaborationInstructions: String?
     let preferredCollaboratorIds: [String]
+    let mentorAgentId: String?
     let memoryNotes: String?
     let enabled: Bool
 }
@@ -1582,6 +1585,7 @@ struct UpdateCompanyAgentPayload: Codable {
     let specialties: [String]?
     let collaborationInstructions: String?
     let preferredCollaboratorIds: [String]?
+    let mentorAgentId: String?
     let memoryNotes: String?
     let enabled: Bool?
     let displayOrder: Int?
@@ -1747,6 +1751,7 @@ struct MockSeed {
                 specialties: ["planning", "triage", "approval"],
                 collaborationInstructions: "Break goals into issues and route work to the strongest specialists first.",
                 preferredCollaboratorIds: ["agent-def-builder", "agent-def-qa"],
+                mentorAgentId: nil,
                 memoryNotes: "Own final merge decisions.",
                 enabled: true,
                 displayOrder: 0,
@@ -1763,6 +1768,7 @@ struct MockSeed {
                 specialties: ["implementation", "integration"],
                 collaborationInstructions: "Hand off risky or ambiguous work back to CEO and route finished work to QA.",
                 preferredCollaboratorIds: ["agent-def-ceo", "agent-def-qa"],
+                mentorAgentId: "agent-def-ceo",
                 memoryNotes: "Keep branches narrowly scoped.",
                 enabled: true,
                 displayOrder: 1,
@@ -1779,6 +1785,7 @@ struct MockSeed {
                 specialties: ["qa", "review", "verification"],
                 collaborationInstructions: "Review implementation output and escalate blockers to CEO.",
                 preferredCollaboratorIds: ["agent-def-builder", "agent-def-ceo"],
+                mentorAgentId: "agent-def-builder",
                 memoryNotes: "Track regressions before merge.",
                 enabled: true,
                 displayOrder: 2,

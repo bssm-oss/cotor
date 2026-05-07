@@ -2192,14 +2192,35 @@ private struct SidebarView: View {
 
             ShellDisclosureSection(
                 title: l("Assignment Options", "배정 옵션"),
-                subtitle: l("Set collaboration rules and preferred teammates.", "협업 규칙과 선호 동료를 설정합니다."),
+                subtitle: l("Set mentor, collaboration rules, and preferred teammates.", "사수, 협업 규칙, 선호 동료를 설정합니다."),
                 isExpanded: $companySidebarDisclosureState.isAgentAdvancedDetailsExpanded
             ) {
-                if !store.newCompanyAgentCollaborationNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !store.newCompanyAgentPreferredCollaboratorIDs.isEmpty {
+                if !store.newCompanyAgentMentorID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    !store.newCompanyAgentCollaborationNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    !store.newCompanyAgentPreferredCollaboratorIDs.isEmpty {
                     ShellTag(text: l("Configured", "설정됨"), tint: ShellPalette.accentWarm)
                 }
             } content: {
                     VStack(alignment: .leading, spacing: 10) {
+                        if !store.availableCompanyAgentMentors.isEmpty {
+                            companySubpanel {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    panelHeading(
+                                        title: l("Mentor", "사수"),
+                                        subtitle: l("A senior agent for onboarding and escalation.", "온보딩과 막힘 해결을 맡는 상위 에이전트입니다.")
+                                    )
+
+                                    Picker(l("Mentor", "사수"), selection: $store.newCompanyAgentMentorID) {
+                                        Text(l("None", "없음")).tag("")
+                                        ForEach(store.availableCompanyAgentMentors) { mentor in
+                                            Text(mentor.title).tag(mentor.id)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                }
+                            }
+                        }
+
                         companySubpanel {
                             agentTextEditorBlock(
                                 title: l("Notes For This Role", "역할 메모"),
@@ -2357,6 +2378,13 @@ private struct SidebarView: View {
                                             ShellTag(text: "+\(skills.count - 3)", tint: ShellPalette.panelRaised)
                                         }
                                     }
+                                }
+                                if let mentorId = agent.mentorAgentId,
+                                   let mentor = store.companyAgentDefinitions.first(where: { $0.id == mentorId }) {
+                                    Text(l("Mentor", "사수") + " · " + mentor.title)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(ShellPalette.accent.opacity(0.92))
+                                        .lineLimit(1)
                                 }
                                 if !agent.preferredCollaboratorIds.isEmpty {
                                     Text(l("Collaborates with", "협업 대상") + " · " + agent.preferredCollaboratorIds.compactMap { collaboratorId in
