@@ -1,6 +1,8 @@
 package com.cotor.app
 
 import com.cotor.model.AgentResult
+import io.kotest.common.ExperimentalKotest
+import io.kotest.core.annotation.Isolate
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -12,8 +14,18 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
 
+@Isolate
+@OptIn(ExperimentalKotest::class)
 class DesktopAppServiceAiOnlyIntegrationTest : FunSpec({
+    concurrency = 1
+
+    afterTest {
+        System.clearProperty("cotor.experimental.durableRuntimeV2")
+        DesktopAppService.shutdownAllForTesting()
+    }
+
     test("company issue run creates durable run by default while only agent execution is mocked") {
+        System.clearProperty("cotor.experimental.durableRuntimeV2")
         var service: DesktopAppService? = null
         try {
             val harness = createDesktopAppServiceIntegrationHarness(
