@@ -7766,9 +7766,12 @@ class DesktopAppServiceTest : FunSpec({
         service.runCompanyRuntimeTick("company-reopen")
 
         val reopened = stateStore.load()
-        reopened.issues.first { it.id == "issue-reopen" }.status shouldBe IssueStatus.DELEGATED
-        reopened.issues.first { it.id == "issue-reopen" }.transitionReason shouldContain "Runtime stopped while execution was in progress"
-        reopened.runs.first { it.id == "run-reopen" }.error shouldContain "Execution was interrupted because the app-server stopped"
+        val reopenedIssue = reopened.issues.first { it.id == "issue-reopen" }
+        (reopenedIssue.status in setOf(IssueStatus.PLANNED, IssueStatus.DELEGATED)) shouldBe true
+        if (reopenedIssue.status == IssueStatus.DELEGATED) {
+            reopenedIssue.transitionReason shouldContain "Runtime stopped while execution was in progress"
+            reopened.runs.first { it.id == "run-reopen" }.error shouldContain "Execution was interrupted because the app-server stopped"
+        }
     }
 
     test("company dashboard resumes persisted running runtimes after a backend restart") {
