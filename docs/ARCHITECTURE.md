@@ -1,109 +1,140 @@
 # Cotor Architecture
 
-Cotor는 **설정 기반 파이프라인 오케스트레이터**입니다.
-핵심 흐름은 `Config Load → Validate → Orchestrate → Monitor/Checkpoint → Output` 입니다.
+Cotor is a local-first multi-agent runtime. One Kotlin core powers three user surfaces:
 
-## 1) High-level components
+- CLI/TUI commands
+- a localhost `app-server`
+- the native macOS desktop shell
+
+The current product model is company-first in the desktop layer: a `Company` owns goals, issues, review state, runtime status, agent definitions, memory, and local evidence. Repositories, workspaces, tasks, and runs are execution infrastructure underneath that company boundary.
+
+## 1. High-Level Runtime
 
 ```mermaid
-graph TD
-    A[CLI / TUI / Web] --> B[Pipeline Loader]
-    B --> C[Validator]
-    C --> D[Orchestrator]
-
-    D --> E[Stage Executor]
-    E --> F[Agent Runners]
-
-    D --> G[Condition / Loop Engine]
-    D --> H[Checkpoint Store]
-    D --> I[Realtime Monitor]
-
-    I --> J[Terminal / Web Dashboard]
-    H --> K[Resume / Recovery]
+flowchart LR
+    CLI["CLI / TUI<br/>Main.kt + presentation/cli"] --> Core["Kotlin runtime core"]
+    Web["Web editor<br/>presentation/web"] --> Core
+    Mac["macOS shell<br/>DesktopStore + DesktopAPI"] --> AppServer["localhost app-server<br/>AppServer.kt"]
+    AppServer --> Service["Company service<br/>DesktopAppService.kt"]
+    Service --> Core
+    Core --> Agents["Agent/provider adapters<br/>data/plugin + data/process"]
+    Service --> Git["Git/GitHub workspace<br/>GitWorkspaceService + providers/github"]
+    Service --> Evidence["Evidence, policy, memory<br/>runtime + policy + provenance + knowledge"]
 ```
 
-## 2) Runtime flow
+## 2. Source Boundaries
+
+| Boundary | Responsibility | Primary files |
+| --- | --- | --- |
+| CLI | command parsing, interactive/TUI launch, packaged lifecycle commands | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/` |
+| App server | local HTTP API and desktop contract | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
+| Company workflow | company state machine, goals, issues, review queue, runtime ticks, reports, operator chat | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
+| Pipeline runtime | generic pipeline planning, orchestration, execution, aggregation, condition evaluation | `src/main/kotlin/com/cotor/domain/` |
+| Agent/tool execution | provider plugins, local process execution, model defaults, command adapters | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` |
+| Context/memory/evidence | prompt context, durable snapshots, knowledge, provenance, verification bundles | `src/main/kotlin/com/cotor/context/`, `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/verification/` |
+| Policy/security | action policy decisions, risk gates, executable/path validation | `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/security/` |
+| External providers | GitHub control-plane state and optional Linear mirror | `src/main/kotlin/com/cotor/providers/github/`, `src/main/kotlin/com/cotor/integrations/linear/` |
+| macOS desktop | SwiftUI shell, HTTP client, DTO decode, live projection | `macos/Sources/CotorDesktopApp/` |
+
+## 3. Main Data Flow
+
+### Generic pipeline run
 
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant P as CLI(Web/TUI)
-    participant V as Validator
-    participant O as Orchestrator
-    participant E as Executor
-    participant M as Monitor
-    participant C as Checkpoint
+    participant User
+    participant CLI as CLI command
+    participant Config as ConfigRepository
+    participant Runtime as PipelineOrchestrator
+    participant Executor as AgentExecutor
+    participant Store as Checkpoint/Monitor
 
-    U->>P: cotor run <pipeline> -c <config>
-    P->>V: Parse + validate YAML
-    V-->>P: Valid
-    P->>O: Start pipeline
-
-    loop Stage by stage
-      O->>E: Execute stage
-      E-->>O: Result / Error
-      O->>M: Emit event
-      O->>C: Save checkpoint
-    end
-
-    O-->>P: Final output
-    P-->>U: Text/JSON summary
+    User->>CLI: cotor run <pipeline> -c cotor.yaml
+    CLI->>Config: load YAML/JSON
+    CLI->>Runtime: validate and start pipeline
+    Runtime->>Executor: execute stage agents
+    Executor-->>Runtime: AgentResult
+    Runtime->>Store: events, stats, checkpoints
+    Runtime-->>CLI: final summary
 ```
 
-## 3) Module map (code)
+### Desktop company run
 
-- `src/main/kotlin/com/cotor/domain/` : orchestrator, executor, condition
-- `src/main/kotlin/com/cotor/presentation/` : CLI, web, formatter
-- `src/main/kotlin/com/cotor/monitoring/` : runtime events/monitoring
-- `src/main/kotlin/com/cotor/checkpoint/` : checkpoint persistence/resume
-- `src/main/kotlin/com/cotor/validation/` : pipeline/config validation
+```mermaid
+sequenceDiagram
+    participant Mac as macOS Desktop
+    participant API as AppServer
+    participant Company as DesktopAppService
+    participant Git as GitWorkspaceService
+    participant Agent as AgentExecutor
+    participant Evidence as Policy/Provenance/Knowledge
 
-## 4) Why this structure
+    Mac->>API: create goal / run issue / start runtime
+    API->>Company: mutate company state
+    Company->>Company: CEO planning, issue routing, runtime tick
+    Company->>Git: prepare branch/worktree
+    Company->>Agent: execute provider adapter
+    Agent-->>Company: output, error, process id
+    Company->>Evidence: policy, verification, memory, A2A context
+    Company->>Git: publish PR when required
+    Company-->>API: dashboard/runtime/execution-log payload
+    API-->>Mac: Swift DTO response
+```
 
-- **Separation of concerns**: parsing/검증/실행/표시를 분리해 변경 영향 최소화
-- **Resilience**: checkpoint + resume로 중단 후 복구 가능
-- **Observability**: 모니터 이벤트를 통해 CLI/TUI/Web에서 동일한 실행 상태 표시
+## 4. Dependency Direction
 
-## 5) Runtime Control Layers
+- `presentation/*` and `app/AppServer.kt` are adapters. They may call application/domain services but should not own product state rules.
+- `app/DesktopAppService.kt` is the company workflow coordinator. It may depend on domain runtime, provider adapters, policy, evidence, and stores.
+- `domain/*` stays generic pipeline logic. It should not import desktop Swift concepts, app-server DTOs, or company UI state.
+- `data/*` and `providers/*` wrap external processes, CLIs, local provider discovery, and GitHub state. They should not decide company product policy.
+- `runtime/*`, `policy/*`, `provenance/*`, `knowledge/*`, and `verification/*` are shared support domains. They should expose explicit APIs rather than reaching into UI or route layers.
+- `macos/Sources/CotorDesktopApp/*` consumes app-server DTOs through `DesktopAPI` and `DesktopStore`; it should not duplicate backend workflow decisions.
 
-- `com.cotor.runtime.actions` : agent/git/github side effects를 하나의 action substrate로 수렴
-- `com.cotor.security` : executable allow-list, shell execution flag blocking, destructive command blocking, and allowed-directory/symlink validation before external actions run
-- `com.cotor.runtime.durable` : checkpoint graph plus side-effect journal; replay-unsafe file/secret/network effects pause continuation until explicit approval
-- `com.cotor.policy` : action allow/deny/approval 결정을 수행하고 audit log를 남김
-- `com.cotor.provenance` : run/checkpoint/action/file/pr 사이의 evidence graph를 저장
-- `com.cotor.providers.github` : PR state, mergeability, status-check summary를 file-backed control-plane으로 유지
-- `com.cotor.knowledge` : review outcome, mergeability, decision-like signals를 structured memory로 저장
-- `AppServer` / `WebServer` : durable runtime, policy, evidence, GitHub, knowledge를 read surface로 노출
+Avoid circular dependencies by keeping public entrypoints small and by passing typed snapshots or service interfaces across boundaries. If a change requires a lower-level module to call back into `app`, introduce a narrow interface or move the rule upward instead.
 
-## 6) Company workflow invariants
+## 5. Public API Boundary
 
-The company automation layer has stricter workflow invariants than the generic pipeline runner.
+The app-server contract is the boundary between Kotlin and Swift. Additive payload fields are preferred. When changing a route response:
 
-- review queue items, QA issues, CEO approval issues, workflow tasks, and workflow runs are bound by explicit workflow lineage metadata for one PR review cycle
-- a newer execution publish must supersede the older review lineage atomically; stale QA or CEO verdicts may not flow into the new PR cycle
-- PR creation policy gates are satisfied by an enabled CEO/chief approval authority when available; they must requeue publishing instead of becoming a user-facing manual approval stop
-- legacy company state is repaired during startup healing, company dashboard reads, and runtime ticks instead of silently reusing stale workflow results
-- merge-conflict recovery and stale PR cleanup are tied to the superseded lineage so the company can continue without leaving blocked review artifacts behind
-- follow-up goals carry explicit failure context so the company can distinguish generic blocked work from merge-conflict remediation and other review follow-up
-- merge-conflict follow-up must reuse the existing PR branch/worktree and synthesize remediation plus validation work, not invent a new handoff PR cycle
-- no-diff retries on an existing PR lineage must converge by refreshing the current PR state and reopening the right lane instead of dead-ending as a generic publish failure
+1. update Kotlin models in `DesktopModels.kt`
+2. update route serialization in `AppServer.kt`
+3. update Swift DTOs in `macos/Sources/CotorDesktopApp/Models.swift`
+4. update `DesktopStore` and views that consume the field
+5. add focused Kotlin and Swift decode/store tests
 
-## 7) Autonomous company runtime v1
+Important route groups live under `/api/app`: settings/backends, capabilities, providers, skills, browser, marketing, video, repositories, workspaces, tasks, runs, durable-runtime, policy, evidence, github, knowledge, verification, runtime, company, companies, issues, review-queue, and TUI sessions.
 
-The v1 autonomous runtime is intentionally internal-quality focused. It does not perform external market or competitor discovery.
+## 6. Company Workflow Invariants
 
-- company memory is modeled as company/project/team/agent layers; `workflowMemory` remains a compatibility alias for project + team memory
-- issue-linked agent runs receive A2A bridge metadata and `COTOR_A2A_*` environment variables, and run bridge events create canonical collaboration evidence
-- direct execution completion is gated by collaboration evidence and a verifier bundle summary; verification blocks update issue fields instead of becoming generic execution failures
-- autonomous discovery scans repeated failures, stale blocked work, review failures, verification gaps, runtime errors, stale follow-ups, and graphify/repository structure warnings into `CompanyProblemSignal`
-- runtime ticks synthesize CEO triage goals only from actionable, deduped, cooldown-safe problem signals; otherwise idle ticks record observable idle states such as `idle-no-discovered-problems`
-- A2A session, artifact, and dedupe stores are bounded/pruned locally, while active company work and recent evidence remain part of the local-first state model
+The company automation layer has stricter invariants than the generic pipeline runner.
 
----
+- Review queue items, QA issues, CEO approval issues, workflow tasks, and workflow runs are bound by explicit workflow lineage metadata for one PR review cycle.
+- A newer execution publish must supersede the older review lineage atomically; stale QA or CEO verdicts may not flow into the new PR cycle.
+- CEO planning is only treated as CEO decomposition when the run returns valid planning JSON. Invalid output is blocked with `CEO_PLANNING_INVALID_OUTPUT` or explicitly labeled as fallback planning where compatibility requires it.
+- PR creation policy gates can be satisfied by an enabled CEO/chief approval authority; they should not become user-facing approval stops when internal authority exists.
+- Direct execution completion requires verification and collaboration evidence where the issue policy requires it.
+- Merge-conflict recovery and stale PR cleanup stay tied to the superseded lineage so the company can continue without stale review artifacts.
+- No-diff code-producing runs retry once with explicit file-edit instructions and then block instead of claiming completion without changes.
 
-관련 문서:
-- [Quick Start](QUICK_START.md)
-- [Features](FEATURES.md)
-- [Multi-Workspace / Remote Runner Design](MULTI_WORKSPACE_REMOTE_RUNNER.md)
-- [Web Editor](WEB_EDITOR.md)
-- [Usage Tips](USAGE_TIPS.md)
+## 7. Autonomous Runtime v1
+
+The v1 autonomous runtime is internal-quality focused.
+
+- Memory is modeled as company/project/team/agent layers. `workflowMemory` remains a compatibility alias for project + team context.
+- Issue-linked runs open A2A bridge metadata and inject `COTOR_A2A_*` environment variables.
+- Discovery scans repeated failures, stale blocked work, review failures, verification gaps, runtime errors, stale follow-ups, and Graphify/repository structure warnings into `CompanyProblemSignal`.
+- Runtime ticks synthesize CEO triage goals only from actionable, deduped, cooldown-safe problem signals. Otherwise they record observable idle states such as `idle-no-discovered-problems`.
+- Local retention protects active worktrees and recent evidence while pruning stale terminal artifacts.
+
+## 8. Graphify As Architecture Aid
+
+Graphify output is tracked in `graphify-out/` and should be refreshed after source or documentation changes.
+
+- Start with `graphify-out/GRAPH_REPORT.md` for corpus size, god nodes, and community shape.
+- Use `graphify query`, `graphify path`, or `graphify explain` for narrow questions.
+- Do not paste `graphify-out/graph.json` into docs or prompts.
+- Run `graphify update .` after code/doc edits and `graphify cluster-only .` after larger boundary changes.
+
+## 9. Module Docs
+
+See [modules/README.md](modules/README.md) for concise module ownership, public entrypoints, test locations, and common change checklists.

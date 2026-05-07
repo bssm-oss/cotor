@@ -21,6 +21,8 @@ Korean companion docs use the same path with `.ko.md` when available.
 - `docs/USAGE_TIPS.md` / `docs/USAGE_TIPS.ko.md`: operator shortcuts and recovery habits
 - `docs/WEB_EDITOR.md` / `docs/WEB_EDITOR.ko.md`: web editor usage
 - `docs/ARCHITECTURE.md` / `docs/ARCHITECTURE.ko.md`: shared runtime architecture
+- `docs/modules.md` / `docs/modules.ko.md`: module-boundary router
+- `docs/modules/README.md` / `docs/modules/README.ko.md`: module responsibilities, public entrypoints, dependency direction, and test locations
 - `docs/CODEBASE_DEEP_DIVE.ko.md`: Korean code-grounded deep dive across CLI, app-server, desktop, and company runtime
 - `docs/CONDITION_DSL.md` / `docs/CONDITION_DSL.ko.md`: condition DSL reference
 - `docs/cookbook.md`: scenario patterns and example workflows
@@ -28,6 +30,7 @@ Korean companion docs use the same path with `.ko.md` when available.
 - `docs/OPENCODE_AGENT.md` / `docs/OPENCODE_AGENT.ko.md`: OpenCode agent reference, configuration, and troubleshooting
 - `docs/team-ops/README.md` / `docs/team-ops/README.ko.md`: onboarding and delivery operations
 - `docs/templates/temp-cotor-template.md`: template note
+- `graphify-out/GRAPH_REPORT.md`: Graphify structure report for assistant orientation; do not paste `graphify-out/graph.json` into prompts or docs
 
 ## Historical / Design Records
 
@@ -44,5 +47,7 @@ Korean companion docs use the same path with `.ko.md` when available.
 
 - Command availability must match `src/main/kotlin/com/cotor/Main.kt`
 - Desktop and company workflow behavior must match `src/main/kotlin/com/cotor/app/*` and `macos/Sources/CotorDesktopApp/*`
+- Module boundary descriptions must match `docs/ARCHITECTURE.md`, `docs/modules/README.md`, and the current import graph.
+- After source or docs changes, refresh Graphify with `graphify update .`; after large boundary changes, also run `graphify cluster-only .`.
 - External-product metaphors such as “Linear-style board” describe the UI shape inside Cotor, not a required external sync
 - Historical records are useful context, but they are not the source of truth for current behavior

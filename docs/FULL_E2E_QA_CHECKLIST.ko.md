@@ -356,22 +356,20 @@
 
 > Agent 생성/수정 항목은 설정 UI 회귀 검증이다. 회사 happy path에서는 사용자가 agent hierarchy를 매번 직접 구성하는 것이 아니라, 준비된 roster가 목표를 받아 24시간 무인 자율 실행해야 한다.
 
-### 5.4 Meeting Room / Map
+### 5.4 Meeting Room / Live Office
 
-- [ ] Meeting Room이 기본적으로 쉬운 `Map`/`지도` 화면을 연다.
 - [ ] Company navigation에서 Meeting Room을 클릭한다.
-- [ ] 첫 진입 tab이 `Map`/`지도`인지 확인한다.
-- [ ] 지도 데이터가 있는 repo에서 저장소 지도가 렌더링된다.
+- [ ] 첫 진입 화면이 `Live Office`/`라이브 오피스`인지 확인한다.
+- [ ] 실제 company agent 수가 Live Office의 agent 수와 일치한다.
+- [ ] running session이 있으면 해당 agent가 focused/typing 상태로 표시된다.
+- [ ] issue 상태별 카드 위치가 planned/active/review/blocked/done lane 의미와 맞는다.
+- [ ] A2A message 또는 activity가 있으면 agent 간 message/flow 표현이 생성된다.
 - [ ] 기술적인 `graphify-out/graph.json` 같은 파일 경로가 기본 UI에 보이지 않는다.
-- [ ] 지도 항목/연결이 화면 중앙에 표시되고 빈 회색 화면으로 남지 않는다.
-- [ ] zoom/pan 또는 scroll이 가능하면 조작 후 UI가 깨지지 않는다.
-- [ ] 지도 항목 클릭/detail sheet가 열린다.
-- [ ] detail sheet에 항목 이름, 파일, 유형, 그룹 같은 쉬운 식별 정보가 표시된다.
+- [ ] agent/issue/zone 클릭 detail sheet가 열린다.
+- [ ] detail sheet에 현재 agent, issue, review, runtime 상태를 식별할 수 있는 정보가 표시된다.
 - [ ] detail sheet 닫기 동작이 정상이다.
-- [ ] 지도 데이터가 없을 때도 깨지지 않고 readable empty state를 보여준다.
-- [ ] live floor map tab으로 전환 가능하다.
-- [ ] floor view가 runtime/backend/review/session wall events와 seat presence를 보여준다.
-- [ ] Map -> Floor Map -> Map 왕복 후 선택 company와 지도 상태가 유지된다.
+- [ ] activity drawer 토글 후 review/activity 요약이 열리고 닫힌다.
+- [ ] low resource 또는 reduce motion 상태에서는 continuous animation 없이 상태가 안정적으로 표시된다.
 - [ ] runtime/review/session 이벤트가 없는 빈 회사에서도 Meeting Room이 빈 상태를 안정적으로 보여준다.
 
 ### 5.5 Board/canvas/detail drawer
@@ -519,8 +517,8 @@
 - [ ] agents/roster 열기.
 - [ ] execution/QA/CEO/graphify agent가 준비되어 있는지 확인.
 - [ ] Meeting Room 열기.
-- [ ] Map 지도 항목 클릭.
-- [ ] Floor Map으로 전환.
+- [ ] Live Office agent/issue/zone detail sheet 클릭 확인.
+- [ ] Activity drawer 열기/닫기 확인.
 - [ ] Goals 열기.
 - [ ] 사용자가 목표 입력/생성.
 - [ ] goal이 runtime 처리 대상으로 들어갔는지 확인.
@@ -753,7 +751,7 @@
 - [ ] `graphify-out/GRAPH_REPORT.md`의 node/edge/community 수를 기록한다.
 - [ ] `cotor agent add graphify` preset이 `graphify explain {input}` 형태로 생성된다.
 - [ ] 모든 company agent execution memory에 graphify guidance가 포함된다.
-- [ ] Meeting Room Map이 저장소 지도 데이터를 읽고, 기술적인 파일 경로는 기본 UI에 노출하지 않는다.
+- [ ] Meeting Room Live Office가 company/runtime/review/activity 상태를 반영하고, 기술적인 Graphify 파일 경로는 기본 UI에 노출하지 않는다.
 - [ ] `cotor knowledge inspect`가 local knowledge state를 출력한다.
 - [ ] action success hook이 반환한 file/branch/PR evidence가 `.cotor/provenance/` graph에 기록된다.
 - [ ] `evidence run`, `evidence file`, `evidence pr`가 기대 node/edge를 보여준다.
