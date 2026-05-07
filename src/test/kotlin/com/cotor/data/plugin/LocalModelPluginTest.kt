@@ -1,10 +1,12 @@
 package com.cotor.data.plugin
 
 import com.cotor.data.process.ProcessManager
+import com.cotor.model.AgentExecutionException
 import com.cotor.model.ExecutionContext
 import com.cotor.model.ProcessResult
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import java.net.InetSocketAddress
@@ -34,7 +36,7 @@ class LocalModelPluginTest : FunSpec({
             when (exchange.requestURI.path) {
                 "/api/tags" -> exchange.respondJson(
                     """
-                    {"models":[{"name":"gemma3:4b"},{"name":"qwen2.5:3b"}]}
+                    {"models":[{"name":"gemma3:4b"},{"name":"gemma3:4b:cloud","remote_host":"https://ollama.com:443"},{"name":"qwen2.5:3b"}]}
                     """.trimIndent()
                 )
                 "/api/chat" -> {
@@ -60,6 +62,36 @@ class LocalModelPluginTest : FunSpec({
             )
 
             output.output shouldBe "fallback gemma ok"
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    test("does not treat Ollama cloud tags as local Gemma fallback candidates") {
+        val server = localRoutingServer { exchange ->
+            when (exchange.requestURI.path) {
+                "/api/tags" -> exchange.respondJson(
+                    """
+                    {"models":[{"name":"gemma3:4b","remote_host":"https://ollama.com:443"},{"name":"gemma4:e2b:cloud"}]}
+                    """.trimIndent()
+                )
+                "/api/chat" -> exchange.respondJson("""{"error":"model 'gemma4:e2b' not found"}""", status = 404)
+                else -> exchange.sendResponseHeaders(404, -1)
+            }
+        }
+        try {
+            val error = shouldThrow<AgentExecutionException> {
+                LocalModelPlugin().execute(
+                    context = localModelContext(
+                        provider = "ollama",
+                        baseUrl = "http://127.0.0.1:${server.address.port}",
+                        model = "gemma4:e2b"
+                    ),
+                    processManager = unusedProcessManager()
+                )
+            }
+
+            error.message.orEmpty() shouldBe "Local model request failed (404): {\"error\":\"model 'gemma4:e2b' not found\"}"
         } finally {
             server.stop(0)
         }

@@ -34,4 +34,13 @@ object LocalModelDefaults {
         val otherGemmaModels = normalized.filter { isGemmaFamilyModel(it) && !isGemma4Model(it) }
         return gemma4Models + otherGemmaModels
     }
+
+    fun isLocalOllamaTag(model: String?, remoteHost: String? = null): Boolean {
+        val normalized = normalizeModel(model) ?: return false
+        val remote = remoteHost?.trim().orEmpty()
+        if (remote.isNotBlank()) return false
+        if (normalized.lowercase().endsWith(":cloud")) return false
+        if (normalized.contains("ollama.com", ignoreCase = true)) return false
+        return true
+    }
 }

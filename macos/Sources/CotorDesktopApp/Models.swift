@@ -600,6 +600,11 @@ struct RunRecord: Codable, Identifiable, Hashable {
     let worktreePath: String
     let status: String
     let model: String?
+    let requestedAgentCli: String?
+    let requestedModel: String?
+    let effectiveAgentCli: String?
+    let effectiveModel: String?
+    let executionMode: String?
     let backendKind: String?
     let processId: Int64?
     let output: String?
@@ -2124,6 +2129,11 @@ struct MockSeed {
             worktreePath: "/Users/demo/cotor/.cotor/worktrees/task-demo/claude",
             status: "RUNNING",
             model: "claude-sonnet-4-20250514",
+            requestedAgentCli: nil,
+            requestedModel: nil,
+            effectiveAgentCli: nil,
+            effectiveModel: nil,
+            executionMode: nil,
             backendKind: "LOCAL_COTOR",
             processId: 1001,
             output: "Working on shell layout and task orchestration...",
@@ -2146,6 +2156,11 @@ struct MockSeed {
             worktreePath: "/Users/demo/cotor/.cotor/worktrees/task-demo/codex",
             status: "COMPLETED",
             model: "gpt-5.4",
+            requestedAgentCli: nil,
+            requestedModel: nil,
+            effectiveAgentCli: nil,
+            effectiveModel: nil,
+            executionMode: nil,
             backendKind: "LOCAL_COTOR",
             processId: 1002,
             output: "Added app-server APIs and worktree scaffolding.",

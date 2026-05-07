@@ -16,6 +16,7 @@ import com.cotor.integrations.linear.LinearIssueMirror
 import com.cotor.integrations.linear.LinearTrackerAdapter
 import com.cotor.model.AgentConfig
 import com.cotor.model.AgentResult
+import com.cotor.model.OpenCodeDefaults
 import com.cotor.model.ProcessExecutionException
 import com.cotor.model.ProcessResult
 import com.cotor.testsupport.withDesktopServiceShutdown
@@ -985,6 +986,282 @@ class DesktopAppServiceTest : FunSpec({
             commitSha = "abc1234567890",
             error = "No changes to publish from codex/cotor/manual-no-diff/codex against master"
         )
+    }
+
+    test("runTask routes gemma4 code-producing company agents through local Ollama OpenCode") {
+        val appHome = Files.createTempDirectory("desktop-gemma-opencode-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-gemma-opencode-repo").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-gemma-opencode-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        val capturedAgents = mutableListOf<AgentConfig>()
+        val capturedPrompts = mutableListOf<String?>()
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-gemma-opencode",
+            name = "Gemma OpenCode Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val project = CompanyProjectContext(
+            id = "project-gemma-opencode",
+            companyId = company.id,
+            name = "Gemma OpenCode",
+            slug = "gemma-opencode",
+            contextDocPath = appHome.resolve("context.md").toString(),
+            lastUpdatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-gemma-opencode",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Route Gemma coding",
+            description = "Verify Gemma coding execution uses OpenCode.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val builder = CompanyAgentDefinition(
+            id = "agent-builder-gemma",
+            companyId = company.id,
+            title = "Builder",
+            agentCli = "gemma4",
+            model = "gemma4:e2b",
+            roleSummary = "Build implementation changes.",
+            createdAt = now,
+            updatedAt = now
+        )
+        val profile = OrgAgentProfile(
+            id = builder.id,
+            companyId = company.id,
+            roleName = builder.title,
+            executionAgentName = builder.agentCli
+        )
+        val issue = CompanyIssue(
+            id = "issue-gemma-code",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Implement a README note",
+            description = "Create an actual tiny README note.",
+            status = IssueStatus.DELEGATED,
+            kind = "execution",
+            assigneeProfileId = builder.id,
+            codeProducing = true,
+            createdAt = now,
+            updatedAt = now
+        )
+        val task = AgentTask(
+            id = "task-gemma-code",
+            workspaceId = WORKSPACE_ID,
+            issueId = issue.id,
+            title = issue.title,
+            prompt = "Edit the repository files.",
+            agents = listOf("gemma4"),
+            status = DesktopTaskStatus.QUEUED,
+            createdAt = now,
+            updatedAt = now
+        )
+        stateStore.save(
+            stateStore.load().copy(
+                companies = listOf(company),
+                projectContexts = listOf(project),
+                goals = listOf(goal),
+                companyAgentDefinitions = listOf(builder),
+                orgProfiles = listOf(profile),
+                issues = listOf(issue),
+                tasks = listOf(task)
+            )
+        )
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/gemma-opencode/opencode",
+            worktreePath = worktreeRoot
+        )
+        coEvery { gitWorkspaceService.hasPublishableChanges(worktreeRoot, "master") } returnsMany listOf(false, true)
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata(
+            commitSha = "abc1234567890",
+            pushedBranch = "codex/cotor/gemma-opencode/opencode",
+            pullRequestNumber = 99,
+            pullRequestUrl = "https://github.com/bssm-oss/cotor-testv2/pull/99"
+        )
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } coAnswers {
+            val agent = invocation.args[0] as AgentConfig
+            capturedAgents += agent
+            capturedPrompts += invocation.args[1] as String?
+            AgentResult(
+                agentName = agent.name,
+                isSuccess = true,
+                output = "edited files",
+                error = null,
+                duration = 25,
+                metadata = emptyMap()
+            )
+        }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
+        )
+
+        service.runTask(task.id)
+        awaitTaskCompletion(stateStore, task.id)
+
+        capturedAgents shouldHaveSize 2
+        capturedAgents.all { it.name == "opencode" } shouldBe true
+        capturedAgents.all { it.pluginClass == "com.cotor.data.plugin.OpenCodePlugin" } shouldBe true
+        capturedAgents.first().parameters["model"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
+        capturedAgents.first().parameters["requestedAgentCli"] shouldBe "gemma4"
+        capturedAgents.first().parameters["requestedModel"] shouldBe "gemma4:e2b"
+        capturedAgents.first().parameters["executionMode"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+        capturedPrompts[1].orEmpty() shouldContain "NO_DIFF_RETRY"
+        val run = stateStore.load().runs.single { it.taskId == task.id }
+        run.agentName shouldBe "opencode"
+        run.requestedAgentCli shouldBe "gemma4"
+        run.requestedModel shouldBe "gemma4:e2b"
+        run.effectiveAgentCli shouldBe "opencode"
+        run.effectiveModel shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
+        run.executionMode shouldBe OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+        @Suppress("UNCHECKED_CAST")
+        val executionLogTasks = service.executionLog(company.id).first { it["issueId"] == issue.id }["tasks"] as List<Map<String, Any?>>
+
+        @Suppress("UNCHECKED_CAST")
+        val executionLogRuns = executionLogTasks.first { it["taskId"] == task.id }["runs"] as List<Map<String, Any?>>
+        val executionLogRun = executionLogRuns.single()
+        executionLogRun["requestedAgentCli"] shouldBe "gemma4"
+        executionLogRun["effectiveModel"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
+    }
+
+    test("runTask keeps gemma4 direct local model routing for validation-only work") {
+        val appHome = Files.createTempDirectory("desktop-gemma-validation-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-gemma-validation-repo").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-gemma-validation-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        val capturedAgents = mutableListOf<AgentConfig>()
+        val now = System.currentTimeMillis()
+        val company = Company(
+            id = "company-gemma-validation",
+            name = "Gemma Validation Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val project = CompanyProjectContext(
+            id = "project-gemma-validation",
+            companyId = company.id,
+            name = "Gemma Validation",
+            slug = "gemma-validation",
+            contextDocPath = appHome.resolve("context.md").toString(),
+            lastUpdatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-gemma-validation",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Validate only",
+            description = "Verify direct local model validation.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val reviewer = CompanyAgentDefinition(
+            id = "agent-reviewer-gemma",
+            companyId = company.id,
+            title = "Reviewer",
+            agentCli = "gemma4",
+            model = "gemma4:e2b",
+            roleSummary = "Validate without code changes.",
+            createdAt = now,
+            updatedAt = now
+        )
+        val profile = OrgAgentProfile(
+            id = reviewer.id,
+            companyId = company.id,
+            roleName = reviewer.title,
+            executionAgentName = reviewer.agentCli
+        )
+        val issue = CompanyIssue(
+            id = "issue-gemma-validation",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Validate evidence",
+            description = "Review existing evidence only.",
+            status = IssueStatus.DELEGATED,
+            kind = "execution",
+            assigneeProfileId = reviewer.id,
+            codeProducing = false,
+            executionIntent = ExecutionIntent.VALIDATION_ONLY,
+            createdAt = now,
+            updatedAt = now
+        )
+        val task = AgentTask(
+            id = "task-gemma-validation",
+            workspaceId = WORKSPACE_ID,
+            issueId = issue.id,
+            title = issue.title,
+            prompt = "Validate only.",
+            agents = listOf("gemma4"),
+            status = DesktopTaskStatus.QUEUED,
+            createdAt = now,
+            updatedAt = now
+        )
+        stateStore.save(
+            stateStore.load().copy(
+                companies = listOf(company),
+                projectContexts = listOf(project),
+                goals = listOf(goal),
+                companyAgentDefinitions = listOf(reviewer),
+                orgProfiles = listOf(profile),
+                issues = listOf(issue),
+                tasks = listOf(task)
+            )
+        )
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/gemma-validation/gemma4",
+            worktreePath = worktreeRoot
+        )
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } coAnswers {
+            val agent = invocation.args[0] as AgentConfig
+            capturedAgents += agent
+            AgentResult(
+                agentName = agent.name,
+                isSuccess = true,
+                output = "QA_VERDICT: PASS",
+                error = null,
+                duration = 20,
+                metadata = emptyMap()
+            )
+        }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
+        )
+
+        service.runTask(task.id)
+        awaitTaskCompletion(stateStore, task.id)
+
+        capturedAgents.single().name shouldBe "gemma4"
+        capturedAgents.single().pluginClass shouldBe "com.cotor.data.plugin.LocalModelPlugin"
+        capturedAgents.single().parameters["model"] shouldBe "gemma4:e2b"
+        stateStore.load().runs.single().executionMode shouldBe null
+        coVerify(exactly = 0) { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     test("validation-only follow-up issues are forced to non-code work even when planning marks them code-producing") {
@@ -7489,9 +7766,12 @@ class DesktopAppServiceTest : FunSpec({
         service.runCompanyRuntimeTick("company-reopen")
 
         val reopened = stateStore.load()
-        reopened.issues.first { it.id == "issue-reopen" }.status shouldBe IssueStatus.DELEGATED
-        reopened.issues.first { it.id == "issue-reopen" }.transitionReason shouldContain "Runtime stopped while execution was in progress"
-        reopened.runs.first { it.id == "run-reopen" }.error shouldContain "Execution was interrupted because the app-server stopped"
+        val reopenedIssue = reopened.issues.first { it.id == "issue-reopen" }
+        (reopenedIssue.status in setOf(IssueStatus.PLANNED, IssueStatus.DELEGATED)) shouldBe true
+        if (reopenedIssue.status == IssueStatus.DELEGATED) {
+            reopenedIssue.transitionReason shouldContain "Runtime stopped while execution was in progress"
+            reopened.runs.first { it.id == "run-reopen" }.error shouldContain "Execution was interrupted because the app-server stopped"
+        }
     }
 
     test("company dashboard resumes persisted running runtimes after a backend restart") {

@@ -4456,6 +4456,11 @@ class DesktopAppService(
                                 "agent" to run.agentName,
                                 "status" to run.status.name,
                                 "model" to run.model,
+                                "requestedAgentCli" to run.requestedAgentCli,
+                                "requestedModel" to run.requestedModel,
+                                "effectiveAgentCli" to run.effectiveAgentCli,
+                                "effectiveModel" to run.effectiveModel,
+                                "executionMode" to run.executionMode,
                                 "backendKind" to run.backendKind?.name,
                                 "branch" to run.branchName,
                                 "processId" to run.processId,
@@ -10450,7 +10455,15 @@ class DesktopAppService(
         discoverLocalModelsCached("ollama") {
             val body = getLocalModelJson("${LocalModelDefaults.OLLAMA_BASE_URL}/api/tags") ?: return@discoverLocalModelsCached emptyList()
             backendJson.parseToJsonElement(body).jsonObject["models"]?.jsonArray
-                ?.mapNotNull { model -> model.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() } }
+                ?.mapNotNull { model ->
+                    val obj = model.jsonObject
+                    val remoteHost = obj["remote_host"]?.jsonPrimitive?.contentOrNull
+                    val name = obj["name"]?.jsonPrimitive?.contentOrNull
+                        ?: obj["model"]?.jsonPrimitive?.contentOrNull
+                    name?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.takeIf { LocalModelDefaults.isLocalOllamaTag(it, remoteHost) }
+                }
                 ?.distinct()
                 ?: emptyList()
         }
@@ -11221,7 +11234,38 @@ class DesktopAppService(
         }
         val definition = resolveCompanyAgentDefinition(state, issue, assigneeProfile, agent.name) ?: return agent
         val normalizedModel = normalizeCompanyAgentModel(definition.agentCli, definition.model) ?: return agent
+        if (definition.agentCli.equals("gemma4", ignoreCase = true) && requiresCodePublish(issue)) {
+            return gemma4CodeProducingAgentViaOpenCode(
+                fallbackAgent = agent,
+                definition = definition,
+                requestedModel = normalizedModel
+            )
+        }
         return agent.copy(parameters = agent.parameters + mapOf("model" to normalizedModel))
+    }
+
+    private fun gemma4CodeProducingAgentViaOpenCode(
+        fallbackAgent: AgentConfig,
+        definition: CompanyAgentDefinition,
+        requestedModel: String
+    ): AgentConfig {
+        val opencode = BuiltinAgentCatalog.get("opencode") ?: fallbackAgent.copy(
+            name = "opencode",
+            pluginClass = "com.cotor.data.plugin.OpenCodePlugin"
+        )
+        return opencode.copy(
+            parameters = opencode.parameters + mapOf(
+                "model" to OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL,
+                "ollamaBaseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                "requestedAgentCli" to definition.agentCli,
+                "requestedModel" to requestedModel,
+                "effectiveAgentCli" to "opencode",
+                "effectiveModel" to OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL,
+                "executionMode" to OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+            ),
+            environment = OpenCodeDefaults.localOllamaEnvironment(opencode.environment),
+            tags = (opencode.tags + "local-ollama-opencode").distinct()
+        )
     }
 
     private fun writeCompanyContextSnapshot(
@@ -11724,6 +11768,11 @@ class DesktopAppService(
             val startedRun = run.copy(
                 status = AgentRunStatus.RUNNING,
                 model = effectiveAgent.parameters["model"],
+                requestedAgentCli = effectiveAgent.parameters["requestedAgentCli"],
+                requestedModel = effectiveAgent.parameters["requestedModel"],
+                effectiveAgentCli = effectiveAgent.parameters["effectiveAgentCli"],
+                effectiveModel = effectiveAgent.parameters["effectiveModel"],
+                executionMode = effectiveAgent.parameters["executionMode"],
                 backendKind = preferredBackendKind,
                 updatedAt = System.currentTimeMillis()
             )
@@ -11799,7 +11848,7 @@ class DesktopAppService(
                     }
                 }
             )
-            val assignedPrompt = assignedPromptFor(task, effectiveAgent.name)
+            val assignedPrompt = assignedPromptFor(task, agentName)
 
             val durableExecutionContext = DurableRuntimeContext(
                 runId = startedRun.id,
@@ -11809,78 +11858,116 @@ class DesktopAppService(
             )
 
             val (result, publish) = withContext(durableExecutionContext) {
-                val executionResult = if (preferredBackendKind == ExecutionBackendKind.CODEX_APP_SERVER) {
-                    val managedStatus = company?.let {
-                        if (backendConfig.launchMode == BackendLaunchMode.MANAGED) {
-                            publishCompanyEvent(it.id, "backend.starting", "Starting backend", issueId = issue?.id)
-                            codexAppServerManager.ensureStarted(it.id, backendConfig)
-                        } else {
-                            codexAppServerManager.status(it.id, backendConfig)
+                suspend fun executeWithPrompt(prompt: String): AgentResult =
+                    if (preferredBackendKind == ExecutionBackendKind.CODEX_APP_SERVER) {
+                        val managedStatus = company?.let {
+                            if (backendConfig.launchMode == BackendLaunchMode.MANAGED) {
+                                publishCompanyEvent(it.id, "backend.starting", "Starting backend", issueId = issue?.id)
+                                codexAppServerManager.ensureStarted(it.id, backendConfig)
+                            } else {
+                                codexAppServerManager.status(it.id, backendConfig)
+                            }
                         }
-                    }
-                    val effectiveBackendConfig = backendConfig.copy(
-                        baseUrl = managedStatus?.baseUrl ?: backendConfig.baseUrl,
-                        port = managedStatus?.port ?: backendConfig.port
-                    )
-                    val health = executionBackend.health(effectiveBackendConfig)
-                    if (health.health != "healthy") {
-                        company?.let {
-                            recordBackendFallback(
-                                company = it,
-                                issue = issue,
-                                preferredKind = preferredBackendKind,
-                                reason = health.message ?: "Codex app server is unavailable"
-                            )
-                        }
-                        localExecutionBackend.execute(
-                            ExecutionBackendRequest(
-                                agent = bridgedAgent,
-                                prompt = assignedPrompt,
-                                effectiveConfig = localBackendConfig(currentState),
-                                metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
-                            )
+                        val effectiveBackendConfig = backendConfig.copy(
+                            baseUrl = managedStatus?.baseUrl ?: backendConfig.baseUrl,
+                            port = managedStatus?.port ?: backendConfig.port
                         )
-                    } else {
-                        val remoteResult = executionBackend.execute(
-                            ExecutionBackendRequest(
-                                agent = bridgedAgent,
-                                prompt = assignedPrompt,
-                                effectiveConfig = effectiveBackendConfig,
-                                metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
-                            )
-                        )
-                        if (shouldFallbackFromCodexResult(remoteResult)) {
+                        val health = executionBackend.health(effectiveBackendConfig)
+                        if (health.health != "healthy") {
                             company?.let {
                                 recordBackendFallback(
                                     company = it,
                                     issue = issue,
                                     preferredKind = preferredBackendKind,
-                                    reason = remoteResult.error ?: "Codex app server execution failed"
+                                    reason = health.message ?: "Codex app server is unavailable"
                                 )
                             }
                             localExecutionBackend.execute(
                                 ExecutionBackendRequest(
                                     agent = bridgedAgent,
-                                    prompt = assignedPrompt,
+                                    prompt = prompt,
                                     effectiveConfig = localBackendConfig(currentState),
                                     metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
                                 )
                             )
                         } else {
-                            remoteResult
+                            val remoteResult = executionBackend.execute(
+                                ExecutionBackendRequest(
+                                    agent = bridgedAgent,
+                                    prompt = prompt,
+                                    effectiveConfig = effectiveBackendConfig,
+                                    metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                                )
+                            )
+                            if (shouldFallbackFromCodexResult(remoteResult)) {
+                                company?.let {
+                                    recordBackendFallback(
+                                        company = it,
+                                        issue = issue,
+                                        preferredKind = preferredBackendKind,
+                                        reason = remoteResult.error ?: "Codex app server execution failed"
+                                    )
+                                }
+                                localExecutionBackend.execute(
+                                    ExecutionBackendRequest(
+                                        agent = bridgedAgent,
+                                        prompt = prompt,
+                                        effectiveConfig = localBackendConfig(currentState),
+                                        metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                                    )
+                                )
+                            } else {
+                                remoteResult
+                            }
                         }
-                    }
-                } else {
-                    executionBackend.execute(
-                        ExecutionBackendRequest(
-                            agent = bridgedAgent,
-                            prompt = assignedPrompt,
-                            effectiveConfig = backendConfig,
-                            metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                    } else {
+                        executionBackend.execute(
+                            ExecutionBackendRequest(
+                                agent = bridgedAgent,
+                                prompt = prompt,
+                                effectiveConfig = backendConfig,
+                                metadata = executionMetadata.copy(pipelineContext = durablePipelineContext, stageId = durableStage.id)
+                            )
                         )
-                    )
-                }
+                    }
+
+                var executionResult = executeWithPrompt(assignedPrompt)
                 val publishRequired = requiresCodePublish(issue)
+                val noDiffRetryEnabled = publishRequired &&
+                    effectiveAgent.parameters["executionMode"] == OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+                if (
+                    executionResult.isSuccess &&
+                    noDiffRetryEnabled &&
+                    !gitWorkspaceService.hasPublishableChanges(binding.worktreePath, workspace.baseBranch)
+                ) {
+                    company?.let {
+                        publishCompanyEvent(
+                            companyId = it.id,
+                            type = "run.no-diff-retry",
+                            title = "Retrying no-diff code run",
+                            detail = "The local Ollama/OpenCode run completed without changing files; retrying once with explicit file-edit instructions.",
+                            goalId = issue?.goalId,
+                            issueId = issue?.id,
+                            runId = startedRun.id
+                        )
+                    }
+                    val retryPrompt = buildNoDiffRetryPrompt(assignedPrompt)
+                    executionResult = executeWithPrompt(retryPrompt)
+                    if (
+                        executionResult.isSuccess &&
+                        !gitWorkspaceService.hasPublishableChanges(binding.worktreePath, workspace.baseBranch)
+                    ) {
+                        executionResult = executionResult.copy(
+                            isSuccess = false,
+                            error = "RUNNER_NO_DIFF: local Ollama/OpenCode completed twice without producing a git diff for required code work.",
+                            metadata = executionResult.metadata + mapOf("noDiffRetry" to "RUNNER_NO_DIFF")
+                        )
+                    } else {
+                        executionResult = executionResult.copy(
+                            metadata = executionResult.metadata + mapOf("noDiffRetry" to "NO_DIFF_RETRY")
+                        )
+                    }
+                }
                 val localPullRequestRequired = requiresGitHubPullRequest(issue, currentState) && issue != null
                 val publishApproval = issue
                     ?.takeIf { localPullRequestRequired }
@@ -12030,6 +12117,17 @@ class DesktopAppService(
 
     private fun assignedPromptFor(task: AgentTask, agentName: String): String =
         task.plan?.assignmentFor(agentName)?.assignedPrompt ?: task.prompt
+
+    private fun buildNoDiffRetryPrompt(prompt: String): String =
+        buildString {
+            appendLine(prompt.trim())
+            appendLine()
+            appendLine("NO_DIFF_RETRY:")
+            appendLine("- Your previous attempt completed without modifying any repository files.")
+            appendLine("- Do not only describe a plan or summarize what should happen.")
+            appendLine("- Apply the requested implementation by editing, creating, or deleting the actual files in this worktree.")
+            appendLine("- If there is genuinely no valid code/documentation change to make, stop and explain the blocker explicitly instead of claiming completion.")
+        }
 
     private suspend fun resolveAgents(repositoryRoot: Path, requestedAgents: List<String>): Map<String, AgentConfig> {
         val configPath = repositoryRoot.resolve("cotor.yaml")
@@ -14601,17 +14699,21 @@ class DesktopAppService(
         company: Company,
         projectContext: CompanyProjectContext?,
         goal: CompanyGoal?,
-        issue: CompanyIssue,
+        issue: CompanyIssue?,
         profile: OrgAgentProfile
     ): CompanyMemorySnapshot {
         val companyGoals = state.goals
             .filter { it.companyId == company.id && it.status != GoalStatus.COMPLETED }
             .sortedByDescending { it.updatedAt }
             .take(3)
-        val goalIssues = state.issues
-            .filter { it.goalId == goal?.id }
-            .sortedByDescending { it.updatedAt }
-            .take(5)
+        val goalIssues = goal
+            ?.let { activeGoal ->
+                state.issues
+                    .filter { it.goalId == activeGoal.id }
+                    .sortedByDescending { it.updatedAt }
+                    .take(5)
+            }
+            .orEmpty()
         val recentActivity = state.companyActivity
             .filter { it.companyId == company.id }
             .sortedByDescending { it.createdAt }
@@ -14621,15 +14723,29 @@ class DesktopAppService(
             .sortedByDescending { it.createdAt }
             .take(3)
         val recentContextEntries = state.agentContextEntries
-            .filter { it.companyId == company.id && (it.issueId == issue.id || it.goalId == goal?.id || it.visibility == "company") }
+            .filter {
+                it.companyId == company.id &&
+                    (
+                        issue?.id?.let { issueId -> it.issueId == issueId } == true ||
+                            goal?.id?.let { goalId -> it.goalId == goalId } == true ||
+                            it.visibility == "company"
+                        )
+            }
             .sortedByDescending { it.createdAt }
             .take(5)
         val recentMessages = state.agentMessages
-            .filter { it.companyId == company.id && (it.issueId == issue.id || it.goalId == goal?.id) }
+            .filter {
+                it.companyId == company.id &&
+                    (
+                        issue?.id?.let { issueId -> it.issueId == issueId } == true ||
+                            goal?.id?.let { goalId -> it.goalId == goalId } == true
+                        )
+            }
             .sortedByDescending { it.createdAt }
             .take(5)
-        val retrievedKnowledge = knowledgeService.retrieveForExecution(issue.id, company.id)
-            .take(3)
+        val retrievedKnowledge = issue
+            ?.let { knowledgeService.retrieveForExecution(it.id, company.id).take(3) }
+            .orEmpty()
         val assignedIssues = state.issues
             .filter { it.companyId == company.id && it.assigneeProfileId == profile.id }
             .sortedByDescending { it.updatedAt }
@@ -14641,7 +14757,16 @@ class DesktopAppService(
         val collaboratorNames = state.companyAgentDefinitions
             .filter { it.companyId == company.id && it.id in collaboratorIds }
             .map { it.title }
-        val agentDefinition = resolveCompanyAgentDefinition(state, issue, profile, profile.executionAgentName)
+        val agentDefinition = issue
+            ?.let { resolveCompanyAgentDefinition(state, it, profile, profile.executionAgentName) }
+            ?: state.companyAgentDefinitions.firstOrNull { definition ->
+                definition.companyId == company.id &&
+                    (
+                        definition.id == profile.id ||
+                            definition.title.equals(profile.roleName, ignoreCase = true) ||
+                            definition.agentCli.equals(profile.executionAgentName, ignoreCase = true)
+                        )
+            }
         val now = System.currentTimeMillis()
         fun fact(
             layer: CompanyMemoryLayer,
@@ -14677,8 +14802,12 @@ class DesktopAppService(
                 add(fact(CompanyMemoryLayer.PROJECT, "goal", it.title, "goal-state", 0.9, it.updatedAt))
                 add(fact(CompanyMemoryLayer.PROJECT, "goalDescription", it.description.lineSequence().firstOrNull().orEmpty(), "goal-state", 0.75, it.updatedAt))
             }
-            add(fact(CompanyMemoryLayer.PROJECT, "issue", issue.title, "issue-state", 0.9, issue.updatedAt))
-            add(fact(CompanyMemoryLayer.PROJECT, "issueStatus", issue.status.name, "issue-state", 0.95, issue.updatedAt))
+            if (issue != null) {
+                add(fact(CompanyMemoryLayer.PROJECT, "issue", issue.title, "issue-state", 0.9, issue.updatedAt))
+                add(fact(CompanyMemoryLayer.PROJECT, "issueStatus", issue.status.name, "issue-state", 0.95, issue.updatedAt))
+            } else {
+                add(fact(CompanyMemoryLayer.PROJECT, "issueContext", "No active issue selected.", "issue-state", 0.75))
+            }
             add(
                 fact(
                     CompanyMemoryLayer.PROJECT,
