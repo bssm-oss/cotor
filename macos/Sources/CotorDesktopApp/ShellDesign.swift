@@ -74,6 +74,20 @@ enum ShellPalette {
     static let success = Color(nsColor: NSColor(red: 0.36, green: 0.79, blue: 0.52, alpha: 1))
     static let warning = Color(nsColor: NSColor(red: 0.98, green: 0.72, blue: 0.31, alpha: 1))
     static let danger = Color(nsColor: NSColor(red: 0.93, green: 0.38, blue: 0.40, alpha: 1))
+
+    // Chat surface tokens — operator chat messenger bubbles
+    static let chatUserBubble = dynamic(
+        NSColor(red: 0.22, green: 0.48, blue: 0.88, alpha: 1),
+        NSColor(red: 0.93, green: 0.76, blue: 0.20, alpha: 1)
+    )
+    static let chatUserText = dynamic(
+        NSColor.white.withAlphaComponent(0.95),
+        NSColor.black.withAlphaComponent(0.85)
+    )
+    static let chatAssistantBubble = dynamic(
+        NSColor(red: 0.90, green: 0.93, blue: 0.97, alpha: 1),
+        NSColor(red: 0.13, green: 0.16, blue: 0.21, alpha: 1)
+    )
 }
 
 enum ShellMetrics {
