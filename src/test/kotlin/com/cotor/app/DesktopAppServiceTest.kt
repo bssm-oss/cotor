@@ -55,6 +55,10 @@ import kotlin.io.path.exists
 class DesktopAppServiceTest : FunSpec({
     concurrency = 1
 
+    beforeTest {
+        DesktopAppService.shutdownAllForTesting()
+    }
+
     afterTest {
         DesktopAppService.shutdownAllForTesting()
     }
@@ -4444,7 +4448,26 @@ class DesktopAppServiceTest : FunSpec({
                 }
 
             service.runIssueAndAwaitSettlement(issue.id, timeoutMs = 60_000)
-            val finalSnapshot = stateStore.load()
+            val finalSnapshot = withTimeout(5_000) {
+                var snapshot = stateStore.load()
+                while (
+                    companyRunsFor(snapshot).none { it.status != AgentRunStatus.QUEUED } ||
+                    snapshot.companyActivity.none {
+                        it.companyId == company.id &&
+                            it.source == "execution-backend" &&
+                            it.title == "Fell back to local execution"
+                    } ||
+                    snapshot.signals.none {
+                        it.companyId == company.id &&
+                            it.source == "execution-backend" &&
+                            it.message.contains("Fell back to Local Cotor")
+                    }
+                ) {
+                    delay(100)
+                    snapshot = stateStore.load()
+                }
+                snapshot
+            }
             val companyRuns = companyRunsFor(finalSnapshot)
             companyRuns.shouldNotBeEmpty()
             companyRuns.any { it.status != AgentRunStatus.QUEUED } shouldBe true
