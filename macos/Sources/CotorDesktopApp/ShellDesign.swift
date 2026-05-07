@@ -75,18 +75,18 @@ enum ShellPalette {
     static let warning = Color(nsColor: NSColor(red: 0.98, green: 0.72, blue: 0.31, alpha: 1))
     static let danger = Color(nsColor: NSColor(red: 0.93, green: 0.38, blue: 0.40, alpha: 1))
 
-    // Chat surface tokens — operator chat messenger bubbles
+    // Chat surface tokens keep operator chat aligned with the shell instead of a separate messenger skin.
     static let chatUserBubble = dynamic(
-        NSColor(red: 0.22, green: 0.48, blue: 0.88, alpha: 1),
-        NSColor(red: 0.93, green: 0.76, blue: 0.20, alpha: 1)
+        NSColor(red: 0.88, green: 0.93, blue: 0.99, alpha: 1),
+        NSColor(red: 0.13, green: 0.18, blue: 0.27, alpha: 1)
     )
     static let chatUserText = dynamic(
-        NSColor.white.withAlphaComponent(0.95),
-        NSColor.black.withAlphaComponent(0.85)
+        NSColor.black.withAlphaComponent(0.86),
+        NSColor.white.withAlphaComponent(0.92)
     )
     static let chatAssistantBubble = dynamic(
-        NSColor(red: 0.90, green: 0.93, blue: 0.97, alpha: 1),
-        NSColor(red: 0.13, green: 0.16, blue: 0.21, alpha: 1)
+        NSColor(red: 0.95, green: 0.97, blue: 0.99, alpha: 1),
+        NSColor(red: 0.09, green: 0.11, blue: 0.15, alpha: 1)
     )
 }
 
@@ -134,12 +134,6 @@ struct ShellCanvas: View {
                 .stroke(ShellPalette.line.opacity(0.35), lineWidth: 1)
                 .blur(radius: 0.2)
                 .padding(24)
-
-            Circle()
-                .fill(ShellPalette.accent.opacity(0.10))
-                .frame(width: 320, height: 320)
-                .blur(radius: 120)
-                .offset(x: -420, y: -220)
         }
     }
 }
@@ -294,23 +288,208 @@ struct ShellTag: View {
     }
 }
 
-struct ShellTopBarButtonStyle: ButtonStyle {
-    let prominent: Bool
+enum ShellActionButtonRole {
+    case normal
+    case prominent
+    case destructive
+    case ghost
+
+    var foreground: Color {
+        switch self {
+        case .destructive:
+            return ShellPalette.danger
+        case .prominent:
+            return ShellPalette.text
+        case .normal, .ghost:
+            return ShellPalette.text
+        }
+    }
+
+    var background: Color {
+        switch self {
+        case .prominent:
+            return ShellPalette.panelRaised
+        case .destructive:
+            return ShellPalette.danger.opacity(0.12)
+        case .ghost:
+            return Color.clear
+        case .normal:
+            return ShellPalette.panelAlt
+        }
+    }
+
+    var border: Color {
+        switch self {
+        case .prominent:
+            return ShellPalette.lineStrong
+        case .destructive:
+            return ShellPalette.danger.opacity(0.38)
+        case .ghost:
+            return ShellPalette.line.opacity(0.55)
+        case .normal:
+            return ShellPalette.line
+        }
+    }
+}
+
+struct ShellActionButtonStyle: ButtonStyle {
+    let role: ShellActionButtonRole
+    var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(ShellPalette.text)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .foregroundStyle(role.foreground.opacity(configuration.isPressed ? 0.82 : 1))
+            .padding(.horizontal, compact ? 10 : 12)
+            .padding(.vertical, compact ? 6 : 8)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(prominent ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .fill(role.background)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(prominent ? ShellPalette.lineStrong : ShellPalette.line, lineWidth: 1)
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .stroke(role.border, lineWidth: 1)
             )
             .opacity(configuration.isPressed ? 0.82 : 1)
+    }
+}
+
+struct ShellTopBarButtonStyle: ButtonStyle {
+    let prominent: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        ShellActionButtonStyle(role: prominent ? .prominent : .normal)
+            .makeBody(configuration: configuration)
+    }
+}
+
+struct ShellIconButtonStyle: ButtonStyle {
+    var active = false
+    var destructive = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(destructive ? ShellPalette.danger : (active ? ShellPalette.text : ShellPalette.muted))
+            .frame(width: 30, height: 30)
+            .background(active ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+            .overlay(
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .stroke(destructive ? ShellPalette.danger.opacity(0.38) : (active ? ShellPalette.lineStrong : ShellPalette.line), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            .opacity(configuration.isPressed ? 0.78 : 1)
+    }
+}
+
+struct ShellIconButton: View {
+    let systemName: String
+    let accessibilityLabel: String
+    var active = false
+    var destructive = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+        }
+        .buttonStyle(ShellIconButtonStyle(active: active, destructive: destructive))
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+struct ShellDrawerToggleButton: View {
+    let isOpen: Bool
+    let title: String
+    let openTitle: String
+    var systemName = "sidebar.right"
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: systemName)
+                Text(isOpen ? openTitle : title)
+            }
+        }
+        .buttonStyle(ShellActionButtonStyle(role: isOpen ? .prominent : .normal, compact: true))
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+struct ShellDisclosureSection<Accessory: View, Content: View>: View {
+    let title: String
+    let subtitle: String?
+    @Binding var isExpanded: Bool
+    @ViewBuilder let accessory: () -> Accessory
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(ShellMotion.spring) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(ShellPalette.text)
+                            .lineLimit(1)
+                        if let subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(ShellPalette.muted)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    accessory()
+
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(ShellPalette.muted)
+                        .frame(width: 14, alignment: .center)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(isExpanded ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+                .overlay(
+                    RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                        .stroke(isExpanded ? ShellPalette.lineStrong : ShellPalette.line, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+
+            if isExpanded {
+                content()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+}
+
+extension ShellDisclosureSection where Accessory == EmptyView {
+    init(
+        title: String,
+        subtitle: String? = nil,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self._isExpanded = isExpanded
+        self.accessory = { EmptyView() }
+        self.content = content
     }
 }

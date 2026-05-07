@@ -103,6 +103,18 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func fullAutoOperatorChatRequestAddsConfirmationToTimeline() async {
+        let store = DesktopStore()
+
+        await store.submitOperatorChatMessage("완전 자동으로 바꿔줘")
+
+        #expect(store.operatorChatMessages.map(\.role) == [.user, .assistant])
+        #expect(store.operatorChatMessages.first?.text == "완전 자동으로 바꿔줘")
+        #expect(store.operatorChatMessages.last?.commands.map(\.kind) == [.confirmFullAuto, .cancelConfirmation])
+        #expect(store.isSendingOperatorChatMessage == false)
+    }
+
+    @Test
     func orgProfileShiftSelectionAndClearWorkAcrossRanges() {
         let store = DesktopStore()
         store.dashboard = DashboardPayload(
