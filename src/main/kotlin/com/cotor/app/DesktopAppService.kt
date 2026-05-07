@@ -159,6 +159,37 @@ private data class CeoChatIntakeDraft(
     val ceoBrief: String
 )
 
+@kotlinx.serialization.Serializable
+private data class OperatorChatLlmPlan(
+    val reply: String = "",
+    val toolCalls: List<OperatorChatToolCall> = emptyList(),
+    val answerSourceHints: List<String> = emptyList()
+)
+
+@kotlinx.serialization.Serializable
+private data class OperatorChatToolCall(
+    val tool: String,
+    val reason: String = "",
+    val args: Map<String, String> = emptyMap()
+)
+
+private data class OperatorChatToolExecution(
+    val actions: List<OperatorCommandAction> = emptyList(),
+    val pendingApprovals: List<OperatorCommandAction> = emptyList(),
+    val blockedActions: List<OperatorCommandAction> = emptyList(),
+    val answerSources: List<OperatorAnswerSource> = emptyList(),
+    val resultLines: List<String> = emptyList()
+) {
+    operator fun plus(other: OperatorChatToolExecution): OperatorChatToolExecution =
+        OperatorChatToolExecution(
+            actions = actions + other.actions,
+            pendingApprovals = pendingApprovals + other.pendingApprovals,
+            blockedActions = blockedActions + other.blockedActions,
+            answerSources = answerSources + other.answerSources,
+            resultLines = resultLines + other.resultLines
+        )
+}
+
 /**
  * High-level application service that owns the desktop-facing workflow.
  *
@@ -4870,31 +4901,761 @@ class DesktopAppService(
             return response
         }
 
-        if (
-            automationMode != null ||
-            confirmFullAuto ||
-            confirmStaffing ||
-            looksLikeDeterministicOperatorCommand(normalized)
-        ) {
-            return runOperatorCommand(
+        if (automationMode != null || confirmFullAuto || confirmStaffing) {
+            val commandResponse = runOperatorCommand(
                 companyId = companyId,
                 message = trimmedMessage,
                 automationMode = automationMode,
                 confirmFullAuto = confirmFullAuto,
                 confirmStaffing = confirmStaffing
-            ).toOperatorChatResponse()
+            )
+            val response = summarizeOperatorCommandAsChat(companyId, trimmedMessage, commandResponse)
+            recordOperatorChatConversation(companyId, trimmedMessage, response)
+            return response
         }
 
-        val answer = buildGroundedOperatorChatAnswer(companyId, trimmedMessage, normalized)
+        val plan = runCatching {
+            planOperatorChatWithLlm(companyId, trimmedMessage)
+        }.getOrElse { error ->
+            val response = operatorChatPlannerFailureResponse(companyId, error.message ?: "operator model failed")
+            recordOperatorChatConversation(companyId, trimmedMessage, response)
+            return response
+        }
+        if (plan == null) {
+            val response = operatorChatPlannerFailureResponse(companyId, "operator model did not return a valid plan")
+            recordOperatorChatConversation(companyId, trimmedMessage, response)
+            return response
+        }
+
+        val activeMode = currentOperatorAutomationMode(companyId)
+        val execution = plan.toolCalls.fold(OperatorChatToolExecution()) { current, toolCall ->
+            current + executeOperatorChatToolCall(
+                companyId = companyId,
+                userMessage = trimmedMessage,
+                toolCall = toolCall,
+                activeMode = activeMode
+            )
+        }
+        val finalSummary = buildOperatorCompanySummary(companyId)
+        val finalMessage = summarizeOperatorChatResultWithLlm(
+            companyId = companyId,
+            userMessage = trimmedMessage,
+            plan = plan,
+            execution = execution,
+            summary = finalSummary
+        ) ?: plan.reply.trim().ifBlank {
+            "I understood the request, but the operator model did not provide a final user-facing answer."
+        }
         val response = OperatorChatResponse(
-            message = answer.message,
+            message = finalMessage,
             automationMode = currentOperatorAutomationMode(companyId),
-            summary = buildOperatorCompanySummary(companyId),
-            answerSources = answer.sources
+            actions = execution.actions,
+            pendingApprovals = execution.pendingApprovals,
+            blockedActions = execution.blockedActions,
+            summary = finalSummary,
+            answerSources = execution.answerSources
         )
         recordOperatorChatConversation(companyId, trimmedMessage, response)
         return response
     }
+
+    private suspend fun summarizeOperatorCommandAsChat(
+        companyId: String,
+        userMessage: String,
+        commandResponse: OperatorCommandResponse
+    ): OperatorChatResponse {
+        val execution = OperatorChatToolExecution(
+            actions = commandResponse.actions,
+            pendingApprovals = commandResponse.pendingApprovals,
+            blockedActions = commandResponse.blockedActions,
+            resultLines = commandResponse.actions.map { it.detail } +
+                commandResponse.pendingApprovals.map { it.detail } +
+                commandResponse.blockedActions.map { it.detail }
+        )
+        val plan = OperatorChatLlmPlan(
+            reply = commandResponse.message,
+            toolCalls = emptyList()
+        )
+        val message = summarizeOperatorChatResultWithLlm(
+            companyId = companyId,
+            userMessage = userMessage,
+            plan = plan,
+            execution = execution,
+            summary = commandResponse.summary ?: buildOperatorCompanySummary(companyId)
+        ) ?: commandResponse.message
+        return commandResponse.toOperatorChatResponse().copy(message = message)
+    }
+
+    private suspend fun operatorChatPlannerFailureResponse(companyId: String, reason: String): OperatorChatResponse =
+        OperatorChatResponse(
+            message = "운영 채팅 모델이 요청을 해석하지 못했습니다. 정해진 상태 응답으로 대신 처리하지 않았습니다. 원인: ${reason.take(220)}",
+            automationMode = currentOperatorAutomationMode(companyId),
+            blockedActions = listOf(
+                OperatorCommandAction(
+                    type = "operator-chat-planner",
+                    title = "Operator model failed",
+                    detail = reason.take(500),
+                    status = "BLOCKED"
+                )
+            ),
+            summary = buildOperatorCompanySummary(companyId),
+            answerSources = listOf(
+                OperatorAnswerSource(
+                    type = "operator-llm",
+                    title = "Operator planner failure",
+                    detail = reason.take(500)
+                )
+            )
+        )
+
+    private suspend fun planOperatorChatWithLlm(companyId: String, userMessage: String): OperatorChatLlmPlan? {
+        val prompt = buildOperatorChatPlannerPrompt(companyId, userMessage)
+        val firstOutput = executeOperatorChatLlm(companyId, prompt, purpose = "planner")
+        parseOperatorChatPlan(firstOutput)?.let { return it }
+
+        val repairPrompt = buildString {
+            appendLine("The previous Cotor operator response was not valid JSON for the required schema.")
+            appendLine("Return JSON only, no prose, no markdown outside the JSON object.")
+            appendLine("Required schema:")
+            appendLine("""{"reply":"short natural answer","toolCalls":[{"tool":"inspect_runtime","reason":"why","args":{}}],"answerSourceHints":[]}""")
+            appendLine()
+            appendLine("Original user message:")
+            appendLine(userMessage)
+            appendLine()
+            appendLine("Invalid model output:")
+            appendLine(firstOutput.take(4_000))
+        }
+        return parseOperatorChatPlan(executeOperatorChatLlm(companyId, repairPrompt, purpose = "planner-repair"))
+    }
+
+    private fun parseOperatorChatPlan(output: String?): OperatorChatLlmPlan? {
+        val candidate = output?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val fenced = Regex("```json\\s*(\\{.*?})\\s*```", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+            .find(candidate)
+            ?.groupValues
+            ?.getOrNull(1)
+        val jsonText = fenced ?: extractJsonObject(candidate)
+            ?: return coerceOperatorChatPlanFromModelText(candidate)
+        val parsed = runCatching {
+            backendJson.decodeFromString(OperatorChatLlmPlan.serializer(), jsonText)
+        }.getOrNull()?.takeIf { plan ->
+            plan.reply.isNotBlank() || plan.toolCalls.isNotEmpty()
+        }
+        return parsed ?: coerceOperatorChatPlanFromModelText(candidate)
+    }
+
+    private fun coerceOperatorChatPlanFromModelText(output: String): OperatorChatLlmPlan? {
+        val normalized = output.lowercase()
+        val tool = when {
+            "inspect_runtime" in normalized ||
+                "runtime" in normalized ||
+                "running" in normalized ||
+                "agent" in normalized ||
+                "에이전트" in normalized ||
+                "런타임" in normalized ||
+                "상태" in normalized -> "inspect_runtime"
+            "inspect_performance" in normalized ||
+                "performance" in normalized ||
+                "성과" in normalized ||
+                "인사평가" in normalized -> "inspect_performance"
+            "inspect_blocked" in normalized ||
+                "blocked" in normalized ||
+                "막힌" in normalized ||
+                "차단" in normalized -> "inspect_blocked"
+            "inspect_reviews" in normalized ||
+                "review" in normalized ||
+                "qa" in normalized ||
+                "리뷰" in normalized ||
+                "승인" in normalized -> "inspect_reviews"
+            "create_goal" in normalized ||
+                "goal" in normalized ||
+                "목표" in normalized ||
+                "일을" in normalized -> "create_goal"
+            "update_agent_models" in normalized ||
+                "model" in normalized ||
+                "모델" in normalized -> "update_agent_models"
+            "start_runtime" in normalized -> "start_runtime"
+            "stop_runtime" in normalized -> "stop_runtime"
+            else -> null
+        } ?: return null
+        return OperatorChatLlmPlan(
+            reply = output.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(240)
+                ?: "요청을 해석했습니다.",
+            toolCalls = listOf(
+                OperatorChatToolCall(
+                    tool = tool,
+                    reason = "Recovered from non-JSON operator model output.",
+                    args = emptyMap()
+                )
+            ),
+            answerSourceHints = emptyList()
+        )
+    }
+
+    private suspend fun summarizeOperatorChatResultWithLlm(
+        companyId: String,
+        userMessage: String,
+        plan: OperatorChatLlmPlan,
+        execution: OperatorChatToolExecution,
+        summary: OperatorCompanySummary
+    ): String? {
+        val prompt = buildString {
+            appendLine("You are Cotor's Company Operator.")
+            appendLine("Write the final user-facing chat answer in the same language as the user.")
+            appendLine("Sound like a practical operator, not a system template.")
+            appendLine("Use the actual tool results below. Do not invent hidden work.")
+            appendLine("The checks below already ran. Do not say you will check later; answer with what was observed.")
+            appendLine("When counts or statuses appear in tool results, include the concrete values.")
+            appendLine("If nothing was executed, still answer naturally.")
+            appendLine()
+            appendLine("User message:")
+            appendLine(userMessage)
+            appendLine()
+            appendLine("Planner draft reply:")
+            appendLine(plan.reply.ifBlank { "(blank)" })
+            appendLine()
+            appendLine("Runtime summary:")
+            appendLine("status=${summary.runtimeStatus}, activeAgentRuns=${summary.activeAgentCount}, blockedIssues=${summary.blockedIssueCount}, reviewItems=${summary.reviewQueueCount}, pendingApprovals=${summary.pendingApprovalCount}, budgetPaused=${summary.budgetPaused}")
+            appendLine()
+            appendLine("Executed actions:")
+            val actionLines = execution.resultLines.ifEmpty {
+                (execution.actions + execution.pendingApprovals + execution.blockedActions).map {
+                    "${it.type}: ${it.status} - ${it.detail}"
+                }
+            }
+            if (actionLines.isEmpty()) {
+                appendLine("(none)")
+            } else {
+                actionLines.take(20).forEach { appendLine("- ${it.take(500)}") }
+            }
+            appendLine()
+            appendLine("Return plain text only. No JSON.")
+        }
+        val output = runCatching { executeOperatorChatLlm(companyId, prompt, purpose = "final-answer") }.getOrNull()
+        val answer = output?.trim()?.takeIf { it.isNotBlank() }
+        return if (answer != null && !looksLikeDeferredOperatorCheck(answer)) {
+            answer
+        } else {
+            groundedOperatorChatToolReply(userMessage, execution, plan)
+        }
+    }
+
+    private fun looksLikeDeferredOperatorCheck(answer: String): Boolean {
+        val normalized = answer.lowercase()
+        return listOf(
+            "확인해볼",
+            "확인해 보",
+            "확인하겠습니다",
+            "살펴보겠습니다",
+            "i'll check",
+            "i will check",
+            "let me check"
+        ).any { it in normalized }
+    }
+
+    private fun groundedOperatorChatToolReply(
+        userMessage: String,
+        execution: OperatorChatToolExecution,
+        plan: OperatorChatLlmPlan
+    ): String? {
+        val korean = userMessage.any { it in '가'..'힣' }
+        execution.resultLines.firstOrNull { it.startsWith("runtime=", ignoreCase = true) }?.let { line ->
+            fun value(key: String): String =
+                Regex("""$key=([^,\s]+)""")
+                    .find(line)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?: "unknown"
+            val status = value("runtime")
+            val active = value("activeAgentRuns")
+            val blocked = value("blockedIssues")
+            val reviews = value("reviewItems")
+            val pending = value("pendingApprovals")
+            return if (korean) {
+                "확인했습니다. 현재 런타임은 $status 이고 실행 중인 에이전트는 ${active}개입니다. 막힌 이슈는 ${blocked}개, 리뷰 항목은 ${reviews}개, 승인 대기는 ${pending}개입니다."
+            } else {
+                "Checked. Runtime is $status with $active running agent(s), $blocked blocked issue(s), $reviews review item(s), and $pending pending approval(s)."
+            }
+        }
+        if (execution.resultLines.isNotEmpty()) {
+            val concise = execution.resultLines.take(5).joinToString("; ") { it.take(220) }
+            return if (korean) "확인했습니다. $concise" else "Checked. $concise"
+        }
+        return plan.reply.takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun executeOperatorChatLlm(companyId: String, prompt: String, purpose: String): String {
+        val state = stateStore.load()
+        val definitions = state.companyAgentDefinitions.filter { it.companyId == companyId && it.enabled }
+        val selected = dominantCompanyExecutionModel(definitions)
+        val timeoutMs = when (purpose) {
+            "final-answer" -> 25_000L
+            "planner-repair" -> 45_000L
+            else -> 60_000L
+        }
+        val localGemmaModel = discoverGemma4ModelsCached().firstOrNull()
+        if (localGemmaModel != null) {
+            val agent = AgentConfig(
+                name = "operator-chat-$purpose",
+                pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
+                parameters = mapOf(
+                    "provider" to "ollama",
+                    "baseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                    "model" to localGemmaModel
+                ),
+                timeout = timeoutMs
+            )
+            val workingDirectory = stateStore.appHome().resolve("operator-chat-llm").also { Files.createDirectories(it) }
+            val result = agentExecutor.executeAgent(
+                agent = agent,
+                input = prompt,
+                metadata = AgentExecutionMetadata(
+                    agentId = "company-operator",
+                    workingDirectory = workingDirectory
+                )
+            )
+            if (!result.isSuccess) {
+                throw IllegalStateException(result.error ?: "operator local model failed")
+            }
+            return result.output?.trim().orEmpty().ifBlank {
+                throw IllegalStateException("operator local model returned empty output")
+            }
+        }
+        val requestedModel = OpenCodeDefaults.normalizeModel(selected.model)
+        val useOpenCode = selected.agentCli.equals("opencode", ignoreCase = true) ||
+            requestedModel?.let(OpenCodeDefaults::isSelectableModel) == true
+        val agent = if (useOpenCode) {
+            AgentConfig(
+                name = "operator-chat-$purpose",
+                pluginClass = "com.cotor.data.plugin.OpenCodePlugin",
+                parameters = mapOf("model" to (requestedModel?.takeIf(OpenCodeDefaults::isSelectableModel) ?: OpenCodeDefaults.DEFAULT_MODEL)),
+                timeout = timeoutMs
+            )
+        } else {
+            AgentConfig(
+                name = "operator-chat-$purpose",
+                pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
+                parameters = buildMap {
+                    put("provider", selected.agentCli.ifBlank { "ollama" })
+                    selected.model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
+                },
+                timeout = timeoutMs
+            )
+        }
+        val workingDirectory = stateStore.appHome().resolve("operator-chat-llm").also { Files.createDirectories(it) }
+        val result = agentExecutor.executeAgent(
+            agent = agent,
+            input = prompt,
+            metadata = AgentExecutionMetadata(
+                agentId = "company-operator",
+                workingDirectory = workingDirectory
+            )
+        )
+        if (!result.isSuccess) {
+            throw IllegalStateException(result.error ?: "operator LLM failed")
+        }
+        return result.output?.trim().orEmpty().ifBlank {
+            throw IllegalStateException("operator LLM returned empty output")
+        }
+    }
+
+    private suspend fun buildOperatorChatPlannerPrompt(companyId: String, userMessage: String): String {
+        val state = stateStore.load().withDerivedMetrics()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val summary = buildOperatorCompanySummary(companyId)
+        return buildString {
+            appendLine("You are Cotor's Company Operator LLM.")
+            appendLine("The user can speak casually, vaguely, or messily. Infer intent like a human operator.")
+            appendLine("Pick tool calls. Cotor will execute them and then answer from real results.")
+            appendLine("Never answer with a canned status template. Never request a human approval queue.")
+            appendLine()
+            appendLine("Return exactly one JSON object. No markdown. No prose outside JSON.")
+            appendLine("""Schema: {"reply":"short natural Korean/English acknowledgement","toolCalls":[{"tool":"inspect_runtime","reason":"why","args":{}}],"answerSourceHints":[]}""")
+            appendLine()
+            appendLine("Allowed tools:")
+            appendLine("inspect_runtime, inspect_performance, inspect_blocked, inspect_reviews, update_agent_models, create_goal, start_runtime, stop_runtime, retry_blocked, hr_staffing, github_status, configure_github_origin, linear_sync, generate_report, inspect_problem_signals, ask_clarifying_question, blocked_by_policy")
+            appendLine()
+            appendLine("Examples:")
+            appendLine("""User: 에이전트들 잘 돌아가?""")
+            appendLine("""JSON: {"reply":"상태를 확인해볼게요.","toolCalls":[{"tool":"inspect_runtime","reason":"User asked whether agents/runtime are working.","args":{}}],"answerSourceHints":["company-summary"]}""")
+            appendLine("""User: 막힌 일 왜 그래?""")
+            appendLine("""JSON: {"reply":"막힌 이슈를 확인해볼게요.","toolCalls":[{"tool":"inspect_blocked","reason":"User asked about blocked work.","args":{}}],"answerSourceHints":["issue"]}""")
+            appendLine("""User: opencode/nemotron-3-super-free로 바꿔""")
+            appendLine("""JSON: {"reply":"모델 변경을 적용해볼게요.","toolCalls":[{"tool":"update_agent_models","reason":"User requested model update.","args":{"model":"opencode/nemotron-3-super-free"}}],"answerSourceHints":["agent-models"]}""")
+            appendLine()
+            appendLine("Company context:")
+            appendLine("company=${company.name}, mode=${company.operatorAutomationMode}, runtime=${summary.runtimeStatus}, activeAgentRuns=${summary.activeAgentCount}, blockedIssues=${summary.blockedIssueCount}, reviews=${summary.reviewQueueCount}, pendingApprovals=${summary.pendingApprovalCount}, budgetPaused=${summary.budgetPaused}")
+            appendLine()
+            appendLine("User message:")
+            appendLine(userMessage)
+        }.trim()
+    }
+
+    private suspend fun executeOperatorChatToolCall(
+        companyId: String,
+        userMessage: String,
+        toolCall: OperatorChatToolCall,
+        activeMode: OperatorAutomationMode
+    ): OperatorChatToolExecution {
+        val tool = toolCall.tool.trim().lowercase().replace('-', '_')
+        return when (tool) {
+            "inspect_runtime", "status", "get_status" -> inspectOperatorRuntimeTool(companyId)
+            "inspect_performance", "performance", "hr_performance" -> inspectOperatorPerformanceTool(companyId)
+            "inspect_blocked", "blocked", "failures" -> inspectOperatorBlockedTool(companyId)
+            "inspect_reviews", "review", "approval", "merge_status" -> inspectOperatorReviewTool(companyId)
+            "update_agent_models", "set_agent_models", "model_update" -> {
+                val requested = toolCall.args["model"]
+                    ?: toolCall.args["requestedModel"]
+                    ?: userMessage
+                val modelUpdate = resolveOperatorModelUpdate(requested)
+                    ?: resolveOperatorModelUpdate("opencode $requested model")
+                    ?: OperatorModelUpdate(requestedModel = requested, appliedModel = OpenCodeDefaults.DEFAULT_MODEL)
+                val includeAllCompanies = toolCall.args["includeAllCompanies"]?.toBooleanStrictOrNull()
+                    ?: referencesAllCompanies(userMessage.lowercase())
+                val action = updateOperatorAgentModels(
+                    companyId = companyId,
+                    includeAllCompanies = includeAllCompanies,
+                    requestedModel = modelUpdate.requestedModel,
+                    appliedModel = modelUpdate.appliedModel
+                )
+                OperatorChatToolExecution(
+                    actions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("agent-models", action.title, action.detail)),
+                    resultLines = listOf("agent models: ${action.status} - ${action.detail}")
+                )
+            }
+            "create_goal", "create_work", "work_intake" -> {
+                val title = toolCall.args["title"]?.trim()?.takeIf { it.isNotBlank() }
+                    ?: operatorGoalTitleFromMessage(userMessage)
+                val description = toolCall.args["description"]?.trim()?.takeIf { it.isNotBlank() }
+                    ?: userMessage
+                val metrics = toolCall.args["successMetrics"]
+                    ?.split('|', ',', '\n')
+                    ?.map { it.trim() }
+                    ?.filter { it.isNotBlank() }
+                    ?: emptyList()
+                val goal = createGoal(
+                    companyId = companyId,
+                    title = title,
+                    description = description,
+                    successMetrics = metrics,
+                    autonomyEnabled = true,
+                    operatingPolicy = "Company Operator LLM intake: the operator model interpreted the chat request and queued CEO planning.",
+                    startRuntimeIfNeeded = false
+                )
+                val action = OperatorCommandAction(
+                    type = "company-work-intake",
+                    title = "Goal created from operator chat",
+                    detail = "Created goal: ${goal.title}. CEO planning will split it into assigned issues when runtime runs.",
+                    status = "DONE"
+                )
+                OperatorChatToolExecution(
+                    actions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("goal", goal.title, goal.description.take(240), goal.id)),
+                    resultLines = listOf("created goal ${goal.id}: ${goal.title}")
+                )
+            }
+            "start_runtime", "runtime_start" -> {
+                val runtime = startCompanyRuntime(companyId)
+                val action = OperatorCommandAction(
+                    type = "runtime-start",
+                    title = "Runtime started",
+                    detail = if (runtime.status == CompanyRuntimeStatus.RUNNING) {
+                        "The selected company is now running."
+                    } else {
+                        "The start request was accepted. Current status: ${runtime.status.name}."
+                    },
+                    status = "DONE"
+                )
+                OperatorChatToolExecution(
+                    actions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("runtime", action.title, action.detail)),
+                    resultLines = listOf("runtime start: ${runtime.status.name}")
+                )
+            }
+            "stop_runtime", "runtime_stop" -> {
+                val runtime = stopCompanyRuntime(companyId)
+                val action = OperatorCommandAction(
+                    type = "runtime-stop",
+                    title = "Runtime stopped",
+                    detail = "The selected company runtime is ${runtime.status.name}.",
+                    status = "DONE"
+                )
+                OperatorChatToolExecution(
+                    actions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("runtime", action.title, action.detail)),
+                    resultLines = listOf("runtime stop: ${runtime.status.name}")
+                )
+            }
+            "retry_blocked", "reopen_blocked" -> {
+                val execution = when (activeMode) {
+                    OperatorAutomationMode.FULL_AUTO -> OperatorChatToolExecution(actions = listOf(reopenBlockedIssuesFromOperator(companyId)))
+                    OperatorAutomationMode.AGENT_APPROVED -> OperatorChatToolExecution(
+                        pendingApprovals = listOf(
+                            routeOperatorApprovalToAgent(
+                                companyId = companyId,
+                                request = userMessage,
+                                approvalTitle = "Approve blocked issue retry",
+                                targetAgent = "CEO"
+                            )
+                        )
+                    )
+                    OperatorAutomationMode.ASK_ME -> OperatorChatToolExecution(
+                        pendingApprovals = listOf(
+                            OperatorCommandAction(
+                                type = "blocked-issue-retry",
+                                title = "Blocked issue retry is waiting",
+                                detail = "This retry needs your confirmation before it can run.",
+                                status = "USER_CONFIRMATION_REQUIRED"
+                            )
+                        )
+                    )
+                }
+                execution.copy(
+                    answerSources = execution.answerSources + OperatorAnswerSource("blocked-issue-retry", "Blocked retry routing", activeMode.name),
+                    resultLines = execution.resultLines + (execution.actions + execution.pendingApprovals).map { "blocked retry: ${it.status} - ${it.detail}" }
+                )
+            }
+            "hr_staffing", "staff_team", "hire_agents" -> {
+                val execution = if (activeMode == OperatorAutomationMode.ASK_ME) {
+                    OperatorChatToolExecution(
+                        pendingApprovals = listOf(
+                            OperatorCommandAction(
+                                type = "hr-staffing",
+                                title = "Team staffing is waiting",
+                                detail = "Confirm once to let HR Manager hire missing agents or assign mentors for this request.",
+                                status = "USER_CONFIRMATION_REQUIRED"
+                            )
+                        )
+                    )
+                } else {
+                    OperatorChatToolExecution(actions = listOf(runHrStaffingReviewAsOperator(companyId, userMessage, HR_MAX_HIRES_PER_COMMAND)))
+                }
+                execution.copy(
+                    answerSources = execution.answerSources + OperatorAnswerSource("hr-staffing", "HR staffing", activeMode.name),
+                    resultLines = execution.resultLines + (execution.actions + execution.pendingApprovals).map { "hr staffing: ${it.status} - ${it.detail}" }
+                )
+            }
+            "github_status", "sync_github" -> {
+                val status = githubPublishStatus(companyId)
+                val action = OperatorCommandAction(
+                    type = "github-status",
+                    title = "GitHub status checked",
+                    detail = status.message ?: "GitHub readiness was checked for this company.",
+                    status = if (status.ghInstalled && status.ghAuthenticated && status.originConfigured) "READY" else "ATTENTION"
+                )
+                OperatorChatToolExecution(
+                    actions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("github", action.title, action.detail)),
+                    resultLines = listOf("github: ${action.status} - ${action.detail}")
+                )
+            }
+            "configure_github_origin", "connect_github_origin" -> {
+                val remoteUrl = toolCall.args["remoteUrl"]
+                    ?: toolCall.args["url"]
+                    ?: extractOperatorRemoteUrl(userMessage)
+                if (remoteUrl.isNullOrBlank()) {
+                    val action = OperatorCommandAction(
+                        type = "github-origin",
+                        title = "GitHub URL needed",
+                        detail = "Send the existing GitHub repository URL to connect as origin.",
+                        status = "USER_CONFIRMATION_REQUIRED"
+                    )
+                    OperatorChatToolExecution(
+                        pendingApprovals = listOf(action),
+                        answerSources = listOf(OperatorAnswerSource("github", action.title, action.detail)),
+                        resultLines = listOf("github origin: missing remote URL")
+                    )
+                } else {
+                    val status = configureGitHubOrigin(companyId, remoteUrl)
+                    val action = OperatorCommandAction(
+                        type = "github-origin",
+                        title = "GitHub origin connected",
+                        detail = status.message ?: "GitHub origin is ${status.originUrl ?: remoteUrl}.",
+                        status = if (status.originConfigured) "DONE" else "ATTENTION"
+                    )
+                    OperatorChatToolExecution(
+                        actions = listOf(action),
+                        answerSources = listOf(OperatorAnswerSource("github", action.title, action.detail)),
+                        resultLines = listOf("github origin: ${action.status} - ${action.detail}")
+                    )
+                }
+            }
+            "linear_sync", "sync_linear" -> {
+                val result = runCatching { syncCompanyLinear(companyId) }
+                val action = result.fold(
+                    onSuccess = { response ->
+                        OperatorCommandAction(
+                            type = "linear-sync",
+                            title = "Linear resynced",
+                            detail = response.message,
+                            status = if (response.ok && response.failedIssues.isEmpty()) "DONE" else "ATTENTION"
+                        )
+                    },
+                    onFailure = { error ->
+                        OperatorCommandAction(
+                            type = "linear-sync",
+                            title = "Linear sync needs attention",
+                            detail = error.message ?: "Linear sync failed.",
+                            status = "BLOCKED"
+                        )
+                    }
+                )
+                OperatorChatToolExecution(
+                    actions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("linear", action.title, action.detail)),
+                    resultLines = listOf("linear: ${action.status} - ${action.detail}")
+                )
+            }
+            "generate_report", "morning_report" -> {
+                val report = generateMorningReport(companyId)
+                val action = OperatorCommandAction(
+                    type = "daily-report",
+                    title = "Morning report generated",
+                    detail = "Generated report for ${report.date}: ${report.summary}",
+                    status = "DONE"
+                )
+                OperatorChatToolExecution(
+                    actions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("daily-report", report.date, report.summary)),
+                    resultLines = listOf("report ${report.date}: ${report.summary}")
+                )
+            }
+            "inspect_problem_signals", "problem_signals" -> {
+                val signals = listProblemSignals(companyId)
+                OperatorChatToolExecution(
+                    answerSources = signals.take(5).map { signal ->
+                        OperatorAnswerSource("problem-signal", signal.title, "${signal.severity} ${signal.status}", signal.id)
+                    },
+                    resultLines = if (signals.isEmpty()) {
+                        listOf("problem signals: none")
+                    } else {
+                        signals.take(5).map { "problem signal ${it.id}: ${it.severity} ${it.status} - ${it.title}" }
+                    }
+                )
+            }
+            "ask_clarifying_question" -> OperatorChatToolExecution(
+                resultLines = listOf("clarifying question requested: ${toolCall.args["question"] ?: toolCall.reason}")
+            )
+            "blocked_by_policy" -> {
+                val action = OperatorCommandAction(
+                    type = "operator-policy",
+                    title = "Request blocked by policy",
+                    detail = toolCall.reason.ifBlank { "The operator model classified this request as outside the delegated policy." },
+                    status = "BLOCKED"
+                )
+                OperatorChatToolExecution(
+                    blockedActions = listOf(action),
+                    answerSources = listOf(OperatorAnswerSource("safety-policy", action.title, action.detail)),
+                    resultLines = listOf("policy blocked: ${action.detail}")
+                )
+            }
+            else -> OperatorChatToolExecution(
+                resultLines = listOf("unknown tool ignored: ${toolCall.tool}")
+            )
+        }
+    }
+
+    private suspend fun inspectOperatorRuntimeTool(companyId: String): OperatorChatToolExecution {
+        val summary = buildOperatorCompanySummary(companyId)
+        return OperatorChatToolExecution(
+            answerSources = listOf(
+                OperatorAnswerSource(
+                    type = "company-summary",
+                    title = "Runtime summary",
+                    detail = "status=${summary.runtimeStatus}, active=${summary.activeAgentCount}, blocked=${summary.blockedIssueCount}, reviews=${summary.reviewQueueCount}, pending=${summary.pendingApprovalCount}"
+                )
+            ),
+            resultLines = listOf(
+                "runtime=${summary.runtimeStatus}, activeAgentRuns=${summary.activeAgentCount}, blockedIssues=${summary.blockedIssueCount}, reviewItems=${summary.reviewQueueCount}, pendingApprovals=${summary.pendingApprovalCount}, budgetPaused=${summary.budgetPaused}"
+            )
+        )
+    }
+
+    private suspend fun inspectOperatorPerformanceTool(companyId: String): OperatorChatToolExecution {
+        val performance = agentPerformance(companyId)
+            .sortedWith(compareByDescending<AgentPerformanceSnapshot> { it.score ?: -1 }.thenBy { it.agentName })
+        return OperatorChatToolExecution(
+            answerSources = performance.take(5).map { snapshot ->
+                OperatorAnswerSource(
+                    type = "agent-performance",
+                    title = "${snapshot.agentName} · ${snapshot.roleName}",
+                    detail = "score=${snapshot.score ?: "insufficient"}, completed=${snapshot.completedIssues}, active=${snapshot.activeIssues}, blocked=${snapshot.blockedIssues}",
+                    refId = snapshot.agentId
+                )
+            },
+            resultLines = if (performance.isEmpty()) {
+                listOf("performance: no agents")
+            } else {
+                performance.take(5).map { snapshot ->
+                    "performance ${snapshot.agentName}/${snapshot.roleName}: score=${snapshot.score ?: "insufficient"}, completed=${snapshot.completedIssues}, active=${snapshot.activeIssues}, blocked=${snapshot.blockedIssues}, runSuccess=${snapshot.runSuccessRate ?: "n/a"}, qaPass=${snapshot.qaPassRate ?: "n/a"}"
+                }
+            }
+        )
+    }
+
+    private suspend fun inspectOperatorBlockedTool(companyId: String): OperatorChatToolExecution {
+        val issues = listIssues(companyId = companyId)
+            .filter { it.status == IssueStatus.BLOCKED }
+            .sortedByDescending { it.updatedAt }
+        return OperatorChatToolExecution(
+            answerSources = issues.take(5).map { issue ->
+                OperatorAnswerSource(
+                    type = "issue",
+                    title = issue.title,
+                    detail = humanizeOperatorBlockReason(issue.transitionReason ?: issue.providerBlockReason),
+                    refId = issue.id
+                )
+            },
+            resultLines = if (issues.isEmpty()) {
+                listOf("blocked issues: none")
+            } else {
+                issues.take(5).map { issue ->
+                    "blocked issue ${issue.id}: ${issue.title} - ${humanizeOperatorBlockReason(issue.transitionReason ?: issue.providerBlockReason)}"
+                }
+            }
+        )
+    }
+
+    private suspend fun inspectOperatorReviewTool(companyId: String): OperatorChatToolExecution {
+        val issues = listIssues(companyId = companyId).associateBy { it.id }
+        val reviews = listReviewQueue(companyId)
+            .filter { it.status != ReviewQueueStatus.MERGED }
+            .sortedByDescending { it.updatedAt }
+        return OperatorChatToolExecution(
+            answerSources = reviews.take(5).map { item ->
+                OperatorAnswerSource(
+                    type = "review",
+                    title = issues[item.issueId]?.title ?: "Review ${item.id}",
+                    detail = "status=${item.status}, qa=${item.qaVerdict ?: "none"}",
+                    refId = item.id
+                )
+            },
+            resultLines = if (reviews.isEmpty()) {
+                listOf("reviews: none")
+            } else {
+                reviews.take(5).map { item ->
+                    "review ${item.id}: issue=${item.issueId}, status=${item.status}, qa=${item.qaVerdict ?: "none"}, pr=${item.pullRequestUrl ?: "none"}"
+                }
+            }
+        )
+    }
+
+    private fun operatorGoalTitleFromMessage(message: String): String =
+        message.lineSequence()
+            .firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?.removePrefix("Create ")
+            ?.removePrefix("만들어")
+            ?.take(90)
+            ?.ifBlank { null }
+            ?: "Operator chat goal"
+
+    private fun extractOperatorRemoteUrl(message: String): String? =
+        Regex("""https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?""")
+            .find(message)
+            ?.value
 
     private data class GroundedOperatorAnswer(
         val message: String,
