@@ -28,7 +28,7 @@ flowchart LR
 | --- | --- | --- |
 | CLI | command parsing, interactive/TUI launch, packaged lifecycle commands | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/` |
 | App server | local HTTP API and desktop contract | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
-| Company workflow | company state machine, goals, issues, review queue, runtime ticks, reports, operator chat | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
+| Company workflow | company state machine, goals, issues, review queue, runtime ticks, runtime retention, reports, operator chat | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
 | Pipeline runtime | generic pipeline planning, orchestration, execution, aggregation, condition evaluation | `src/main/kotlin/com/cotor/domain/` |
 | Agent/tool execution | provider plugins, local process execution, model defaults, command adapters | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` |
 | Context/memory/evidence | prompt context, durable snapshots, knowledge, provenance, verification bundles | `src/main/kotlin/com/cotor/context/`, `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/verification/` |
@@ -138,6 +138,7 @@ The company automation layer has stricter invariants than the generic pipeline r
 - Direct execution completion requires verification and collaboration evidence where the issue policy requires it.
 - Merge-conflict recovery and stale PR cleanup stay tied to the superseded lineage so the company can continue without stale review artifacts.
 - No-diff code-producing runs retry once with explicit file-edit instructions and then block instead of claiming completion without changes.
+- Runtime loop recoverable tick failures remain `RUNNING` with failure counters until the retry budget is exhausted; user stop/cancellation is interruption state, not a generic runtime error.
 
 ## 7. Autonomous Runtime v1
 
@@ -147,9 +148,19 @@ The v1 autonomous runtime is internal-quality focused.
 - Issue-linked runs open A2A bridge metadata and inject `COTOR_A2A_*` environment variables.
 - Discovery scans repeated failures, stale blocked work, review failures, verification gaps, runtime errors, stale follow-ups, and Graphify/repository structure warnings into `CompanyProblemSignal`.
 - Runtime ticks synthesize CEO triage goals only from actionable, deduped, cooldown-safe problem signals. Otherwise they record observable idle states such as `idle-no-discovered-problems`.
-- Local retention protects active worktrees and recent evidence while pruning stale terminal artifacts.
+- Local retention protects active/open/review/PR-linked worktrees and recent evidence while exposing dry-run cleanup for stale terminal worktrees, old orphan worktrees, and Cotor-recorded terminal processes.
 
-## 8. Graphify As Architecture Aid
+## 8. Runtime Retention And Desktop Liveness
+
+Long-running desktop sessions have two cleanup/liveness boundaries:
+
+- Kotlin retention is owned by `CompanyRuntimeRetention`. It scans known `.cotor/worktrees` roots, classifies candidates, and only deletes when the caller explicitly sets `apply=true`; API and CLI dry-run are the default.
+- The app-server exposes retention through `GET /api/app/runtime/cleanup/preview` and `POST /api/app/runtime/cleanup`. The CLI surface is `cotor company runtime cleanup`.
+- macOS backend lifecycle is coordinated through `DesktopStore.bootstrap()` / `handleAppBecameActive()`. `EmbeddedBackendLauncher` remains a low-level process launcher.
+- Company live updates use generation-scoped event-stream tasks. A malformed NDJSON line is logged and dropped per line; transport failure or cancellation ends the stream and allows reconnect/polling fallback.
+- Meeting Room scene memory is company-scoped and capped with TTL/LRU pruning so animation ledgers do not leak across companies or grow without bound.
+
+## 9. Graphify As Architecture Aid
 
 Graphify output is tracked in `graphify-out/` and should be refreshed after source or documentation changes.
 
@@ -158,6 +169,6 @@ Graphify output is tracked in `graphify-out/` and should be refreshed after sour
 - Do not paste `graphify-out/graph.json` into docs or prompts.
 - Run `graphify update .` after code/doc edits and `graphify cluster-only .` after larger boundary changes.
 
-## 9. Module Docs
+## 10. Module Docs
 
 See [modules/README.md](modules/README.md) for concise module ownership, public entrypoints, test locations, and common change checklists.

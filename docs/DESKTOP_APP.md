@@ -126,7 +126,7 @@ The current macOS shell has two top-level modes.
   - autonomous discovery scans internal quality signals before synthesizing CEO triage goals, and persisted problem signals are available through the app-server and CLI
   - CEO chat intake: a vague chat request can be confirmed into one CEO-owned goal, a clarified brief, and assigned downstream issues without creating a GitHub repository
 - company activity feed with live event-driven updates
-- live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event
+- live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event; malformed NDJSON event lines are dropped per line so one bad optional payload does not kill the stream
 - issue execution detail cards now show agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary for each issue-linked run
 - async detail and memory snapshot refreshes ignore stale responses if the selected issue/task changes before the request completes
 - if the live company stream disconnects, the UI keeps the last company snapshot and shows `Live company updates disconnected. Re-syncing...` while it recovers
@@ -189,6 +189,8 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
 - `POST /api/app/companies/{companyId}/runtime/stop`
+- `GET /api/app/runtime/cleanup/preview`
+- `POST /api/app/runtime/cleanup`
 - `GET /api/app/marketing/policies`
 - `POST /api/app/marketing/policies`
 - `PATCH /api/app/marketing/policies/{policyId}`
@@ -218,6 +220,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inject A2A run bridge metadata and `COTOR_A2A_*` environment variables into issue-linked agent runs, then use bridge/context artifacts as canonical collaboration evidence
 - block direct execution completion when collaboration evidence or verification evidence is missing, recording the reason in issue verification/runtime fields instead of treating it as a generic run failure
 - scan internal quality signals into `CompanyProblemSignal` records and convert only actionable, deduped, cooldown-safe signals into CEO triage goals
+- preview runtime cleanup safely with `cotor company runtime cleanup --company-id <id> --dry-run` or `--all-companies --dry-run`; actual pruning requires `--apply` and preserves active/open/review/PR-linked worktrees
 - mirror company issues and progress to Linear when company-scoped Linear sync is enabled
 - inspect linked tasks and runs
 - inspect derived per-agent performance from existing issues, runs, reviews, org profiles, and company agent definitions, with insufficient-data agents called out separately
@@ -236,6 +239,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - surface a compact GitHub quick-connect panel in the company sidebar when PR mode is blocked by a missing `gh` CLI, `gh` auth, or `origin`
 - connect an existing GitHub repository from the GitHub settings panel without auto-creating a remote repository when `origin` is missing
 - start, stop, and inspect the local runtime loop
+- preview and apply runtime retention cleanup for stale `.cotor/worktrees` and Cotor-recorded terminal processes through dry-run-first API/CLI controls
 - keep an explicit company stop sticky until the user presses Start again, even if active autonomous goals still exist
 - keep active company work on a fast monitoring cadence so stale `RUNNING` tasks/runs are reconciled sooner
 - re-queue company issues that were interrupted by an app-server shutdown instead of leaving them blocked by a generic process-exit failure

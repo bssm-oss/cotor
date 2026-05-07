@@ -171,7 +171,7 @@ Current desktop model:
 - dedicated `Performance` navigation surface shows derived per-agent scores, success rates, QA pass rates, retries, duration, and known estimated cost from existing company execution data
 - company memory snapshots now separate company, project, team, and agent memory; the older workflow memory field remains as a compatibility alias for project + team context
 - autonomous runtime discovery scans internal quality signals before creating new work, so idle loops produce observable `idle-no-discovered-problems` or `discovery-triage-created` states instead of random continuous prompts
-- `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
+- `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation; malformed NDJSON event lines are logged and skipped without killing the stream
 - desktop backend launch, health checks, shutdown, and client requests use the same `COTOR_APP_TOKEN` source so token-protected local sessions stay aligned
 - embedded desktop backends start with a sanitized environment so incidental API keys, provider tokens, and password-like parent-shell variables are not passed into the local app-server
 - `Meeting Room` opens to a `Live Office` pixel-office projection by default, using runtime data for agent state, issue cards, A2A messages, review flow, and activity; the activity/review detail surfaces stay behind a compact drawer
@@ -224,6 +224,7 @@ The current build includes a working local operations layer:
 - inspect estimated company spend and adjust daily/monthly runtime guardrails from deeper company settings instead of the default summary
 - inspect stored morning reports for the previous local day; reports are generated from local runtime, activity, issue, run, and review data rather than LLM-generated prose
 - start and stop a local autonomous runtime loop per company
+- preview runtime artifact cleanup with `cotor company runtime cleanup --company-id <id> --dry-run` or `--all-companies --dry-run`; actual pruning requires `--apply` and protects active/open/review/PR-linked worktrees
 - let the CEO reopen planning after one wave finishes so active goals can generate the next wave instead of freezing after the first batch of issues
 - bias autonomous continuous-improvement goals toward multi-issue portfolios and parallel branchable slices instead of a single narrow follow-up
 - enrich short high-level goal descriptions into a broader execution portfolio so larger teams do not collapse into only one or two issues

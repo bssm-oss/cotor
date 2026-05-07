@@ -130,7 +130,7 @@ cotor delete
 - 자율 discovery scan은 CEO triage goal을 만들기 전에 내부 품질 신호를 먼저 수집하고, 저장된 problem signal은 app-server와 CLI에서 확인 가능
 - CEO 채팅 인테이크: 대충 쓴 채팅 요청도 확인 후 CEO 소유 목표, 정리된 브리프, 담당 하위 이슈로 만들며 GitHub 저장소를 자동 생성하지 않음
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
-- 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영
+- 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영하며, 잘못된 NDJSON event line 하나는 버리고 stream은 계속 유지
 - 이슈 실행 상세 카드는 이제 각 issue-linked run마다 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약을 함께 보여줌
 - 비동기 상세 정보와 메모리 스냅샷 요청은 완료 전에 선택된 issue/task가 바뀌면 오래된 응답을 적용하지 않음
 - 회사 실시간 stream이 끊기면 마지막 snapshot은 유지한 채 `회사 실시간 업데이트 연결이 끊어졌습니다. 다시 동기화하는 중...` 메시지를 보여주며 복구
@@ -142,6 +142,7 @@ cotor delete
 - 예전 CEO merge-conflict 때문에 execution 이슈가 `BLOCKED`에 남아 있던 경우도 다시 `PLANNED`로 되돌려 rebase와 republish를 이어서 할 수 있게 함
 - PR이 이미 머지됐는데 stale execution sync 때문에 막혀 남은 execution 이슈도 다음 runtime tick에서 자동으로 닫힘
 - 런타임 시작/중지/상태
+- 오래된 `.cotor/worktrees`와 Cotor가 기록한 terminal process를 dry-run 우선 API/CLI로 preview/apply하는 런타임 retention cleanup
 - 회사 런타임을 명시적으로 중지하면 앱 재실행이나 회사 refresh 뒤에도 사용자가 다시 시작할 때까지 그대로 유지
 - 회사 모드 이벤트마다 전체 데스크톱 새로고침을 돌리지 않고, 회사 전용 dashboard snapshot으로 상태를 바로 패치
 - 한 wave의 goal work가 끝나면 CEO planning lane을 다시 열어서 첫 decomposition 이후 goal이 얼어붙지 않게 함
@@ -195,6 +196,8 @@ cotor delete
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
 - `POST /api/app/companies/{companyId}/runtime/stop`
+- `GET /api/app/runtime/cleanup/preview`
+- `POST /api/app/runtime/cleanup`
 - `GET /api/app/marketing/policies`
 - `POST /api/app/marketing/policies`
 - `PATCH /api/app/marketing/policies/{policyId}`
@@ -224,6 +227,7 @@ cotor delete
 - issue-linked agent run에 A2A bridge metadata와 `COTOR_A2A_*` 환경 변수를 주입하고, bridge/context artifact를 canonical collaboration evidence로 사용
 - 직접 완료되는 실행 이슈는 collaboration evidence 또는 verification evidence가 부족하면 일반 실행 실패가 아니라 issue verification/runtime 필드에 이유를 남기고 차단
 - 내부 품질 신호를 `CompanyProblemSignal`로 저장하고, actionable/dedupe/cooldown 조건을 통과한 신호만 CEO triage goal로 전환
+- `cotor company runtime cleanup --company-id <id> --dry-run` 또는 `--all-companies --dry-run`으로 안전하게 cleanup 후보를 먼저 확인 가능. 실제 삭제는 `--apply`가 필요하고 active/open/review/PR-linked worktree는 보존
 - 회사 단위 Linear sync가 켜져 있으면 바깥 Linear로 이슈/진행 상태 미러링
 - 연결된 태스크와 실행 이력 조회
 - 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시

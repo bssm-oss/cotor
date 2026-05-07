@@ -30,7 +30,7 @@ flowchart LR
 | --- | --- | --- |
 | CLI | 명령 파싱, interactive/TUI 실행, packaged lifecycle 명령 | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/` |
 | App server | 로컬 HTTP API와 데스크톱 계약 | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
-| Company workflow | 회사 상태 머신, 목표, 이슈, 리뷰 큐, 런타임 tick, 보고서, 운영 채팅 | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
+| Company workflow | 회사 상태 머신, 목표, 이슈, 리뷰 큐, 런타임 tick, 런타임 retention, 보고서, 운영 채팅 | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
 | Pipeline runtime | 범용 파이프라인 계획, 오케스트레이션, 실행, 집계, 조건 평가 | `src/main/kotlin/com/cotor/domain/` |
 | Agent/tool execution | provider plugin, 로컬 프로세스 실행, 모델 기본값, 명령 adapter | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` |
 | Context/memory/evidence | 프롬프트 context, durable snapshot, knowledge, provenance, verification bundle | `src/main/kotlin/com/cotor/context/`, `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/verification/` |
@@ -140,6 +140,7 @@ app-server 계약이 Kotlin과 Swift 사이의 경계입니다. payload field는
 - 직접 실행 완료는 issue policy가 요구하는 verification/collaboration evidence를 만족해야 합니다.
 - merge conflict 복구와 stale PR 정리는 superseded lineage와 연결되어야 회사가 stale review artifact 없이 계속 진행할 수 있습니다.
 - no-diff code-producing run은 실제 변경 없이 완료를 주장하지 않고, 파일 수정 지시로 1회 재시도한 뒤 block합니다.
+- 런타임 tick의 recoverable 실패는 retry budget이 소진되기 전까지 `RUNNING` 상태와 실패 카운터로 남깁니다. 사용자 중지와 cancellation은 일반 runtime error가 아니라 interruption 상태입니다.
 
 ## 7. Autonomous Runtime v1
 
@@ -149,9 +150,19 @@ v1 자율 런타임은 내부 품질 중심입니다.
 - issue-linked run은 A2A bridge metadata를 열고 `COTOR_A2A_*` 환경변수를 주입합니다.
 - discovery scan은 반복 실패, 오래된 blocked work, review failure, verification gap, runtime error, 오래된 follow-up, Graphify/repository 구조 경고를 `CompanyProblemSignal`로 수집합니다.
 - runtime tick은 actionable, deduped, cooldown-safe problem signal에서만 CEO triage goal을 만듭니다. 신호가 없으면 `idle-no-discovered-problems` 같은 관측 가능한 idle 상태를 남깁니다.
-- local retention은 active worktree와 최근 evidence를 보존하고 오래된 terminal artifact만 정리합니다.
+- local retention은 active/open/review/PR-linked worktree와 최근 evidence를 보존하고, 오래된 terminal worktree, 오래된 orphan worktree, Cotor가 기록한 terminal process만 dry-run cleanup 후보로 노출합니다.
 
-## 8. Graphify를 아키텍처 보조 도구로 쓰기
+## 8. 런타임 Retention과 데스크톱 생존성
+
+오래 켜 둔 데스크톱 세션은 cleanup/liveness 경계가 따로 있습니다.
+
+- Kotlin retention은 `CompanyRuntimeRetention`이 담당합니다. 알려진 `.cotor/worktrees` root를 스캔하고 후보를 분류하며, 호출자가 `apply=true`를 명시해야만 삭제합니다. API와 CLI의 기본값은 dry-run입니다.
+- app-server route는 `GET /api/app/runtime/cleanup/preview`, `POST /api/app/runtime/cleanup`입니다. CLI 표면은 `cotor company runtime cleanup`입니다.
+- macOS backend lifecycle은 `DesktopStore.bootstrap()` / `handleAppBecameActive()`가 조율합니다. `EmbeddedBackendLauncher`는 낮은 수준의 process launcher로만 남습니다.
+- 회사 live update는 generation-scoped event stream task를 사용합니다. 잘못된 NDJSON 한 줄은 log 후 버리고 stream을 유지하며, transport failure나 cancellation일 때만 reconnect/polling fallback으로 넘어갑니다.
+- Meeting Room scene memory는 회사별로 분리되고 TTL/LRU cap으로 정리되어 회사 간 animation 상태가 섞이거나 무한히 커지지 않습니다.
+
+## 9. Graphify를 아키텍처 보조 도구로 쓰기
 
 Graphify output은 `graphify-out/`에 추적되며 source 또는 documentation 변경 후 갱신해야 합니다.
 
@@ -160,6 +171,6 @@ Graphify output은 `graphify-out/`에 추적되며 source 또는 documentation �
 - `graphify-out/graph.json` 전체를 문서나 prompt에 붙여 넣지 않습니다.
 - 코드/문서 편집 후 `graphify update .`, 큰 경계 변경 후 `graphify cluster-only .`를 실행합니다.
 
-## 9. 모듈 문서
+## 10. 모듈 문서
 
 모듈별 책임, public entrypoint, test 위치, 자주 바꾸는 파일은 [modules/README.ko.md](modules/README.ko.md)를 봅니다.
