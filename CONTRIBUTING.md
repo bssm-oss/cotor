@@ -9,6 +9,8 @@ Thank you for contributing to Cotor.
 - [ ] Describe **what changed** and **why**.
 - [ ] Run relevant tests or checks locally.
 - [ ] Keep docs aligned with behavior changes.
+- [ ] If source layout, route payloads, public import paths, or configuration paths changed, update `docs/ARCHITECTURE.md`, `docs/modules/README.md`, and add a migration note or compatibility statement.
+- [ ] Run `graphify update .` after source or documentation changes; run `graphify cluster-only .` after large boundary changes.
 - [ ] AI agents follow `AGENTS.md` when changing code, docs, tests, or workflows.
 
 ## Documentation Synchronization Rule (EN/KR)
@@ -22,6 +24,15 @@ When adding or changing any **feature, option, command, flag, workflow, or behav
 - [ ] Any newly introduced command/option appears in both language docs (or is clearly marked as pending translation with follow-up issue).
 - [ ] Examples/snippets reflect the same capabilities in both languages.
 - [ ] If one language intentionally differs, the PR description explains why and links a follow-up task.
+- [ ] Graphify workflow docs still point readers to `graphify-out/GRAPH_REPORT.md` and do not paste `graphify-out/graph.json`.
+
+## Graphify And Architecture Checklist
+
+- Read `graphify-out/GRAPH_REPORT.md` before architecture/debug/refactor changes.
+- Use `graphify query`, `graphify path`, or `graphify explain` to narrow cross-module questions.
+- Keep `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE.ko.md`, `docs/modules/README.md`, and `docs/modules/README.ko.md` aligned with the current code.
+- Do not introduce vague module names such as `utils`, `helpers`, `common`, `misc`, `manager`, or `service` unless they are under a precise domain.
+- Public API, import path, route path, or config path changes require a compatibility shim or migration note in `docs/CHANGELOG.md` or the PR summary.
 
 ## Suggested Process
 
@@ -41,6 +52,8 @@ Cotor에 기여해 주셔서 감사합니다.
 - [ ] **무엇이** 변경되었는지와 **왜** 변경했는지 설명합니다.
 - [ ] 관련 테스트/점검을 로컬에서 실행합니다.
 - [ ] 동작 변경 시 문서도 함께 맞춰 갱신합니다.
+- [ ] 소스 구조, route payload, public import path, config path를 바꿨다면 `docs/ARCHITECTURE.md`, `docs/modules/README.md`를 갱신하고 migration note 또는 compatibility statement를 남깁니다.
+- [ ] source 또는 documentation 변경 후 `graphify update .`를 실행합니다. 큰 경계 변경 뒤에는 `graphify cluster-only .`도 실행합니다.
 - [ ] AI 에이전트는 코드, 문서, 테스트, 워크플로 변경 시 `AGENTS.md`를 따릅니다.
 
 ## 문서 동기화 규칙 (한/영)
@@ -54,6 +67,15 @@ Cotor에 기여해 주셔서 감사합니다.
 - [ ] 새 명령어/옵션이 양쪽 언어 문서에 모두 반영되어 있습니다. (불가 시 번역 예정임을 명시하고 후속 이슈를 연결)
 - [ ] 예제/스니펫이 양쪽 문서에서 동일한 기능 범위를 설명합니다.
 - [ ] 의도적으로 언어별 차이가 있는 경우, PR 설명에 이유와 후속 작업 링크를 남겼습니다.
+- [ ] Graphify workflow 문서는 `graphify-out/GRAPH_REPORT.md`를 안내하고, `graphify-out/graph.json` 전체를 붙여 넣지 않습니다.
+
+## Graphify 및 아키텍처 체크리스트
+
+- architecture/debug/refactor 변경 전 `graphify-out/GRAPH_REPORT.md`를 읽습니다.
+- cross-module 질문은 `graphify query`, `graphify path`, `graphify explain`로 범위를 좁힙니다.
+- `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE.ko.md`, `docs/modules/README.md`, `docs/modules/README.ko.md`를 현재 코드와 맞춥니다.
+- `utils`, `helpers`, `common`, `misc`, `manager`, `service` 같은 흐린 module 이름은 정확한 domain 아래에서만 사용합니다.
+- public API, import path, route path, config path 변경에는 compatibility shim 또는 `docs/CHANGELOG.md`/PR summary의 migration note가 필요합니다.
 
 ## 권장 작업 순서
 

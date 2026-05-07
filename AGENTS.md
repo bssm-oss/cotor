@@ -53,6 +53,10 @@ Read these before making changes in the related area.
   - architecture boundaries
   - execution flow
   - subsystem map
+- `docs/modules/README.md`
+  - module responsibilities
+  - public entrypoints
+  - allowed dependency direction
 - `docs/DESKTOP_APP.md`
   - desktop shell model
   - app-server contract
@@ -61,6 +65,10 @@ Read these before making changes in the related area.
   - Korean equivalent of desktop behavior
 - `CONTRIBUTING.md`
   - PR and validation expectations
+- `CLAUDE.md`
+  - short Claude Code source-of-truth routing rules
+- `graphify-out/GRAPH_REPORT.md`
+  - current graph community shape, god nodes, and structure signals
 - `docs/team-ops/README.md`
   - workflow, templates, and team operating cadence
 
@@ -177,6 +185,9 @@ Start here before changing product behavior:
 
 - English and Korean docs must stay functionally aligned when behavior changes.
 - Root README and `docs/` entry pages must not drift apart on installation or command behavior.
+- Architecture/debug/refactor work should start with `graphify-out/GRAPH_REPORT.md`, then narrow with `graphify query`, `graphify path`, or `graphify explain`.
+- Do not paste `graphify-out/graph.json` into prompts or docs; use `GRAPH_REPORT.md` and targeted graph queries.
+- New modules or cross-boundary imports require `docs/ARCHITECTURE.md` and `docs/modules/README.md` to stay aligned.
 
 ## 8. Generated And Local State Files
 
@@ -434,6 +445,10 @@ Do not optimize for a hypothetical future product at the cost of breaking:
   - 아키텍처 경계
   - 실행 흐름
   - 서브시스템 맵
+- `docs/modules/README.ko.md`
+  - 모듈 책임
+  - public entrypoint
+  - 허용되는 의존 방향
 - `docs/DESKTOP_APP.md`
   - 데스크톱 셸 모델
   - app-server 계약
@@ -442,6 +457,10 @@ Do not optimize for a hypothetical future product at the cost of breaking:
   - 데스크톱 동작의 한국어 설명
 - `CONTRIBUTING.md`
   - PR 및 검증 기대치
+- `CLAUDE.md`
+  - Claude Code용 짧은 source-of-truth 라우팅 규칙
+- `graphify-out/GRAPH_REPORT.md`
+  - 현재 graph community, god node, 구조 신호
 - `docs/team-ops/README.md`
   - 워크플로, 템플릿, 운영 리듬
 
@@ -558,6 +577,9 @@ Do not optimize for a hypothetical future product at the cost of breaking:
 
 - 동작이 바뀌면 영문/국문 문서가 기능적으로 맞아야 합니다.
 - 루트 README와 `docs/` 진입 문서가 설치/명령 동작에서 서로 어긋나면 안 됩니다.
+- architecture/debug/refactor 작업은 먼저 `graphify-out/GRAPH_REPORT.md`를 읽고, 이후 `graphify query`, `graphify path`, `graphify explain`로 범위를 좁힙니다.
+- `graphify-out/graph.json` 전체를 prompt나 문서에 붙여 넣지 않습니다. `GRAPH_REPORT.md`와 좁힌 graph query 결과를 사용합니다.
+- 새 module 또는 domain 경계 import를 만들면 `docs/ARCHITECTURE.md`와 `docs/modules/README.md`를 함께 맞춥니다.
 
 ## 8. 생성물과 로컬 상태 파일
 
@@ -780,7 +802,13 @@ Cotor를 저장소가 오늘 실제로 구현한 모습에 맞춰 유지하세�
 This project has a graphify knowledge graph at graphify-out/.
 
 Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
-- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
+- Before answering architecture, debug, refactor, or cross-module questions, read `graphify-out/GRAPH_REPORT.md` for god nodes and community structure.
+- If `graphify-out/wiki/index.md` exists, navigate it before reading raw files broadly.
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over broad grep. Use grep after the graph has narrowed the likely files.
+- After modifying code or documentation files, run `graphify update .`. Slash-command environments may expose the equivalent `/graphify . --update`.
+- After large structural changes, also run `graphify cluster-only .`. Slash-command environments may expose `/graphify . --cluster-only`.
+- Do not paste `graphify-out/graph.json` into prompts, PRs, or docs. Use `GRAPH_REPORT.md` and targeted query output.
+- Avoid vague module names such as `utils`, `helpers`, `common`, `misc`, `manager`, or `service` unless they are scoped under a precise domain.
+- Check `docs/ARCHITECTURE.md` and `docs/modules/README.md` before adding imports across domain boundaries.
+- Public API changes require a compatibility shim or migration note.
+- New modules require README or `docs/modules/` updates in the same PR.
