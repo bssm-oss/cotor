@@ -976,11 +976,21 @@ class OpenCodePlugin : AgentPlugin {
 
         val json = Json { ignoreUnknownKeys = true }
         val textParts = linkedSetOf<String>()
+        var parsedStructuredEvent = false
 
         fun collectText(element: JsonElement) {
             when (element) {
                 is JsonArray -> element.forEach(::collectText)
                 is JsonObject -> {
+                    if (
+                        element["type"] != null ||
+                        element["role"] != null ||
+                        element["part"] != null ||
+                        element["sessionID"] != null ||
+                        element["callID"] != null
+                    ) {
+                        parsedStructuredEvent = true
+                    }
                     val type = element["type"]?.jsonPrimitive?.contentOrNull?.lowercase()
                     if (type == "tool_use" || type == "step_start") {
                         return
@@ -1002,9 +1012,10 @@ class OpenCodePlugin : AgentPlugin {
             }
         }
 
-        runCatching {
+        val parsedWhole = runCatching {
             collectText(json.parseToJsonElement(rawOutput.trim()))
-        }.onFailure {
+        }.isSuccess
+        if (!parsedWhole) {
             rawOutput.lineSequence()
                 .map { it.trim() }
                 .filter { it.isNotBlank() && (it.startsWith("{") || it.startsWith("[")) }
@@ -1016,7 +1027,7 @@ class OpenCodePlugin : AgentPlugin {
         return textParts
             .filter { it.isNotBlank() }
             .joinToString("\n\n")
-            .ifBlank { rawOutput }
+            .ifBlank { if (parsedStructuredEvent) "" else rawOutput }
     }
 
     private fun extractTextFromEvent(event: JsonObject): String {

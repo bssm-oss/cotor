@@ -179,6 +179,98 @@ class OpenCodePluginTest : FunSpec({
         result.output shouldBe "QA_VERDICT: PASS\n\nThe PR is ready to merge after QA review."
     }
 
+    test("parses assistant message content from newer opencode event shapes") {
+        val plugin = OpenCodePlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = when (command) {
+                listOf("opencode", "models") -> ProcessResult(
+                    exitCode = 1,
+                    stdout = "",
+                    stderr = "models lookup unavailable",
+                    isSuccess = false
+                )
+                else -> {
+                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    ProcessResult(
+                        exitCode = 0,
+                        stdout = """
+                            {"type":"message","role":"assistant","content":[{"type":"text","text":"```json\n{\"goalSummary\":\"Plan\",\"issues\":[]}\n```"}]}
+                        """.trimIndent(),
+                        stderr = "",
+                        isSuccess = true
+                    )
+                }
+            }
+        }
+
+        val result = plugin.execute(
+            ExecutionContext(
+                agentName = "opencode",
+                input = "hello",
+                timeout = 1_000,
+                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                environment = emptyMap()
+            ),
+            processManager
+        )
+
+        result.output shouldBe "```json\n{\"goalSummary\":\"Plan\",\"issues\":[]}\n```"
+    }
+
+    test("tool-only opencode event streams produce empty assistant output") {
+        val plugin = OpenCodePlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = when (command) {
+                listOf("opencode", "models") -> ProcessResult(
+                    exitCode = 1,
+                    stdout = "",
+                    stderr = "models lookup unavailable",
+                    isSuccess = false
+                )
+                else -> {
+                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    ProcessResult(
+                        exitCode = 0,
+                        stdout = """
+                            {"type":"step_start","timestamp":1,"sessionID":"session-1"}
+                            {"type":"tool_use","tool":"bash","state":{"output":"permission denied"}}
+                            {"type":"step_finish","reason":"tool-calls"}
+                        """.trimIndent(),
+                        stderr = "",
+                        isSuccess = true
+                    )
+                }
+            }
+        }
+
+        val result = plugin.execute(
+            ExecutionContext(
+                agentName = "opencode",
+                input = "hello",
+                timeout = 1_000,
+                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                environment = emptyMap()
+            ),
+            processManager
+        )
+
+        result.output shouldBe ""
+    }
+
     test("retries with an available opencode model when the configured model is missing") {
         val plugin = OpenCodePlugin()
         var runCount = 0
