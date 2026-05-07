@@ -5954,13 +5954,14 @@ class DesktopAppService(
                     ?: "GitHub publishing is not ready"
             lower.contains("capability") && lower.contains("requires approval") ->
                 "A required execution capability is waiting for approval"
-            else -> text
-                .lineSequence()
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .take(3)
-                .joinToString(" ")
-                .take(300)
+            else ->
+                text
+                    .lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .take(3)
+                    .joinToString(" ")
+                    .take(300)
         }
     }
 
