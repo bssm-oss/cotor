@@ -289,6 +289,18 @@ struct ModelsTests {
     }
 
     @Test
+    func operatorChatMessagesPreserveTimelineRoles() {
+        let messages = [
+            OperatorChatMessage(role: .user, text: "상태 확인"),
+            OperatorChatMessage(role: .assistant, text: "정상입니다."),
+            OperatorChatMessage(role: .system, text: "연결 상태 변경")
+        ]
+
+        #expect(messages.map(\.role) == [.user, .assistant, .system])
+        #expect(messages.map(\.text) == ["상태 확인", "정상입니다.", "연결 상태 변경"])
+    }
+
+    @Test
     func batchUpdatePayloadEncodesSelectedFields() throws {
         let payload = BatchUpdateCompanyAgentsPayload(
             agentIds: ["agent-1", "agent-2"],
