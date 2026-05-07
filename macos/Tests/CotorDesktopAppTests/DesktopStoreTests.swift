@@ -1069,8 +1069,33 @@ struct DesktopStoreTests {
         let card = AgentSkillCardRecord(agent: agent, profile: profile, skillCatalog: [])
 
         #expect(!card.enabled)
-        #expect(card.policyChips.contains(.disabled))
+        #expect(!card.policyChips.contains(.disabled))
+        #expect(!card.hasDisabledCapabilities)
         #expect(card.capabilityScopes.contains(.qaReview))
+    }
+
+    @Test
+    func agentSkillCardShowsHasDisabledCapabilitiesForEnabledAgentWithRestrictedCapability() {
+        let agent = agentDefinition(id: "agent-restricted", title: "Restricted", roleSummary: "marketing")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "AUTO",
+                skillAllowlist: ["marketing-operator"]
+            ),
+            "WEB_PUBLISH": AgentCapabilitySettingRecord(enabled: true, mode: "DISABLED"),
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "marketing-operator", displayName: "Marketing Operator", requiredCapabilities: ["WEB_PUBLISH"])
+            ]
+        )
+
+        #expect(card.enabled)
+        #expect(!card.policyChips.contains(.disabled))
+        #expect(card.hasDisabledCapabilities)
     }
 
     @Test
