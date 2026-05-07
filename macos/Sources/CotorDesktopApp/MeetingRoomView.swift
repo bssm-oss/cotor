@@ -317,15 +317,18 @@ private struct PixelOfficeCanvas: View {
     }
 
     private func drawRoom(context: inout GraphicsContext, size: CGSize) {
-        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.07, green: 0.08, blue: 0.10)))
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.08, green: 0.08, blue: 0.09)))
 
         let wall = CGRect(x: 0, y: 0, width: size.width, height: size.height * 0.22)
-        context.fill(Path(wall), with: .color(Color(red: 0.12, green: 0.11, blue: 0.12)))
+        context.fill(Path(wall), with: .color(Color(red: 0.13, green: 0.12, blue: 0.12)))
+
+        let backBand = CGRect(x: 0, y: wall.maxY - 16, width: size.width, height: 16)
+        context.fill(Path(backBand), with: .color(Color(red: 0.19, green: 0.17, blue: 0.15).opacity(0.9)))
 
         let floor = CGRect(x: 0, y: wall.maxY, width: size.width, height: size.height - wall.maxY)
-        context.fill(Path(floor), with: .color(Color(red: 0.22, green: 0.18, blue: 0.14)))
+        context.fill(Path(floor), with: .color(Color(red: 0.20, green: 0.18, blue: 0.15)))
 
-        let tile: CGFloat = 32
+        let tile: CGFloat = 24
         var y = layout.snapped(floor.minY)
         var row = 0
         while y < floor.maxY {
@@ -333,8 +336,8 @@ private struct PixelOfficeCanvas: View {
             var column = 0
             while x < floor.maxX {
                 let rect = CGRect(x: x, y: y, width: tile, height: tile)
-                let opacity = (row + column).isMultiple(of: 2) ? 0.07 : 0.035
-                context.fill(Path(rect), with: .color(Color.white.opacity(opacity)))
+                let opacity = (row + column).isMultiple(of: 2) ? 0.045 : 0.018
+                context.fill(Path(rect), with: .color(Color(red: 0.95, green: 0.84, blue: 0.64).opacity(opacity)))
                 x += tile
                 column += 1
             }
@@ -344,16 +347,34 @@ private struct PixelOfficeCanvas: View {
 
         for index in 0...Int(size.width / 8) {
             let x = CGFloat(index) * 8
-            context.fill(Path(CGRect(x: x, y: floor.minY, width: 1, height: floor.height)), with: .color(Color.black.opacity(index.isMultiple(of: 4) ? 0.10 : 0.035)))
+            context.fill(Path(CGRect(x: x, y: floor.minY, width: 1, height: floor.height)), with: .color(Color.black.opacity(index.isMultiple(of: 3) ? 0.055 : 0.018)))
         }
         for index in 0...Int(size.height / 8) {
             let y = CGFloat(index) * 8
-            context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(Color.black.opacity(index.isMultiple(of: 4) ? 0.10 : 0.035)))
+            context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(Color.black.opacity(index.isMultiple(of: 3) ? 0.055 : 0.018)))
+        }
+
+        let lampX = layout.snapped(size.width * 0.50)
+        context.fill(Path(CGRect(x: lampX - 2, y: 10, width: 4, height: 24)), with: .color(ShellPalette.line.opacity(0.72)))
+        context.fill(Path(CGRect(x: lampX - 22, y: 34, width: 44, height: 8)), with: .color(Color(red: 0.16, green: 0.15, blue: 0.15)))
+        context.fill(Path(CGRect(x: lampX - 18, y: 42, width: 36, height: 5)), with: .color(ShellPalette.warning.opacity(0.72)))
+        context.fill(Path(CGRect(x: lampX - 52, y: 48, width: 104, height: 16)), with: .color(ShellPalette.warning.opacity(0.08)))
+
+        let monitorY = wall.midY - 8
+        for (x, tint) in [(size.width * 0.18, ShellPalette.accentWarm), (size.width * 0.82, ShellPalette.warning)] {
+            let panel = CGRect(x: layout.snapped(x) - 44, y: monitorY - 18, width: 88, height: 42)
+            context.fill(Path(roundedRect: panel, cornerRadius: 3), with: .color(Color(red: 0.10, green: 0.11, blue: 0.12)))
+            context.stroke(Path(roundedRect: panel, cornerRadius: 3), with: .color(ShellPalette.line.opacity(0.58)), lineWidth: 1)
+            for index in 0..<4 {
+                let bar = CGRect(x: panel.minX + 12, y: panel.minY + 10 + CGFloat(index) * 7, width: 18 + CGFloat(index) * 9, height: 3)
+                context.fill(Path(bar), with: .color(index == 0 ? tint.opacity(0.86) : ShellPalette.muted.opacity(0.45)))
+            }
+            context.fill(Path(CGRect(x: panel.maxX - 16, y: panel.minY + 10, width: 6, height: 6)), with: .color(tint.opacity(0.9)))
         }
 
         context.stroke(
             Path(roundedRect: CGRect(x: 8, y: 8, width: size.width - 16, height: size.height - 16), cornerRadius: 6),
-            with: .color(ShellPalette.lineStrong.opacity(0.65)),
+            with: .color(ShellPalette.lineStrong.opacity(0.50)),
             lineWidth: 2
         )
     }
@@ -370,8 +391,8 @@ private struct PixelOfficeCanvas: View {
     private func zonePlate(_ zone: MeetingRoomOfficeZone, size: CGSize, tint: Color, context: inout GraphicsContext) {
         let point = layout.zonePoint(zone)
         let rect = CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height)
-        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.12)))
-        context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.50)), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.055)))
+        context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.28)), style: StrokeStyle(lineWidth: 1, dash: [4, 8]))
     }
 
     private func drawFurniture(context: inout GraphicsContext) {
@@ -387,12 +408,12 @@ private struct PixelOfficeCanvas: View {
     private func drawPlanningBoard(context: inout GraphicsContext) {
         let point = layout.zonePoint(.planningBoard)
         let board = CGRect(x: point.x - 64, y: point.y - 32, width: 128, height: 58)
-        context.fill(Path(roundedRect: board, cornerRadius: 3), with: .color(Color(red: 0.14, green: 0.19, blue: 0.19)))
-        context.stroke(Path(roundedRect: board, cornerRadius: 3), with: .color(ShellPalette.accentWarm.opacity(0.7)), lineWidth: 2)
+        context.fill(Path(roundedRect: board, cornerRadius: 3), with: .color(Color(red: 0.10, green: 0.15, blue: 0.15)))
+        context.stroke(Path(roundedRect: board, cornerRadius: 3), with: .color(ShellPalette.accentWarm.opacity(0.52)), lineWidth: 2)
         for index in 0..<9 {
             let x = board.minX + 10 + CGFloat(index % 3) * 35
             let y = board.minY + 10 + CGFloat(index / 3) * 15
-            context.fill(Path(CGRect(x: x, y: y, width: 25, height: 9)), with: .color(index.isMultiple(of: 2) ? ShellPalette.accentWarm.opacity(0.72) : ShellPalette.warning.opacity(0.66)))
+            context.fill(Path(CGRect(x: x, y: y, width: 25, height: 9)), with: .color(index.isMultiple(of: 2) ? ShellPalette.accentWarm.opacity(0.70) : ShellPalette.warning.opacity(0.56)))
         }
     }
 
@@ -413,34 +434,44 @@ private struct PixelOfficeCanvas: View {
 
     private func drawDesk(at point: CGPoint, context: inout GraphicsContext) {
         let top = CGRect(x: point.x - 42, y: point.y - 16, width: 84, height: 26)
-        context.fill(Path(top), with: .color(Color(red: 0.30, green: 0.18, blue: 0.10)))
-        context.fill(Path(CGRect(x: top.minX + 10, y: top.minY - 9, width: 28, height: 14)), with: .color(ShellPalette.panelRaised))
-        context.fill(Path(CGRect(x: top.minX + 56, y: top.minY + 7, width: 8, height: 8)), with: .color(ShellPalette.accentWarm))
-        context.fill(Path(CGRect(x: top.minX + 8, y: top.maxY, width: 6, height: 16)), with: .color(Color.black.opacity(0.38)))
-        context.fill(Path(CGRect(x: top.maxX - 14, y: top.maxY, width: 6, height: 16)), with: .color(Color.black.opacity(0.38)))
+        context.fill(Path(top), with: .color(Color(red: 0.42, green: 0.31, blue: 0.20)))
+        context.fill(Path(CGRect(x: top.minX, y: top.minY, width: top.width, height: 5)), with: .color(Color(red: 0.58, green: 0.43, blue: 0.27).opacity(0.72)))
+        context.fill(Path(CGRect(x: top.minX + 10, y: top.minY - 10, width: 28, height: 15)), with: .color(Color(red: 0.08, green: 0.10, blue: 0.12)))
+        context.fill(Path(CGRect(x: top.minX + 14, y: top.minY - 6, width: 18, height: 5)), with: .color(ShellPalette.accentWarm.opacity(0.72)))
+        context.fill(Path(CGRect(x: top.minX + 56, y: top.minY + 7, width: 8, height: 8)), with: .color(ShellPalette.accentWarm.opacity(0.78)))
+        context.fill(Path(CGRect(x: top.minX + 8, y: top.maxY, width: 6, height: 16)), with: .color(Color.black.opacity(0.28)))
+        context.fill(Path(CGRect(x: top.maxX - 14, y: top.maxY, width: 6, height: 16)), with: .color(Color.black.opacity(0.28)))
     }
 
     private func drawConferenceTable(context: inout GraphicsContext) {
-        let point = CGPoint(x: layout.size.width * 0.30, y: layout.size.height * 0.40)
-        let table = CGRect(x: point.x - 62, y: point.y - 18, width: 124, height: 36)
-        context.fill(Path(roundedRect: table, cornerRadius: 4), with: .color(Color(red: 0.28, green: 0.15, blue: 0.09)))
-        context.stroke(Path(roundedRect: table, cornerRadius: 4), with: .color(ShellPalette.warning.opacity(0.34)), lineWidth: 1)
+        let point = CGPoint(x: layout.size.width * 0.50, y: layout.size.height * 0.43)
+        let table = CGRect(x: point.x - 70, y: point.y - 22, width: 140, height: 44)
+        context.fill(Path(roundedRect: table, cornerRadius: 4), with: .color(Color(red: 0.48, green: 0.36, blue: 0.23)))
+        context.stroke(Path(roundedRect: table, cornerRadius: 4), with: .color(ShellPalette.warning.opacity(0.38)), lineWidth: 1)
+        let screen = CGRect(x: point.x - 42, y: point.y - 16, width: 84, height: 32)
+        context.fill(Path(roundedRect: screen, cornerRadius: 3), with: .color(Color(red: 0.05, green: 0.15, blue: 0.18)))
+        context.stroke(Path(roundedRect: screen, cornerRadius: 3), with: .color(ShellPalette.accentWarm.opacity(0.78)), lineWidth: 2)
+        context.fill(Path(CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8)), with: .color(ShellPalette.accentWarm.opacity(0.9)))
+        for offset in [-28, 28] {
+            context.fill(Path(CGRect(x: point.x + CGFloat(offset) - 8, y: point.y - 2, width: 16, height: 4)), with: .color(ShellPalette.accent.opacity(0.58)))
+            context.fill(Path(CGRect(x: point.x + CGFloat(offset) - 2, y: point.y - 10, width: 4, height: 20)), with: .color(ShellPalette.accent.opacity(0.46)))
+        }
         for index in 0..<6 {
-            let x = table.minX + 14 + CGFloat(index) * 20
-            context.fill(Path(CGRect(x: x, y: table.minY - 12, width: 14, height: 8)), with: .color(ShellPalette.panelRaised))
-            context.fill(Path(CGRect(x: x, y: table.maxY + 4, width: 14, height: 8)), with: .color(ShellPalette.panelRaised))
+            let x = table.minX + 16 + CGFloat(index) * 20
+            context.fill(Path(CGRect(x: x, y: table.minY - 12, width: 14, height: 8)), with: .color(Color(red: 0.16, green: 0.16, blue: 0.17)))
+            context.fill(Path(CGRect(x: x, y: table.maxY + 4, width: 14, height: 8)), with: .color(Color(red: 0.16, green: 0.16, blue: 0.17)))
         }
     }
 
     private func drawReviewDesk(context: inout GraphicsContext) {
         let point = layout.zonePoint(.reviewDesk)
         let desk = CGRect(x: point.x - 58, y: point.y - 20, width: 116, height: 40)
-        context.fill(Path(desk), with: .color(Color(red: 0.26, green: 0.21, blue: 0.12)))
-        context.stroke(Path(desk), with: .color(ShellPalette.warning.opacity(0.65)), lineWidth: 2)
+        context.fill(Path(desk), with: .color(Color(red: 0.43, green: 0.32, blue: 0.20)))
+        context.stroke(Path(desk), with: .color(ShellPalette.warning.opacity(0.46)), lineWidth: 2)
         for index in 0..<4 {
             context.fill(
                 Path(CGRect(x: desk.minX + 14 + CGFloat(index) * 23, y: desk.minY + 10, width: 16, height: 20)),
-                with: .color(index.isMultiple(of: 2) ? ShellPalette.success.opacity(0.64) : ShellPalette.warning.opacity(0.72))
+                with: .color(index.isMultiple(of: 2) ? ShellPalette.success.opacity(0.56) : ShellPalette.warning.opacity(0.62))
             )
         }
     }
@@ -448,17 +479,18 @@ private struct PixelOfficeCanvas: View {
     private func drawBlockerCorner(context: inout GraphicsContext) {
         let point = layout.zonePoint(.blockerZone)
         let rect = CGRect(x: point.x - 52, y: point.y - 26, width: 104, height: 52)
-        context.fill(Path(rect), with: .color(ShellPalette.danger.opacity(0.18)))
-        context.stroke(Path(rect), with: .color(ShellPalette.danger.opacity(0.62)), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-        context.fill(Path(CGRect(x: rect.minX + 12, y: rect.minY + 12, width: 18, height: 18)), with: .color(ShellPalette.danger.opacity(0.72)))
+        context.fill(Path(rect), with: .color(ShellPalette.danger.opacity(0.10)))
+        context.stroke(Path(rect), with: .color(ShellPalette.danger.opacity(0.46)), style: StrokeStyle(lineWidth: 2, dash: [6, 6]))
+        context.fill(Path(CGRect(x: rect.minX + 12, y: rect.minY + 12, width: 18, height: 18)), with: .color(ShellPalette.danger.opacity(0.56)))
+        context.fill(Path(CGRect(x: rect.minX + 18, y: rect.minY + 16, width: 6, height: 10)), with: .color(ShellPalette.text.opacity(0.72)))
     }
 
     private func drawMergeLane(context: inout GraphicsContext) {
         let point = layout.zonePoint(.mergeLane)
         let rect = CGRect(x: point.x - 62, y: point.y - 20, width: 124, height: 40)
-        context.fill(Path(rect), with: .color(ShellPalette.success.opacity(0.14)))
+        context.fill(Path(rect), with: .color(ShellPalette.success.opacity(0.09)))
         for index in 0..<5 {
-            context.fill(Path(CGRect(x: rect.minX + 10 + CGFloat(index) * 22, y: rect.midY - 5, width: 14, height: 10)), with: .color(ShellPalette.success.opacity(0.68)))
+            context.fill(Path(CGRect(x: rect.minX + 10 + CGFloat(index) * 22, y: rect.midY - 5, width: 14, height: 10)), with: .color(ShellPalette.success.opacity(0.58)))
         }
     }
 
@@ -468,17 +500,18 @@ private struct PixelOfficeCanvas: View {
             CGPoint(x: layout.size.width * 0.92, y: layout.size.height * 0.88),
         ].map(layout.snapped)
         for point in points {
-            context.fill(Path(CGRect(x: point.x - 7, y: point.y + 6, width: 14, height: 14)), with: .color(Color(red: 0.46, green: 0.27, blue: 0.12)))
-            context.fill(Path(CGRect(x: point.x - 14, y: point.y - 10, width: 10, height: 18)), with: .color(ShellPalette.success.opacity(0.78)))
-            context.fill(Path(CGRect(x: point.x - 2, y: point.y - 18, width: 12, height: 26)), with: .color(ShellPalette.success.opacity(0.86)))
-            context.fill(Path(CGRect(x: point.x + 9, y: point.y - 8, width: 8, height: 16)), with: .color(ShellPalette.success.opacity(0.72)))
+            context.fill(Path(CGRect(x: point.x - 8, y: point.y + 6, width: 16, height: 14)), with: .color(Color(red: 0.46, green: 0.30, blue: 0.16)))
+            context.fill(Path(CGRect(x: point.x - 16, y: point.y - 10, width: 10, height: 18)), with: .color(ShellPalette.success.opacity(0.62)))
+            context.fill(Path(CGRect(x: point.x - 3, y: point.y - 20, width: 12, height: 28)), with: .color(ShellPalette.success.opacity(0.78)))
+            context.fill(Path(CGRect(x: point.x + 10, y: point.y - 8, width: 9, height: 17)), with: .color(ShellPalette.success.opacity(0.58)))
+            context.fill(Path(CGRect(x: point.x - 2, y: point.y + 11, width: 4, height: 9)), with: .color(Color.black.opacity(0.18)))
         }
     }
 
     private func drawInbox(context: inout GraphicsContext) {
         let rect = CGRect(x: layout.size.width * 0.50 - 58, y: layout.size.height - 58, width: 116, height: 38)
-        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(ShellPalette.panelRaised.opacity(0.72)))
-        context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(ShellPalette.accentWarm.opacity(0.34)), lineWidth: 1)
+        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(Color(red: 0.08, green: 0.13, blue: 0.15).opacity(0.84)))
+        context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(ShellPalette.accentWarm.opacity(0.42)), lineWidth: 1)
         context.draw(
             Text("\(language("INBOX", "받은 요청")) \(inboxCount)")
                 .font(.system(size: 10, weight: .heavy, design: .monospaced))
@@ -530,11 +563,11 @@ private struct PixelOfficeInteractionRouteView: View {
             path.addQuadCurve(to: interaction.toPoint, control: mid)
             context.stroke(
                 path,
-                with: .color(tint.opacity(interaction.isFresh ? 0.64 : 0.24)),
-                style: StrokeStyle(lineWidth: interaction.isFresh ? 2 : 1, lineCap: .round, dash: interaction.isFresh ? [7, 4] : [3, 5])
+                with: .color(tint.opacity(interaction.isFresh ? 0.38 : 0.14)),
+                style: StrokeStyle(lineWidth: interaction.isFresh ? 1.25 : 0.75, lineCap: .round, dash: interaction.isFresh ? [4, 6] : [2, 7])
             )
             if interaction.isFresh {
-                context.fill(Path(ellipseIn: CGRect(x: interaction.toPoint.x - 4, y: interaction.toPoint.y - 4, width: 8, height: 8)), with: .color(tint.opacity(0.8)))
+                context.fill(Path(CGRect(x: interaction.toPoint.x - 3, y: interaction.toPoint.y - 3, width: 6, height: 6)), with: .color(tint.opacity(0.62)))
             }
         }
         .allowsHitTesting(false)
@@ -718,17 +751,7 @@ private struct PixelAgentSprite: View {
         Button(action: action) {
             VStack(spacing: 4) {
                 if showsBubble {
-                    Text(roomLine(bubbleText, limit: sceneAgent.isSimplified ? 12 : 18))
-                        .font(.system(size: 8, weight: .heavy, design: .monospaced))
-                        .foregroundStyle(ShellPalette.text)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(ShellPalette.panelRaised.opacity(0.94))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .stroke(stateTint.opacity(0.36), lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    speechBubble
                 } else {
                     Color.clear.frame(height: 14)
                 }
@@ -756,6 +779,26 @@ private struct PixelAgentSprite: View {
         .accessibilityLabel("\(agent.role), \(agent.status), \(agent.actionLine)")
     }
 
+    private var speechBubble: some View {
+        VStack(spacing: 0) {
+            Text(roomLine(bubbleText, limit: sceneAgent.isSimplified ? 12 : 18))
+                .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                .foregroundStyle(ShellPalette.text)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color(red: 0.10, green: 0.12, blue: 0.13).opacity(0.96))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .stroke(stateTint.opacity(0.48), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            Rectangle()
+                .fill(stateTint.opacity(0.66))
+                .frame(width: 6, height: 4)
+                .offset(x: -8)
+        }
+    }
+
     private var bodyPixels: some View {
         let step = animate ? keyframeStep : 0
         let blink = animate && Int(phase * 2 + Double(abs(agent.id.hashValue % 5))).isMultiple(of: 9)
@@ -768,205 +811,253 @@ private struct PixelAgentSprite: View {
             }
 
             VStack(spacing: 0) {
-                head(blink: blink)
-                torso(step: step)
-                legs(step: step)
+                robotHead(blink: blink)
+                robotTorso(step: step)
+                robotLegs(step: step)
             }
-            .offset(y: animate && sceneAgent.action == .walking ? abs(step) * -block : 0)
+            .offset(y: animate && sceneAgent.action == .walking ? abs(step) * -block * 0.8 : 0)
 
             if typing {
                 keyboard
-                    .offset(y: block * 10)
+                    .offset(x: block * 1.5, y: block * 9)
             }
         }
-        .frame(width: block * 16, height: block * 19)
+        .frame(width: block * 18, height: block * 20)
     }
 
-    private func head(blink: Bool) -> some View {
-        ZStack(alignment: .top) {
-            Rectangle()
-                .fill(skinTint)
-                .frame(width: block * 7, height: block * 6)
-                .offset(y: block * 2)
-
-            Rectangle()
-                .fill(hairTint)
-                .frame(width: block * 8, height: block * 2)
-            HStack(spacing: block * 4) {
-                Rectangle()
-                    .fill(hairTint)
-                    .frame(width: block, height: block * 3)
-                Rectangle()
-                    .fill(hairTint)
-                    .frame(width: block, height: block * 3)
-            }
-            .offset(y: block * 2)
-
-            HStack(spacing: block * 2) {
-                eye(blink: blink, left: true)
-                eye(blink: blink, left: false)
-            }
-            .offset(y: block * 4)
-
-            mouth
-                .offset(y: block * 6)
-
-            headwear
-        }
-        .frame(width: block * 10, height: block * 9)
-    }
-
-    private func torso(step: CGFloat) -> some View {
+    private func robotHead(blink: Bool) -> some View {
         ZStack {
-            Rectangle()
-                .fill(outfitTint)
-                .frame(width: block * 7, height: block * 6)
-            Rectangle()
-                .fill(stateTint.opacity(0.75))
-                .frame(width: block * 2, height: block * 2)
-                .offset(y: block * -1)
-            HStack(spacing: block * 7) {
+            HStack(spacing: block * 10) {
                 Rectangle()
-                    .fill(skinTint)
-                    .frame(width: block, height: block * 5)
-                    .offset(y: sceneAgent.action == .typing ? block * 2 : step * block)
+                    .fill(robotAccentTint.opacity(0.86))
+                    .frame(width: block * 2, height: block * 4)
                 Rectangle()
-                    .fill(skinTint)
-                    .frame(width: block, height: block * 5)
-                    .offset(y: sceneAgent.action == .typing ? block * 2 : -step * block)
+                    .fill(robotAccentTint.opacity(0.86))
+                    .frame(width: block * 2, height: block * 4)
             }
+
+            RoundedRectangle(cornerRadius: block * 2, style: .continuous)
+                .fill(robotShellTint)
+                .frame(width: block * 12, height: block * 8)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.34))
+                .frame(width: block * 8, height: block)
+                .offset(y: -block * 2.5)
+
+            RoundedRectangle(cornerRadius: block, style: .continuous)
+                .fill(robotScreenTint)
+                .frame(width: block * 8, height: block * 4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: block, style: .continuous)
+                        .stroke(Color.black.opacity(0.38), lineWidth: 1)
+                )
+                .offset(y: block * 0.4)
+
+            HStack(spacing: block * 2.2) {
+                robotEye(blink: blink, left: true)
+                robotEye(blink: blink, left: false)
+            }
+            .offset(y: block * 0.15)
+
+            robotMouth
+                .offset(y: block * 2.1)
+
+            robotAccessory
+                .offset(y: -block * 4.5)
         }
-        .frame(width: block * 11, height: block * 6)
+        .frame(width: block * 16, height: block * 10)
     }
 
-    private func legs(step: CGFloat) -> some View {
+    @ViewBuilder
+    private var robotAccessory: some View {
+        if agent.visualState == .blocked || agent.visualState == .failed {
+            VStack(spacing: 0) {
+                Rectangle().fill(ShellPalette.danger).frame(width: block * 2, height: block * 2)
+                Rectangle().fill(Color(red: 0.18, green: 0.10, blue: 0.10)).frame(width: block, height: block)
+            }
+        } else if lowerRole.contains("ceo") || lowerRole.contains("lead") {
+            HStack(spacing: block * 0.5) {
+                Rectangle().fill(ShellPalette.warning).frame(width: block * 1.5, height: block * 1.5)
+                Rectangle().fill(ShellPalette.warning).frame(width: block * 2, height: block * 2)
+                Rectangle().fill(ShellPalette.warning).frame(width: block * 1.5, height: block * 1.5)
+            }
+        } else if lowerRole.contains("qa") || lowerRole.contains("review") {
+            HStack(spacing: block * 0.5) {
+                Rectangle().fill(ShellPalette.success).frame(width: block, height: block * 2)
+                Rectangle().fill(ShellPalette.success).frame(width: block * 3, height: block)
+            }
+        } else if lowerRole.contains("ux") || lowerRole.contains("design") || lowerRole.contains("ui") || lowerRole.contains("product") {
+            HStack(spacing: block * 0.5) {
+                Rectangle().fill(ShellPalette.accentWarm).frame(width: block, height: block)
+                Rectangle().fill(ShellPalette.warning).frame(width: block, height: block)
+                Rectangle().fill(ShellPalette.accent).frame(width: block, height: block)
+            }
+        } else if lowerRole.contains("builder") || lowerRole.contains("backend") || lowerRole.contains("engineer") {
+            Rectangle()
+                .fill(ShellPalette.accentWarm)
+                .frame(width: block * 5, height: block)
+        } else {
+            Rectangle()
+                .fill(robotAccentTint)
+                .frame(width: block * 2, height: block * 2)
+        }
+    }
+
+    private func robotTorso(step: CGFloat) -> some View {
+        ZStack {
+            HStack(spacing: block * 8) {
+                Rectangle()
+                    .fill(robotShellTint)
+                    .frame(width: block * 2, height: block * 5)
+                    .offset(y: sceneAgent.action == .typing ? block * 1.7 : step * block)
+                Rectangle()
+                    .fill(robotShellTint)
+                    .frame(width: block * 2, height: block * 5)
+                    .offset(y: sceneAgent.action == .typing ? block * 1.7 : -step * block)
+            }
+
+            RoundedRectangle(cornerRadius: block, style: .continuous)
+                .fill(robotBodyTint)
+                .frame(width: block * 9, height: block * 6)
+
+            Rectangle()
+                .fill(robotScreenTint)
+                .frame(width: block * 4, height: block * 2)
+                .offset(y: -block)
+
+            HStack(spacing: block) {
+                ForEach(0..<3, id: \.self) { index in
+                    Rectangle()
+                        .fill(index < statusPixelCount ? stateTint : ShellPalette.line.opacity(0.45))
+                        .frame(width: block, height: block)
+                }
+            }
+            .offset(y: block * 1.4)
+        }
+        .frame(width: block * 13, height: block * 7)
+    }
+
+    private func robotLegs(step: CGFloat) -> some View {
         HStack(spacing: block * 2) {
             Rectangle()
-                .fill(ShellPalette.panelDeeper)
-                .frame(width: block * 2, height: block * 4)
+                .fill(Color(red: 0.08, green: 0.09, blue: 0.10))
+                .frame(width: block * 2, height: block * 3)
                 .offset(y: sceneAgent.action == .walking ? max(0, step) * block : 0)
             Rectangle()
-                .fill(ShellPalette.panelDeeper)
-                .frame(width: block * 2, height: block * 4)
+                .fill(Color(red: 0.08, green: 0.09, blue: 0.10))
+                .frame(width: block * 2, height: block * 3)
                 .offset(y: sceneAgent.action == .walking ? max(0, -step) * block : 0)
         }
-        .frame(height: block * 4)
+        .frame(height: block * 3)
     }
 
-    private func eye(blink: Bool, left: Bool) -> some View {
+    private func robotEye(blink: Bool, left: Bool) -> some View {
         Group {
             if blink {
-                Rectangle().frame(width: block, height: 1)
+                Rectangle().frame(width: block * 2, height: 1)
             } else {
                 switch agent.expression {
                 case .focused:
-                    Rectangle().frame(width: block, height: block * 2)
+                    Rectangle().frame(width: block * 2, height: block * 2)
                 case .talking:
                     Rectangle().frame(width: block * 2, height: block)
                 case .happy:
-                    Rectangle()
-                        .frame(width: block * 2, height: 1)
-                        .rotationEffect(.degrees(left ? 15 : -15))
+                    HStack(spacing: 1) {
+                        Rectangle().frame(width: block, height: block)
+                        Rectangle().frame(width: block, height: block)
+                    }
                 case .confused:
                     Rectangle().frame(width: left ? block : block * 2, height: block)
                 case .sad:
                     Rectangle()
                         .frame(width: block * 2, height: 1)
-                        .rotationEffect(.degrees(left ? -12 : 12))
                 case .warning:
                     Rectangle().frame(width: block * 2, height: block * 2)
                 case .idle:
-                    Rectangle().frame(width: block, height: block)
+                    Rectangle().frame(width: block * 2, height: block * 2)
                 }
             }
         }
-        .foregroundStyle(ShellPalette.text)
+        .foregroundStyle(robotLightTint)
     }
 
     @ViewBuilder
-    private var mouth: some View {
+    private var robotMouth: some View {
         switch agent.expression {
         case .happy:
-            Rectangle().fill(stateTint).frame(width: block * 3, height: block)
-        case .talking:
-            Rectangle().fill(stateTint).frame(width: block * 2, height: block * 2)
-        case .confused, .warning:
-            Rectangle().fill(stateTint).frame(width: block * 2, height: block)
-        case .sad:
-            Rectangle().fill(stateTint.opacity(0.7)).frame(width: block * 3, height: 1)
-        case .focused:
-            Rectangle().fill(stateTint).frame(width: block * 3, height: block)
-        case .idle:
-            Rectangle().fill(stateTint.opacity(0.75)).frame(width: block * 2, height: 1)
-        }
-    }
-
-    @ViewBuilder
-    private var headwear: some View {
-        if lowerRole.contains("ceo") || lowerRole.contains("lead") {
-            HStack(spacing: 0) {
-                PixelTriangle()
-                    .fill(ShellPalette.warning)
-                    .frame(width: block * 2, height: block * 2)
-                PixelTriangle()
-                    .fill(ShellPalette.warning)
-                    .frame(width: block * 3, height: block * 3)
-                PixelTriangle()
-                    .fill(ShellPalette.warning)
-                    .frame(width: block * 2, height: block * 2)
+            HStack(spacing: block) {
+                Rectangle().fill(robotLightTint).frame(width: block, height: block)
+                Rectangle().fill(robotLightTint).frame(width: block, height: block)
+                Rectangle().fill(robotLightTint).frame(width: block, height: block)
             }
-            .offset(y: -block)
-        } else if lowerRole.contains("builder") || lowerRole.contains("engineer") || lowerRole.contains("backend") {
-            Rectangle()
-                .fill(ShellPalette.panelRaised)
-                .frame(width: block * 6, height: block)
-                .offset(y: block)
-        } else if lowerRole.contains("ux") || lowerRole.contains("design") || lowerRole.contains("ui") || lowerRole.contains("product") {
-            Rectangle()
-                .fill(ShellPalette.accentWarm)
-                .frame(width: block * 5, height: block)
-                .rotationEffect(.degrees(-8))
-                .offset(y: block)
-        } else if lowerRole.contains("qa") || lowerRole.contains("review") {
-            Rectangle()
-                .fill(ShellPalette.warning)
-                .frame(width: block * 4, height: block)
-                .offset(y: block)
+        case .talking:
+            HStack(spacing: block) {
+                Rectangle().fill(robotLightTint).frame(width: block, height: block * 2)
+                Rectangle().fill(robotLightTint).frame(width: block, height: block)
+            }
+        case .confused, .warning:
+            Rectangle().fill(robotLightTint.opacity(0.82)).frame(width: block * 2, height: block)
+        case .sad:
+            Rectangle().fill(robotLightTint.opacity(0.7)).frame(width: block * 3, height: 1)
+        case .focused:
+            Rectangle().fill(robotLightTint).frame(width: block * 3, height: block)
+        case .idle:
+            Rectangle().fill(robotLightTint.opacity(0.72)).frame(width: block * 2, height: 1)
         }
     }
 
     private var keyboard: some View {
-        HStack(spacing: 1) {
-            ForEach(0..<6, id: \.self) { index in
-                Rectangle()
-                    .fill(index.isMultiple(of: 2) ? stateTint : ShellPalette.lineStrong)
-                    .frame(width: block, height: block)
+        VStack(spacing: 1) {
+            Rectangle()
+                .fill(Color(red: 0.06, green: 0.11, blue: 0.12))
+                .frame(width: block * 7, height: block * 3)
+                .overlay(
+                    Rectangle()
+                        .fill(robotLightTint.opacity(0.72))
+                        .frame(width: block * 4, height: block),
+                    alignment: .center
+                )
+            HStack(spacing: 1) {
+                ForEach(0..<6, id: \.self) { index in
+                    Rectangle()
+                        .fill(index.isMultiple(of: 2) ? robotLightTint : ShellPalette.lineStrong.opacity(0.7))
+                        .frame(width: block, height: block)
+                }
             }
         }
-        .padding(3)
-        .background(ShellPalette.panelDeeper)
+        .padding(2)
+        .background(Color(red: 0.08, green: 0.09, blue: 0.10))
     }
 
     private var pixelDesk: some View {
         VStack(spacing: 0) {
             Rectangle()
-                .fill(Color(red: 0.30, green: 0.18, blue: 0.10))
+                .fill(Color(red: 0.42, green: 0.31, blue: 0.20))
                 .frame(width: block * 14, height: block * 4)
             HStack(spacing: block * 9) {
-                Rectangle().fill(Color.black.opacity(0.42)).frame(width: block, height: block * 3)
-                Rectangle().fill(Color.black.opacity(0.42)).frame(width: block, height: block * 3)
+                Rectangle().fill(Color.black.opacity(0.30)).frame(width: block, height: block * 3)
+                Rectangle().fill(Color.black.opacity(0.30)).frame(width: block, height: block * 3)
             }
         }
         .accessibilityHidden(true)
     }
 
     private var stateBadge: some View {
-        Image(systemName: stateIcon)
-            .font(.system(size: 8, weight: .black))
-            .foregroundStyle(ShellPalette.text)
-            .padding(3)
-            .background(stateTint.opacity(0.82))
-            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+        HStack(spacing: 1) {
+            ForEach(0..<3, id: \.self) { index in
+                Rectangle()
+                    .fill(index < statusPixelCount ? stateTint : ShellPalette.line.opacity(0.38))
+                    .frame(width: 3, height: 5)
+            }
+        }
+        .padding(3)
+        .background(Color(red: 0.07, green: 0.08, blue: 0.09).opacity(0.92))
+        .overlay(
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .stroke(stateTint.opacity(0.46), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
     }
 
     private var showsBubble: Bool {
@@ -1107,79 +1198,76 @@ private struct PixelAgentSprite: View {
         }
     }
 
-    private var skinTint: Color {
+    private var robotShellTint: Color {
         if lowerRole.contains("ceo") || lowerRole.contains("lead") {
-            return Color(red: 0.93, green: 0.70, blue: 0.48)
+            return Color(red: 0.98, green: 0.87, blue: 0.66)
         }
         if lowerRole.contains("qa") || lowerRole.contains("review") {
-            return Color(red: 0.82, green: 0.65, blue: 0.48)
+            return Color(red: 0.91, green: 0.86, blue: 0.72)
         }
         if lowerRole.contains("product") || lowerRole.contains("ux") {
-            return Color(red: 0.95, green: 0.74, blue: 0.55)
+            return Color(red: 0.96, green: 0.88, blue: 0.72)
         }
-        return Color(red: 0.88, green: 0.67, blue: 0.50)
+        return Color(red: 0.93, green: 0.88, blue: 0.76)
     }
 
-    private var hairTint: Color {
+    private var robotBodyTint: Color {
         if lowerRole.contains("ceo") || lowerRole.contains("lead") {
-            return Color(red: 0.38, green: 0.24, blue: 0.13)
-        }
-        if lowerRole.contains("ux") || lowerRole.contains("design") || lowerRole.contains("ui") {
-            return Color(red: 0.72, green: 0.49, blue: 0.26)
-        }
-        if lowerRole.contains("product") {
-            return Color(red: 0.18, green: 0.16, blue: 0.20)
-        }
-        return Color(red: 0.25, green: 0.17, blue: 0.12)
-    }
-
-    private var outfitTint: Color {
-        if lowerRole.contains("ceo") || lowerRole.contains("lead") {
-            return Color(red: 0.34, green: 0.18, blue: 0.22)
-        }
-        if lowerRole.contains("product") {
-            return Color(red: 0.22, green: 0.38, blue: 0.66)
-        }
-        if lowerRole.contains("builder") || lowerRole.contains("backend") || lowerRole.contains("engineer") {
-            return Color(red: 0.18, green: 0.48, blue: 0.48)
-        }
-        if lowerRole.contains("ux") || lowerRole.contains("design") || lowerRole.contains("ui") {
-            return Color(red: 0.38, green: 0.62, blue: 0.38)
+            return Color(red: 0.58, green: 0.37, blue: 0.22)
         }
         if lowerRole.contains("qa") || lowerRole.contains("review") {
-            return Color(red: 0.35, green: 0.53, blue: 0.78)
+            return Color(red: 0.34, green: 0.48, blue: 0.58)
         }
-        return Color(red: 0.40, green: 0.52, blue: 0.38)
+        if lowerRole.contains("ux") || lowerRole.contains("design") || lowerRole.contains("ui") || lowerRole.contains("product") {
+            return Color(red: 0.36, green: 0.55, blue: 0.44)
+        }
+        return Color(red: 0.50, green: 0.42, blue: 0.32)
     }
 
-    private var stateIcon: String {
+    private var robotScreenTint: Color {
+        Color(red: 0.05, green: 0.07, blue: 0.08)
+    }
+
+    private var robotAccentTint: Color {
+        if lowerRole.contains("ceo") || lowerRole.contains("lead") {
+            return ShellPalette.warning
+        }
+        if lowerRole.contains("qa") || lowerRole.contains("review") {
+            return ShellPalette.success
+        }
+        if lowerRole.contains("builder") || lowerRole.contains("backend") || lowerRole.contains("engineer") {
+            return ShellPalette.accentWarm
+        }
+        if lowerRole.contains("ux") || lowerRole.contains("design") || lowerRole.contains("ui") || lowerRole.contains("product") {
+            return ShellPalette.accent
+        }
+        return ShellPalette.accentWarm
+    }
+
+    private var robotLightTint: Color {
+        switch agent.expression {
+        case .warning, .confused:
+            return ShellPalette.warning
+        case .sad:
+            return ShellPalette.danger.opacity(0.86)
+        case .happy:
+            return ShellPalette.success
+        case .talking, .focused, .idle:
+            return robotAccentTint
+        }
+    }
+
+    private var statusPixelCount: Int {
         switch agent.visualState {
         case .idle:
-            return "chair"
+            return 1
         case .running:
-            return "keyboard.fill"
-        case .review:
-            return "checklist"
-        case .blocked:
-            return "exclamationmark.triangle.fill"
-        case .failed:
-            return "xmark.octagon.fill"
-        case .done:
-            return "checkmark.seal.fill"
-        case .costBlocked:
-            return "pause.circle.fill"
+            return 3
+        case .review, .done:
+            return 2
+        case .blocked, .failed, .costBlocked:
+            return 3
         }
-    }
-}
-
-private struct PixelTriangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }
 
