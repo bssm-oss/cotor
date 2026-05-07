@@ -810,6 +810,30 @@ internal fun Application.cotorAppModule(
                 }
             }
 
+            route("/runtime/cleanup") {
+                get("/preview") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.request.queryParameters["companyId"]?.takeIf { it.isNotBlank() }
+                    val olderThanDays = call.request.queryParameters["olderThanDays"]?.toIntOrNull()
+                    val allCompanies = call.request.queryParameters["allCompanies"]?.toBooleanStrictOrNull()
+                        ?: (companyId == null)
+                    call.respond(
+                        desktopService.previewRuntimeCleanup(
+                            companyId = companyId,
+                            olderThanDays = olderThanDays,
+                            allCompanies = allCompanies
+                        )
+                    )
+                }
+
+                post {
+                    if (!requireToken(token)) return@post
+                    respondDesktopRequest {
+                        desktopService.cleanupRuntime(call.receive<RuntimeCleanupRequest>())
+                    }
+                }
+            }
+
             route("/evidence") {
                 get("/runs/{runId}") {
                     if (!requireToken(token)) return@get

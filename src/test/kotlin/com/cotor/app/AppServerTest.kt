@@ -1940,6 +1940,66 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("runtime cleanup preview and apply routes serialize retention results") {
+        val preview = RuntimeCleanupPreview(
+            companyId = "company-1",
+            allCompanies = false,
+            generatedAt = 100,
+            terminalRetentionDays = 7,
+            orphanRetentionDays = 14,
+            candidates = listOf(
+                RuntimeCleanupCandidate(
+                    id = "worktree:/tmp/stale",
+                    kind = "worktree",
+                    classification = "stale-terminal",
+                    companyId = "company-1",
+                    path = "/tmp/stale",
+                    ageDays = 9,
+                    eligible = true,
+                    reason = "Terminal run is 9 day(s) old."
+                )
+            )
+        )
+        coEvery {
+            desktopService.previewRuntimeCleanup(companyId = "company-1", olderThanDays = 7, allCompanies = false)
+        } returns preview
+        coEvery {
+            desktopService.cleanupRuntime(
+                RuntimeCleanupRequest(companyId = "company-1", olderThanDays = 7, dryRun = false, apply = true)
+            )
+        } returns RuntimeCleanupResult(
+            dryRun = false,
+            preview = preview,
+            deletedWorktreeCount = 1
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val previewResponse = client.get("/api/app/runtime/cleanup/preview?companyId=company-1&olderThanDays=7") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val applyResponse = client.post("/api/app/runtime/cleanup") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"companyId":"company-1","olderThanDays":7,"dryRun":false,"apply":true}""")
+            }
+
+            previewResponse.status shouldBe HttpStatusCode.OK
+            previewResponse.bodyAsText() shouldContain "\"classification\":\"stale-terminal\""
+            previewResponse.bodyAsText() shouldContain "\"eligibleCount\":1"
+            applyResponse.status shouldBe HttpStatusCode.OK
+            applyResponse.bodyAsText() shouldContain "\"deletedWorktreeCount\":1"
+            applyResponse.bodyAsText() shouldContain "\"dryRun\":false"
+        }
+    }
+
     test("backend settings and company topology routes respond when authorized") {
         coEvery { desktopService.backendStatuses() } returns listOf(
             ExecutionBackendStatus(

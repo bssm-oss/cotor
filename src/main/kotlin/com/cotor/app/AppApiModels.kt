@@ -107,6 +107,50 @@ data class OperatorCommandRequest(
 )
 
 @Serializable
+data class RuntimeCleanupRequest(
+    val companyId: String? = null,
+    val allCompanies: Boolean = false,
+    val olderThanDays: Int? = null,
+    val dryRun: Boolean = true,
+    val apply: Boolean = false
+)
+
+@Serializable
+data class RuntimeCleanupCandidate(
+    val id: String,
+    val kind: String,
+    val classification: String,
+    val companyId: String? = null,
+    val path: String? = null,
+    val processId: Long? = null,
+    val ageDays: Long? = null,
+    val eligible: Boolean,
+    val reason: String
+)
+
+@Serializable
+data class RuntimeCleanupPreview(
+    val companyId: String? = null,
+    val allCompanies: Boolean = false,
+    val generatedAt: Long,
+    val terminalRetentionDays: Int,
+    val orphanRetentionDays: Int,
+    val candidates: List<RuntimeCleanupCandidate> = emptyList(),
+    val eligibleCount: Int = candidates.count { it.eligible },
+    val protectedCount: Int = candidates.count { !it.eligible }
+)
+
+@Serializable
+data class RuntimeCleanupResult(
+    val dryRun: Boolean,
+    val preview: RuntimeCleanupPreview,
+    val deletedWorktreeCount: Int = 0,
+    val terminatedProcessCount: Int = 0,
+    val skippedCount: Int = preview.protectedCount,
+    val errors: List<String> = emptyList()
+)
+
+@Serializable
 data class OperatorCommandAction(
     val type: String,
     val title: String,

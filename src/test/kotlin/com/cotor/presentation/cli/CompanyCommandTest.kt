@@ -6,6 +6,9 @@ import com.cotor.app.CompanyIssue
 import com.cotor.app.DesktopAppService
 import com.cotor.app.ReviewQueueItem
 import com.cotor.app.ReviewQueueStatus
+import com.cotor.app.RuntimeCleanupPreview
+import com.cotor.app.RuntimeCleanupRequest
+import com.cotor.app.RuntimeCleanupResult
 import com.cotor.provenance.EvidenceBundle
 import com.github.ajalt.clikt.testing.test
 import io.kotest.core.spec.style.FunSpec
@@ -489,12 +492,54 @@ class CompanyCommandTest : FunSpec({
         result.output shouldContain "\"ceoVerdict\": \"APPROVE\""
     }
 
+    test("company runtime cleanup defaults to dry-run and can apply explicitly") {
+        val preview = RuntimeCleanupPreview(
+            companyId = "company-1",
+            allCompanies = false,
+            generatedAt = 1,
+            terminalRetentionDays = 7,
+            orphanRetentionDays = 14
+        )
+        coEvery {
+            service.cleanupRuntime(
+                RuntimeCleanupRequest(
+                    companyId = "company-1",
+                    allCompanies = false,
+                    olderThanDays = null,
+                    dryRun = true,
+                    apply = false
+                )
+            )
+        } returns RuntimeCleanupResult(dryRun = true, preview = preview)
+        coEvery {
+            service.cleanupRuntime(
+                RuntimeCleanupRequest(
+                    companyId = "company-1",
+                    allCompanies = false,
+                    olderThanDays = null,
+                    dryRun = false,
+                    apply = true
+                )
+            )
+        } returns RuntimeCleanupResult(dryRun = false, preview = preview, deletedWorktreeCount = 1)
+
+        val dryRun = CompanyCommand().test("runtime cleanup --company-id company-1")
+        val apply = CompanyCommand().test("runtime cleanup --company-id company-1 --apply")
+
+        dryRun.statusCode shouldBe 0
+        dryRun.output shouldContain "\"dryRun\": true"
+        apply.statusCode shouldBe 0
+        apply.output shouldContain "\"dryRun\": false"
+        apply.output shouldContain "\"deletedWorktreeCount\": 1"
+    }
+
     test("completion output includes company and auth nested commands") {
         val result = CompletionCommand().test("bash")
 
         result.statusCode shouldBe 0
         result.output shouldContain "company"
         result.output shouldContain "batch-update"
+        result.output shouldContain "cleanup"
         result.output shouldContain "codex-oauth"
     }
 })

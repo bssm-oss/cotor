@@ -711,7 +711,7 @@ class CompletionCommand : CliktCommand(
     private val companyGoalSubcommands = listOf("list", "create", "update", "delete", "decompose", "enable-autonomy", "disable-autonomy")
     private val companyIssueSubcommands = listOf("list", "create", "show", "delete", "delegate", "run")
     private val companyReviewSubcommands = listOf("list", "merge")
-    private val companyRuntimeSubcommands = listOf("status", "start", "stop")
+    private val companyRuntimeSubcommands = listOf("status", "start", "stop", "cleanup")
     private val companyBackendSubcommands = listOf("status", "update", "start", "stop", "restart", "test")
     private val companyLinearSubcommands = listOf("config", "resync")
     private val companyContextSubcommands = listOf("list", "add", "delete")
