@@ -496,6 +496,123 @@ class DesktopAppServiceTest : FunSpec({
         persisted.all { it.model == com.cotor.model.OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
     }
 
+    test("operator chat answers agent performance questions from company evidence") {
+        val now = System.currentTimeMillis()
+        val appHome = Files.createTempDirectory("operator-chat-performance-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Chat Performance", rootPath = appHome.toString())
+        val seeded = stateStore.load()
+        val project = seeded.projectContexts.first { it.companyId == company.id }
+        val workspace = seeded.workspaces.first { it.repositoryId == company.repositoryId }
+        val builder = seeded.companyAgentDefinitions.first { it.companyId == company.id && it.title == "Builder" }
+        val qa = seeded.companyAgentDefinitions.first { it.companyId == company.id && it.title == "QA" }
+        val goal = CompanyGoal(
+            id = "goal-operator-performance",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Ship performance evidence",
+            description = "Seed enough evidence for operator chat.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val builderIssue = CompanyIssue(
+            id = "issue-builder-performance",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "Builder delivered slice",
+            description = "Completed implementation work.",
+            status = IssueStatus.DONE,
+            kind = "execution",
+            assigneeProfileId = builder.id,
+            createdAt = now - 5_000,
+            updatedAt = now - 1_000
+        )
+        val qaIssue = CompanyIssue(
+            id = "issue-qa-performance",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "QA blocked slice",
+            description = "Still blocked.",
+            status = IssueStatus.BLOCKED,
+            kind = "execution",
+            assigneeProfileId = qa.id,
+            createdAt = now - 4_000,
+            updatedAt = now - 2_000
+        )
+        val task = AgentTask(
+            id = "task-builder-performance",
+            workspaceId = workspace.id,
+            issueId = builderIssue.id,
+            title = builderIssue.title,
+            prompt = builderIssue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.COMPLETED,
+            createdAt = now - 4_000,
+            updatedAt = now - 1_000
+        )
+        val run = AgentRun(
+            id = "run-builder-performance",
+            taskId = task.id,
+            workspaceId = workspace.id,
+            repositoryId = company.repositoryId,
+            agentId = builder.id,
+            agentName = builder.title,
+            branchName = "codex/test",
+            worktreePath = appHome.toString(),
+            status = AgentRunStatus.COMPLETED,
+            output = "Implemented and verified.",
+            durationMs = 90_000,
+            estimatedCostCents = 12,
+            createdAt = now - 3_000,
+            updatedAt = now - 1_000
+        )
+        stateStore.save(
+            seeded.copy(
+                goals = seeded.goals + goal,
+                issues = seeded.issues + builderIssue + qaIssue,
+                tasks = seeded.tasks + task,
+                runs = seeded.runs + run
+            )
+        )
+
+        val response = service.runOperatorChat(company.id, "팀 인사평가에서 가장 좋은 에이전트는 뭐야?")
+
+        response.message shouldContain "Builder"
+        response.answerSources.any { it.type == "agent-performance" && it.refId == builder.id } shouldBe true
+        response.actions.shouldBeEmpty()
+        response.blockedActions.shouldBeEmpty()
+        stateStore.load().agentMessages.any { it.kind == "operator-answer" && it.body.contains("Builder") } shouldBe true
+    }
+
+    test("operator chat hard gates destructive policy changes") {
+        val appHome = Files.createTempDirectory("operator-chat-hard-gate-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Chat Safety", rootPath = appHome.toString())
+
+        val response = service.runOperatorChat(company.id, "merge policy 해제하고 바로 머지해")
+
+        response.blockedActions.shouldNotBeEmpty()
+        response.blockedActions.single().type shouldBe "hard-gate"
+        response.actions.shouldBeEmpty()
+    }
+
     test("new companies seed HR Manager and mentor assignments") {
         val appHome = Files.createTempDirectory("hr-seed-home")
         val stateStore = DesktopStateStore { appHome }
@@ -3438,6 +3555,60 @@ class DesktopAppServiceTest : FunSpec({
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
         state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
         state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "CEO planned execution graph"
+    }
+
+    test("interrupted OpenCode CEO planning remains retryable instead of invalid JSON blocked") {
+        val appHome = Files.createTempDirectory("desktop-ceo-interrupted-plan-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-interrupted-plan-test").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-interrupted-plan-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/ceo-interrupted-plan/opencode",
+            worktreePath = worktreeRoot
+        )
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = false,
+            output = """{"type":"step_start","timestamp":1778128131724,"sessionID":"ses_1ff4df14affeEb414G1doOHnl8","part":{"id":"prt_e00b21686001aYMfThX3ibFRHJ","messageID":"msg_e00b20ef6001e5wxJOGHKwx9eJ","sessionID":"ses_1ff4df14affeEb414G1doOHnl8","snapshot":"bd97a7460fae5ba7ad0f53fe8c854a4791e3c501","type":"step-start"}}""",
+            error = """OpenCode execution failed (exit=143): {"type":"step_start","timestamp":1778128131724}""",
+            duration = 100,
+            metadata = emptyMap()
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = agentExecutor
+        )
+        val company = service.createCompany(
+            name = "CEO Interrupted Plan Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Plan after provider interruption",
+            description = "The CEO planning provider is interrupted before producing content.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+        val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
+
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
+
+        val state = stateStore.load()
+        val latestIssue = state.issues.single { it.id == planningIssue.id }
+        latestIssue.status shouldBe IssueStatus.PLANNED
+        latestIssue.providerBlockReason.shouldBeNull()
+        latestIssue.transitionReason.orEmpty() shouldNotContain "CEO_PLANNING_INVALID_OUTPUT"
+        state.goalDecisions.filter { it.goalId == goal.id && it.title == "CEO planning blocked" }.shouldBeEmpty()
+        state.companyActivity.filter { it.issueId == planningIssue.id && it.title == "CEO planning blocked" }.shouldBeEmpty()
     }
 
     test("autonomous CEO planning blocks after repeated invalid output without creating fallback issues") {

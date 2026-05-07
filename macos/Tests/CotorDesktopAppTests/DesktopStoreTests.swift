@@ -318,14 +318,14 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode", "codex"],
                 availableCliAgents: ["opencode", "codex", "gemma4", "ollama", "lmstudio"],
                 availableAgentModels: [
-                    "opencode": ["opencode/big-pickle", "opencode-go/deepseek-v4-flash"],
+                    "opencode": ["opencode/big-pickle", "opencode/nemotron-3-super-free"],
                     "codex": ["openai/gpt-5.5"],
                     "gemma4": ["gemma4:e2b"],
                     "ollama": ["gemma4:e2b"],
                     "lmstudio": ["gemma4:e2b"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "opencode-go/deepseek-v4-flash",
+                    "opencode": "opencode/nemotron-3-super-free",
                     "codex": "openai/gpt-5.5",
                     "gemma4": "gemma4:e2b",
                     "ollama": "gemma4:e2b",
@@ -360,7 +360,7 @@ struct DesktopStoreTests {
         )
 
         store.selectNewCompanyAgentCli("opencode")
-        #expect(store.newCompanyAgentModel == "opencode-go/deepseek-v4-flash")
+        #expect(store.newCompanyAgentModel == "opencode/nemotron-3-super-free")
 
         store.selectNewCompanyAgentCli("codex")
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
@@ -386,10 +386,10 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode"],
                 availableCliAgents: ["opencode"],
                 availableAgentModels: [
-                    "opencode": ["opencode-go/deepseek-v4-flash"]
+                    "opencode": ["opencode/nemotron-3-super-free"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "opencode-go/deepseek-v4-flash"
+                    "opencode": "opencode/nemotron-3-super-free"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -422,7 +422,7 @@ struct DesktopStoreTests {
         store.newCompanyAgentCli = ""
 
         #expect(store.resolvedNewCompanyAgentCli == "opencode")
-        #expect(store.newCompanyAgentModelOptions == ["opencode-go/deepseek-v4-flash"])
+        #expect(store.newCompanyAgentModelOptions == ["opencode/nemotron-3-super-free"])
     }
 
     @Test
@@ -626,13 +626,13 @@ struct DesktopStoreTests {
     func batchEditPayloadKeepsExplicitModelAndCapabilities() {
         let payload = OrgProfileBatchEditPayloadDraft.build(
             batchAgent: "opencode",
-            batchModel: " opencode-go/deepseek-v4-flash ",
+            batchModel: " opencode/nemotron-3-super-free ",
             batchCapabilities: "qa, review, , deploy",
             batchEnabled: false
         )
 
         #expect(payload.agentCli == "opencode")
-        #expect(payload.model == "opencode-go/deepseek-v4-flash")
+        #expect(payload.model == "opencode/nemotron-3-super-free")
         #expect(payload.specialties == ["qa", "review", "deploy"])
         #expect(payload.enabled == false)
     }
