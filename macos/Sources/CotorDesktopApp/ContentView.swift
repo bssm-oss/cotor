@@ -3883,7 +3883,11 @@ private struct AgentSkillCardView: View {
     }
 
     private var policyTags: [(String, Color)] {
-        card.policyChips.map { ($0.rawValue, policyTint($0)) }
+        var tags = card.policyChips.map { ($0.label(language), policyTint($0)) }
+        if card.hasDisabledCapabilities {
+            tags.append((language("Some off", "일부 권한 꺼짐"), ShellPalette.muted))
+        }
+        return tags
     }
 
     private func compactTags(_ tags: [(String, Color)]) -> some View {
