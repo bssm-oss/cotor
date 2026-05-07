@@ -11,6 +11,8 @@ package com.cotor.app
  */
 
 import com.cotor.app.runtime.CompanyRuntimeBindingService
+import com.cotor.app.runtime.CompanyRuntimeLoopDisposition
+import com.cotor.app.runtime.CompanyRuntimeLoopFailureDisposition
 import com.cotor.app.runtime.CompanyRuntimeMachine
 import com.cotor.app.runtime.RuntimeCommand
 import com.cotor.app.runtime.WorkQueue
@@ -226,6 +228,7 @@ class DesktopAppService(
     private val verificationBundleService: VerificationBundleService = VerificationBundleService(),
     private val companyVerifierService: CompanyVerifierService = CompanyVerifierService(verificationBundleService),
     private val autonomousDiscoveryService: AutonomousDiscoveryService = AutonomousDiscoveryService(),
+    private val companyRuntimeRetention: CompanyRuntimeRetention = CompanyRuntimeRetention(),
     private val marketingBrowserRunner: MarketingBrowserRunner = LocalPlaywrightMarketingBrowserRunner(
         appHomeProvider = { stateStore.appHome() },
         commandAvailability = commandAvailability
@@ -435,9 +438,8 @@ class DesktopAppService(
                 .sortedByDescending { it.lastTickAt ?: 0L },
             agentContextEntries = state.agentContextEntries.sortedByDescending { it.createdAt },
             agentMessages = state.agentMessages.sortedByDescending { it.createdAt },
-            marketingDelegationPolicies = state.marketingDelegationPolicies
-                .sortedWith(compareBy<MarketingDelegationPolicy> { it.companyId }.thenBy { it.agentId }.thenBy { it.name.lowercase() }),
-            marketingRuns = state.marketingRuns.sortedByDescending { it.createdAt },
+            marketingDelegationPolicies = CompanyMarketingDashboardProjection.policies(state),
+            marketingRuns = CompanyMarketingDashboardProjection.runs(state),
             agentPerformance = computeAgentPerformance(state, companyId = null, orgProfiles = orgProfiles)
         ).redactedForApi()
     }
@@ -972,12 +974,8 @@ class DesktopAppService(
             agentMessages = state.agentMessages
                 .filter { companyId == null || it.companyId == companyId }
                 .sortedByDescending { it.createdAt },
-            marketingDelegationPolicies = state.marketingDelegationPolicies
-                .filter { companyId == null || it.companyId == companyId }
-                .sortedWith(compareBy<MarketingDelegationPolicy> { it.companyId }.thenBy { it.agentId }.thenBy { it.name.lowercase() }),
-            marketingRuns = state.marketingRuns
-                .filter { companyId == null || it.companyId == companyId }
-                .sortedByDescending { it.createdAt },
+            marketingDelegationPolicies = CompanyMarketingDashboardProjection.policies(state, companyId),
+            marketingRuns = CompanyMarketingDashboardProjection.runs(state, companyId),
             agentPerformance = computeAgentPerformance(
                 state = state,
                 companyId = companyId,
@@ -1934,6 +1932,59 @@ class DesktopAppService(
                 runtime = state.companyRuntimes.firstOrNull { it.companyId == companyId } ?: CompanyRuntimeSnapshot(companyId = companyId)
             ).runtime
         }
+    }
+
+    suspend fun previewRuntimeCleanup(
+        companyId: String? = null,
+        olderThanDays: Int? = null,
+        allCompanies: Boolean = companyId == null
+    ): RuntimeCleanupPreview =
+        companyRuntimeRetention.preview(
+            appHome = stateStore.appHome(),
+            state = stateStore.load(),
+            companyId = companyId,
+            olderThanDays = olderThanDays,
+            allCompanies = allCompanies
+        )
+
+    suspend fun cleanupRuntime(request: RuntimeCleanupRequest): RuntimeCleanupResult {
+        val dryRun = !request.apply
+        val preview = previewRuntimeCleanup(
+            companyId = request.companyId,
+            olderThanDays = request.olderThanDays,
+            allCompanies = request.allCompanies || request.companyId == null
+        )
+        if (dryRun) {
+            recordRuntimeCleanupActivity(preview, deletedWorktrees = 0, terminatedProcesses = 0, dryRun = true)
+            return RuntimeCleanupResult(dryRun = true, preview = preview)
+        }
+
+        val errors = mutableListOf<String>()
+        var deletedWorktrees = 0
+        preview.candidates
+            .filter { it.eligible && it.kind == "worktree" && !it.path.isNullOrBlank() }
+            .forEach { candidate ->
+                val error = companyRuntimeRetention.deleteWorktree(requireNotNull(candidate.path))
+                if (error == null) {
+                    deletedWorktrees += 1
+                } else {
+                    errors += "${candidate.path}: $error"
+                }
+            }
+        val terminatedProcesses = terminateProcessIds(
+            preview.candidates
+                .filter { it.eligible && it.kind == "process" }
+                .mapNotNull { it.processId }
+        )
+        val result = RuntimeCleanupResult(
+            dryRun = false,
+            preview = preview,
+            deletedWorktreeCount = deletedWorktrees,
+            terminatedProcessCount = terminatedProcesses,
+            errors = errors
+        )
+        recordRuntimeCleanupActivity(preview, deletedWorktrees, terminatedProcesses, dryRun = false)
+        return result
     }
 
     suspend fun policyDecisions(runId: String? = null, issueId: String? = null): List<PolicyDecision> =
@@ -8941,7 +8992,8 @@ class DesktopAppService(
                         lastAction = "runtime-started",
                         manuallyStoppedAt = null,
                         budgetPausedAt = null,
-                        lastError = null
+                        lastError = null,
+                        consecutiveFailures = 0
                     )
                 )
             ).recordSignal(
@@ -19892,8 +19944,16 @@ class DesktopAppService(
                     break
                 } catch (cause: Throwable) {
                     consecutiveFailures++
-                    markCompanyRuntimeError(companyId, cause)
+                    val disposition = recordCompanyRuntimeTickFailure(
+                        companyId = companyId,
+                        cause = cause,
+                        consecutiveFailures = consecutiveFailures,
+                        maxConsecutiveFailures = maxConsecutiveFailures
+                    )
                     if (consecutiveFailures >= maxConsecutiveFailures) {
+                        break
+                    }
+                    if (disposition.terminal) {
                         break
                     }
                     val backoffMs = (30_000L * (1L shl (consecutiveFailures - 1).coerceAtMost(3))).coerceAtMost(300_000L)
@@ -20202,6 +20262,105 @@ class DesktopAppService(
         }
     }
 
+    private suspend fun recordCompanyRuntimeTickFailure(
+        companyId: String,
+        cause: Throwable,
+        consecutiveFailures: Int,
+        maxConsecutiveFailures: Int
+    ): CompanyRuntimeLoopFailureDisposition {
+        if (cause is CancellationException) {
+            return CompanyRuntimeLoopDisposition.failure(cause, maxConsecutiveFailures, maxConsecutiveFailures)
+        }
+        appendCompanyRuntimeErrorLog(companyId, cause)
+        val disposition = CompanyRuntimeLoopDisposition.failure(cause, consecutiveFailures, maxConsecutiveFailures)
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val now = System.currentTimeMillis()
+            val currentRuntime = state.companyRuntimes.firstOrNull { it.companyId == companyId }
+                ?: CompanyRuntimeSnapshot(companyId = companyId)
+            val nextRuntime = currentRuntime.copy(
+                companyId = companyId,
+                status = if (disposition.terminal) CompanyRuntimeStatus.ERROR else CompanyRuntimeStatus.RUNNING,
+                lastStoppedAt = if (disposition.terminal) now else currentRuntime.lastStoppedAt,
+                lastAction = disposition.lastAction,
+                lastError = cause.message ?: cause::class.simpleName,
+                consecutiveFailures = consecutiveFailures,
+                adaptiveTickMs = if (disposition.terminal) {
+                    currentRuntime.adaptiveTickMs
+                } else {
+                    currentRuntime.adaptiveTickMs.coerceAtLeast(15_000L)
+                }
+            )
+            val detail = cause.message ?: cause::class.simpleName
+            val nextState = state.copy(
+                companyRuntimes = upsertCompanyRuntime(state.companyRuntimes, nextRuntime)
+            ).recordSignal(
+                source = "runtime",
+                message = if (disposition.terminal) {
+                    "Autonomous runtime failed after $consecutiveFailures consecutive failure(s): $detail"
+                } else {
+                    "Autonomous runtime tick failed; retry $consecutiveFailures/$maxConsecutiveFailures: $detail"
+                },
+                severity = disposition.severity,
+                companyId = companyId
+            ).recordCompanyActivity(
+                companyId = companyId,
+                source = "runtime",
+                title = if (disposition.terminal) "Runtime error" else "Runtime tick retry",
+                detail = detail,
+                severity = disposition.severity
+            ).withDerivedMetrics()
+            stateStore.save(nextState)
+        }
+        return disposition
+    }
+
+    internal suspend fun recordCompanyRuntimeTickFailureForTesting(
+        companyId: String,
+        cause: Throwable,
+        consecutiveFailures: Int,
+        maxConsecutiveFailures: Int = 5
+    ): CompanyRuntimeLoopFailureDisposition =
+        recordCompanyRuntimeTickFailure(companyId, cause, consecutiveFailures, maxConsecutiveFailures)
+
+    private suspend fun recordRuntimeCleanupActivity(
+        preview: RuntimeCleanupPreview,
+        deletedWorktrees: Int,
+        terminatedProcesses: Int,
+        dryRun: Boolean
+    ) {
+        val affectedCompanyIds = preview.candidates.mapNotNull { it.companyId }.distinct()
+            .ifEmpty { preview.companyId?.let(::listOf) ?: emptyList() }
+        if (affectedCompanyIds.isEmpty()) {
+            return
+        }
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val title = if (dryRun) "Runtime retention preview" else "Runtime retention cleanup"
+            val detail = if (dryRun) {
+                "Preview found ${preview.eligibleCount} cleanup candidate(s) and ${preview.protectedCount} protected item(s)."
+            } else {
+                "Deleted $deletedWorktrees worktree(s), terminated $terminatedProcesses process(es), skipped ${preview.protectedCount} protected item(s)."
+            }
+            val source = if (dryRun) "runtime-retention-preview" else "runtime-retention-pruned"
+            val nextState = affectedCompanyIds.fold(state) { current, companyId ->
+                current.recordCompanyActivity(
+                    companyId = companyId,
+                    source = source,
+                    title = title,
+                    detail = detail,
+                    severity = if (dryRun) "info" else "warning"
+                ).recordSignal(
+                    source = source,
+                    message = detail,
+                    companyId = companyId,
+                    severity = if (dryRun) "info" else "warning"
+                )
+            }.withDerivedMetrics()
+            stateStore.save(nextState)
+        }
+    }
+
     private fun appendCompanyRuntimeErrorLog(companyId: String, cause: Throwable) {
         runCatching {
             val runtimeDir = stateStore.appHome().resolve("runtime").resolve("backend")
@@ -20258,6 +20417,7 @@ class DesktopAppService(
                         lastTickAt = System.currentTimeMillis(),
                         lastAction = lastAction,
                         lastError = null,
+                        consecutiveFailures = 0,
                         budgetPausedAt = if (lastAction.startsWith("budget-paused")) {
                             current.budgetPausedAt ?: System.currentTimeMillis()
                         } else {

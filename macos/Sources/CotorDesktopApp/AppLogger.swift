@@ -21,6 +21,10 @@ enum AppLogger {
         write(level: "INFO", message: message)
     }
 
+    static func warning(_ message: String) {
+        write(level: "WARN", message: message)
+    }
+
     static func error(_ message: String) {
         write(level: "ERROR", message: message)
     }

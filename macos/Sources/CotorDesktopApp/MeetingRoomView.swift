@@ -20,7 +20,10 @@ struct MeetingRoomView: View {
     @State private var selectedZone: MeetingRoomOfficeZone?
 
     private var sceneMemoryKey: String {
-        projection.companyId ?? "all-companies"
+        if let companyId = projection.companyId {
+            return "company:\(companyId)"
+        }
+        return "unscoped:\(projection.hashValue.magnitude)"
     }
 
     var body: some View {
@@ -79,6 +82,14 @@ struct MeetingRoomView: View {
                 projection: projection,
                 language: language
             )
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase != .active else { return }
+            MeetingRoomSceneMemoryStore.pruneExpired(maxAgeSeconds: 60)
+        }
+        .onChange(of: lowResourceMode) { _, enabled in
+            guard enabled else { return }
+            MeetingRoomSceneMemoryStore.pruneToCapacity(8)
         }
     }
 

@@ -392,18 +392,47 @@ struct MeetingRoomSceneLedger: Hashable {
 
 @MainActor
 enum MeetingRoomSceneMemoryStore {
-    private static var ledgers: [String: MeetingRoomSceneLedger] = [:]
-
-    static func ledger(for key: String) -> MeetingRoomSceneLedger {
-        ledgers[key] ?? .empty
+    private struct Entry {
+        var ledger: MeetingRoomSceneLedger
+        var updatedAt: TimeInterval
     }
 
-    static func remember(_ ledger: MeetingRoomSceneLedger, for key: String) {
-        ledgers[key] = ledger
+    private static let defaultMaxEntries = 32
+    private static let defaultTTLSeconds: TimeInterval = 30 * 60
+    private static var ledgers: [String: Entry] = [:]
+
+    static func ledger(for key: String, now: TimeInterval = Date().timeIntervalSince1970) -> MeetingRoomSceneLedger {
+        pruneExpired(now: now)
+        return ledgers[key]?.ledger ?? .empty
+    }
+
+    static func remember(_ ledger: MeetingRoomSceneLedger, for key: String, now: TimeInterval = Date().timeIntervalSince1970) {
+        pruneExpired(now: now)
+        ledgers[key] = Entry(ledger: ledger, updatedAt: now)
+        pruneToCapacity(defaultMaxEntries)
     }
 
     static func reset(for key: String) {
         ledgers[key] = nil
+    }
+
+    static func pruneExpired(now: TimeInterval = Date().timeIntervalSince1970, maxAgeSeconds: TimeInterval = defaultTTLSeconds) {
+        ledgers = ledgers.filter { _, entry in
+            now - entry.updatedAt <= maxAgeSeconds
+        }
+    }
+
+    static func pruneToCapacity(_ maxEntries: Int = defaultMaxEntries) {
+        guard ledgers.count > maxEntries else { return }
+        let keysToDrop = ledgers
+            .sorted { $0.value.updatedAt < $1.value.updatedAt }
+            .prefix(ledgers.count - maxEntries)
+            .map(\.key)
+        keysToDrop.forEach { ledgers[$0] = nil }
+    }
+
+    static func countForTesting() -> Int {
+        ledgers.count
     }
 }
 

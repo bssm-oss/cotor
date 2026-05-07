@@ -17,7 +17,7 @@
 | 모듈 | 책임 | Public entrypoint | 테스트 |
 | --- | --- | --- | --- |
 | CLI and presentation | 명령 파싱, interactive/TUI 실행, web adapter, 출력 formatting | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/Commands.kt`, `src/main/kotlin/com/cotor/presentation/cli/InteractiveCommand.kt` | `src/test/kotlin/com/cotor/presentation/cli/`, CLI 중심 integration test |
-| App server and company workflow | localhost `/api/app` route, 회사 dashboard/runtime/goals/issues/reviews/reports/operator chat | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` | `src/test/kotlin/com/cotor/app/` |
+| App server and company workflow | localhost `/api/app` route, 회사 dashboard/runtime/goals/issues/reviews/reports/operator chat, runtime retention | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt` | `src/test/kotlin/com/cotor/app/` |
 | Generic pipeline runtime | pipeline orchestration, stage execution, condition, aggregation, checkpoint | `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/` | `src/test/kotlin/com/cotor/` 아래 domain/orchestrator/executor test |
 | Agent/provider execution | provider plugin, local process 실행, model routing, OpenCode/Codex/local model adapter | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` | plugin/model/process test |
 | Runtime evidence and memory | durable action, provenance, knowledge memory, verification bundle, A2A context | `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/verification/`, `src/main/kotlin/com/cotor/context/` | runtime/provenance/knowledge/verification test |
@@ -40,12 +40,12 @@
 
 ### App server and company workflow
 
-- 책임: 회사 상태, app-server payload, runtime tick, 목표, 이슈, review queue, report, memory, operator command를 조율합니다.
-- Public entrypoint: `AppServer.kt`, `DesktopAppService.kt`, `DesktopModels.kt`, `GitWorkspaceService.kt`.
-- 내부 전용: route/test가 명시적으로 소비하지 않는 `src/main/kotlin/com/cotor/app/runtime/` helper.
+- 책임: 회사 상태, app-server payload, runtime tick, retention cleanup, 목표, 이슈, review queue, report, memory, operator command를 조율합니다.
+- Public entrypoint: `AppServer.kt`, `DesktopAppService.kt`, `DesktopModels.kt`, `GitWorkspaceService.kt`, `CompanyRuntimeRetention.kt`.
+- 내부 전용: route/test가 명시적으로 소비하지 않는 `src/main/kotlin/com/cotor/app/runtime/` runtime disposition/projection helper.
 - 의존 가능: domain runtime, provider adapter, GitHub integration, policy, evidence, verification, state store.
 - 의존 금지: SwiftUI 구현 세부사항과 UI-only copy.
-- 자주 바꾸는 작업: route field, dashboard card, runtime state transition, GitHub readiness, blocked reason. Kotlin test, Swift DTO/store, desktop docs를 함께 갱신합니다.
+- 자주 바꾸는 작업: route field, dashboard card, runtime state transition, retention cleanup, GitHub readiness, blocked reason. Kotlin test, Swift DTO/store, desktop docs를 함께 갱신합니다.
 
 ### Generic pipeline runtime
 
@@ -91,6 +91,7 @@
 - 의존 가능: HTTP를 통한 Kotlin app-server DTO contract.
 - 의존 금지: packaged runtime에서 repo-local Kotlin build file.
 - 자주 바꾸는 작업: 새 sidebar surface, DTO field, runtime control, meeting-room visualization. Swift test와 실제 app smoke를 실행합니다.
+- live company event stream은 잘못된 NDJSON 한 줄 때문에 앱을 offline으로 보이면 안 됩니다. backend lifecycle 소유권은 `DesktopStore` 중심으로 유지합니다.
 
 ### Packaging and install
 

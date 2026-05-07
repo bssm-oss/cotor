@@ -174,7 +174,7 @@ cotor delete    # 삭제
 - 전용 `인사평가` 탐색 surface에서 기존 회사 실행 데이터로 파생한 에이전트별 점수, 성공률, QA 통과율, 재시도, 평균 시간, 확인된 추정 비용을 보여줌
 - 회사 메모리 스냅샷은 company/project/team/agent 4계층으로 나뉘며, 기존 workflow memory 필드는 project + team의 호환 alias로 유지
 - 자율 런타임은 새 일을 만들기 전에 내부 품질 신호를 먼저 스캔해서, idle 루프가 무작위 continuous prompt 대신 `idle-no-discovered-problems` 또는 `discovery-triage-created` 같은 관측 가능한 상태를 남김
-- `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
+- `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨. 잘못된 NDJSON event line 하나는 로그로 남기고 건너뛰어 stream 전체가 끊기지 않음
 - 데스크톱 backend launch, health check, shutdown, client request가 같은 `COTOR_APP_TOKEN` source를 사용해서 token-protected local session이 어긋나지 않음
 - embedded 데스크톱 backend는 정리된 최소 환경으로 시작해서, 우연히 부모 shell에 있던 API key, provider token, password 계열 변수를 로컬 app-server로 넘기지 않음
 - `미팅룸`은 기본으로 `라이브 오피스` 픽셀 오피스 projection을 열고, 실제 런타임 데이터로 에이전트 상태, 이슈 카드, A2A 메시지, 리뷰 흐름, 활동을 보여주며 활동/리뷰 상세는 압축 drawer 뒤에 둠
@@ -230,6 +230,7 @@ cotor delete    # 삭제
 - 회사 요약 페이지에서는 압축된 런타임 상태와 최근 이슈만 먼저 보고, 필요할 때 고급 세부정보를 열어 차단/리뷰/활동 기록 확인
 - 전날 로컬 날짜 기준 아침 보고서 조회. 보고서는 LLM 생성 문장이 아니라 로컬 런타임, 활동, 이슈, 실행, 리뷰 데이터 집계로 생성
 - 회사별 로컬 자율 런타임 시작/중지
+- `cotor company runtime cleanup --company-id <id> --dry-run` 또는 `--all-companies --dry-run`으로 런타임 산출물 정리 후보를 먼저 확인 가능. 실제 삭제는 `--apply`가 필요하고 active/open/review/PR-linked worktree는 보호
 - active task/run이 남아 있으면 회사 런타임이 느린 idle backoff로 내려가지 않고 빠른 monitoring cadence를 유지해서 죽은 `RUNNING` 상태를 더 빨리 정리
 - app-server가 active company work 도중 종료되면, 현재 빌드는 일반 process-exit 실패로 굳히지 않고 해당 이슈를 다시 큐에 올려 재개 가능하게 유지
 - 그 뒤 데스크톱 앱을 다시 열면 실행 중이던 회사 런타임이 queued delegated work를 다시 태우고, 회사 활동 로그에도 복구 흐름이 바로 반영됨

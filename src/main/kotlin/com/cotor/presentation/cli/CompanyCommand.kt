@@ -3,6 +3,7 @@ package com.cotor.presentation.cli
 import com.cotor.app.*
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.NoSuchOption
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
@@ -561,7 +562,12 @@ private class CompanyReviewCeoCommand : CompanyServiceCommand(name = "ceo") {
 
 private class CompanyRuntimeCommand : CliktCommand(name = "runtime", help = "Control company runtime") {
     init {
-        subcommands(CompanyRuntimeStatusCommand(), CompanyRuntimeStartCommand(), CompanyRuntimeStopCommand())
+        subcommands(
+            CompanyRuntimeStatusCommand(),
+            CompanyRuntimeStartCommand(),
+            CompanyRuntimeStopCommand(),
+            CompanyRuntimeCleanupCommand()
+        )
     }
     override fun run() = Unit
 }
@@ -584,6 +590,34 @@ private class CompanyRuntimeStopCommand : CompanyServiceCommand(name = "stop") {
     private val companyId by option("--company-id").required()
     override fun run() = runBlocking {
         printJson(desktopService.stopCompanyRuntime(companyId), CompanyRuntimeSnapshot.serializer())
+    }
+}
+
+private class CompanyRuntimeCleanupCommand : CompanyServiceCommand(
+    name = "cleanup",
+    help = "Preview or apply runtime worktree/process retention cleanup. Dry-run is the default."
+) {
+    private val companyId by option("--company-id")
+    private val allCompanies by option("--all-companies").flag(default = false)
+    private val olderThanDays by option("--older-than-days").int()
+    private val apply by option("--apply").flag(default = false)
+    private val dryRun by option("--dry-run").flag(default = false)
+
+    override fun run() = runBlocking {
+        if (companyId == null && !allCompanies) {
+            throw UsageError("Pass --company-id <id> or --all-companies.")
+        }
+        if (apply && dryRun) {
+            throw UsageError("Pass only one of --apply or --dry-run.")
+        }
+        val request = RuntimeCleanupRequest(
+            companyId = companyId,
+            allCompanies = allCompanies,
+            olderThanDays = olderThanDays,
+            dryRun = dryRun || !apply,
+            apply = apply
+        )
+        printJson(desktopService.cleanupRuntime(request), RuntimeCleanupResult.serializer())
     }
 }
 
