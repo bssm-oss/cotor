@@ -118,7 +118,7 @@ The current macOS shell has two top-level modes.
   - Marketing Operator skill selection that reveals a delegation-policy panel for allowed channels, domains, daily publish limits, brand rules, session/secret references, and recent marketing run logs
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
-  - dedicated `Operator Chat` navigation surface with a message-thread interface for natural-language company commands; automation modes, approvals, and runtime actions are exposed through chat commands rather than persistent status/control panels
+  - dedicated `Operator Chat` navigation surface with a message-thread interface for natural-language company commands; selected-company messages go through an LLM-first operator planner that prefers local Ollama Gemma when available, chooses validated company tools, and answers from real tool results
   - progressive disclosure across the company and issue surfaces: the first view shows only the current company signal and focused issue queue, while backend health, paths, cost guardrails, metadata, execution logs, Linear links, and agent conversation details stay behind expandable detail views
   - dedicated `Reports` surface for previous-day morning reports covering completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
   - dedicated `Performance` surface for derived per-agent execution scores, success rates, QA pass rates, retries, duration, and known estimated cost without storing separate evaluation history
@@ -174,6 +174,7 @@ Current company-first routes:
 - `POST /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/chat-intake`
 - `POST /api/app/companies/{companyId}/operator/commands`
+- `POST /api/app/companies/{companyId}/operator/chat`
 - `GET /api/app/companies/{companyId}/issues`
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
@@ -222,7 +223,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect derived per-agent performance from existing issues, runs, reviews, org profiles, and company agent definitions, with insufficient-data agents called out separately
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to the `Live Office` runtime projection, with synthesized runtime/backend/review/session summaries, event-driven movement, and agent/issue/zone detail sheets
-- use the Operator Chat surface to ask for status, bulk switch selected-company agents to the free OpenCode default (`opencode/nemotron-3-super-free`), explicitly select DeepSeek only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one message-style command chat
+- use the Operator Chat surface to ask messy natural-language questions or commands. The backend asks the operator LLM, preferring local Ollama Gemma when available, to pick tools such as runtime inspection, performance inspection, blocked issue inspection, model updates, goal creation, HR staffing, GitHub/Linear sync, report generation, and problem-signal inspection, then returns a natural answer grounded in those tool results.
 - use Operator Chat for HR staffing requests such as hiring missing specialists or assigning mentors. HR hires inherit the current company execution model policy, avoid duplicate role coverage, and stay capped per chat command and runtime tick.
 - turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step
 - choose `ASK_ME`, `AGENT_APPROVED`, or `FULL_AUTO` automation; `AGENT_APPROVED` is the default and routes recoverable sensitive actions to CEO/QA/Reviewer approval instead of a user confirmation rail

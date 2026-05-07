@@ -85,6 +85,34 @@ class DesktopAppServiceTest : FunSpec({
         }
     }
 
+    fun operatorChatLlmExecutor(vararg outputs: String): AgentExecutor {
+        val queue = ArrayDeque(outputs.toList())
+        return object : AgentExecutor {
+            override suspend fun executeAgent(
+                agent: AgentConfig,
+                input: String?,
+                metadata: com.cotor.model.AgentExecutionMetadata
+            ): AgentResult {
+                val output = queue.removeFirstOrNull().orEmpty()
+                return AgentResult(
+                    agentName = agent.name,
+                    isSuccess = output.isNotBlank(),
+                    output = output.takeIf { it.isNotBlank() },
+                    error = output.takeIf { it.isBlank() }?.let { "empty test operator output" },
+                    duration = 1,
+                    metadata = emptyMap()
+                )
+            }
+
+            override suspend fun executeWithRetry(
+                agent: AgentConfig,
+                input: String?,
+                retryPolicy: com.cotor.model.RetryPolicy,
+                metadata: com.cotor.model.AgentExecutionMetadata
+            ): AgentResult = executeAgent(agent, input, metadata)
+        }
+    }
+
     test("builtin opencode company agent uses a longer timeout budget") {
         BuiltinAgentCatalog.get("opencode")!!.timeout shouldBe 45 * 60_000L
     }
@@ -560,7 +588,10 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = operatorChatLlmExecutor(
+                """{"reply":"인사평가 근거를 확인하겠습니다.","toolCalls":[{"tool":"inspect_performance","reason":"The user asked who is performing best.","args":{}}],"answerSourceHints":["agent-performance"]}""",
+                "Builder가 현재 가장 좋은 에이전트입니다. 성과 근거를 보면 완료 이슈와 실행 성공 기록이 가장 좋습니다."
+            )
         )
         val company = service.createCompany(name = "Operator Chat Performance", rootPath = appHome.toString())
         val seeded = stateStore.load()
@@ -649,6 +680,69 @@ class DesktopAppServiceTest : FunSpec({
         response.actions.shouldBeEmpty()
         response.blockedActions.shouldBeEmpty()
         stateStore.load().agentMessages.any { it.kind == "operator-answer" && it.body.contains("Builder") } shouldBe true
+    }
+
+    test("operator chat uses LLM planner for vague status requests instead of canned status fallback") {
+        val appHome = Files.createTempDirectory("operator-chat-llm-status-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = operatorChatLlmExecutor(
+                """{"reply":"제가 상태를 직접 확인해볼게요.","toolCalls":[{"tool":"inspect_runtime","reason":"The user asked whether agents are running.","args":{}}],"answerSourceHints":["company-summary"]}""",
+                "지금 회사 런타임은 멈춰 있고 실행 중인 에이전트는 없습니다. 막힌 이슈나 승인 대기는 없어 바로 목표를 넣고 시작할 수 있습니다."
+            )
+        )
+        val company = service.createCompany(name = "Operator Chat LLM", rootPath = appHome.toString())
+
+        val response = service.runOperatorChat(company.id, "에이전트들 잘 돌아가?")
+
+        response.message shouldContain "실행 중인 에이전트"
+        response.message shouldNotContain "Runtime"
+        response.answerSources.any { it.type == "company-summary" } shouldBe true
+        response.actions.shouldBeEmpty()
+        response.blockedActions.shouldBeEmpty()
+    }
+
+    test("operator chat does not replace invalid LLM output with deterministic status") {
+        val appHome = Files.createTempDirectory("operator-chat-invalid-llm-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = operatorChatLlmExecutor("not json", "still not json")
+        )
+        val company = service.createCompany(name = "Operator Chat Invalid", rootPath = appHome.toString())
+
+        val response = service.runOperatorChat(company.id, "hello")
+
+        response.message shouldContain "운영 채팅 모델이 요청을 해석하지 못했습니다"
+        response.blockedActions.single().type shouldBe "operator-chat-planner"
+        response.actions.shouldBeEmpty()
+    }
+
+    test("operator chat recovers tool choice from non-json LLM planner output") {
+        val appHome = Files.createTempDirectory("operator-chat-non-json-llm-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = operatorChatLlmExecutor(
+                "I should call inspect_runtime because the user asked whether the agents are running.",
+                "에이전트들이 멈춰 있어요. 무슨 문제가 있는지 확인해볼게요."
+            )
+        )
+        val company = service.createCompany(name = "Operator Chat Non JSON", rootPath = appHome.toString())
+
+        val response = service.runOperatorChat(company.id, "에이전트들 잘 돌아가?")
+
+        response.message shouldContain "현재 런타임"
+        response.message shouldContain "실행 중인 에이전트"
+        response.answerSources.any { it.type == "company-summary" } shouldBe true
+        response.blockedActions.shouldBeEmpty()
     }
 
     test("operator chat hard gates destructive policy changes") {

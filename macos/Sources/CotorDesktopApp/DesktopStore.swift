@@ -3300,32 +3300,10 @@ final class DesktopStore: ObservableObject {
             )
             return
         }
-        if selectedOperatorAutomationMode.uppercased() == "ASK_ME",
-           looksLikeHrStaffingChatRequest(normalized) {
-            appendOperatorChatMessage(
-                role: .assistant,
-                text: language(
-                    "HR Manager can hire missing agents or assign mentors. Confirm to run this staffing change.",
-                    "HR 매니저가 필요한 에이전트를 고용하거나 사수를 지정할 수 있습니다. 실행하려면 확인하세요."
-                ),
-                commands: [
-                    OperatorChatCommand(
-                        title: language("Run HR staffing", "HR 보강 실행"),
-                        prompt: trimmed,
-                        kind: .confirmHrStaffing
-                    ),
-                    OperatorChatCommand(
-                        title: language("Cancel", "취소"),
-                        prompt: "",
-                        kind: .cancelConfirmation
-                    )
-                ]
-            )
-            return
-        }
-
         let reply = await executeOperatorChatMessage(trimmed, normalized: normalized)
-        appendOperatorChatMessage(role: .assistant, text: reply)
+        if !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            appendOperatorChatMessage(role: .assistant, text: reply)
+        }
     }
 
     private func appendOperatorChatMessage(
@@ -3348,6 +3326,34 @@ final class DesktopStore: ObservableObject {
         }
         guard selectedCompany != nil else {
             return language("Select or create a company first.", "먼저 회사를 선택하거나 만들어주세요.")
+        }
+
+        if let response = await runCompanyOperatorChat(message: message) {
+            return operatorAssistantText(for: response)
+        }
+
+        if selectedOperatorAutomationMode.uppercased() == "ASK_ME",
+           looksLikeHrStaffingChatRequest(normalized) {
+            appendOperatorChatMessage(
+                role: .assistant,
+                text: language(
+                    "HR Manager can hire missing agents or assign mentors. Confirm to run this staffing change.",
+                    "HR 매니저가 필요한 에이전트를 고용하거나 사수를 지정할 수 있습니다. 실행하려면 확인하세요."
+                ),
+                commands: [
+                    OperatorChatCommand(
+                        title: language("Run HR staffing", "HR 보강 실행"),
+                        prompt: message,
+                        kind: .confirmHrStaffing
+                    ),
+                    OperatorChatCommand(
+                        title: language("Cancel", "취소"),
+                        prompt: "",
+                        kind: .cancelConfirmation
+                    )
+                ]
+            )
+            return ""
         }
 
         if looksLikeRuntimeStartChatRequest(normalized) {
@@ -3512,6 +3518,10 @@ final class DesktopStore: ObservableObject {
     }
 
     private func operatorAssistantText(for response: OperatorChatResponsePayload) -> String {
+        let message = sanitizeOperatorUserText(response.message, language: language)
+        if !message.isEmpty {
+            return message
+        }
         let blocked = response.blockedActions.map { operatorActionText($0) }
         if !blocked.isEmpty {
             return blocked.joined(separator: "\n")
@@ -3524,7 +3534,7 @@ final class DesktopStore: ObservableObject {
         if !actions.isEmpty {
             return actions.joined(separator: "\n")
         }
-        return sanitizeOperatorUserText(response.message, language: language)
+        return operatorFailureFallback()
     }
 
     private func operatorActionText(_ action: OperatorCommandActionPayload) -> String {

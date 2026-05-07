@@ -122,7 +122,7 @@ cotor delete
 - Marketing Operator skill을 선택하면 channel, domain, 일일 게시 한도, 브랜드 규칙, session/secret reference, 최근 marketing run log를 설정하는 위임 정책 패널 표시
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
-- 자연어 회사 명령을 메시지 스레드처럼 처리하는 전용 `운영 채팅` 탐색 surface. 자동화 모드, 승인, 런타임 동작은 지속 노출되는 상태/제어 패널이 아니라 채팅 명령으로 노출
+- 자연어 회사 명령을 메시지 스레드처럼 처리하는 전용 `운영 채팅` 탐색 surface. 선택된 회사의 메시지는 LLM-first 운영 planner가 먼저 해석하고, 가능한 경우 로컬 Ollama Gemma를 사용하며, 검증된 회사 도구를 고른 뒤 실제 tool 결과를 근거로 답함
 - 회사와 이슈 surface는 점진적 공개 구조를 사용해서 첫 화면에는 현재 회사 신호와 핵심 이슈 큐만 보이고, 백엔드 health, 경로, 비용 상한, 메타데이터, 실행 로그, Linear 링크, 에이전트 대화는 펼치는 상세 화면 안에 둠
 - 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 집계한 아침 보고서 전용 `보고서` surface
 - 별도 평가 이력을 저장하지 않고 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 에이전트별 점수, 성공률, QA 통과율, 재시도, 평균 시간, 확인된 추정 비용을 계산하는 전용 `인사평가` surface
@@ -180,6 +180,7 @@ cotor delete
 - `POST /api/app/companies/{companyId}/goals`
 - `POST /api/app/companies/{companyId}/chat-intake`
 - `POST /api/app/companies/{companyId}/operator/commands`
+- `POST /api/app/companies/{companyId}/operator/chat`
 - `GET /api/app/companies/{companyId}/issues`
 - `GET /api/app/companies/{companyId}/review-queue`
 - `GET /api/app/companies/{companyId}/activity`
@@ -228,7 +229,7 @@ cotor delete
 - 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 아이템 생성 및 머지 처리
 - `라이브 오피스` 런타임 projection과 runtime/backend/review/session 요약, 이벤트 기반 움직임, agent/issue/zone 상세 sheet를 함께 제공하는 전용 상황실 보기
-- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트를 무료 OpenCode 기본값(`opencode/nemotron-3-super-free`)으로 변경, 명시적으로 요청한 경우에만 DeepSeek 선택, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
+- 운영 채팅 surface에서 대충 쓴 자연어 질문이나 명령을 보내면 backend가 운영 LLM에게, 가능한 경우 로컬 Ollama Gemma를 우선 사용해, 런타임 점검, 인사평가, 막힌 이슈 확인, 모델 변경, 목표 생성, HR 보강, GitHub/Linear 동기화, 보고서 생성, 문제 신호 확인 같은 tool을 고르게 하고, 그 결과로 자연어 응답을 작성
 - 운영 채팅에서 필요한 specialist 고용이나 사수 지정을 HR Manager에게 맡길 수 있음. HR 고용은 회사의 현재 실행 모델 정책을 상속하고, 중복 역할과 chat/runtime tick별 무제한 고용을 막음
 - 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
 - `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO` 자동화 모드를 채팅 명령으로 바꿀 수 있고 기본값은 `AGENT_APPROVED`. 복구 가능한 민감 작업은 사용자 확인 rail 대신 CEO/QA/Reviewer 승인으로 라우팅
