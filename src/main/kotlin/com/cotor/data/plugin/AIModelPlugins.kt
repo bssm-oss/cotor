@@ -784,6 +784,14 @@ class OpenCodePlugin : AgentPlugin {
                 stderr = result.stderr.ifBlank { finalError ?: result.stderr }
             )
         }
+        if (result.stdout.isBlank()) {
+            throw ProcessExecutionException(
+                message = "OpenCode execution failed",
+                exitCode = result.exitCode,
+                stdout = "opencode run exit 0 but stdout and stderr were both empty",
+                stderr = "opencode run exit 0 but stdout and stderr were both empty"
+            )
+        }
 
         val parsedText = parseOpenCodeJsonOutput(result.stdout)
         return PluginExecutionOutput(parsedText, result.processId)
@@ -802,7 +810,11 @@ class OpenCodePlugin : AgentPlugin {
         // Keep the full task prompt out of process arguments; it may contain repo
         // context or user text that should not be visible via `ps`.
         val promptFile = withContext(Dispatchers.IO) {
-            Files.createTempFile("cotor-opencode-prompt-", ".md").also { path ->
+            val promptDir = context.workingDirectory
+                ?.resolve(".cotor/runtime/opencode-prompts")
+                ?.also { Files.createDirectories(it) }
+                ?: Path.of(System.getProperty("java.io.tmpdir"))
+            Files.createTempFile(promptDir, "opencode-prompt-", ".md").also { path ->
                 runCatching {
                     Files.setPosixFilePermissions(
                         path,

@@ -56,7 +56,7 @@ class OpenCodePluginTest : FunSpec({
                         assertOpenCodeRunCommand(command, "opencode/qwen3.6-plus-free", "hello")
                         ProcessResult(
                             exitCode = 0,
-                            stdout = "",
+                            stdout = """{"type":"text","text":"ok"}""",
                             stderr = "",
                             isSuccess = true
                         )
@@ -553,6 +553,102 @@ class OpenCodePluginTest : FunSpec({
             runInvoked shouldBe false
         } finally {
             server.stop(0)
+        }
+    }
+
+    test("exit 0 with blank stdout and stderr throws ProcessExecutionException") {
+        val plugin = OpenCodePlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = when (command) {
+                listOf("opencode", "models") -> ProcessResult(
+                    exitCode = 1,
+                    stdout = "",
+                    stderr = "models lookup unavailable",
+                    isSuccess = false
+                )
+                else -> ProcessResult(
+                    exitCode = 0,
+                    stdout = "",
+                    stderr = "",
+                    isSuccess = true
+                )
+            }
+        }
+
+        val error = shouldThrow<ProcessExecutionException> {
+            plugin.execute(
+                ExecutionContext(
+                    agentName = "opencode",
+                    input = "hello",
+                    timeout = 1_000,
+                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    environment = emptyMap()
+                ),
+                processManager
+            )
+        }
+
+        error.message shouldBe "OpenCode execution failed"
+        error.stdout shouldBe "opencode run exit 0 but stdout and stderr were both empty"
+        error.stderr shouldBe "opencode run exit 0 but stdout and stderr were both empty"
+    }
+
+    test("writes prompt file inside working directory when workingDirectory is set") {
+        val workDir = Files.createTempDirectory("cotor-test-workdir-")
+        val plugin = OpenCodePlugin()
+        var capturedPromptPath: String? = null
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = when (command) {
+                listOf("opencode", "models") -> ProcessResult(
+                    exitCode = 1,
+                    stdout = "",
+                    stderr = "models lookup unavailable",
+                    isSuccess = false
+                )
+                else -> {
+                    capturedPromptPath = command.firstOrNull { it.startsWith("--file=") }
+                        ?.removePrefix("--file=")
+                    ProcessResult(
+                        exitCode = 0,
+                        stdout = """{"type":"text","text":"done"}""",
+                        stderr = "",
+                        isSuccess = true
+                    )
+                }
+            }
+        }
+
+        try {
+            plugin.execute(
+                ExecutionContext(
+                    agentName = "opencode",
+                    input = "hello",
+                    timeout = 1_000,
+                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    environment = emptyMap(),
+                    workingDirectory = workDir
+                ),
+                processManager
+            )
+
+            val promptPath = Path.of(capturedPromptPath!!)
+            promptPath.startsWith(workDir.resolve(".cotor/runtime/opencode-prompts")) shouldBe true
+        } finally {
+            workDir.toFile().deleteRecursively()
         }
     }
 })
