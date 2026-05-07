@@ -4826,6 +4826,292 @@ class DesktopAppService(
         return response
     }
 
+    suspend fun runOperatorChat(
+        companyId: String,
+        message: String,
+        automationMode: OperatorAutomationMode? = null,
+        confirmFullAuto: Boolean = false,
+        confirmStaffing: Boolean = false
+    ): OperatorChatResponse {
+        val trimmedMessage = message.trim()
+        require(trimmedMessage.isNotBlank()) { "message is required" }
+        val normalized = trimmedMessage.lowercase()
+
+        detectHardGateOperatorAction(normalized)?.let { blocked ->
+            val response = OperatorChatResponse(
+                message = blocked.detail,
+                automationMode = currentOperatorAutomationMode(companyId),
+                blockedActions = listOf(blocked),
+                summary = buildOperatorCompanySummary(companyId),
+                answerSources = listOf(
+                    OperatorAnswerSource(
+                        type = "safety-policy",
+                        title = "Operator hard gate",
+                        detail = blocked.title
+                    )
+                )
+            )
+            recordOperatorChatConversation(companyId, trimmedMessage, response)
+            return response
+        }
+
+        if (
+            automationMode != null ||
+            confirmFullAuto ||
+            confirmStaffing ||
+            looksLikeDeterministicOperatorCommand(normalized)
+        ) {
+            return runOperatorCommand(
+                companyId = companyId,
+                message = trimmedMessage,
+                automationMode = automationMode,
+                confirmFullAuto = confirmFullAuto,
+                confirmStaffing = confirmStaffing
+            ).toOperatorChatResponse()
+        }
+
+        val answer = buildGroundedOperatorChatAnswer(companyId, trimmedMessage, normalized)
+        val response = OperatorChatResponse(
+            message = answer.message,
+            automationMode = currentOperatorAutomationMode(companyId),
+            summary = buildOperatorCompanySummary(companyId),
+            answerSources = answer.sources
+        )
+        recordOperatorChatConversation(companyId, trimmedMessage, response)
+        return response
+    }
+
+    private data class GroundedOperatorAnswer(
+        val message: String,
+        val sources: List<OperatorAnswerSource> = emptyList()
+    )
+
+    private fun OperatorCommandResponse.toOperatorChatResponse(
+        answerSources: List<OperatorAnswerSource> = emptyList()
+    ): OperatorChatResponse = OperatorChatResponse(
+        message = message,
+        automationMode = automationMode,
+        actions = actions,
+        pendingApprovals = pendingApprovals,
+        blockedActions = blockedActions,
+        summary = summary,
+        answerSources = answerSources
+    )
+
+    private suspend fun buildGroundedOperatorChatAnswer(
+        companyId: String,
+        message: String,
+        normalized: String
+    ): GroundedOperatorAnswer {
+        val state = stateStore.load().withDerivedMetrics()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val orgProfiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+        val performance = computeAgentPerformance(state, companyId, orgProfiles)
+        val companyIssues = state.issues.filter { it.companyId == companyId }
+        val companyIssueIds = companyIssues.mapTo(linkedSetOf()) { it.id }
+        val companyTasks = state.tasks.filter { task -> task.issueId == null || task.issueId in companyIssueIds }
+        val companyTaskIds = companyTasks.mapTo(linkedSetOf()) { it.id }
+        val companyRuns = state.runs.filter { it.taskId in companyTaskIds }
+        val companyReviews = state.reviewQueue.filter { it.companyId == companyId || it.issueId in companyIssueIds }
+        val companyActivity = state.companyActivity.filter { it.companyId == companyId }
+        val summary = buildOperatorCompanySummary(companyId)
+        val korean = prefersKoreanOperatorAnswer(message)
+
+        return when {
+            looksLikePerformanceQuestion(normalized) ->
+                buildOperatorPerformanceAnswer(performance, companyIssues, companyRuns, companyReviews, korean)
+            looksLikeBlockedQuestion(normalized) ->
+                buildOperatorBlockedAnswer(companyIssues, companyActivity, korean)
+            looksLikeApprovalOrReviewQuestion(normalized) ->
+                buildOperatorReviewAnswer(companyReviews, companyIssues, korean)
+            looksLikeRuntimeQuestion(normalized) ->
+                buildOperatorRuntimeAnswer(summary, companyRuns, korean)
+            else ->
+                buildOperatorGeneralAnswer(company, summary, performance, companyIssues, companyActivity, korean)
+        }
+    }
+
+    private fun buildOperatorPerformanceAnswer(
+        performance: List<AgentPerformanceSnapshot>,
+        issues: List<CompanyIssue>,
+        runs: List<AgentRun>,
+        reviews: List<ReviewQueueItem>,
+        korean: Boolean
+    ): GroundedOperatorAnswer {
+        val ranked = performance.sortedWith(
+            compareByDescending<AgentPerformanceSnapshot> { it.score ?: -1 }
+                .thenByDescending { it.completedIssues }
+                .thenBy { it.blockedIssues }
+                .thenBy { it.retryCount }
+        )
+        val best = ranked.firstOrNull()
+            ?: return GroundedOperatorAnswer(
+                message = if (korean) {
+                    "아직 인사평가에 쓸 에이전트 실행 데이터가 없습니다. 이슈 실행, 리뷰, QA 결과가 쌓이면 성과 순위를 답할 수 있습니다."
+                } else {
+                    "There is not enough agent performance data yet. Once issues, runs, and review outcomes exist, I can rank the team."
+                },
+                sources = listOf(
+                    OperatorAnswerSource(
+                        type = "agent-performance",
+                        title = "No scoreable agent performance",
+                        detail = "issues=${issues.size}, runs=${runs.size}, reviews=${reviews.size}"
+                    )
+                )
+            )
+
+        val scoreText = best.score?.let { "${it}점" } ?: if (korean) "점수 산정 전" else "not scored yet"
+        val successText = best.runSuccessRate?.let { "${(it * 100).toInt()}%" } ?: if (korean) "데이터 부족" else "insufficient data"
+        val qaText = best.qaPassRate?.let { "${(it * 100).toInt()}%" } ?: if (korean) "데이터 부족" else "insufficient data"
+        val message = if (korean) {
+            buildString {
+                append("${best.agentName}(${best.roleName})가 현재 가장 좋은 에이전트입니다. ")
+                append("성과 점수는 $scoreText, 완료 이슈 ${best.completedIssues}개, 실행 성공률 $successText, QA 통과율 ${qaText}입니다.")
+                if (best.blockedIssues > 0) append(" 다만 막힌 이슈 ${best.blockedIssues}개가 있어 다음 평가에서 감점 요인이 됩니다.")
+                if (best.retryCount > 0) append(" 재시도는 ${best.retryCount}회 기록됐습니다.")
+            }
+        } else {
+            buildString {
+                append("${best.agentName} (${best.roleName}) is currently the strongest agent. ")
+                append("Score: ${best.score ?: "not scored"}, completed issues: ${best.completedIssues}, run success: $successText, QA pass: $qaText.")
+                if (best.blockedIssues > 0) append(" ${best.blockedIssues} blocked issue(s) still weigh against that score.")
+                if (best.retryCount > 0) append(" Retry count: ${best.retryCount}.")
+            }
+        }
+        val sources = ranked.take(3).map { snapshot ->
+            OperatorAnswerSource(
+                type = "agent-performance",
+                title = "${snapshot.agentName} · ${snapshot.roleName}",
+                detail = "score=${snapshot.score ?: "n/a"}, completed=${snapshot.completedIssues}, active=${snapshot.activeIssues}, blocked=${snapshot.blockedIssues}, runSuccess=${snapshot.runSuccessRate ?: "n/a"}, qaPass=${snapshot.qaPassRate ?: "n/a"}",
+                refId = snapshot.agentId
+            )
+        } + OperatorAnswerSource(
+            type = "runtime-scope",
+            title = "Performance evidence scope",
+            detail = "issues=${issues.size}, runs=${runs.size}, reviews=${reviews.size}"
+        )
+        return GroundedOperatorAnswer(message = message, sources = sources)
+    }
+
+    private fun buildOperatorBlockedAnswer(
+        issues: List<CompanyIssue>,
+        activity: List<CompanyActivityItem>,
+        korean: Boolean
+    ): GroundedOperatorAnswer {
+        val blocked = issues.filter { it.status == IssueStatus.BLOCKED }.sortedByDescending { it.updatedAt }
+        if (blocked.isEmpty()) {
+            return GroundedOperatorAnswer(
+                message = if (korean) {
+                    "현재 막힌 이슈는 없습니다. 최근 활동 기준으로 차단 상태가 새로 쌓이지 않았습니다."
+                } else {
+                    "There are no blocked issues right now."
+                },
+                sources = activity.take(3).map {
+                    OperatorAnswerSource("activity", it.title, it.detail, it.id)
+                }
+            )
+        }
+        val lead = blocked.first()
+        val reason = humanizeOperatorBlockReason(lead.transitionReason ?: lead.providerBlockReason)
+        val message = if (korean) {
+            "현재 ${blocked.size}개 이슈가 막혀 있습니다. 가장 최근 항목은 \"${lead.title}\"이고, 원인은 $reason 입니다."
+        } else {
+            "${blocked.size} issue(s) are blocked. The most recent is \"${lead.title}\"; reason: $reason."
+        }
+        val sources = blocked.take(5).map { issue ->
+            OperatorAnswerSource(
+                type = "issue",
+                title = issue.title,
+                detail = humanizeOperatorBlockReason(issue.transitionReason ?: issue.providerBlockReason),
+                refId = issue.id
+            )
+        } + activity.filter { it.title.contains("blocked", ignoreCase = true) || it.severity == "error" }
+            .take(3)
+            .map { OperatorAnswerSource("activity", it.title, humanizeOperatorBlockReason(it.detail), it.id) }
+        return GroundedOperatorAnswer(message = message, sources = sources)
+    }
+
+    private fun buildOperatorReviewAnswer(
+        reviews: List<ReviewQueueItem>,
+        issues: List<CompanyIssue>,
+        korean: Boolean
+    ): GroundedOperatorAnswer {
+        val attention = reviews.filter { it.status != ReviewQueueStatus.MERGED }.sortedByDescending { it.updatedAt }
+        val ceoReady = attention.count { it.status == ReviewQueueStatus.READY_FOR_CEO || it.status == ReviewQueueStatus.READY_TO_MERGE }
+        val qaReady = attention.count { it.status == ReviewQueueStatus.AWAITING_QA || it.status == ReviewQueueStatus.CHANGES_REQUESTED }
+        val message = if (korean) {
+            "리뷰 큐에는 처리할 항목 ${attention.size}개가 있습니다. CEO 승인 대기 ${ceoReady}개, QA/수정 확인 ${qaReady}개입니다."
+        } else {
+            "The review queue has ${attention.size} active item(s): $ceoReady waiting on CEO/merge approval and $qaReady in QA or changes-requested review."
+        }
+        val issueById = issues.associateBy { it.id }
+        val sources = attention.take(5).map { item ->
+            OperatorAnswerSource(
+                type = "review",
+                title = issueById[item.issueId]?.title ?: "Review ${item.id}",
+                detail = item.status.name,
+                refId = item.id
+            )
+        }
+        return GroundedOperatorAnswer(message = message, sources = sources)
+    }
+
+    private fun buildOperatorRuntimeAnswer(
+        summary: OperatorCompanySummary,
+        runs: List<AgentRun>,
+        korean: Boolean
+    ): GroundedOperatorAnswer {
+        val activeRuns = runs.filter { it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.QUEUED }
+        val message = if (korean) {
+            "런타임은 ${summary.runtimeStatus} 상태입니다. 활성 에이전트 ${summary.activeAgentCount}개, 막힌 이슈 ${summary.blockedIssueCount}개, 승인 대기 ${summary.pendingApprovalCount}개입니다."
+        } else {
+            "Runtime status is ${summary.runtimeStatus}. Active agents: ${summary.activeAgentCount}, blocked issues: ${summary.blockedIssueCount}, pending approvals: ${summary.pendingApprovalCount}."
+        }
+        val sources = activeRuns.take(5).map { run ->
+            OperatorAnswerSource(
+                type = "run",
+                title = "${run.agentName} · ${run.status.name}",
+                detail = run.output?.take(180) ?: run.error?.take(180),
+                refId = run.id
+            )
+        }
+        return GroundedOperatorAnswer(message = message, sources = sources)
+    }
+
+    private fun buildOperatorGeneralAnswer(
+        company: Company,
+        summary: OperatorCompanySummary,
+        performance: List<AgentPerformanceSnapshot>,
+        issues: List<CompanyIssue>,
+        activity: List<CompanyActivityItem>,
+        korean: Boolean
+    ): GroundedOperatorAnswer {
+        val best = performance.firstOrNull { it.score != null }
+        val activeIssues = issues.count { it.status in setOf(IssueStatus.PLANNED, IssueStatus.DELEGATED, IssueStatus.IN_PROGRESS, IssueStatus.IN_REVIEW) }
+        val message = if (korean) {
+            buildString {
+                append("${company.name} 상태를 기준으로 답하면, 런타임은 ${summary.runtimeStatus}이고 활성 이슈는 ${activeIssues}개입니다. ")
+                append("막힌 이슈 ${summary.blockedIssueCount}개, 리뷰 ${summary.reviewQueueCount}개, 승인 대기 ${summary.pendingApprovalCount}개가 보입니다.")
+                best?.let { append(" 현재 성과 상위 에이전트는 ${it.agentName}(${it.roleName})입니다.") }
+            }
+        } else {
+            buildString {
+                append("${company.name} is ${summary.runtimeStatus}; active issues: $activeIssues. ")
+                append("Blocked issues: ${summary.blockedIssueCount}, review items: ${summary.reviewQueueCount}, pending approvals: ${summary.pendingApprovalCount}.")
+                best?.let { append(" Current top performer: ${it.agentName} (${it.roleName}).") }
+            }
+        }
+        val sources = buildList {
+            add(OperatorAnswerSource("company-summary", company.name, "runtime=${summary.runtimeStatus}, activeIssues=$activeIssues", company.id))
+            best?.let {
+                add(OperatorAnswerSource("agent-performance", "${it.agentName} · ${it.roleName}", "score=${it.score}", it.agentId))
+            }
+            activity.take(3).forEach { add(OperatorAnswerSource("activity", it.title, it.detail, it.id)) }
+        }
+        return GroundedOperatorAnswer(message = message, sources = sources)
+    }
+
     private data class OperatorModeUpdate(
         val mode: OperatorAutomationMode,
         val actions: List<OperatorCommandAction> = emptyList(),
@@ -5568,6 +5854,31 @@ class DesktopAppService(
         }
     }
 
+    private suspend fun recordOperatorChatConversation(
+        companyId: String,
+        request: String,
+        response: OperatorChatResponse
+    ) {
+        runCatching {
+            sendMessage(
+                companyId = companyId,
+                fromAgentName = "User",
+                toAgentName = "Company Operator",
+                kind = "operator-chat",
+                subject = "Operator question",
+                body = request
+            )
+            sendMessage(
+                companyId = companyId,
+                fromAgentName = "Company Operator",
+                toAgentName = null,
+                kind = "operator-answer",
+                subject = "Operator answer",
+                body = response.message
+            )
+        }
+    }
+
     private fun requestsFullAutoMode(text: String): Boolean =
         containsAny(text, "full_auto", "full auto", "풀오토", "완전 자동")
 
@@ -5601,6 +5912,57 @@ class DesktopAppService(
 
     private fun containsAny(text: String, vararg needles: String): Boolean =
         needles.any { text.contains(it) }
+
+    private fun looksLikeDeterministicOperatorCommand(text: String): Boolean =
+        requestsFullAutoMode(text) ||
+            looksLikeDeepSeekModelUpdate(text) ||
+            looksLikeHrStaffingRequest(text) ||
+            looksLikeRuntimeStart(text) ||
+            looksLikeRuntimeStop(text) ||
+            looksLikeBlockedIssueRetry(text) ||
+            looksLikeGitHubSync(text) ||
+            looksLikeLinearSync(text)
+
+    private fun looksLikePerformanceQuestion(text: String): Boolean =
+        containsAny(text, "인사평가", "성과", "performance", "평가", "제일 잘", "가장 좋", "최고", "best agent", "top agent")
+
+    private fun looksLikeBlockedQuestion(text: String): Boolean =
+        containsAny(text, "왜 막", "왜 blocked", "why blocked", "blocked", "블록", "막혔", "차단", "실패 원인")
+
+    private fun looksLikeApprovalOrReviewQuestion(text: String): Boolean =
+        containsAny(text, "review", "리뷰", "qa", "승인", "approval", "merge", "머지")
+
+    private fun looksLikeRuntimeQuestion(text: String): Boolean =
+        containsAny(text, "runtime", "런타임", "실행 중", "가동", "active agent", "활성 에이전트")
+
+    private fun prefersKoreanOperatorAnswer(message: String): Boolean =
+        message.any { ch -> ch in '\uAC00'..'\uD7A3' }
+
+    private fun humanizeOperatorBlockReason(reason: String?): String {
+        val text = reason?.trim().orEmpty()
+        if (text.isBlank()) {
+            return "No detailed reason was recorded."
+        }
+        val lower = text.lowercase()
+        return when {
+            isOpenCodeInterruptedBeforePlanningText(text) ->
+                "OpenCode was interrupted before producing planning text"
+            lower.contains(CEO_PLANNING_INVALID_OUTPUT.lowercase()) ->
+                "CEO planning did not produce a valid execution graph"
+            lower.contains("github publishing") ->
+                text.lineSequence().firstOrNull { it.isNotBlank() }?.take(240)
+                    ?: "GitHub publishing is not ready"
+            lower.contains("capability") && lower.contains("requires approval") ->
+                "A required execution capability is waiting for approval"
+            else -> text
+                .lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .take(3)
+                .joinToString(" ")
+                .take(300)
+        }
+    }
 
     private fun detectHardGateOperatorAction(text: String): OperatorCommandAction? {
         val title = when {
@@ -9415,6 +9777,19 @@ class DesktopAppService(
                     message.contains("invalid argument: [object object]")
                 )
 
+    private fun isOpenCodeInterruptedBeforePlanningText(message: String): Boolean {
+        val lower = message.lowercase()
+        val exit143 = lower.contains("exit=143") ||
+            lower.contains("exit 143") ||
+            lower.contains("exit code 143")
+        if (!exit143) {
+            return false
+        }
+        val stepStarted = lower.contains("step_start") || lower.contains("step-start")
+        val hasPlanningJson = lower.contains("```json") || lower.contains("\"issues\"")
+        return stepStarted && !hasPlanningJson
+    }
+
     private fun extractGitHubPublishReadinessFailureReason(
         task: AgentTask,
         issue: CompanyIssue,
@@ -9463,6 +9838,7 @@ class DesktopAppService(
                 message.contains(INTERRUPTED_RUN_ERROR.lowercase()) ||
                 (message.contains("pull request create failed") && isTransientGitHubPublishFailure(message)) ||
                 message.contains("submitted too quickly") ||
+                isOpenCodeInterruptedBeforePlanningText(message) ||
                 isRecoverableCodexExecutionConfigFailure(message) ||
                 isRecoverableCodexMcpBootstrapFailure(message) ||
                 isRecoverableOpenCodeCliFailure(message)
@@ -9475,6 +9851,7 @@ class DesktopAppService(
         }
         return failureSignals(task, run).any { message ->
             message.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) ||
+                isOpenCodeInterruptedBeforePlanningText(message) ||
                 CodexDefaults.isRetiredModelAliasFailure(message) ||
                 isOpenCodePromptFileArgumentOrderFailure(message)
         }
@@ -9599,7 +9976,7 @@ class DesktopAppService(
                     val recoverableRetryPending =
                         issue.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED) &&
                             retryDecision.canAutoRetry
-                    if (recoverableRetryPending) {
+                    if (recoverableRetryPending && !issue.kind.equals("planning", ignoreCase = true)) {
                         informationalTraceEvents += buildCompanyAutomationTraceEvent(
                             issue = issue,
                             goal = state.goals.firstOrNull { it.id == issue.goalId },
@@ -16363,6 +16740,22 @@ class DesktopAppService(
         return "$CEO_PLANNING_INVALID_OUTPUT: CEO planning task ${task.id} run $runRef ended with ${finalStatus.name} but did not produce a valid planning JSON block. Output summary: $summary"
     }
 
+    private fun isRetryableCeoPlanningInterruption(
+        task: AgentTask,
+        run: AgentRun?,
+        finalStatus: DesktopTaskStatus
+    ): Boolean =
+        finalStatus != DesktopTaskStatus.COMPLETED &&
+            failureSignals(task, run).any(::isOpenCodeInterruptedBeforePlanningText)
+
+    private fun ceoPlanningInterruptedReason(
+        task: AgentTask,
+        run: AgentRun?
+    ): String {
+        val runRef = run?.id ?: "none"
+        return "OpenCode was interrupted before producing planning text for CEO planning task ${task.id} run $runRef."
+    }
+
     private fun ceoPlanningRunOutputSummary(run: AgentRun?): String =
         listOfNotNull(run?.output, run?.error, run?.publish?.error)
             .joinToString("\n")
@@ -16484,6 +16877,133 @@ class DesktopAppService(
 
             val parsedPlan = if (finalStatus == DesktopTaskStatus.COMPLETED) parseCeoPlanningPayload(primaryRun?.output) else null
             if (parsedPlan == null) {
+                val retryableInterruption = isRetryableCeoPlanningInterruption(task, primaryRun, finalStatus)
+                if (retryableInterruption) {
+                    val latestRunsByTaskId = state.runs
+                        .filter { run -> state.tasks.any { it.issueId == currentIssue.id && it.id == run.taskId } }
+                        .groupBy { it.taskId }
+                        .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
+                    val retryDecision = resolveRecoverableRetryDecision(
+                        issueTasks = state.tasks.filter { it.issueId == currentIssue.id },
+                        latestRunsByTaskId = latestRunsByTaskId,
+                        now = now
+                    )
+                    val interruptionReason = ceoPlanningInterruptedReason(task, primaryRun)
+                    if (retryDecision.mode != RecoverableRetryMode.EXHAUSTED) {
+                        val retryReason = if (retryDecision.mode == RecoverableRetryMode.WAITING && retryDecision.retryAt != null) {
+                            "$interruptionReason Cotor will retry CEO planning after the provider cooldown."
+                        } else {
+                            "$interruptionReason Cotor will retry CEO planning instead of treating this as invalid CEO JSON."
+                        }
+                        val retryablePlanningIssue = currentIssue.copy(
+                            status = IssueStatus.PLANNED,
+                            transitionReason = retryReason,
+                            providerBlockReason = null,
+                            blockedBy = emptyList(),
+                            updatedAt = if (
+                                currentIssue.status == IssueStatus.PLANNED &&
+                                currentIssue.transitionReason == retryReason &&
+                                currentIssue.providerBlockReason == null
+                            ) {
+                                currentIssue.updatedAt
+                            } else {
+                                now
+                            }
+                        )
+                        traceEvents += buildCompanyAutomationTraceEvent(
+                            issue = currentIssue,
+                            goal = goal,
+                            oldStatus = currentIssue.status,
+                            newStatus = retryablePlanningIssue.status,
+                            source = "syncPlanningIssueFromTask",
+                            reason = retryReason,
+                            latestTask = task,
+                            latestRun = primaryRun,
+                            retryEligible = true
+                        )
+                        val nextState = state.copy(
+                            issues = state.issues.map { existing -> if (existing.id == currentIssue.id) retryablePlanningIssue else existing }
+                        ).recordCompanyActivity(
+                            companyId = company.id,
+                            projectContextId = currentIssue.projectContextId,
+                            goalId = goal.id,
+                            issueId = currentIssue.id,
+                            source = "ceo-planning",
+                            title = "CEO planning retry pending",
+                            detail = retryReason,
+                            severity = "warning"
+                        ).withDerivedMetrics()
+                        stateStore.save(nextState)
+                        runtimeContinuationCompanyId = currentIssue.companyId
+                        return@withLock
+                    }
+                    val exhaustedReason =
+                        "$interruptionReason Automatic retry budget was exhausted after ${retryDecision.consecutiveFailures} recoverable interruption(s)."
+                    val blockedTransition = "$exhaustedReason Downstream execution issues were not created."
+                    val blockedPlanningIssue = currentIssue.copy(
+                        status = IssueStatus.BLOCKED,
+                        transitionReason = blockedTransition,
+                        providerBlockReason = exhaustedReason,
+                        updatedAt = if (
+                            currentIssue.status == IssueStatus.BLOCKED &&
+                            currentIssue.transitionReason == blockedTransition &&
+                            currentIssue.providerBlockReason == exhaustedReason
+                        ) {
+                            currentIssue.updatedAt
+                        } else {
+                            now
+                        }
+                    )
+                    val decisionExists = state.goalDecisions.any { decision ->
+                        decision.companyId == company.id &&
+                            decision.goalId == goal.id &&
+                            decision.issueId == currentIssue.id &&
+                            decision.title == "CEO planning blocked" &&
+                            decision.escalations.contains(exhaustedReason)
+                    }
+                    val nextDecisions = if (decisionExists) {
+                        state.goalDecisions
+                    } else {
+                        state.goalDecisions + GoalOrchestrationDecision(
+                            id = UUID.randomUUID().toString(),
+                            companyId = company.id,
+                            goalId = goal.id,
+                            issueId = currentIssue.id,
+                            title = "CEO planning blocked",
+                            summary = "CEO planning for \"${goal.title}\" was interrupted before producing an execution graph.",
+                            createdIssues = emptyList(),
+                            assignments = emptyList(),
+                            escalations = listOf(exhaustedReason),
+                            createdAt = now
+                        )
+                    }
+                    traceEvents += buildCompanyAutomationTraceEvent(
+                        issue = currentIssue,
+                        goal = goal,
+                        oldStatus = currentIssue.status,
+                        newStatus = blockedPlanningIssue.status,
+                        source = "syncPlanningIssueFromTask",
+                        reason = blockedTransition,
+                        latestTask = task,
+                        latestRun = primaryRun,
+                        retryEligible = false
+                    )
+                    val nextState = state.copy(
+                        issues = state.issues.map { existing -> if (existing.id == currentIssue.id) blockedPlanningIssue else existing },
+                        goalDecisions = nextDecisions
+                    ).recordCompanyActivity(
+                        companyId = company.id,
+                        projectContextId = currentIssue.projectContextId,
+                        goalId = goal.id,
+                        issueId = currentIssue.id,
+                        source = "ceo-planning",
+                        title = "CEO planning blocked",
+                        detail = blockedTransition,
+                        severity = "error"
+                    ).withDerivedMetrics()
+                    stateStore.save(nextState)
+                    return@withLock
+                }
                 val invalidPlanningReason = ceoPlanningInvalidOutputReason(task, primaryRun, finalStatus)
                 val repairAttempts = state.tasks.count { candidate ->
                     candidate.issueId == currentIssue.id &&
@@ -16531,11 +17051,16 @@ class DesktopAppService(
                     runtimeContinuationCompanyId = currentIssue.companyId
                     return@withLock
                 }
+                val blockedTransition = "$invalidPlanningReason Downstream execution issues were not created."
+                val unchangedBlockedIssue =
+                    currentIssue.status == IssueStatus.BLOCKED &&
+                        currentIssue.transitionReason == blockedTransition &&
+                        currentIssue.providerBlockReason == invalidPlanningReason
                 val blockedPlanningIssue = currentIssue.copy(
                     status = IssueStatus.BLOCKED,
-                    transitionReason = "$invalidPlanningReason Downstream execution issues were not created.",
+                    transitionReason = blockedTransition,
                     providerBlockReason = invalidPlanningReason,
-                    updatedAt = now
+                    updatedAt = if (unchangedBlockedIssue) currentIssue.updatedAt else now
                 )
                 traceEvents += buildCompanyAutomationTraceEvent(
                     issue = currentIssue,
@@ -16548,9 +17073,17 @@ class DesktopAppService(
                     latestRun = primaryRun,
                     retryEligible = false
                 )
-                val nextState = state.copy(
-                    issues = state.issues.map { existing -> if (existing.id == currentIssue.id) blockedPlanningIssue else existing },
-                    goalDecisions = state.goalDecisions + GoalOrchestrationDecision(
+                val decisionExists = state.goalDecisions.any { decision ->
+                    decision.companyId == company.id &&
+                        decision.goalId == goal.id &&
+                        decision.issueId == currentIssue.id &&
+                        decision.title == "CEO planning blocked" &&
+                        decision.escalations.contains(invalidPlanningReason)
+                }
+                val nextDecisions = if (decisionExists) {
+                    state.goalDecisions
+                } else {
+                    state.goalDecisions + GoalOrchestrationDecision(
                         id = UUID.randomUUID().toString(),
                         companyId = company.id,
                         goalId = goal.id,
@@ -16562,6 +17095,10 @@ class DesktopAppService(
                         escalations = listOf(invalidPlanningReason),
                         createdAt = now
                     )
+                }
+                val nextState = state.copy(
+                    issues = state.issues.map { existing -> if (existing.id == currentIssue.id) blockedPlanningIssue else existing },
+                    goalDecisions = nextDecisions
                 ).recordCompanyActivity(
                     companyId = company.id,
                     projectContextId = currentIssue.projectContextId,
@@ -18653,6 +19190,19 @@ class DesktopAppService(
         goalId: String? = null,
         issueId: String? = null
     ): DesktopAppState {
+        val now = System.currentTimeMillis()
+        val cutoff = now - COMPANY_TRACE_DEDUP_WINDOW_MS
+        val duplicate = companyActivity.any { activity ->
+            activity.companyId == companyId &&
+                activity.issueId == issueId &&
+                activity.source == source &&
+                activity.title == title &&
+                activity.detail == detail &&
+                activity.createdAt >= cutoff
+        }
+        if (duplicate) {
+            return this
+        }
         val item = CompanyActivityItem(
             id = UUID.randomUUID().toString(),
             companyId = companyId,
@@ -18663,7 +19213,7 @@ class DesktopAppService(
             title = title,
             detail = detail,
             severity = severity,
-            createdAt = System.currentTimeMillis()
+            createdAt = now
         )
         return copy(companyActivity = (listOf(item) + companyActivity).take(200))
     }

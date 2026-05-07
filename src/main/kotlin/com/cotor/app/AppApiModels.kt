@@ -136,6 +136,25 @@ data class OperatorCommandResponse(
 )
 
 @Serializable
+data class OperatorAnswerSource(
+    val type: String,
+    val title: String,
+    val detail: String? = null,
+    val refId: String? = null
+)
+
+@Serializable
+data class OperatorChatResponse(
+    val message: String,
+    val automationMode: OperatorAutomationMode,
+    val actions: List<OperatorCommandAction> = emptyList(),
+    val pendingApprovals: List<OperatorCommandAction> = emptyList(),
+    val blockedActions: List<OperatorCommandAction> = emptyList(),
+    val summary: OperatorCompanySummary? = null,
+    val answerSources: List<OperatorAnswerSource> = emptyList()
+)
+
+@Serializable
 data class UpdateGoalRequest(
     val title: String? = null,
     val description: String? = null,

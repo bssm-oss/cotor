@@ -1596,6 +1596,24 @@ internal fun Application.cotorAppModule(
                     }
                 }
 
+                route("/{companyId}/operator/chat") {
+                    post {
+                        if (!requireToken(token)) return@post
+                        val companyId = call.parameters["companyId"]
+                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                        val request = call.receive<OperatorCommandRequest>()
+                        respondDesktopRequest {
+                            desktopService.runOperatorChat(
+                                companyId = companyId,
+                                message = request.message,
+                                automationMode = request.automationMode,
+                                confirmFullAuto = request.confirmFullAuto,
+                                confirmStaffing = request.confirmStaffing
+                            )
+                        }
+                    }
+                }
+
                 route("/{companyId}/issues") {
                     get {
                         if (!requireToken(token)) return@get
