@@ -6065,12 +6065,6 @@ class DesktopAppService(
         if (!shouldCreateFreshTask && expectedWorkflowLineage != null) {
             synchronizeWorkflowTaskLineage(executableIssue.id, task.id, expectedWorkflowLineage)
         }
-        if (task.status == DesktopTaskStatus.QUEUED) {
-            runCatching { runTaskIfPresent(task.id) }
-                .onFailure { cause ->
-                    markCompanyRuntimeError(executableIssue.companyId, cause)
-                }
-        }
         val runningIssue = stateMutex.withLock {
             val latest = stateStore.load()
             val currentIssue = latest.issues.firstOrNull { it.id == executableIssue.id } ?: return@withLock executableIssue
@@ -6113,6 +6107,12 @@ class DesktopAppService(
             runningIssue.id,
             comment = "Cotor started work on \"${runningIssue.title}\" with agent ${profile.executionAgentName}."
         )
+        if (task.status == DesktopTaskStatus.QUEUED) {
+            runCatching { runTaskIfPresent(task.id) }
+                .onFailure { cause ->
+                    markCompanyRuntimeError(executableIssue.companyId, cause)
+                }
+        }
         return runningIssue
     }
 
