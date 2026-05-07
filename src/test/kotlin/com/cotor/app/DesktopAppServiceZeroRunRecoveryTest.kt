@@ -162,7 +162,8 @@ private fun zeroRunTestService(
         gitWorkspaceService = gitWorkspaceService,
         configRepository = mockk<ConfigRepository>(relaxed = true),
         agentExecutor = mockk<AgentExecutor>(relaxed = true),
-        linearTracker = linearTracker
+        linearTracker = linearTracker,
+        autoStartAutomationRefresh = false
     )
 }
 
