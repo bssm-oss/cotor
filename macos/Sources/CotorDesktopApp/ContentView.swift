@@ -3581,10 +3581,10 @@ private struct CompanyChatControlRail: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
             }
-            .onChange(of: sentMessages.count) { _ in
+            .onChange(of: sentMessages.count) {
                 withAnimation(ShellMotion.spring) { proxy.scrollTo("chat-bottom", anchor: .bottom) }
             }
-            .onChange(of: store.operatorCommandResponses.count) { _ in
+            .onChange(of: store.operatorCommandResponses.count) {
                 withAnimation(ShellMotion.spring) { proxy.scrollTo("chat-bottom", anchor: .bottom) }
             }
         }
@@ -3614,7 +3614,7 @@ private struct CompanyChatControlRail: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
-                    .background(ShellPalette.panelRaised)
+                    .background(ChatPalette.assistantBubble)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
                 }
@@ -3663,7 +3663,7 @@ private struct CompanyChatControlRail: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .background(ShellPalette.panelRaised)
+                .background(ChatPalette.assistantBubble)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .frame(maxWidth: bubbleMaxWidth, alignment: .leading)
             }
@@ -3838,8 +3838,9 @@ private struct CompanyChatControlRail: View {
 }
 
 private enum ChatPalette {
-    static let userBubble = Color(nsColor: NSColor(red: 0.95, green: 0.76, blue: 0.20, alpha: 1))
-    static let userText = Color(nsColor: NSColor.black.withAlphaComponent(0.85))
+    static let userBubble = ShellPalette.chatUserBubble
+    static let userText = ShellPalette.chatUserText
+    static let assistantBubble = ShellPalette.chatAssistantBubble
 }
 
 private struct OrgChartNode: View {
