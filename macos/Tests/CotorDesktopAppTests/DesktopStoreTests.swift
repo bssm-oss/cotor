@@ -27,6 +27,7 @@ struct DesktopStoreTests {
             specialties: [],
             collaborationInstructions: nil,
             preferredCollaboratorIds: [],
+            mentorAgentId: nil,
             memoryNotes: nil,
             enabled: true,
             displayOrder: 0,
@@ -115,6 +116,59 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func askMeHrStaffingChatRequestAddsConfirmationToTimeline() async {
+        let store = DesktopStore()
+        store.language = .korean
+        store.selectedCompanyID = "company"
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DashboardPayload.empty.settings,
+            companies: [company(id: "company", repositoryId: "repo", name: "Test Company", operatorAutomationMode: "ASK_ME")],
+            companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: [],
+            agentPerformance: []
+        )
+
+        await store.submitOperatorChatMessage("팀 보강해")
+
+        #expect(store.operatorChatMessages.map(\.role) == [.user, .assistant])
+        #expect(store.operatorChatMessages.last?.commands.map(\.kind) == [.confirmHrStaffing, .cancelConfirmation])
+        #expect(store.operatorChatMessages.last?.text.contains("HR 매니저") == true)
+        #expect(store.isSendingOperatorChatMessage == false)
+    }
+
+    @Test
+    func operatorSuggestedCommandsExposeHrStaffingAndMentorActions() {
+        let store = DesktopStore()
+        store.language = .korean
+
+        let commands = store.operatorSuggestedCommands()
+        let titles = commands.map(\.title)
+        let prompts = commands.map(\.prompt).joined(separator: "\n")
+
+        #expect(titles.contains("팀 보강"))
+        #expect(titles.contains("사수 지정"))
+        #expect(prompts.contains("HR 매니저"))
+        #expect(prompts.contains("사수"))
+    }
+
+    @Test
     func orgProfileShiftSelectionAndClearWorkAcrossRanges() {
         let store = DesktopStore()
         store.dashboard = DashboardPayload(
@@ -194,6 +248,7 @@ struct DesktopStoreTests {
                     specialties: ["qa", "review"],
                     collaborationInstructions: nil,
                     preferredCollaboratorIds: [],
+                    mentorAgentId: nil,
                     memoryNotes: nil,
                     enabled: true,
                     displayOrder: 0,
@@ -210,6 +265,7 @@ struct DesktopStoreTests {
                     specialties: ["build"],
                     collaborationInstructions: nil,
                     preferredCollaboratorIds: [],
+                    mentorAgentId: nil,
                     memoryNotes: nil,
                     enabled: true,
                     displayOrder: 1,
@@ -794,6 +850,7 @@ struct DesktopStoreTests {
             specialties: ["marketing"],
             collaborationInstructions: nil,
             preferredCollaboratorIds: [],
+            mentorAgentId: nil,
             memoryNotes: nil,
             enabled: true,
             displayOrder: 1,
@@ -1121,8 +1178,13 @@ struct DesktopStoreTests {
         WorkspaceRecord(id: id, repositoryId: repositoryId, name: name, baseBranch: "master", createdAt: 0, updatedAt: 0)
     }
 
-    private func company(id: String, repositoryId: String, name: String) -> CompanyRecord {
-        CompanyRecord(id: id, name: name, rootPath: "/tmp/\(name)", repositoryId: repositoryId, defaultBaseBranch: "master", backendKind: "LOCAL_COTOR", linearSyncEnabled: false, linearConfigOverride: nil, autonomyEnabled: true, dailyBudgetCents: nil, monthlyBudgetCents: nil, createdAt: 0, updatedAt: 0, operatorAutomationMode: "AGENT_APPROVED")
+    private func company(
+        id: String,
+        repositoryId: String,
+        name: String,
+        operatorAutomationMode: String = "AGENT_APPROVED"
+    ) -> CompanyRecord {
+        CompanyRecord(id: id, name: name, rootPath: "/tmp/\(name)", repositoryId: repositoryId, defaultBaseBranch: "master", backendKind: "LOCAL_COTOR", linearSyncEnabled: false, linearConfigOverride: nil, autonomyEnabled: true, dailyBudgetCents: nil, monthlyBudgetCents: nil, createdAt: 0, updatedAt: 0, operatorAutomationMode: operatorAutomationMode)
     }
 
     private func goal(id: String, companyId: String, title: String, status: String) -> GoalRecord {
@@ -1158,6 +1220,7 @@ struct DesktopStoreTests {
             specialties: specialties,
             collaborationInstructions: nil,
             preferredCollaboratorIds: [],
+            mentorAgentId: nil,
             memoryNotes: nil,
             enabled: enabled,
             displayOrder: 0,

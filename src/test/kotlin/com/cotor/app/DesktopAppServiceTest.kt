@@ -496,6 +496,199 @@ class DesktopAppServiceTest : FunSpec({
         persisted.all { it.model == com.cotor.model.OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
     }
 
+    test("new companies seed HR Manager and mentor assignments") {
+        val appHome = Files.createTempDirectory("hr-seed-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "HR Seed", rootPath = appHome.toString())
+
+        val definitions = service.listCompanyAgentDefinitions(company.id)
+        val byTitle = definitions.associateBy { it.title }
+
+        definitions.map { it.title }.contains("HR Manager") shouldBe true
+        byTitle.getValue("CEO").mentorAgentId.shouldBeNull()
+        byTitle.getValue("HR Manager").mentorAgentId shouldBe byTitle.getValue("CEO").id
+        byTitle.getValue("Engineering Lead").mentorAgentId shouldBe byTitle.getValue("CEO").id
+        byTitle.getValue("Builder").mentorAgentId shouldBe byTitle.getValue("Engineering Lead").id
+        byTitle.getValue("Backend Builder").mentorAgentId shouldBe byTitle.getValue("Engineering Lead").id
+        byTitle.getValue("QA").mentorAgentId shouldBe byTitle.getValue("Engineering Lead").id
+    }
+
+    test("company agent mentor can be created updated and cleared") {
+        val appHome = Files.createTempDirectory("hr-mentor-update-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "HR Mentor", rootPath = appHome.toString())
+        val ceo = service.listCompanyAgentDefinitions(company.id).first { it.title == "CEO" }
+
+        val created = service.createCompanyAgentDefinition(
+            companyId = company.id,
+            title = "Frontend Specialist",
+            agentCli = "opencode",
+            roleSummary = "Own frontend delivery",
+            mentorAgentId = ceo.id
+        )
+        created.mentorAgentId shouldBe ceo.id
+
+        val engineeringLead = service.listCompanyAgentDefinitions(company.id).first { it.title == "Engineering Lead" }
+        val updated = service.updateCompanyAgentDefinition(
+            companyId = company.id,
+            agentId = created.id,
+            mentorAgentId = engineeringLead.id
+        )
+        updated.mentorAgentId shouldBe engineeringLead.id
+
+        val cleared = service.updateCompanyAgentDefinition(
+            companyId = company.id,
+            agentId = created.id,
+            mentorAgentId = ""
+        )
+        cleared.mentorAgentId.shouldBeNull()
+    }
+
+    test("operator HR staffing waits in ask-me mode and hires with a mentor after confirmation") {
+        val appHome = Files.createTempDirectory("hr-operator-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "HR Operator", rootPath = appHome.toString())
+        val initial = stateStore.load()
+        val narrowedDefinitions = initial.companyAgentDefinitions
+            .filter { it.companyId != company.id || it.title in setOf("CEO", "HR Manager", "Engineering Lead") }
+            .map { definition ->
+                if (definition.companyId == company.id && definition.title == "Engineering Lead") {
+                    definition.copy(roleSummary = "mentor engineering hires", specialties = listOf("mentorship"))
+                } else {
+                    definition
+                }
+            }
+        val narrowedIds = narrowedDefinitions.mapTo(linkedSetOf()) { it.id }
+        stateStore.save(
+            initial.copy(
+                companyAgentDefinitions = narrowedDefinitions,
+                agentCapabilityProfiles = initial.agentCapabilityProfiles.filter { it.agentId in narrowedIds },
+                orgProfiles = emptyList()
+            )
+        )
+
+        val pending = service.runOperatorCommand(
+            companyId = company.id,
+            message = "프론트 화면 작업에 필요한 사람 고용해",
+            automationMode = OperatorAutomationMode.ASK_ME
+        )
+        pending.pendingApprovals.single().status shouldBe "USER_CONFIRMATION_REQUIRED"
+        stateStore.load().companyAgentDefinitions.none {
+            it.companyId == company.id && it.title == "Frontend Specialist"
+        } shouldBe true
+
+        val confirmed = service.runOperatorCommand(
+            companyId = company.id,
+            message = "프론트 화면 작업에 필요한 사람 고용해",
+            confirmStaffing = true
+        )
+        val definitions = service.listCompanyAgentDefinitions(company.id)
+        val engineeringLead = definitions.first { it.title == "Engineering Lead" }
+        val hired = definitions.firstOrNull { it.title == "Frontend Specialist" }.shouldNotBeNull()
+
+        confirmed.actions.any { it.type == "hr-staffing" && it.status == "DONE" } shouldBe true
+        confirmed.shouldHideRawOperatorInternals()
+        hired.agentCli shouldBe "opencode"
+        hired.model shouldBe OpenCodeDefaults.DEFAULT_MODEL
+        hired.mentorAgentId shouldBe engineeringLead.id
+        stateStore.load().agentMessages.any {
+            it.kind == "hr-onboarding" && it.fromAgentName == "HR Manager" && it.toAgentName == hired.title
+        } shouldBe true
+    }
+
+    test("runtime HR staffing review hires at most one missing specialist per tick") {
+        val appHome = Files.createTempDirectory("hr-runtime-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(name = "HR Runtime", rootPath = appHome.toString())
+        val now = System.currentTimeMillis()
+        val initial = stateStore.load()
+        val workspace = initial.workspaces.first { it.repositoryId == company.repositoryId }
+        val project = initial.projectContexts.first { it.companyId == company.id }
+        val goal = CompanyGoal(
+            id = "hr-runtime-goal",
+            companyId = company.id,
+            projectContextId = project.id,
+            title = "Ship frontend and backend",
+            description = "Needs focused specialists.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "hr-runtime-issue",
+            companyId = company.id,
+            projectContextId = project.id,
+            goalId = goal.id,
+            workspaceId = workspace.id,
+            title = "Frontend and backend implementation",
+            description = "Build SwiftUI frontend and Kotlin backend changes.",
+            status = IssueStatus.PLANNED,
+            acceptanceCriteria = listOf("frontend flow works", "backend API works"),
+            createdAt = now,
+            updatedAt = now
+        )
+        val narrowedDefinitions = initial.companyAgentDefinitions
+            .filter { it.companyId != company.id || it.title in setOf("CEO", "HR Manager", "Engineering Lead") }
+            .map { definition ->
+                if (definition.companyId == company.id && definition.title == "Engineering Lead") {
+                    definition.copy(roleSummary = "mentor engineering hires", specialties = listOf("mentorship"))
+                } else {
+                    definition
+                }
+            }
+        val narrowedIds = narrowedDefinitions.mapTo(linkedSetOf()) { it.id }
+        stateStore.save(
+            initial.copy(
+                companyAgentDefinitions = narrowedDefinitions,
+                agentCapabilityProfiles = initial.agentCapabilityProfiles.filter { it.agentId in narrowedIds },
+                orgProfiles = emptyList(),
+                goals = initial.goals + goal,
+                issues = initial.issues + issue,
+                companyRuntimes = initial.companyRuntimes.map { runtime ->
+                    if (runtime.companyId == company.id) {
+                        runtime.copy(status = CompanyRuntimeStatus.RUNNING)
+                    } else {
+                        runtime
+                    }
+                }
+            )
+        )
+
+        val tick = service.runCompanyRuntimeTick(company.id)
+        val hiredSpecialists = service.listCompanyAgentDefinitions(company.id).filter {
+            it.title.endsWith("Specialist")
+        }
+
+        tick.lastAction.orEmpty() shouldContain "hr-hired:1"
+        hiredSpecialists shouldHaveSize 1
+        hiredSpecialists.single().model shouldBe OpenCodeDefaults.DEFAULT_MODEL
+    }
+
     test("agent approved operator mode routes blocked issue retry to a senior agent") {
         val appHome = Files.createTempDirectory("operator-approval-home")
         val stateStore = DesktopStateStore { appHome }
@@ -4332,7 +4525,7 @@ class DesktopAppServiceTest : FunSpec({
         val issues = service.listIssues(goal.id)
 
         profiles.map { it.executionAgentName }.distinct() shouldBe listOf("opencode")
-        profiles shouldHaveSize 10
+        profiles shouldHaveSize 11
         val assignedProfileIds = issues.mapNotNull { it.assigneeProfileId }.toSet()
         assignedProfileIds.shouldNotBeEmpty()
         assignedProfileIds.subtract(profiles.map { it.id }.toSet()).shouldBeEmpty()
@@ -4385,6 +4578,7 @@ class DesktopAppServiceTest : FunSpec({
             "CEO",
             "Product Strategist",
             "Marketing Operator",
+            "HR Manager",
             "Engineering Lead",
             "UX Builder",
             "UI Builder",
@@ -5394,6 +5588,7 @@ class DesktopAppServiceTest : FunSpec({
             "CEO",
             "Product Strategist",
             "Marketing Operator",
+            "HR Manager",
             "Engineering Lead",
             "UX Builder",
             "UI Builder",

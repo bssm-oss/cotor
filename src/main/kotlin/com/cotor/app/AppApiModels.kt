@@ -102,7 +102,8 @@ data class ChatIntakeResponse(
 data class OperatorCommandRequest(
     val message: String,
     val automationMode: OperatorAutomationMode? = null,
-    val confirmFullAuto: Boolean = false
+    val confirmFullAuto: Boolean = false,
+    val confirmStaffing: Boolean = false
 )
 
 @Serializable
@@ -202,6 +203,7 @@ data class CreateCompanyAgentDefinitionRequest(
     val specialties: List<String> = emptyList(),
     val collaborationInstructions: String? = null,
     val preferredCollaboratorIds: List<String> = emptyList(),
+    val mentorAgentId: String? = null,
     val memoryNotes: String? = null,
     val enabled: Boolean = true
 )
@@ -215,6 +217,7 @@ data class UpdateCompanyAgentDefinitionRequest(
     val specialties: List<String>? = null,
     val collaborationInstructions: String? = null,
     val preferredCollaboratorIds: List<String>? = null,
+    val mentorAgentId: String? = null,
     val memoryNotes: String? = null,
     val enabled: Boolean? = null,
     val displayOrder: Int? = null

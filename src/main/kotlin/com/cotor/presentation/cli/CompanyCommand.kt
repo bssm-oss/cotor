@@ -251,6 +251,7 @@ private class CompanyAgentAddCommand : CompanyServiceCommand(name = "add") {
     private val specialties by option("--specialty").multiple()
     private val collaborationInstructions by option("--collaboration-instructions")
     private val preferredCollaboratorIds by option("--preferred-collaborator-id").multiple()
+    private val mentorAgentId by option("--mentor-agent-id")
     private val memoryNotes by option("--memory-notes")
     private val enabled by option("--enabled").choice("true", "false").default("true")
 
@@ -265,6 +266,7 @@ private class CompanyAgentAddCommand : CompanyServiceCommand(name = "add") {
                 specialties = specialties,
                 collaborationInstructions = collaborationInstructions,
                 preferredCollaboratorIds = preferredCollaboratorIds,
+                mentorAgentId = mentorAgentId,
                 memoryNotes = memoryNotes,
                 enabled = enabled.toBooleanStrict()
             ),
@@ -283,6 +285,7 @@ private class CompanyAgentUpdateCommand : CompanyServiceCommand(name = "update")
     private val specialties by option("--specialty").multiple()
     private val collaborationInstructions by option("--collaboration-instructions")
     private val preferredCollaboratorIds by option("--preferred-collaborator-id").multiple()
+    private val mentorAgentId by option("--mentor-agent-id")
     private val memoryNotes by option("--memory-notes")
     private val enabled by option("--enabled").choice("true", "false")
     private val displayOrder by option("--display-order").int()
@@ -299,6 +302,7 @@ private class CompanyAgentUpdateCommand : CompanyServiceCommand(name = "update")
                 specialties = specialties.takeIf { it.isNotEmpty() },
                 collaborationInstructions = collaborationInstructions,
                 preferredCollaboratorIds = preferredCollaboratorIds.takeIf { it.isNotEmpty() },
+                mentorAgentId = mentorAgentId,
                 memoryNotes = memoryNotes,
                 enabled = enabled?.toBooleanStrict(),
                 displayOrder = displayOrder

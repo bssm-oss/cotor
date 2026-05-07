@@ -218,14 +218,16 @@ struct DesktopAPI {
         companyId: String,
         message: String,
         automationMode: String? = nil,
-        confirmFullAuto: Bool = false
+        confirmFullAuto: Bool = false,
+        confirmStaffing: Bool = false
     ) async throws -> OperatorCommandResponsePayload {
         try await post(
             path: "api/app/companies/\(companyId)/operator/commands",
             body: OperatorCommandRequestPayload(
                 message: message,
                 automationMode: automationMode,
-                confirmFullAuto: confirmFullAuto
+                confirmFullAuto: confirmFullAuto,
+                confirmStaffing: confirmStaffing
             )
         )
     }
@@ -523,6 +525,7 @@ struct DesktopAPI {
         specialties: [String],
         collaborationInstructions: String?,
         preferredCollaboratorIds: [String],
+        mentorAgentId: String?,
         memoryNotes: String?,
         enabled: Bool = true
     ) async throws -> CompanyAgentDefinitionRecord {
@@ -536,6 +539,7 @@ struct DesktopAPI {
                 specialties: specialties,
                 collaborationInstructions: collaborationInstructions,
                 preferredCollaboratorIds: preferredCollaboratorIds,
+                mentorAgentId: mentorAgentId,
                 memoryNotes: memoryNotes,
                 enabled: enabled
             )
@@ -552,6 +556,7 @@ struct DesktopAPI {
         specialties: [String],
         collaborationInstructions: String?,
         preferredCollaboratorIds: [String],
+        mentorAgentId: String?,
         memoryNotes: String?,
         enabled: Bool
     ) async throws -> CompanyAgentDefinitionRecord {
@@ -565,6 +570,7 @@ struct DesktopAPI {
                 specialties: specialties,
                 collaborationInstructions: collaborationInstructions,
                 preferredCollaboratorIds: preferredCollaboratorIds,
+                mentorAgentId: mentorAgentId,
                 memoryNotes: memoryNotes,
                 enabled: enabled,
                 displayOrder: nil

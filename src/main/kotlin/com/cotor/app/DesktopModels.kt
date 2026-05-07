@@ -281,6 +281,7 @@ data class CompanyAgentDefinition(
     val specialties: List<String> = emptyList(),
     val collaborationInstructions: String? = null,
     val preferredCollaboratorIds: List<String> = emptyList(),
+    val mentorAgentId: String? = null,
     val memoryNotes: String? = null,
     val enabled: Boolean = true,
     val displayOrder: Int = 0,

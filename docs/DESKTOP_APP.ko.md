@@ -118,6 +118,7 @@ cotor delete
 - 하나의 루트 폴더에 묶이는 회사 생성
 - 기본으로 쉬운 저장소 `지도`를 열고, 준비된 그래프가 없어도 폴더 기반 기본 지도를 보여주며, 기술적인 그래프 파일 경로 없이 `에이전트 회의`와 라이브 플로어로 전환할 수 있는 `상황실` 직접 탐색
 - 에이전트 정의 작성
+- 에이전트 편집기와 팀 카드에서 압축형 사수 배정 표시. 새 회사에는 HR Manager가 기본 생성되어 필요한 specialist 고용과 사수 지정을 맡음
 - Marketing Operator skill을 선택하면 channel, domain, 일일 게시 한도, 브랜드 규칙, session/secret reference, 최근 marketing run log를 설정하는 위임 정책 패널 표시
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
@@ -211,6 +212,8 @@ cotor delete
 - 회사당 하나의 작업 폴더 바인딩
 - 최소 입력 기반 회사 에이전트 정의
 - 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
+- 회사 에이전트별 선택 사수(`mentorAgentId`) 저장. 사수는 같은 회사의 활성 에이전트만 선택할 수 있고, 고급 배정 영역에서 비울 수 있음
+- 새 회사에는 HR Manager와 CEO/Product/Engineering/Builder/QA/Release 기본 사수 관계를 함께 생성
 - 회사 에이전트 편집기에서 내장 스킬 카탈로그를 보여주고, 친근한 스킬 선택값을 각 에이전트의 `SKILL_RUN` capability allowlist로 저장
 - 에이전트 편집기에서 Marketing Operator 위임 정책 설정. 이 정책은 허용된 자사/social domain과 channel 안에서만 browser 및 marketing publish capability를 열고, 정책 밖 action은 사용자 승인으로 보내지 않고 deny 처리
 - 로컬 지도 도구가 있으면 작업공간 구조 확인용 내장 회사 에이전트 선택 가능, 그리고 모든 회사 에이전트 실행 메모리에 가벼운 작업공간 지도 지침 주입
@@ -226,6 +229,7 @@ cotor delete
 - 리뷰 큐 아이템 생성 및 머지 처리
 - 기본 저장소 `지도`와 runtime/backend/review/session 상태를 합성한 실시간 활동, 실행 현황/리뷰 요약을 함께 제공하는 전용 상황실 보기
 - 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
+- 운영 채팅에서 필요한 specialist 고용이나 사수 지정을 HR Manager에게 맡길 수 있음. HR 고용은 `opencode/nemotron-3-super-free`를 사용하고, 중복 역할과 chat/runtime tick별 무제한 고용을 막음
 - 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
 - `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO` 자동화 모드를 채팅 명령으로 바꿀 수 있고 기본값은 `AGENT_APPROVED`. 복구 가능한 민감 작업은 사용자 확인 rail 대신 CEO/QA/Reviewer 승인으로 라우팅
 - 저장소 삭제, 대량 파일 삭제, secret 작업, 비용 상한 해제, 배포/머지 정책 해제 같은 hard-gate 작업은 모든 모드에서 차단
