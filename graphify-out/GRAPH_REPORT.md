@@ -1,7 +1,7 @@
 # Graph Report - cotor-hr-manager-mentor-hiring  (2026-05-07)
 
 ## Corpus Check
-- 335 files · ~547,535 words
+- 335 files · ~547,554 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary

@@ -668,11 +668,17 @@ class DesktopAppServiceTest : FunSpec({
                 agentCapabilityProfiles = initial.agentCapabilityProfiles.filter { it.agentId in narrowedIds },
                 orgProfiles = emptyList(),
                 goals = initial.goals + goal,
-                issues = initial.issues + issue
+                issues = initial.issues + issue,
+                companyRuntimes = initial.companyRuntimes.map { runtime ->
+                    if (runtime.companyId == company.id) {
+                        runtime.copy(status = CompanyRuntimeStatus.RUNNING)
+                    } else {
+                        runtime
+                    }
+                }
             )
         )
 
-        service.startCompanyRuntime(company.id)
         val tick = service.runCompanyRuntimeTick(company.id)
         val hiredSpecialists = service.listCompanyAgentDefinitions(company.id).filter {
             it.title.endsWith("Specialist")
