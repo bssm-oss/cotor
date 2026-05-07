@@ -704,6 +704,36 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("company memory snapshot route supports company-level request without issue id") {
+        coEvery { desktopService.companyMemorySnapshot("company-1", null, null) } returns CompanyMemorySnapshotResponse(
+            companyMemory = "Company memory",
+            workflowMemory = "Project memory\nTeam memory",
+            agentMemory = "Agent memory",
+            projectMemory = "Project memory",
+            teamMemory = "Team memory"
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/companies/company-1/memory-snapshot") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"companyMemory\":\"Company memory\""
+            response.bodyAsText() shouldContain "\"projectMemory\":\"Project memory\""
+            response.bodyAsText() shouldContain "\"teamMemory\":\"Team memory\""
+            coVerify(exactly = 1) { desktopService.companyMemorySnapshot("company-1", null, null) }
+        }
+    }
+
     test("company github status route returns backend readiness payload when authorized") {
         coEvery { desktopService.githubPublishStatus("company-1") } returns GitHubPublishStatus(
             policy = CodePublishMode.REQUIRE_GITHUB_PR,

@@ -309,8 +309,38 @@ class DesktopAppServiceExecutionMemoryTest : FunSpec({
 
         snapshot.companyMemory shouldContain "company=Snapshot Co"
         snapshot.projectMemory shouldContain "goal=Snapshot Goal"
-        snapshot.teamMemory shouldContain "team memory"
+        snapshot.teamMemory shouldContain "recentDecisions="
         snapshot.workflowMemory shouldContain "goal=Snapshot Goal"
+        snapshot.agentMemory shouldContain "role=CEO"
+    }
+
+    test("companyMemorySnapshot returns company-level memory before any issue exists") {
+        val appHome = Files.createTempDirectory("desktop-company-memory-no-issue-home")
+        val stateStore = DesktopStateStore { appHome }
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-company-memory-no-issue-repo").resolve("repo"))
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "main"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+        )
+
+        val company = service.createCompany(
+            name = "Empty Snapshot Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "main"
+        )
+
+        val snapshot = service.companyMemorySnapshot(company.id)
+
+        snapshot.companyMemory shouldContain "company=Empty Snapshot Co"
+        snapshot.projectMemory shouldContain "issueContext=No active issue selected."
+        snapshot.workflowMemory shouldContain "issueContext=No active issue selected."
         snapshot.agentMemory shouldContain "role=CEO"
     }
 })

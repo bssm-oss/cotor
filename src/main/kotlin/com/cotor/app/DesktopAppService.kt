@@ -214,6 +214,10 @@ class DesktopAppService(
         private const val NO_OP_PR_REUSE_REFRESH_INTERVAL_MS = 60_000L
         private const val PR_METADATA_REFRESH_CACHE_MS = 60_000L
         private const val CEO_PLANNING_SOURCE = "ceo-planning"
+        private const val FALLBACK_PLANNING_SOURCE_PREFIX = "fallback-planning:"
+        private const val CEO_PLANNING_INVALID_OUTPUT = "CEO_PLANNING_INVALID_OUTPUT"
+        private const val CEO_PLANNING_REPAIR_MARKER = "CEO_PLANNING_REPAIR"
+        private const val RUN_PROCESS_TERMINATION_TIMEOUT_MS = 2_000L
         private const val QA_REVIEW_SOURCE_PREFIX = "qa-review:"
         private const val CEO_APPROVAL_SOURCE_PREFIX = "ceo-approval:"
         private const val SHUTDOWN_JOIN_TIMEOUT_MS = 5_000L
@@ -3063,14 +3067,22 @@ class DesktopAppService(
             ?: throw IllegalArgumentException("Company not found: $companyId")
         val issue = when {
             issueId != null -> state.issues.firstOrNull { it.id == issueId && it.companyId == companyId }
+                ?: throw IllegalArgumentException("Issue not found for company: $companyId")
             else -> state.issues.firstOrNull { it.companyId == companyId }
-        } ?: throw IllegalArgumentException("Issue not found for company: $companyId")
-        val goal = issue.goalId?.let { goalId -> state.goals.firstOrNull { it.id == goalId } }
-        val projectContext = issue.projectContextId?.let { projectContextId -> state.projectContexts.firstOrNull { it.id == projectContextId } }
+        }
+        val goal = issue?.goalId
+            ?.let { goalId -> state.goals.firstOrNull { it.id == goalId } }
+            ?: state.goals
+                .filter { it.companyId == companyId && it.status != GoalStatus.COMPLETED }
+                .maxByOrNull { it.updatedAt }
+        val projectContext = issue?.projectContextId
+            ?.let { projectContextId -> state.projectContexts.firstOrNull { it.id == projectContextId } }
+            ?: state.projectContexts.firstOrNull { it.companyId == companyId }
+        val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
         val profile = when {
-            agentProfileId != null -> state.orgProfiles.firstOrNull { it.id == agentProfileId && it.companyId == companyId }
-            else -> state.orgProfiles.firstOrNull { it.companyId == companyId && it.roleName == "CEO" }
-                ?: state.orgProfiles.firstOrNull { it.companyId == companyId }
+            agentProfileId != null -> profiles.firstOrNull { it.id == agentProfileId && it.companyId == companyId }
+            else -> profiles.firstOrNull { it.companyId == companyId && it.roleName == "CEO" }
+                ?: profiles.firstOrNull { it.companyId == companyId }
         } ?: throw IllegalArgumentException("Agent profile not found for company: $companyId")
 
         return buildCompanyMemorySnapshot(state, company, projectContext, goal, issue, profile).toResponse()
@@ -3327,6 +3339,13 @@ class DesktopAppService(
                     code = BlockedReasonCode.PROVIDER_ERROR,
                     summary = "The execution provider failed.",
                     source = source("run.error", "providerBlockReason", "transitionReason"),
+                    retryable = true
+                )
+            has(CEO_PLANNING_INVALID_OUTPUT.lowercase()) ->
+                snapshot(
+                    code = BlockedReasonCode.CEO_PLANNING_INVALID_OUTPUT,
+                    summary = "CEO planning did not produce a valid execution graph.",
+                    source = source("transitionReason", "run.error", "providerBlockReason"),
                     retryable = true
                 )
             else ->
@@ -6183,6 +6202,14 @@ class DesktopAppService(
             if (existingPlanningIssue != null && existingPlanningTaskRunning) {
                 return existing.sortedByDescending { it.updatedAt }
             }
+            if (
+                existingPlanningIssue != null &&
+                existingPlanningIssue.status == IssueStatus.BLOCKED &&
+                listOf(existingPlanningIssue.transitionReason, existingPlanningIssue.providerBlockReason)
+                    .any { it?.contains(CEO_PLANNING_INVALID_OUTPUT) == true }
+            ) {
+                return existing.sortedByDescending { it.updatedAt }
+            }
             if (existingPlanningIssue != null &&
                 existingPlanningIssue.status == IssueStatus.DONE &&
                 unresolvedNonPlanning.isNotEmpty()
@@ -6306,11 +6333,36 @@ class DesktopAppService(
                     )
                     val company = state.companies.firstOrNull { it.id == goal.companyId } ?: return@withLock
                     val projectContext = state.projectContexts.firstOrNull { it.companyId == company.id } ?: return@withLock
+                    val decision = GoalOrchestrationDecision(
+                        id = UUID.randomUUID().toString(),
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = planningIssue.id,
+                        title = "Fallback planned execution graph",
+                        summary = "Fallback planner decomposed \"${goal.title}\" into ${fallback.first.size} branchable issues because autonomous CEO planning is disabled.",
+                        createdIssues = fallback.first.map { it.id },
+                        assignments = fallback.first.mapNotNull { createdIssue ->
+                            val assignee = profiles.firstOrNull { it.id == createdIssue.assigneeProfileId }?.roleName
+                            assignee?.let { "${createdIssue.title} -> $it" }
+                        },
+                        escalations = listOf(updatedPlanningIssue.transitionReason.orEmpty()),
+                        createdAt = now
+                    )
                     val nextState = state.copy(
                         issues = state.issues.filterNot { it.id == planningIssueId } + updatedPlanningIssue + fallback.first,
                         issueDependencies = state.issueDependencies.filterNot { dep ->
                             dep.issueId == planningIssueId
-                        } + fallback.second
+                        } + fallback.second,
+                        goalDecisions = state.goalDecisions + decision
+                    ).recordCompanyActivity(
+                        companyId = company.id,
+                        projectContextId = planningIssue.projectContextId,
+                        goalId = goal.id,
+                        issueId = planningIssue.id,
+                        source = "fallback-planning",
+                        title = "Fallback planned goal",
+                        detail = updatedPlanningIssue.transitionReason,
+                        severity = "warning"
                     ).withDerivedMetrics()
                     stateStore.save(nextState)
                     writeCompanyContextSnapshot(nextState, company, projectContext)
@@ -6525,17 +6577,19 @@ class DesktopAppService(
         if (!shouldCreateFreshTask && expectedWorkflowLineage != null) {
             synchronizeWorkflowTaskLineage(executableIssue.id, task.id, expectedWorkflowLineage)
         }
-        if (task.status == DesktopTaskStatus.QUEUED) {
-            runCatching { runTaskIfPresent(task.id) }
-                .onFailure { cause ->
-                    markCompanyRuntimeError(executableIssue.companyId, cause)
-                }
-        }
         val runningIssue = stateMutex.withLock {
             val latest = stateStore.load()
             val currentIssue = latest.issues.firstOrNull { it.id == executableIssue.id } ?: return@withLock executableIssue
             val runningIssue = currentIssue.copy(
-                status = if (currentIssue.status == IssueStatus.DONE || currentIssue.status == IssueStatus.IN_REVIEW) {
+                status = if (currentIssue.status in setOf(
+                        IssueStatus.IN_REVIEW,
+                        IssueStatus.READY_FOR_CEO,
+                        IssueStatus.WAITING_FOR_APPROVAL,
+                        IssueStatus.BLOCKED,
+                        IssueStatus.DONE,
+                        IssueStatus.CANCELED
+                    )
+                ) {
                     currentIssue.status
                 } else {
                     IssueStatus.IN_PROGRESS
@@ -6565,6 +6619,12 @@ class DesktopAppService(
             runningIssue.id,
             comment = "Cotor started work on \"${runningIssue.title}\" with agent ${profile.executionAgentName}."
         )
+        if (task.status == DesktopTaskStatus.QUEUED) {
+            runCatching { runTaskIfPresent(task.id) }
+                .onFailure { cause ->
+                    markCompanyRuntimeError(executableIssue.companyId, cause)
+                }
+        }
         return runningIssue
     }
 
@@ -7605,6 +7665,7 @@ class DesktopAppService(
     }
 
     suspend fun stopCompanyRuntime(companyId: String): CompanyRuntimeSnapshot {
+        val terminatedBeforeStop = terminateActiveCompanyRunProcesses(companyId)
         val runtimeJob = companyRuntimeJobs.remove(companyId)
         runtimeJob?.cancel()
         if (runtimeJob != null) {
@@ -7614,6 +7675,7 @@ class DesktopAppService(
         }
         companyRuntimeWakeSignals.remove(companyId)
         codexAppServerManager.stop(companyId)
+        val terminatedRunProcesses = terminatedBeforeStop + terminateActiveCompanyRunProcesses(companyId)
         val snapshot = stateMutex.withLock {
             val state = stateStore.load()
             val now = System.currentTimeMillis()
@@ -7625,7 +7687,11 @@ class DesktopAppService(
                         status = CompanyRuntimeStatus.STOPPED,
                         lastStoppedAt = now,
                         manuallyStoppedAt = now,
-                        lastAction = "runtime-stopped",
+                        lastAction = if (terminatedRunProcesses > 0) {
+                            "runtime-stopped, terminated-run-processes:$terminatedRunProcesses"
+                        } else {
+                            "runtime-stopped"
+                        },
                         backendLifecycleState = BackendLifecycleState.STOPPED,
                         backendPid = null
                     )
@@ -7648,6 +7714,54 @@ class DesktopAppService(
             title = "Stopped runtime"
         )
         return snapshot
+    }
+
+    private suspend fun terminateActiveCompanyRunProcesses(companyId: String): Int {
+        val processIds = stateStore.load().let { state ->
+            val tasksById = state.tasks.associateBy { it.id }
+            val issuesById = state.issues.associateBy { it.id }
+            state.runs
+                .filter { run -> run.status == AgentRunStatus.RUNNING || run.status == AgentRunStatus.QUEUED }
+                .filter { run ->
+                    val issueId = tasksById[run.taskId]?.issueId
+                    issueId != null && issuesById[issueId]?.companyId == companyId
+                }
+                .mapNotNull { it.processId }
+                .distinct()
+        }
+        if (processIds.isEmpty()) {
+            return 0
+        }
+        return withContext(Dispatchers.IO) {
+            processIds.count { processId -> terminateProcessTree(processId) }
+        }
+    }
+
+    private fun terminateProcessTree(processId: Long): Boolean {
+        val root = ProcessHandle.of(processId).orElse(null) ?: return false
+        if (!root.isAlive) {
+            return false
+        }
+        val handles = root.descendants().toList().asReversed() + root
+        handles.forEach { handle ->
+            runCatching {
+                if (handle.isAlive) {
+                    handle.destroy()
+                }
+            }
+        }
+        val deadline = System.currentTimeMillis() + RUN_PROCESS_TERMINATION_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline && handles.any { it.isAlive }) {
+            Thread.sleep(25)
+        }
+        handles.forEach { handle ->
+            runCatching {
+                if (handle.isAlive) {
+                    handle.destroyForcibly()
+                }
+            }
+        }
+        return true
     }
 
     suspend fun stopCompanyRuntime(): CompanyRuntimeSnapshot {
@@ -9715,6 +9829,7 @@ class DesktopAppService(
                     recoverableRetryPending -> issue.status
                     latestTask == null || issue.id in activeTaskIssueIds || issue.status == IssueStatus.DONE || issue.status == IssueStatus.CANCELED -> issue.status
                     workflowDrivenIssue -> issue.status
+                    issue.kind.equals("planning", ignoreCase = true) -> issue.status
                     latestTask.status == DesktopTaskStatus.COMPLETED -> IssueStatus.DONE
                     latestTask.status == DesktopTaskStatus.FAILED || latestTask.status == DesktopTaskStatus.PARTIAL -> IssueStatus.BLOCKED
                     else -> issue.status
@@ -12897,6 +13012,19 @@ class DesktopAppService(
         return task
     }
 
+    private suspend fun executeTaskInline(taskId: String) {
+        try {
+            executeTask(taskId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            updateTaskStatus(taskId, DesktopTaskStatus.FAILED)
+            syncIssueFromTask(taskId, DesktopTaskStatus.FAILED)
+        } finally {
+            intentionallyInterruptedTaskIds.remove(taskId)
+        }
+    }
+
     private suspend fun recordRunFailure(
         task: AgentTask,
         workspace: Workspace,
@@ -13976,7 +14104,11 @@ class DesktopAppService(
                 } else {
                     "Fallback planner assigned this issue to ${assignee?.roleName ?: plannedIssue.assigneeRole}."
                 },
-                sourceSignal = "$CEO_PLANNING_SOURCE:${goal.id}",
+                sourceSignal = if (planningSource == "ceo") {
+                    "$CEO_PLANNING_SOURCE:${goal.id}"
+                } else {
+                    "$FALLBACK_PLANNING_SOURCE_PREFIX${goal.id}"
+                },
                 createdAt = now + index,
                 updatedAt = now + index
             )
@@ -15483,6 +15615,9 @@ class DesktopAppService(
         profile: OrgAgentProfile
     ): String = buildCeoPlanningPrompt(state, issue, profile)
 
+    internal fun hasValidCeoPlanningPayloadForTesting(output: String?): Boolean =
+        parseCeoPlanningPayload(output) != null
+
     internal fun buildCompanyMemorySnapshotForTesting(
         state: DesktopAppState,
         company: Company,
@@ -16218,6 +16353,82 @@ class DesktopAppService(
         return hasContext || hasMessages
     }
 
+    private fun ceoPlanningInvalidOutputReason(
+        task: AgentTask,
+        run: AgentRun?,
+        finalStatus: DesktopTaskStatus
+    ): String {
+        val runRef = run?.id ?: "none"
+        val summary = ceoPlanningRunOutputSummary(run)
+        return "$CEO_PLANNING_INVALID_OUTPUT: CEO planning task ${task.id} run $runRef ended with ${finalStatus.name} but did not produce a valid planning JSON block. Output summary: $summary"
+    }
+
+    private fun ceoPlanningRunOutputSummary(run: AgentRun?): String =
+        listOfNotNull(run?.output, run?.error, run?.publish?.error)
+            .joinToString("\n")
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .take(12)
+            .joinToString("\n")
+            .take(1_000)
+            .ifBlank { "No assistant planning text was recorded." }
+
+    private fun buildCeoPlanningRepairTask(
+        state: DesktopAppState,
+        issue: CompanyIssue,
+        task: AgentTask,
+        primaryRun: AgentRun?,
+        now: Long
+    ): AgentTask {
+        val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+        val profile = issue.assigneeProfileId?.let { id -> profiles.firstOrNull { it.id == id } }
+        val agentName = task.agents.firstOrNull()?.takeIf { it.isNotBlank() }
+            ?: profile?.executionAgentName?.takeIf { it.isNotBlank() }
+            ?: preferredExecutableAgent()
+        val repairPrompt = buildString {
+            appendLine("$CEO_PLANNING_REPAIR_MARKER:")
+            appendLine("The previous CEO planning run did not produce valid planning JSON, so this is the only automatic repair attempt.")
+            appendLine("Return JSON only inside one ```json fenced block. Do not use tools, do not inspect files, and do not write prose outside the JSON block.")
+            appendLine("Required schema:")
+            appendLine("```json")
+            appendLine("""{"goalSummary":"...","issues":[{"refId":"exec-1","title":"...","description":"...","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":true,"dependsOn":[],"acceptanceCriteria":["..."],"reviewRequired":true,"approvalRequired":true}]}""")
+            appendLine("```")
+            appendLine()
+            appendLine("Invalid previous output summary:")
+            appendLine(ceoPlanningRunOutputSummary(primaryRun))
+            appendLine()
+            appendLine("Original planning prompt:")
+            appendLine(task.prompt.trim())
+        }.trim()
+        return AgentTask(
+            id = UUID.randomUUID().toString(),
+            workspaceId = task.workspaceId,
+            issueId = issue.id,
+            title = "${issue.title} repair",
+            prompt = repairPrompt,
+            agents = listOf(agentName),
+            plan = TaskExecutionPlan(
+                goalSummary = issue.title,
+                decompositionSource = "ceo-planning-repair",
+                assignments = listOf(
+                    AgentAssignmentPlan(
+                        participantId = issue.assigneeProfileId,
+                        agentName = agentName,
+                        role = profile?.roleName ?: "CEO",
+                        phase = "planning",
+                        focus = "repair-ceo-planning-json",
+                        assignedPrompt = repairPrompt
+                    )
+                )
+            ),
+            status = DesktopTaskStatus.QUEUED,
+            createdAt = now,
+            updatedAt = now,
+            workflowLineage = task.workflowLineage
+        )
+    }
+
     private suspend fun syncPlanningIssueFromTask(
         task: AgentTask,
         issue: CompanyIssue,
@@ -16225,6 +16436,7 @@ class DesktopAppService(
         finalStatus: DesktopTaskStatus
     ) {
         var runtimeContinuationCompanyId: String? = null
+        var repairTaskToRun: String? = null
         val traceEvents = mutableListOf<CompanyAutomationTraceEvent>()
         val now = System.currentTimeMillis()
         stateMutex.withLock {
@@ -16254,6 +16466,9 @@ class DesktopAppService(
                     )
                     return@withLock
                 }
+                if (currentIssue.transitionReason?.contains(CEO_PLANNING_INVALID_OUTPUT) == true) {
+                    return@withLock
+                }
                 val updatedPlanningIssue = currentIssue.copy(
                     status = IssueStatus.DONE,
                     transitionReason = "CEO planning lane already produced downstream issues for this goal.",
@@ -16268,42 +16483,116 @@ class DesktopAppService(
             }
 
             val parsedPlan = if (finalStatus == DesktopTaskStatus.COMPLETED) parseCeoPlanningPayload(primaryRun?.output) else null
-            val planningSource = if (parsedPlan != null) "ceo" else "fallback"
-            val decomposition = if (parsedPlan != null) {
-                val plannedIssues = materializePlannedIssues(
-                    goal = goal,
-                    workspace = workspace,
-                    profiles = profiles,
-                    plan = parsedPlan,
-                    now = now,
-                    planningSource = "ceo"
-                )
-                plannedIssues to plannedIssues.flatMap { createdIssue ->
-                    createdIssue.dependsOn.map { dependencyId ->
-                        IssueDependency(
-                            id = UUID.randomUUID().toString(),
-                            issueId = createdIssue.id,
-                            dependsOnIssueId = dependencyId
-                        )
-                    }
+            if (parsedPlan == null) {
+                val invalidPlanningReason = ceoPlanningInvalidOutputReason(task, primaryRun, finalStatus)
+                val repairAttempts = state.tasks.count { candidate ->
+                    candidate.issueId == currentIssue.id &&
+                        candidate.prompt.contains(CEO_PLANNING_REPAIR_MARKER)
                 }
-            } else {
-                buildFallbackGoalIssues(
-                    state = state,
-                    goal = goal,
-                    workspace = workspace,
-                    profiles = profiles,
-                    definitions = state.companyAgentDefinitions,
-                    now = now
+                if (finalStatus == DesktopTaskStatus.COMPLETED && repairAttempts == 0) {
+                    val repairTask = buildCeoPlanningRepairTask(
+                        state = state,
+                        issue = currentIssue,
+                        task = task,
+                        primaryRun = primaryRun,
+                        now = now
+                    )
+                    val repairedPlanningIssue = currentIssue.copy(
+                        status = IssueStatus.DELEGATED,
+                        transitionReason = "$invalidPlanningReason Retrying CEO planning once with a JSON-only repair prompt.",
+                        updatedAt = now
+                    )
+                    traceEvents += buildCompanyAutomationTraceEvent(
+                        issue = currentIssue,
+                        goal = goal,
+                        oldStatus = currentIssue.status,
+                        newStatus = repairedPlanningIssue.status,
+                        source = "syncPlanningIssueFromTask",
+                        reason = repairedPlanningIssue.transitionReason.orEmpty(),
+                        latestTask = task,
+                        latestRun = primaryRun,
+                        retryEligible = true
+                    )
+                    val nextState = state.copy(
+                        issues = state.issues.map { existing -> if (existing.id == currentIssue.id) repairedPlanningIssue else existing },
+                        tasks = state.tasks + repairTask
+                    ).recordCompanyActivity(
+                        companyId = company.id,
+                        projectContextId = currentIssue.projectContextId,
+                        goalId = goal.id,
+                        issueId = currentIssue.id,
+                        source = "ceo-planning",
+                        title = "Retrying CEO planning",
+                        detail = repairedPlanningIssue.transitionReason,
+                        severity = "warning"
+                    ).withDerivedMetrics()
+                    stateStore.save(nextState)
+                    repairTaskToRun = repairTask.id
+                    runtimeContinuationCompanyId = currentIssue.companyId
+                    return@withLock
+                }
+                val blockedPlanningIssue = currentIssue.copy(
+                    status = IssueStatus.BLOCKED,
+                    transitionReason = "$invalidPlanningReason Downstream execution issues were not created.",
+                    providerBlockReason = invalidPlanningReason,
+                    updatedAt = now
                 )
+                traceEvents += buildCompanyAutomationTraceEvent(
+                    issue = currentIssue,
+                    goal = goal,
+                    oldStatus = currentIssue.status,
+                    newStatus = blockedPlanningIssue.status,
+                    source = "syncPlanningIssueFromTask",
+                    reason = blockedPlanningIssue.transitionReason.orEmpty(),
+                    latestTask = task,
+                    latestRun = primaryRun,
+                    retryEligible = false
+                )
+                val nextState = state.copy(
+                    issues = state.issues.map { existing -> if (existing.id == currentIssue.id) blockedPlanningIssue else existing },
+                    goalDecisions = state.goalDecisions + GoalOrchestrationDecision(
+                        id = UUID.randomUUID().toString(),
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = currentIssue.id,
+                        title = "CEO planning blocked",
+                        summary = "CEO planning for \"${goal.title}\" did not produce a valid execution graph.",
+                        createdIssues = emptyList(),
+                        assignments = emptyList(),
+                        escalations = listOf(invalidPlanningReason),
+                        createdAt = now
+                    )
+                ).recordCompanyActivity(
+                    companyId = company.id,
+                    projectContextId = currentIssue.projectContextId,
+                    goalId = goal.id,
+                    issueId = currentIssue.id,
+                    source = "ceo-planning",
+                    title = "CEO planning blocked",
+                    detail = blockedPlanningIssue.transitionReason,
+                    severity = "error"
+                ).withDerivedMetrics()
+                stateStore.save(nextState)
+                return@withLock
             }
-            val planningReason = when {
-                parsedPlan != null -> "CEO planning run created ${decomposition.first.size} downstream issues."
-                finalStatus == DesktopTaskStatus.COMPLETED ->
-                    "CEO planning output was invalid, so Cotor used the deterministic fallback planner."
-                else ->
-                    "CEO planning run ended with ${finalStatus.name}; Cotor used the deterministic fallback planner."
+            val plannedIssues = materializePlannedIssues(
+                goal = goal,
+                workspace = workspace,
+                profiles = profiles,
+                plan = parsedPlan,
+                now = now,
+                planningSource = "ceo"
+            )
+            val decomposition = plannedIssues to plannedIssues.flatMap { createdIssue ->
+                createdIssue.dependsOn.map { dependencyId ->
+                    IssueDependency(
+                        id = UUID.randomUUID().toString(),
+                        issueId = createdIssue.id,
+                        dependsOnIssueId = dependencyId
+                    )
+                }
             }
+            val planningReason = "CEO planning run created ${decomposition.first.size} downstream issues."
             val updatedPlanningIssue = currentIssue.copy(
                 status = IssueStatus.DONE,
                 transitionReason = planningReason,
@@ -16324,18 +16613,14 @@ class DesktopAppService(
                 companyId = company.id,
                 goalId = goal.id,
                 issueId = currentIssue.id,
-                title = if (planningSource == "ceo") "CEO planned execution graph" else "Fallback planned execution graph",
-                summary = if (planningSource == "ceo") {
-                    "CEO decomposed \"${goal.title}\" into ${decomposition.first.size} branchable issues."
-                } else {
-                    "Fallback planner decomposed \"${goal.title}\" into ${decomposition.first.size} branchable issues after CEO planning failed."
-                },
+                title = "CEO planned execution graph",
+                summary = "CEO decomposed \"${goal.title}\" into ${decomposition.first.size} branchable issues.",
                 createdIssues = decomposition.first.map { it.id },
                 assignments = decomposition.first.mapNotNull { createdIssue ->
                     val assignee = profiles.firstOrNull { it.id == createdIssue.assigneeProfileId }?.roleName
                     assignee?.let { "${createdIssue.title} -> $it" }
                 },
-                escalations = if (planningSource == "fallback") listOf(planningReason) else emptyList(),
+                escalations = emptyList(),
                 createdAt = now
             )
             val nextState = applyVerificationProjection(
@@ -16352,9 +16637,9 @@ class DesktopAppService(
                 goalId = goal.id,
                 issueId = currentIssue.id,
                 source = "ceo-planning",
-                title = if (planningSource == "ceo") "CEO planned goal" else "Fallback planned goal",
+                title = "CEO planned goal",
                 detail = planningReason,
-                severity = if (planningSource == "ceo") "info" else "warning"
+                severity = "info"
             ).withDerivedMetrics()
             stateStore.save(nextState)
             val projectContext = nextState.projectContexts.firstOrNull { it.id == currentIssue.projectContextId }
@@ -16367,14 +16652,18 @@ class DesktopAppService(
             }
         }
         traceEvents.forEach(::appendCompanyAutomationTrace)
-        publishCompanyEvent(
-            companyId = issue.companyId,
-            type = "goal.decomposed",
-            title = "Created execution graph",
-            detail = issue.title,
-            goalId = issue.goalId,
-            issueId = issue.id
-        )
+        if (repairTaskToRun != null) {
+            executeTaskInline(repairTaskToRun)
+        } else {
+            publishCompanyEvent(
+                companyId = issue.companyId,
+                type = "goal.decomposed",
+                title = "Created execution graph",
+                detail = issue.title,
+                goalId = issue.goalId,
+                issueId = issue.id
+            )
+        }
         runtimeContinuationCompanyId?.let { companyId ->
             serviceScope.launch {
                 runCatching { runCompanyRuntimeTick(companyId) }
