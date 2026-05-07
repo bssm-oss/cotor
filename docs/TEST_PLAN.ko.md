@@ -70,7 +70,7 @@ cd macos && swift build
 | board/canvas 전환 | 선택 이슈를 잃지 않고 보드 전환 |
 | session card 클릭 | 카드 어느 곳이든 클릭 시 선택 전환 |
 | base branch 업데이트 | backend workspace 갱신 후 TUI 세션 재시작 |
-| Meeting Room 지도 | 저장소 `지도`가 기술적인 그래프 파일 경로를 노출하지 않고 렌더링되며, missing/empty 상태가 읽기 쉬움 |
+| Meeting Room 라이브 오피스 | 픽셀 오피스 projection이 실제 회사 에이전트/이슈/리뷰/활동을 반영하고, idle 상태가 안정적이며, agent/issue/zone 클릭 detail sheet가 열림 |
 | GitHub readiness card | company settings가 `gh`/auth/origin 상태를 표시하고 credential 포함 remote URL을 redaction |
 | capability/provider controls | secret 값을 저장하지 않고 backend capability/provider payload 표시 |
 

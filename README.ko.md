@@ -64,6 +64,22 @@ Cotor는 로컬 우선 AI 워크플로우 실행기에서 출발해, CEO AI가 �
 - `blocked-escalation`
 - `custom`
 
+## 코드베이스 진입점
+
+프로젝트 구조를 처음 읽거나 변경할 때는 아래 파일에서 시작하세요.
+
+- CLI bootstrap: `src/main/kotlin/com/cotor/Main.kt`
+- CLI 명령: `src/main/kotlin/com/cotor/presentation/cli/`
+- 일반 파이프라인 런타임: `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/`, `src/main/kotlin/com/cotor/domain/planning/`
+- 로컬 app-server route: `src/main/kotlin/com/cotor/app/AppServer.kt`
+- 회사 워크플로 서비스: `src/main/kotlin/com/cotor/app/DesktopAppService.kt`
+- 데스크톱 API DTO와 상태 모델: `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `macos/Sources/CotorDesktopApp/Models.swift`
+- macOS 데스크톱 셸: `macos/Sources/CotorDesktopApp/DesktopStore.swift`, `macos/Sources/CotorDesktopApp/ContentView.swift`, `macos/Sources/CotorDesktopApp/DesktopAPI.swift`
+- 런타임 제어/증거: `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`
+- provider/tool adapter: `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/providers/`
+
+모듈 경계, 공개 진입점, 허용 의존 방향은 [docs/modules/README.ko.md](docs/modules/README.ko.md)를 보세요.
+
 ## 설치
 
 ### Homebrew (권장)
@@ -161,7 +177,7 @@ cotor delete    # 삭제
 - `Company` 모드는 기본적으로 이벤트 기반 live update를 사용해서, 정상 동작 중에는 수동 새로고침 없이 활동 로그, 이슈, 리뷰 상태, 런타임 상태가 바로 반영됨
 - 데스크톱 backend launch, health check, shutdown, client request가 같은 `COTOR_APP_TOKEN` source를 사용해서 token-protected local session이 어긋나지 않음
 - embedded 데스크톱 backend는 정리된 최소 환경으로 시작해서, 우연히 부모 shell에 있던 API key, provider token, password 계열 변수를 로컬 app-server로 넘기지 않음
-- `미팅룸`은 기본으로 쉬운 `지도`를 열고, 준비된 그래프가 없어도 폴더 기반 기본 지도를 보여주며, `에이전트 회의`와 라이브 플로어 보기를 바로 전환할 수 있음
+- `미팅룸`은 기본으로 `라이브 오피스` 픽셀 오피스 projection을 열고, 실제 런타임 데이터로 에이전트 상태, 이슈 카드, A2A 메시지, 리뷰 흐름, 활동을 보여주며 활동/리뷰 상세는 압축 drawer 뒤에 둠
 - 회사 이슈 실행 상세는 이제 단순 변경점이 아니라 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약까지 함께 보여줌
 - `cotor company issue run <issue-id>`는 기본적으로 이슈가 정착 상태가 될 때까지 기다려서, CLI에서 시작한 로컬 에이전트 작업이 중간에 고아 작업으로 끊기지 않게 함. 이미 실행 중인 app-server가 백그라운드 작업을 맡아야 할 때만 `--async` 사용
 - 회사 런타임은 이제 이슈/태스크/리뷰 상태 변화가 생기면 바로 깨어나며, 서로 다른 역할이 같은 execution CLI를 쓰더라도 runnable issue를 병렬로 시작할 수 있음
@@ -202,7 +218,7 @@ cotor delete    # 삭제
 - 완료된 회사 이슈 실행은 실험적 pipeline replay flag 없이도 `cotor resume inspect <run-id>`로 durable run을 확인 가능
 - 기존 회사 이슈, 실행, 리뷰, 조직 프로필, 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 생성
-- 기본 `지도`, 실시간 협업을 보는 `에이전트 회의` 테이블, runtime/backend/review/session 상태를 합성한 이벤트 월, 움직이는 에이전트 플로어를 함께 제공하는 전용 미팅룸 보기
+- `라이브 오피스` 런타임 projection에서 이벤트 기반 에이전트 sprite, 이슈 이동, 리뷰 흐름, runtime/backend/review/session 요약, agent/issue/zone 상세 sheet를 제공하는 전용 미팅룸 보기
 - 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
 - 운영 채팅에서 HR Manager에게 필요한 specialist 고용이나 사수 지정을 맡길 수 있음. HR은 `opencode/nemotron-3-super-free`를 쓰고, 중복 역할과 무제한 고용은 막음
 - 느슨하게 쓴 채팅 요청도 CEO가 목표, 성공 기준, 담당 하위 이슈로 정리하게 하되 GitHub 저장소는 자동 생성하지 않음
@@ -235,6 +251,8 @@ cotor delete    # 삭제
 시작점:
 
 - [문서 인덱스](docs/INDEX.md)
+- [아키텍처 개요](docs/ARCHITECTURE.ko.md)
+- [모듈 경계](docs/modules/README.ko.md)
 - [영문 가이드](docs/README.md)
 - [한글 가이드](docs/README.ko.md)
 - [빠른 시작](docs/QUICK_START.md)
@@ -247,9 +265,43 @@ cotor delete    # 삭제
 
 과거 리포트, 릴리스 기록, 설계 초안은 [docs/INDEX.md](docs/INDEX.md)의 `Historical / design records` 섹션에서 찾을 수 있습니다.
 
+## Graphify 워크플로
+
+Graphify는 이 저장소에서 구조 이해와 리팩터링 검증에 쓰는 source-of-truth 보조 자료입니다. 전체 repo를 무작정 읽기 전에 Graphify로 관련 subgraph를 좁히세요.
+
+- 리포트: `graphify-out/GRAPH_REPORT.md`
+- 그래프 데이터: `graphify-out/graph.json`
+- 탐색 UI: `graphify-out/graph.html`
+
+아키텍처, 모듈 소유권, 이상한 의존성, god node를 확인할 때는 먼저 `graphify-out/GRAPH_REPORT.md`를 읽습니다. `graphify-out/graph.json` 전체는 prompt나 문서에 붙여넣는 파일이 아닙니다.
+
+프로젝트 루트 기준 명령:
+
+```bash
+graphify .                  # graph가 없을 때 초기 생성
+graphify update .           # 코드/문서 변경 후 갱신
+graphify cluster-only .     # 큰 구조 변경 후 community 재계산
+graphify query "DesktopAppService와 AppServer는 어떻게 연결되는가?"
+graphify path "DesktopAppService" "AgentRun"
+graphify explain "CompanyProblemSignal"
+graphify hook status
+graphify hook install
+graphify claude install
+graphify codex install
+graphify opencode install
+```
+
+assistant slash-command 환경에서는 같은 흐름이 `/graphify .`, `/graphify . --update`, `/graphify . --cluster-only`로 노출될 수 있습니다. 이 checkout에 설치된 CLI는 위 subcommand 문법을 사용합니다.
+
+리팩터링 후에는 변경 전/후 `GRAPH_REPORT.md` 요약과 community 변화를 비교한 뒤 문서를 신뢰하세요.
+
 ## 검증 기준선
 
 ```bash
-./gradlew --no-build-cache test -x jacocoTestCoverageVerification
-cd macos && swift build
+cotor version
+./gradlew formatCheck
+./gradlew test -x jacocoTestReport -x jacocoTestCoverageVerification
+swift build --package-path macos
+swift test --package-path macos
+graphify update .
 ```

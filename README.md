@@ -66,6 +66,22 @@ Current template types:
 - `blocked-escalation`
 - `custom`
 
+## Codebase Entrypoints
+
+Start from these files when reading or changing the project:
+
+- CLI bootstrap: `src/main/kotlin/com/cotor/Main.kt`
+- CLI commands: `src/main/kotlin/com/cotor/presentation/cli/`
+- generic pipeline runtime: `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/`, `src/main/kotlin/com/cotor/domain/planning/`
+- local app-server routes: `src/main/kotlin/com/cotor/app/AppServer.kt`
+- company workflow service: `src/main/kotlin/com/cotor/app/DesktopAppService.kt`
+- desktop API DTOs and state models: `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `macos/Sources/CotorDesktopApp/Models.swift`
+- macOS desktop shell: `macos/Sources/CotorDesktopApp/DesktopStore.swift`, `macos/Sources/CotorDesktopApp/ContentView.swift`, `macos/Sources/CotorDesktopApp/DesktopAPI.swift`
+- runtime control/evidence: `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`
+- provider and tool adapters: `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/providers/`
+
+For module boundaries, public entrypoints, and allowed dependency directions, see [docs/modules/README.md](docs/modules/README.md).
+
 ## Install
 
 ### Homebrew (Recommended)
@@ -158,7 +174,7 @@ Current desktop model:
 - `Company` mode now uses event-driven live updates as the primary path, so activity, issues, review state, and runtime status update without a manual refresh in normal operation
 - desktop backend launch, health checks, shutdown, and client requests use the same `COTOR_APP_TOKEN` source so token-protected local sessions stay aligned
 - embedded desktop backends start with a sanitized environment so incidental API keys, provider tokens, and password-like parent-shell variables are not passed into the local app-server
-- `Meeting Room` opens to a plain repository `Map` by default, falls back to a simple folder map when a prepared graph is missing, and keeps the `Agent Meeting` and live floor views one click away
+- `Meeting Room` opens to a `Live Office` pixel-office projection by default, using runtime data for agent state, issue cards, A2A messages, review flow, and activity; the activity/review detail surfaces stay behind a compact drawer
 - company issue execution details now surface agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary instead of only change metadata
 - `cotor company issue run <issue-id>` waits for a settled issue state by default so local CLI-launched agent work is not orphaned; use `--async` only when an already-running app-server should own the background work
 - company runtime now wakes immediately on issue/task/review transitions and can dispatch multiple runnable issues in parallel even when different roles share the same execution CLI
@@ -199,7 +215,7 @@ The current build includes a working local operations layer:
 - inspect completed company issue runs through `cotor resume inspect <run-id>` without enabling the experimental pipeline replay flag
 - inspect per-agent performance derived from existing company issues, runs, reviews, org profiles, and agent definitions, with insufficient-data agents shown separately
 - populate and merge ready review queue items
-- inspect the dedicated Meeting Room page with a default repository `Map`, a visible `Agent Meeting` table for live coordination, synthesized runtime/backend/review/session wall events, and animated agent presence in the floor view
+- inspect the dedicated Meeting Room page as a `Live Office` runtime projection with event-driven agent sprites, issue movement, review flow, runtime/backend/review/session summaries, and click-through agent/issue/zone detail sheets
 - use the Operator Chat surface to ask for status, change all selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
 - ask the HR Manager through Operator Chat to hire missing specialists or assign mentors; HR uses `opencode/nemotron-3-super-free`, avoids duplicate roles, and caps automatic hiring so teams do not grow without bounds
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
@@ -236,6 +252,7 @@ Start here:
 
 - [Documentation Index](docs/INDEX.md)
 - [Architecture Overview](docs/ARCHITECTURE.md)
+- [Module Boundaries](docs/modules/README.md)
 - [English Guide](docs/README.md)
 - [Korean Guide](docs/README.ko.md)
 - [Quick Start](docs/QUICK_START.md)
@@ -249,9 +266,43 @@ Start here:
 
 Historical reports, release notes, and architecture drafts are linked from [docs/INDEX.md](docs/INDEX.md) under `Historical / design records`.
 
+## Graphify Workflow
+
+Graphify is part of the source-of-truth workflow for this repo. Use it to narrow architecture and refactor questions before reading broad file sets.
+
+- Report: `graphify-out/GRAPH_REPORT.md`
+- Graph data: `graphify-out/graph.json`
+- Human navigation UI: `graphify-out/graph.html`
+
+Read `graphify-out/GRAPH_REPORT.md` first when investigating architecture, module ownership, surprising dependencies, or god nodes. Do not paste `graphify-out/graph.json` into prompts or docs; use targeted graph commands instead.
+
+Common commands from the repository root:
+
+```bash
+graphify .                  # initial graph build when no graph exists
+graphify update .           # refresh code/document corpus after changes
+graphify cluster-only .     # recompute communities after large structure changes
+graphify query "How does DesktopAppService relate to AppServer?"
+graphify path "DesktopAppService" "AgentRun"
+graphify explain "CompanyProblemSignal"
+graphify hook status
+graphify hook install
+graphify claude install
+graphify codex install
+graphify opencode install
+```
+
+Assistant slash-command environments may expose the same workflow as `/graphify .`, `/graphify . --update`, and `/graphify . --cluster-only`. The installed CLI in this checkout uses the subcommands shown above.
+
+After a refactor, compare the before/after `GRAPH_REPORT.md` summary and inspect changed communities before trusting the docs.
+
 ## Validation
 
 ```bash
 cotor version
-./gradlew test
+./gradlew formatCheck
+./gradlew test -x jacocoTestReport -x jacocoTestCoverageVerification
+swift build --package-path macos
+swift test --package-path macos
+graphify update .
 ```

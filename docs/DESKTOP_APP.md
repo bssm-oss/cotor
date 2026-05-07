@@ -112,7 +112,7 @@ The current macOS shell has two top-level modes.
 - `Company`
   - company selector
   - company creation bound to one root folder
-  - direct `Meeting Room` navigation that opens to a plain repository `Map`, falls back to a simple folder map when prepared graph data is missing, and exposes `Agent Meeting` plus live floor views without showing technical graph paths
+  - direct `Meeting Room` navigation that opens to a `Live Office` pixel-office runtime projection, with event-driven agent sprites, issue cards, A2A/message movement, review flow, and compact activity/review drawer details
   - agent-definition composer
   - compact mentor assignment in the agent editor and team cards, with new companies seeded with an HR Manager who can assign mentors and hire missing specialists
   - Marketing Operator skill selection that reveals a delegation-policy panel for allowed channels, domains, daily publish limits, brand rules, session/secret references, and recent marketing run logs
@@ -221,7 +221,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect linked tasks and runs
 - inspect derived per-agent performance from existing issues, runs, reviews, org profiles, and company agent definitions, with insufficient-data agents called out separately
 - populate and merge review queue items
-- inspect a dedicated Meeting Room view that defaults to a plain repository `Map`, with synthesized runtime/backend/review/session wall events and floor-view summaries
+- inspect a dedicated Meeting Room view that defaults to the `Live Office` runtime projection, with synthesized runtime/backend/review/session summaries, event-driven movement, and agent/issue/zone detail sheets
 - use the Operator Chat surface to ask for status, bulk switch selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one message-style command chat
 - use Operator Chat for HR staffing requests such as hiring missing specialists or assigning mentors. HR hires use `opencode/nemotron-3-super-free`, avoid duplicate role coverage, and stay capped per chat command and runtime tick.
 - turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step

@@ -2,3 +2,7 @@
 # and their short internal symbols can dominate graphify god-node analysis.
 macos/Sources/CotorDesktopApp/Resources/Terminal/addon-fit.js
 macos/Sources/CotorDesktopApp/Resources/Terminal/xterm.js
+
+# Keep graphify-out/ tracked as documentation corpus. `GRAPH_REPORT.md` is the
+# human-readable structure report; `graph.json` is machine data and should not be
+# pasted into prompts or docs, but it is intentionally not ignored here.

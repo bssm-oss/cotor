@@ -116,7 +116,7 @@ cotor delete
 
 - 회사 선택기
 - 하나의 루트 폴더에 묶이는 회사 생성
-- 기본으로 쉬운 저장소 `지도`를 열고, 준비된 그래프가 없어도 폴더 기반 기본 지도를 보여주며, 기술적인 그래프 파일 경로 없이 `에이전트 회의`와 라이브 플로어로 전환할 수 있는 `상황실` 직접 탐색
+- 기본으로 `라이브 오피스` 픽셀 오피스 런타임 projection을 열고, 이벤트 기반 에이전트 sprite, 이슈 카드, A2A/message 이동, 리뷰 흐름, 활동/리뷰 drawer detail을 제공하는 `상황실` 직접 탐색
 - 에이전트 정의 작성
 - 에이전트 편집기와 팀 카드에서 압축형 사수 배정 표시. 새 회사에는 HR Manager가 기본 생성되어 필요한 specialist 고용과 사수 지정을 맡음
 - Marketing Operator skill을 선택하면 channel, domain, 일일 게시 한도, 브랜드 규칙, session/secret reference, 최근 marketing run log를 설정하는 위임 정책 패널 표시
@@ -227,7 +227,7 @@ cotor delete
 - 연결된 태스크와 실행 이력 조회
 - 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 아이템 생성 및 머지 처리
-- 기본 저장소 `지도`와 runtime/backend/review/session 상태를 합성한 실시간 활동, 실행 현황/리뷰 요약을 함께 제공하는 전용 상황실 보기
+- `라이브 오피스` 런타임 projection과 runtime/backend/review/session 요약, 이벤트 기반 움직임, agent/issue/zone 상세 sheet를 함께 제공하는 전용 상황실 보기
 - 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트 OpenCode DeepSeek(`opencode-go/deepseek-v4-flash`) 변경, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화를 하나의 메시지형 명령 채팅으로 실행
 - 운영 채팅에서 필요한 specialist 고용이나 사수 지정을 HR Manager에게 맡길 수 있음. HR 고용은 `opencode/nemotron-3-super-free`를 사용하고, 중복 역할과 chat/runtime tick별 무제한 고용을 막음
 - 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
