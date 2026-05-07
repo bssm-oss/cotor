@@ -738,6 +738,7 @@ private func agent(id: String, title: String) -> CompanyAgentDefinitionRecord {
         specialties: [],
         collaborationInstructions: nil,
         preferredCollaboratorIds: [],
+        mentorAgentId: nil,
         memoryNotes: nil,
         enabled: true,
         displayOrder: id == "ceo" ? 0 : 1,

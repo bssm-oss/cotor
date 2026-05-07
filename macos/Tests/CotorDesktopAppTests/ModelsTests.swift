@@ -115,6 +115,32 @@ struct ModelsTests {
     }
 
     @Test
+    func companyAgentDefinitionDecodesMissingMentorAsNil() throws {
+        let data = """
+        {
+          "id": "agent-builder",
+          "companyId": "company",
+          "title": "Builder",
+          "agentCli": "opencode",
+          "model": "opencode/nemotron-3-super-free",
+          "roleSummary": "implementation",
+          "specialties": ["implementation"],
+          "collaborationInstructions": null,
+          "preferredCollaboratorIds": [],
+          "memoryNotes": null,
+          "enabled": true,
+          "displayOrder": 0,
+          "createdAt": 1,
+          "updatedAt": 2
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(CompanyAgentDefinitionRecord.self, from: data)
+
+        #expect(decoded.mentorAgentId == nil)
+    }
+
+    @Test
     func agentCapabilitySettingDecodesMissingChannelAllowlistAsEmpty() throws {
         let data = """
         {
@@ -214,7 +240,8 @@ struct ModelsTests {
         let request = OperatorCommandRequestPayload(
             message: "모든 에이전트 opencode deepseek",
             automationMode: "AGENT_APPROVED",
-            confirmFullAuto: false
+            confirmFullAuto: false,
+            confirmStaffing: false
         )
         let requestData = try JSONEncoder().encode(request)
         let decodedRequest = try JSONDecoder().decode(OperatorCommandRequestPayload.self, from: requestData)
