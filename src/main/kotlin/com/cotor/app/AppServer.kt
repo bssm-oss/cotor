@@ -1400,6 +1400,7 @@ internal fun Application.cotorAppModule(
                                 specialties = request.specialties,
                                 collaborationInstructions = request.collaborationInstructions,
                                 preferredCollaboratorIds = request.preferredCollaboratorIds,
+                                mentorAgentId = request.mentorAgentId,
                                 memoryNotes = request.memoryNotes,
                                 enabled = request.enabled
                             )
@@ -1441,6 +1442,7 @@ internal fun Application.cotorAppModule(
                                 specialties = request.specialties,
                                 collaborationInstructions = request.collaborationInstructions,
                                 preferredCollaboratorIds = request.preferredCollaboratorIds,
+                                mentorAgentId = request.mentorAgentId,
                                 memoryNotes = request.memoryNotes,
                                 enabled = request.enabled,
                                 displayOrder = request.displayOrder
@@ -1587,7 +1589,8 @@ internal fun Application.cotorAppModule(
                                 companyId = companyId,
                                 message = request.message,
                                 automationMode = request.automationMode,
-                                confirmFullAuto = request.confirmFullAuto
+                                confirmFullAuto = request.confirmFullAuto,
+                                confirmStaffing = request.confirmStaffing
                             )
                         }
                     }

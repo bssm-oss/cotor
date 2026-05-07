@@ -219,6 +219,9 @@ class DesktopAppService(
         private const val SHUTDOWN_JOIN_TIMEOUT_MS = 5_000L
         private const val ISSUE_RUN_AWAIT_TIMEOUT_MS = 60 * 60 * 1_000L
         private const val WORKTREE_BINDING_TIMEOUT_MS = 20_000L
+        private const val HR_MAX_ACTIVE_AGENTS_PER_COMPANY = 16
+        private const val HR_MAX_HIRES_PER_COMMAND = 2
+        private const val HR_MAX_HIRES_PER_RUNTIME_TICK = 1
         private const val INTERRUPTED_RUN_ERROR =
             "Execution was interrupted because the app-server stopped before the run finished."
         private const val INTERRUPTED_ISSUE_REASON =
@@ -4619,7 +4622,8 @@ class DesktopAppService(
         companyId: String,
         message: String,
         automationMode: OperatorAutomationMode? = null,
-        confirmFullAuto: Boolean = false
+        confirmFullAuto: Boolean = false,
+        confirmStaffing: Boolean = false
     ): OperatorCommandResponse {
         val trimmedMessage = message.trim()
         require(trimmedMessage.isNotBlank()) { "message is required" }
@@ -4672,6 +4676,25 @@ class DesktopAppService(
                 companyId = companyId,
                 includeAllCompanies = referencesAllCompanies(normalized)
             )
+            summary = buildOperatorCompanySummary(companyId)
+            handled = true
+        }
+
+        if (looksLikeHrStaffingRequest(normalized)) {
+            if (activeMode == OperatorAutomationMode.ASK_ME && !confirmStaffing) {
+                pendingApprovals += OperatorCommandAction(
+                    type = "hr-staffing",
+                    title = "Team staffing is waiting",
+                    detail = "Confirm once to let HR Manager hire missing agents or assign mentors for this request.",
+                    status = "USER_CONFIRMATION_REQUIRED"
+                )
+            } else {
+                actions += runHrStaffingReviewAsOperator(
+                    companyId = companyId,
+                    requestText = trimmedMessage,
+                    maxHires = HR_MAX_HIRES_PER_COMMAND
+                )
+            }
             summary = buildOperatorCompanySummary(companyId)
             handled = true
         }
@@ -4991,6 +5014,450 @@ class DesktopAppService(
         )
     }
 
+    private data class HrStaffingNeed(
+        val title: String,
+        val roleSummary: String,
+        val specialties: List<String>,
+        val reason: String,
+        val mentorTitleHints: List<String>,
+        val collaboratorTitleHints: List<String> = emptyList()
+    )
+
+    private data class HrMentorAssignment(
+        val agentTitle: String,
+        val mentorTitle: String
+    )
+
+    private data class HrStaffingOutcome(
+        val hiredAgents: List<CompanyAgentDefinition>,
+        val mentorAssignments: List<HrMentorAssignment>,
+        val capped: Boolean,
+        val noOpReason: String?
+    )
+
+    private suspend fun runHrStaffingReviewAsOperator(
+        companyId: String,
+        requestText: String?,
+        maxHires: Int
+    ): OperatorCommandAction {
+        val outcome = runHrStaffingReview(companyId, requestText, maxHires)
+        val detail = formatHrStaffingOutcome(outcome)
+        return OperatorCommandAction(
+            type = "hr-staffing",
+            title = when {
+                outcome.hiredAgents.isNotEmpty() -> "HR Manager staffed the team"
+                outcome.mentorAssignments.isNotEmpty() -> "HR Manager assigned mentors"
+                else -> "HR Manager checked the team"
+            },
+            detail = detail,
+            status = if (outcome.hiredAgents.isEmpty() && outcome.mentorAssignments.isEmpty()) "NOOP" else "DONE"
+        )
+    }
+
+    private suspend fun runHrStaffingReview(
+        companyId: String,
+        requestText: String?,
+        maxHires: Int
+    ): HrStaffingOutcome = stateMutex.withLock {
+        val state = stateStore.load()
+        val company = state.companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val now = System.currentTimeMillis()
+        val companyDefinitions = state.companyAgentDefinitions
+            .filter { it.companyId == companyId }
+            .sortedWith(compareBy<CompanyAgentDefinition> { it.displayOrder }.thenBy { it.title.lowercase() })
+        val activeDefinitions = companyDefinitions.filter { it.enabled }
+        val activeDefinitionCount = activeDefinitions.size
+        val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+            .filter { it.companyId == companyId && it.enabled }
+        val occupiedProfileIds = occupiedCompanyProfileIds(state, companyId)
+
+        val mentorAssignments = mutableListOf<Pair<String, String>>()
+        var nextCompanyDefinitions = companyDefinitions.map { definition ->
+            if (!definition.enabled || definition.mentorAgentId != null || definition.title.equals("CEO", ignoreCase = true)) {
+                definition
+            } else {
+                val mentor = chooseMentorForAgent(definition, companyDefinitions)
+                if (mentor == null) {
+                    definition
+                } else {
+                    mentorAssignments += definition.id to mentor.id
+                    definition.copy(mentorAgentId = mentor.id, updatedAt = now)
+                }
+            }
+        }
+
+        val requestMentorOnly = requestText
+            ?.lowercase()
+            ?.let { text ->
+                containsAny(text, "mentor", "사수") &&
+                    !containsAny(text, "hire", "hiring", "staff", "팀 보강", "고용", "채용", "필요한 사람", "사람 붙")
+            }
+            ?: false
+        val staffingNeeds = if (requestMentorOnly) {
+            emptyList()
+        } else {
+            inferHrStaffingNeeds(state, companyId, requestText)
+        }
+        val hiredDefinitions = mutableListOf<CompanyAgentDefinition>()
+        var capped = false
+
+        staffingNeeds.forEach { need ->
+            if (hiredDefinitions.size >= maxHires) {
+                capped = true
+                return@forEach
+            }
+            if (activeDefinitionCount + hiredDefinitions.size >= HR_MAX_ACTIVE_AGENTS_PER_COMPANY) {
+                capped = true
+                return@forEach
+            }
+            if (companyHasCoverageForNeed(need, nextCompanyDefinitions + hiredDefinitions, profiles, occupiedProfileIds)) {
+                return@forEach
+            }
+            val mentor = chooseMentorForNeed(need, nextCompanyDefinitions + hiredDefinitions)
+            val preferredCollaboratorIds = (
+                listOfNotNull(mentor?.id) +
+                    need.collaboratorTitleHints.mapNotNull { titleHint ->
+                        (nextCompanyDefinitions + hiredDefinitions).firstOrNull {
+                            it.enabled && it.title.equals(titleHint, ignoreCase = true)
+                        }?.id
+                    }
+                ).distinct()
+            val definition = CompanyAgentDefinition(
+                id = UUID.randomUUID().toString(),
+                companyId = companyId,
+                title = uniqueHrHireTitle(need.title, nextCompanyDefinitions + hiredDefinitions),
+                agentCli = "opencode",
+                model = OpenCodeDefaults.DEFAULT_MODEL,
+                roleSummary = need.roleSummary,
+                specialties = need.specialties,
+                collaborationInstructions = "Work with ${mentor?.title ?: "the company lead"} as mentor and keep HR Manager informed about onboarding blockers.",
+                preferredCollaboratorIds = preferredCollaboratorIds,
+                mentorAgentId = mentor?.id,
+                memoryNotes = "Hired by HR Manager. Reason: ${need.reason}",
+                enabled = true,
+                displayOrder = companyDefinitions.size + hiredDefinitions.size,
+                createdAt = now,
+                updatedAt = now
+            )
+            hiredDefinitions += definition
+        }
+
+        if (hiredDefinitions.isEmpty() && mentorAssignments.isEmpty()) {
+            return@withLock HrStaffingOutcome(
+                hiredAgents = emptyList(),
+                mentorAssignments = emptyList(),
+                capped = capped,
+                noOpReason = if (capped) {
+                    "The team is at its staffing limit."
+                } else {
+                    "The current team already covers this request."
+                }
+            )
+        }
+
+        nextCompanyDefinitions = nextCompanyDefinitions + hiredDefinitions
+        val nextDefinitions = state.companyAgentDefinitions
+            .filterNot { it.companyId == companyId }
+            .plus(nextCompanyDefinitions)
+        val mentorAssignmentsById = mentorAssignments.toMap()
+        val assignmentSummaries = mentorAssignments.mapNotNull { (agentId, mentorId) ->
+            val agent = nextCompanyDefinitions.firstOrNull { it.id == agentId } ?: return@mapNotNull null
+            val mentor = nextCompanyDefinitions.firstOrNull { it.id == mentorId } ?: return@mapNotNull null
+            HrMentorAssignment(agent.title, mentor.title)
+        } + hiredDefinitions.mapNotNull { hired ->
+            val mentorId = hired.mentorAgentId ?: return@mapNotNull null
+            val mentor = nextCompanyDefinitions.firstOrNull { it.id == mentorId } ?: return@mapNotNull null
+            HrMentorAssignment(hired.title, mentor.title)
+        }.filterNot { hiredAssignment ->
+            mentorAssignmentsById.any { (agentId, mentorId) ->
+                val agent = nextCompanyDefinitions.firstOrNull { it.id == agentId }
+                val mentor = nextCompanyDefinitions.firstOrNull { it.id == mentorId }
+                agent?.title == hiredAssignment.agentTitle && mentor?.title == hiredAssignment.mentorTitle
+            }
+        }
+        val messages = buildList {
+            hiredDefinitions.forEach { hired ->
+                val mentorTitle = hired.mentorAgentId
+                    ?.let { mentorId -> nextCompanyDefinitions.firstOrNull { it.id == mentorId }?.title }
+                    ?: "company lead"
+                add(
+                    AgentMessage(
+                        id = UUID.randomUUID().toString(),
+                        companyId = companyId,
+                        fromAgentName = "HR Manager",
+                        toAgentName = hired.title,
+                        kind = "hr-onboarding",
+                        subject = "New agent onboarded",
+                        body = "You were hired for ${hired.roleSummary}. Your mentor is $mentorTitle.",
+                        createdAt = now
+                    )
+                )
+            }
+            assignmentSummaries.filter { assignment ->
+                hiredDefinitions.none { it.title == assignment.agentTitle }
+            }.forEach { assignment ->
+                add(
+                    AgentMessage(
+                        id = UUID.randomUUID().toString(),
+                        companyId = companyId,
+                        fromAgentName = "HR Manager",
+                        toAgentName = assignment.agentTitle,
+                        kind = "hr-mentor-assignment",
+                        subject = "Mentor assigned",
+                        body = "${assignment.mentorTitle} is your mentor for onboarding and escalation.",
+                        createdAt = now
+                    )
+                )
+            }
+        }
+
+        val nextState = state.copy(
+            companyAgentDefinitions = nextDefinitions,
+            agentCapabilityProfiles = state.agentCapabilityProfiles + hiredDefinitions.map {
+                seedCompanyAgentCapabilityProfile(company, it, now)
+            },
+            orgProfiles = deriveProfiles(nextDefinitions, state.companies),
+            agentMessages = state.agentMessages + messages
+        ).recordCompanyActivity(
+            companyId = companyId,
+            source = "hr-manager",
+            title = "HR Manager reviewed staffing",
+            detail = formatHrStaffingActivityDetail(hiredDefinitions, assignmentSummaries),
+            severity = if (capped) "warning" else "info"
+        ).withDerivedMetrics()
+        stateStore.save(nextState)
+        nextState.projectContexts.firstOrNull { it.companyId == companyId }?.let { context ->
+            writeCompanyContextSnapshot(nextState, company, context)
+        }
+        HrStaffingOutcome(
+            hiredAgents = hiredDefinitions,
+            mentorAssignments = assignmentSummaries,
+            capped = capped,
+            noOpReason = null
+        )
+    }
+
+    private fun formatHrStaffingOutcome(outcome: HrStaffingOutcome): String {
+        val parts = buildList {
+            if (outcome.hiredAgents.isNotEmpty()) {
+                add(
+                    outcome.hiredAgents.joinToString { hired ->
+                        val mentorText = outcome.mentorAssignments.firstOrNull { it.agentTitle == hired.title }
+                            ?.mentorTitle
+                            ?.let { " with $it as mentor" }
+                            .orEmpty()
+                        "${hired.title}$mentorText"
+                    } + " added."
+                )
+            }
+            val existingMentors = outcome.mentorAssignments.filterNot { assignment ->
+                outcome.hiredAgents.any { it.title == assignment.agentTitle }
+            }
+            if (existingMentors.isNotEmpty()) {
+                add(
+                    existingMentors.joinToString { "${it.agentTitle} -> ${it.mentorTitle}" } +
+                        " mentor assignment(s) updated."
+                )
+            }
+            if (outcome.capped) {
+                add("Additional hiring was held at the company staffing limit.")
+            }
+            outcome.noOpReason?.let { add(it) }
+        }
+        return parts.joinToString(" ")
+    }
+
+    private fun formatHrStaffingActivityDetail(
+        hiredDefinitions: List<CompanyAgentDefinition>,
+        mentorAssignments: List<HrMentorAssignment>
+    ): String =
+        when {
+            hiredDefinitions.isNotEmpty() -> "Hired ${hiredDefinitions.joinToString { it.title }}."
+            mentorAssignments.isNotEmpty() -> "Assigned mentors for ${mentorAssignments.joinToString { it.agentTitle }}."
+            else -> "No staffing change needed."
+        }
+
+    private fun occupiedCompanyProfileIds(state: DesktopAppState, companyId: String): Set<String> {
+        val issueCompanyById = state.issues.associate { it.id to it.companyId }
+        return state.tasks
+            .filter { it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED }
+            .mapNotNull { task ->
+                val issueCompanyId = task.issueId?.let(issueCompanyById::get) ?: return@mapNotNull null
+                if (issueCompanyId == companyId) {
+                    state.issues.firstOrNull { it.id == task.issueId }?.assigneeProfileId
+                } else {
+                    null
+                }
+            }
+            .toSet()
+    }
+
+    private fun inferHrStaffingNeeds(
+        state: DesktopAppState,
+        companyId: String,
+        requestText: String?
+    ): List<HrStaffingNeed> {
+        val request = requestText.orEmpty()
+        val issueTexts = state.issues
+            .filter {
+                it.companyId == companyId &&
+                    it.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED, IssueStatus.BLOCKED)
+            }
+            .sortedWith(compareBy<CompanyIssue> { it.priority }.thenByDescending { it.updatedAt })
+            .take(6)
+            .joinToString("\n") { "${it.kind} ${it.title} ${it.description} ${it.acceptanceCriteria.joinToString(" ")}" }
+        val text = "$request\n$issueTexts".lowercase()
+        val explicitStaffing = containsAny(text, "hire", "hiring", "staff", "팀 보강", "고용", "채용", "필요한 사람", "사람 붙")
+        val needs = mutableListOf<HrStaffingNeed>()
+        fun addNeed(need: HrStaffingNeed) {
+            if (needs.none { it.title.equals(need.title, ignoreCase = true) }) {
+                needs += need
+            }
+        }
+        if (containsAny(text, "frontend", "front-end", "ui", "swift", "macos", "desktop", "화면", "프론트", "사용자 경험")) {
+            addNeed(
+                HrStaffingNeed(
+                    title = "Frontend Specialist",
+                    roleSummary = "own frontend, SwiftUI, desktop UI, and interaction polish work",
+                    specialties = listOf("frontend", "swiftui", "macos", "ui"),
+                    reason = "Frontend or desktop UI work needs dedicated capacity.",
+                    mentorTitleHints = listOf("Engineering Lead", "UI Builder", "UX Builder"),
+                    collaboratorTitleHints = listOf("UI Builder", "UX Builder", "QA")
+                )
+            )
+        }
+        if (containsAny(text, "backend", "api", "kotlin", "server", "orchestration", "백엔드")) {
+            addNeed(
+                HrStaffingNeed(
+                    title = "Backend Specialist",
+                    roleSummary = "own backend APIs, Kotlin orchestration, and runtime integration",
+                    specialties = listOf("backend", "api", "kotlin", "orchestration"),
+                    reason = "Backend or orchestration work needs dedicated capacity.",
+                    mentorTitleHints = listOf("Engineering Lead", "Backend Builder", "CEO"),
+                    collaboratorTitleHints = listOf("Backend Builder", "QA", "Release Manager")
+                )
+            )
+        }
+        if (containsAny(text, "qa", "test", "testing", "검증", "테스트", "리뷰")) {
+            addNeed(
+                HrStaffingNeed(
+                    title = "QA Specialist",
+                    roleSummary = "own regression testing, verification evidence, and review feedback",
+                    specialties = listOf("qa", "testing", "verification", "review"),
+                    reason = "Verification workload needs dedicated capacity.",
+                    mentorTitleHints = listOf("QA", "Engineering Lead", "Release Manager"),
+                    collaboratorTitleHints = listOf("QA", "Release Manager")
+                )
+            )
+        }
+        if (containsAny(text, "marketing", "content", "social", "마케팅", "콘텐츠")) {
+            addNeed(
+                HrStaffingNeed(
+                    title = "Marketing Specialist",
+                    roleSummary = "support delegated content, owned-channel, and social workflow execution",
+                    specialties = listOf("marketing", "content", "social"),
+                    reason = "Marketing work needs dedicated capacity.",
+                    mentorTitleHints = listOf("Marketing Operator", "Product Strategist", "CEO"),
+                    collaboratorTitleHints = listOf("Marketing Operator", "Product Strategist")
+                )
+            )
+        }
+        if (explicitStaffing && needs.isEmpty()) {
+            addNeed(
+                HrStaffingNeed(
+                    title = "Generalist Builder",
+                    roleSummary = "take implementation overflow and unblock broad product work",
+                    specialties = listOf("implementation", "delivery", "integration"),
+                    reason = "The team asked HR Manager to add general execution capacity.",
+                    mentorTitleHints = listOf("Engineering Lead", "Builder", "CEO"),
+                    collaboratorTitleHints = listOf("Builder", "QA")
+                )
+            )
+        }
+        return needs
+    }
+
+    private fun companyHasCoverageForNeed(
+        need: HrStaffingNeed,
+        definitions: List<CompanyAgentDefinition>,
+        profiles: List<OrgAgentProfile>,
+        occupiedProfileIds: Set<String>
+    ): Boolean {
+        val activeDefinitions = definitions.filter { it.enabled }
+        if (activeDefinitions.any { it.title.equals(need.title, ignoreCase = true) }) {
+            return true
+        }
+        val matchingDefinitionIds = activeDefinitions
+            .filter { definition -> definitionMatchesNeed(definition, need) }
+            .mapTo(linkedSetOf()) { it.id }
+        if (matchingDefinitionIds.isEmpty()) {
+            return false
+        }
+        val matchingProfiles = profiles.filter { it.id in matchingDefinitionIds }
+        return matchingProfiles.any { it.id !in occupiedProfileIds }
+    }
+
+    private fun definitionMatchesNeed(definition: CompanyAgentDefinition, need: HrStaffingNeed): Boolean {
+        val descriptor = listOf(
+            definition.title,
+            definition.roleSummary,
+            definition.specialties.joinToString(" ")
+        ).joinToString(" ").lowercase()
+        return need.specialties.any { specialty -> descriptor.contains(specialty.lowercase()) }
+    }
+
+    private fun chooseMentorForNeed(
+        need: HrStaffingNeed,
+        definitions: List<CompanyAgentDefinition>
+    ): CompanyAgentDefinition? =
+        need.mentorTitleHints.firstNotNullOfOrNull { hint ->
+            definitions.firstOrNull { it.enabled && it.title.equals(hint, ignoreCase = true) }
+        } ?: definitions.firstOrNull { it.enabled && it.title.equals("CEO", ignoreCase = true) }
+            ?: definitions.firstOrNull { it.enabled }
+
+    private fun chooseMentorForAgent(
+        definition: CompanyAgentDefinition,
+        definitions: List<CompanyAgentDefinition>
+    ): CompanyAgentDefinition? {
+        val title = definition.title.lowercase()
+        val hints = when {
+            title == "ceo" -> emptyList()
+            "hr" in title || "engineering lead" in title || "product" in title || "marketing" in title ->
+                listOf("CEO")
+            "release" in title -> listOf("QA", "Engineering Lead", "CEO")
+            "ui" in title -> listOf("UX Builder", "Engineering Lead", "CEO")
+            "ux" in title -> listOf("Product Strategist", "CEO")
+            "qa" in title || "backend" in title || "builder" in title || "frontend" in title ->
+                listOf("Engineering Lead", "Builder", "CEO")
+            else -> listOf("Engineering Lead", "CEO", "HR Manager")
+        }
+        return hints.firstNotNullOfOrNull { hint ->
+            definitions.firstOrNull {
+                it.enabled &&
+                    it.id != definition.id &&
+                    it.title.equals(hint, ignoreCase = true)
+            }
+        } ?: definitions.firstOrNull {
+            it.enabled &&
+                it.id != definition.id &&
+                it.title.equals("CEO", ignoreCase = true)
+        } ?: definitions.firstOrNull { it.enabled && it.id != definition.id }
+    }
+
+    private fun uniqueHrHireTitle(
+        requestedTitle: String,
+        definitions: List<CompanyAgentDefinition>
+    ): String {
+        val existing = definitions.mapTo(mutableSetOf()) { it.title.lowercase() }
+        if (requestedTitle.lowercase() !in existing) return requestedTitle
+        var suffix = 2
+        while ("$requestedTitle $suffix".lowercase() in existing) {
+            suffix += 1
+        }
+        return "$requestedTitle $suffix"
+    }
+
     private suspend fun reopenBlockedIssuesFromOperator(companyId: String): OperatorCommandAction = stateMutex.withLock {
         val state = stateStore.load()
         val company = state.companies.firstOrNull { it.id == companyId }
@@ -5091,6 +5558,9 @@ class DesktopAppService(
     private fun looksLikeDeepSeekModelUpdate(text: String): Boolean =
         text.contains("opencode") && (text.contains("deepseek") || text.contains("모델") || text.contains("model"))
 
+    private fun looksLikeHrStaffingRequest(text: String): Boolean =
+        containsAny(text, "hr", "hiring", "hire", "staff", "mentor", "팀 보강", "사수", "고용", "채용", "사람 붙", "필요한 사람", "인력")
+
     private fun looksLikeRuntimeStart(text: String): Boolean =
         containsAny(text, "runtime start", "start runtime", "런타임 시작", "실행 시작", "가동")
 
@@ -5140,6 +5610,27 @@ class DesktopAppService(
         )
     }
 
+    private fun normalizeMentorAgentId(
+        requestedMentorId: String?,
+        companyId: String,
+        targetAgentId: String,
+        definitions: List<CompanyAgentDefinition>,
+        preserveWhenNull: Boolean,
+        currentMentorId: String?
+    ): String? {
+        if (requestedMentorId == null) return if (preserveWhenNull) currentMentorId else null
+        val trimmed = requestedMentorId.trim()
+        if (trimmed.isBlank()) return null
+        val mentor = definitions.firstOrNull {
+            it.companyId == companyId &&
+                it.id == trimmed &&
+                it.id != targetAgentId &&
+                it.enabled
+        }
+        require(mentor != null) { "Mentor agent must be an active agent in the same company" }
+        return mentor.id
+    }
+
     suspend fun createCompanyAgentDefinition(
         companyId: String,
         title: String,
@@ -5148,6 +5639,7 @@ class DesktopAppService(
         specialties: List<String> = emptyList(),
         collaborationInstructions: String? = null,
         preferredCollaboratorIds: List<String> = emptyList(),
+        mentorAgentId: String? = null,
         memoryNotes: String? = null,
         enabled: Boolean = true,
         model: String? = null
@@ -5162,8 +5654,17 @@ class DesktopAppService(
                 collaboratorId.isNotBlank() && state.companyAgentDefinitions.any { it.companyId == companyId && it.id == collaboratorId }
             }
             .distinct()
+        val definitionId = UUID.randomUUID().toString()
+        val normalizedMentorId = normalizeMentorAgentId(
+            requestedMentorId = mentorAgentId,
+            companyId = companyId,
+            targetAgentId = definitionId,
+            definitions = state.companyAgentDefinitions,
+            preserveWhenNull = false,
+            currentMentorId = null
+        )
         val definition = CompanyAgentDefinition(
-            id = UUID.randomUUID().toString(),
+            id = definitionId,
             companyId = companyId,
             title = title.trim().ifEmpty { "Agent" },
             agentCli = agentCli.trim().ifEmpty { "echo" },
@@ -5172,6 +5673,7 @@ class DesktopAppService(
             specialties = specialties.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
             collaborationInstructions = collaborationInstructions?.trim()?.takeIf { it.isNotBlank() },
             preferredCollaboratorIds = normalizedCollaborators,
+            mentorAgentId = normalizedMentorId,
             memoryNotes = memoryNotes?.trim()?.takeIf { it.isNotBlank() },
             enabled = enabled,
             displayOrder = state.companyAgentDefinitions.count { it.companyId == companyId },
@@ -5207,6 +5709,7 @@ class DesktopAppService(
         specialties: List<String>? = null,
         collaborationInstructions: String? = null,
         preferredCollaboratorIds: List<String>? = null,
+        mentorAgentId: String? = null,
         memoryNotes: String? = null,
         enabled: Boolean? = null,
         displayOrder: Int? = null,
@@ -5223,6 +5726,14 @@ class DesktopAppService(
                     state.companyAgentDefinitions.any { it.companyId == companyId && it.id == collaboratorId }
             }
             ?.distinct()
+        val normalizedMentorId = normalizeMentorAgentId(
+            requestedMentorId = mentorAgentId,
+            companyId = companyId,
+            targetAgentId = agentId,
+            definitions = state.companyAgentDefinitions,
+            preserveWhenNull = true,
+            currentMentorId = current.mentorAgentId
+        )
         val updated = current.copy(
             title = title?.trim()?.takeIf { it.isNotBlank() } ?: current.title,
             agentCli = agentCli?.trim()?.takeIf { it.isNotBlank() } ?: current.agentCli,
@@ -5238,6 +5749,7 @@ class DesktopAppService(
                 else -> collaborationInstructions.trim()
             },
             preferredCollaboratorIds = normalizedCollaborators ?: current.preferredCollaboratorIds,
+            mentorAgentId = normalizedMentorId,
             memoryNotes = when {
                 memoryNotes == null -> current.memoryNotes
                 memoryNotes.isBlank() -> null
@@ -7234,6 +7746,16 @@ class DesktopAppService(
                 } else {
                     "goal-added:${synthesizedGoal.id}"
                 }
+            }
+            val hrStaffingOutcome = runHrStaffingReview(
+                companyId = companyId,
+                requestText = null,
+                maxHires = HR_MAX_HIRES_PER_RUNTIME_TICK
+            )
+            if (hrStaffingOutcome.hiredAgents.isNotEmpty()) {
+                actions += "hr-hired:${hrStaffingOutcome.hiredAgents.size}"
+            } else if (hrStaffingOutcome.mentorAssignments.isNotEmpty()) {
+                actions += "hr-mentors:${hrStaffingOutcome.mentorAssignments.size}"
             }
 
             val current = stateStore.load()
@@ -10993,7 +11515,20 @@ class DesktopAppService(
                 .sortedWith(compareBy<CompanyAgentDefinition> { it.displayOrder }.thenBy { it.title.lowercase() })
             val edges = buildList {
                 definitions.forEach { definition ->
-                    definition.preferredCollaboratorIds.forEach { collaboratorId ->
+                    definition.mentorAgentId?.let { mentorId ->
+                        if (definitions.any { it.id == mentorId }) {
+                            add(
+                                AgentCollaborationEdge(
+                                    companyId = company.id,
+                                    fromAgentId = mentorId,
+                                    toAgentId = definition.id,
+                                    reason = "Mentorship and escalation support",
+                                    handoffType = "mentorship"
+                                )
+                            )
+                        }
+                    }
+                    definition.preferredCollaboratorIds.filterNot { it == definition.mentorAgentId }.forEach { collaboratorId ->
                         if (definitions.any { it.id == collaboratorId }) {
                             add(
                                 AgentCollaborationEdge(
@@ -11364,6 +11899,7 @@ class DesktopAppService(
                         appendLine("- ${definition.title} · ${definition.agentCli}")
                         appendLine("  role: ${definition.roleSummary}")
                         appendLine("  specialties: ${definition.specialties.joinToString(", ").ifBlank { "none" }}")
+                        appendLine("  mentor: ${definition.mentorAgentId?.let { mentorId -> companyDefinitions.firstOrNull { it.id == mentorId }?.title }.orEmpty().ifBlank { "none" }}")
                         appendLine("  collaborators: ${definition.preferredCollaboratorIds.mapNotNull { collaboratorId -> companyDefinitions.firstOrNull { it.id == collaboratorId }?.title }.joinToString(", ").ifBlank { "none" }}")
                         definition.collaborationInstructions?.takeIf { it.isNotBlank() }?.let {
                             appendLine("  collaboration: $it")
@@ -11429,6 +11965,7 @@ class DesktopAppService(
                     appendLine("- enabled: ${definition.enabled}")
                     appendLine("- roleSummary: ${definition.roleSummary}")
                     appendLine("- specialties: ${definition.specialties.joinToString(", ").ifBlank { "none" }}")
+                    appendLine("- mentor: ${definition.mentorAgentId?.let { mentorId -> companyDefinitions.firstOrNull { it.id == mentorId }?.title }.orEmpty().ifBlank { "none" }}")
                     appendLine("- preferredCollaborators: ${definition.preferredCollaboratorIds.mapNotNull { collaboratorId -> companyDefinitions.firstOrNull { it.id == collaboratorId }?.title }.joinToString(", ").ifBlank { "none" }}")
                     appendLine("- capabilities: ${profile?.capabilities?.joinToString(", ").orEmpty().ifBlank { "none" }}")
                     appendLine("- mergeAuthority: ${profile?.mergeAuthority == true}")
@@ -14767,6 +15304,9 @@ class DesktopAppService(
                             definition.agentCli.equals(profile.executionAgentName, ignoreCase = true)
                         )
             }
+        val mentorName = state.companyAgentDefinitions
+            .firstOrNull { it.companyId == company.id && it.id == agentDefinition?.mentorAgentId }
+            ?.title
         val now = System.currentTimeMillis()
         fun fact(
             layer: CompanyMemoryLayer,
@@ -14874,6 +15414,9 @@ class DesktopAppService(
             }
             agentDefinition?.memoryNotes?.takeIf { it.isNotBlank() }?.let {
                 add(fact(CompanyMemoryLayer.AGENT, "memoryNotes", summarizeForPrompt(it, 160), "agent-definition", 0.75, agentDefinition.updatedAt))
+            }
+            mentorName?.takeIf { it.isNotBlank() }?.let {
+                add(fact(CompanyMemoryLayer.AGENT, "mentor", it, "agent-definition", 0.82, agentDefinition?.updatedAt ?: now))
             }
             add(
                 fact(
@@ -15098,6 +15641,7 @@ class DesktopAppService(
             val specialties: List<String> = emptyList(),
             val collaborationInstructions: String? = null,
             val preferredCollaborators: List<String> = emptyList(),
+            val mentor: String? = null,
             val memoryNotes: String? = null
         )
 
@@ -15115,63 +15659,81 @@ class DesktopAppService(
                 roleSummary = "translate company goals into scoped work, requirements, and prioritization guidance",
                 specialties = listOf("product", "requirements", "roadmap", "discovery"),
                 collaborationInstructions = "Clarify the next slice before builders start, and hand planning context back to the CEO.",
-                preferredCollaborators = listOf("CEO", "UX Builder", "Engineering Lead")
+                preferredCollaborators = listOf("CEO", "UX Builder", "Engineering Lead"),
+                mentor = "CEO"
             ),
             SeededRole(
                 title = "Marketing Operator",
                 roleSummary = "operate delegated owned web, CMS, organic social, and marketing analytics workflows under policy",
                 specialties = listOf("marketing", "content", "social", "analytics"),
                 collaborationInstructions = "Use browser-driven marketing actions only inside an explicit MarketingDelegationPolicy; deny and re-scope anything outside it.",
-                preferredCollaborators = listOf("CEO", "Product Strategist", "Release Manager")
+                preferredCollaborators = listOf("CEO", "Product Strategist", "Release Manager"),
+                mentor = "CEO"
+            ),
+            SeededRole(
+                title = "HR Manager",
+                roleSummary = "hire missing agents, assign mentors, watch team capacity, and write onboarding notes",
+                specialties = listOf("hiring", "mentorship", "capacity", "onboarding"),
+                collaborationInstructions = "Add specialists only when the current team lacks capacity or coverage, and assign a senior mentor for every new hire.",
+                preferredCollaborators = listOf("CEO", "Engineering Lead", "Product Strategist"),
+                mentor = "CEO",
+                memoryNotes = "Keep hiring conservative. Prefer one well-scoped specialist with a clear mentor over broad roster expansion."
             ),
             SeededRole(
                 title = "Engineering Lead",
                 roleSummary = "coordinate architecture, implementation direction, integration planning, and technical delegation",
                 specialties = listOf("architecture", "integration", "backend", "frontend"),
                 collaborationInstructions = "Split technical work across builders and surface integration risks early.",
-                preferredCollaborators = listOf("CEO", "Builder", "Backend Builder", "Release Manager")
+                preferredCollaborators = listOf("CEO", "Builder", "Backend Builder", "Release Manager"),
+                mentor = "CEO"
             ),
             SeededRole(
                 title = "UX Builder",
                 roleSummary = "shape product flows, usability, interaction clarity, and user-facing experience",
                 specialties = listOf("ux", "research", "flows", "usability"),
                 collaborationInstructions = "Turn product requirements into clearer flows before UI polish begins.",
-                preferredCollaborators = listOf("Product Strategist", "UI Builder", "Builder")
+                preferredCollaborators = listOf("Product Strategist", "UI Builder", "Builder"),
+                mentor = "Product Strategist"
             ),
             SeededRole(
                 title = "UI Builder",
                 roleSummary = "craft visual interface details, component polish, layout quality, and design fidelity",
                 specialties = listOf("ui", "design", "components", "visual polish"),
                 collaborationInstructions = "Convert UX intent into concrete screens and hand implementation-ready guidance to frontend.",
-                preferredCollaborators = listOf("UX Builder", "Builder")
+                preferredCollaborators = listOf("UX Builder", "Builder"),
+                mentor = "UX Builder"
             ),
             SeededRole(
                 title = "Builder",
                 roleSummary = "implement assigned product slices, integrate changes, and deliver reviewable work",
                 specialties = listOf("implementation", "integration", "delivery"),
                 collaborationInstructions = "Own user-facing implementation and coordinate with UI/UX roles on fidelity gaps.",
-                preferredCollaborators = listOf("UI Builder", "UX Builder", "Backend Builder")
+                preferredCollaborators = listOf("UI Builder", "UX Builder", "Backend Builder"),
+                mentor = "Engineering Lead"
             ),
             SeededRole(
                 title = "Backend Builder",
                 roleSummary = "implement backend behavior, orchestration logic, APIs, and integration reliability",
                 specialties = listOf("backend", "api", "kotlin", "orchestration"),
                 collaborationInstructions = "Own service and runtime changes, then hand integration notes to QA and release.",
-                preferredCollaborators = listOf("Engineering Lead", "Builder", "QA")
+                preferredCollaborators = listOf("Engineering Lead", "Builder", "QA"),
+                mentor = "Engineering Lead"
             ),
             SeededRole(
                 title = "QA",
                 roleSummary = "review completed work, verify behavior, run qa checks, and summarize residual risk",
                 specialties = listOf("qa", "review", "verification", "testing"),
                 collaborationInstructions = "Review every completed slice and decide whether more remediation is needed before release.",
-                preferredCollaborators = listOf("Backend Builder", "Builder", "Release Manager")
+                preferredCollaborators = listOf("Backend Builder", "Builder", "Release Manager"),
+                mentor = "Engineering Lead"
             ),
             SeededRole(
                 title = "Release Manager",
                 roleSummary = "coordinate release readiness, final integration checks, operational notes, and delivery handoff",
                 specialties = listOf("release", "ops", "integration", "delivery"),
                 collaborationInstructions = "Prepare the final slice for CEO approval and call out any operational or release blockers.",
-                preferredCollaborators = listOf("QA", "Engineering Lead", "CEO")
+                preferredCollaborators = listOf("QA", "Engineering Lead", "CEO"),
+                mentor = "QA"
             )
         )
 
@@ -15187,6 +15749,7 @@ class DesktopAppService(
                 specialties = template.specialties,
                 collaborationInstructions = template.collaborationInstructions,
                 preferredCollaboratorIds = template.preferredCollaborators.mapNotNull(idByTitle::get),
+                mentorAgentId = template.mentor?.let(idByTitle::get),
                 memoryNotes = template.memoryNotes,
                 displayOrder = index,
                 createdAt = now,
