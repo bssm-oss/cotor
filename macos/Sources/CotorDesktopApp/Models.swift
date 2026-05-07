@@ -575,6 +575,27 @@ struct OperatorCommandResponsePayload: Codable, Hashable, Identifiable {
     let summary: OperatorCompanySummaryPayload?
 }
 
+struct OperatorAnswerSourcePayload: Codable, Hashable, Identifiable {
+    var id: String { "\(type)-\(title)-\(refId ?? "")-\(detail ?? "")" }
+
+    let type: String
+    let title: String
+    let detail: String?
+    let refId: String?
+}
+
+struct OperatorChatResponsePayload: Codable, Hashable, Identifiable {
+    var id: String { "\(message)-\(automationMode)-\(actions.count)-\(pendingApprovals.count)-\(blockedActions.count)-\(answerSources.count)" }
+
+    let message: String
+    let automationMode: String
+    let actions: [OperatorCommandActionPayload]
+    let pendingApprovals: [OperatorCommandActionPayload]
+    let blockedActions: [OperatorCommandActionPayload]
+    let summary: OperatorCompanySummaryPayload?
+    let answerSources: [OperatorAnswerSourcePayload]
+}
+
 /// User-authored task record shown in the center pane.
 struct TaskRecord: Codable, Identifiable, Hashable {
     let id: String

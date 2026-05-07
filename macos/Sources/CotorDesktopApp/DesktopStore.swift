@@ -3131,6 +3131,37 @@ final class DesktopStore: ObservableObject {
         }
     }
 
+    func runCompanyOperatorChat(
+        message: String,
+        automationMode: String? = nil,
+        confirmFullAuto: Bool = false,
+        confirmStaffing: Bool = false
+    ) async -> OperatorChatResponsePayload? {
+        guard let company = selectedCompany else { return nil }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            actionErrorMessage = nil
+            errorMessage = nil
+            let response = try await runWithEmbeddedBackendRecovery {
+                try await api.runOperatorChat(
+                    companyId: company.id,
+                    message: trimmed,
+                    automationMode: automationMode,
+                    confirmFullAuto: confirmFullAuto,
+                    confirmStaffing: confirmStaffing
+                )
+            }
+            await refreshDashboard(restartEventStream: false)
+            await loadSelectedCompanyMemorySnapshot()
+            return response
+        } catch {
+            actionErrorMessage = error.localizedDescription
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func setSelectedCompanyOperatorAutomationMode(_ mode: String, confirmFullAuto: Bool = false) async {
         guard let company = selectedCompany else { return }
         let response = await runCompanyOperatorCommand(
@@ -3434,7 +3465,7 @@ final class DesktopStore: ObservableObject {
             return companyLinearStatusMessage ?? language("Saved Linear settings.", "Linear 설정을 저장했습니다.")
         }
 
-        return await runOperatorCommandAsChatReply(message: message)
+        return await runOperatorChatAsChatReply(message: message)
     }
 
     private func runOperatorCommandAsChatReply(
@@ -3454,7 +3485,33 @@ final class DesktopStore: ObservableObject {
         return operatorAssistantText(for: response)
     }
 
+    private func runOperatorChatAsChatReply(message: String) async -> String {
+        guard let response = await runCompanyOperatorChat(message: message) else {
+            if let commandResponse = await runCompanyOperatorCommand(message: message) {
+                return operatorAssistantText(for: commandResponse)
+            }
+            return operatorFailureFallback()
+        }
+        return operatorAssistantText(for: response)
+    }
+
     private func operatorAssistantText(for response: OperatorCommandResponsePayload) -> String {
+        let blocked = response.blockedActions.map { operatorActionText($0) }
+        if !blocked.isEmpty {
+            return blocked.joined(separator: "\n")
+        }
+        let pending = response.pendingApprovals.map { operatorActionText($0) }
+        if !pending.isEmpty {
+            return language("Sent this to internal approval.", "내부 승인으로 보냈습니다.") + "\n" + pending.joined(separator: "\n")
+        }
+        let actions = response.actions.map { operatorActionText($0) }
+        if !actions.isEmpty {
+            return actions.joined(separator: "\n")
+        }
+        return sanitizeOperatorUserText(response.message, language: language)
+    }
+
+    private func operatorAssistantText(for response: OperatorChatResponsePayload) -> String {
         let blocked = response.blockedActions.map { operatorActionText($0) }
         if !blocked.isEmpty {
             return blocked.joined(separator: "\n")
