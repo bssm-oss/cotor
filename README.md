@@ -164,7 +164,7 @@ Current desktop model:
 
 - top-level `Company` and `TUI` shell modes
 - `Company` mode for multi-company operations, agent team, goals, issue board/canvas, activity feed, runtime controls, and a dedicated `Meeting Room` surface
-- dedicated `Operator Chat` navigation surface that behaves like a message thread for natural-language company commands, with automation modes, approvals, and runtime actions handled through chat commands instead of always-visible control rails
+- dedicated `Operator Chat` navigation surface that sends selected-company messages through an LLM-first operator planner; the planner prefers local Ollama Gemma when available, interprets loose natural language, chooses validated company tools, and then answers from the actual tool results instead of keyword-matching canned status text
 - `Company` summary keeps only the immediate company signal and recent issues visible by default; team work, live runs, CEO decisions, Linear state, and activity history sit behind an expandable detail section
 - `Company` and issue surfaces use progressive disclosure so paths, backend health, cost guardrails, metadata, execution logs, and agent conversation details appear only after opening deeper detail views
 - dedicated `Reports` navigation surface shows deterministic previous-day morning reports with completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots

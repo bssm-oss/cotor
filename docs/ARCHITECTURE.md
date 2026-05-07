@@ -55,8 +55,31 @@ sequenceDiagram
     Runtime->>Executor: execute stage agents
     Executor-->>Runtime: AgentResult
     Runtime->>Store: events, stats, checkpoints
-    Runtime-->>CLI: final summary
+Runtime-->>CLI: final summary
 ```
+
+### Operator chat
+
+```mermaid
+sequenceDiagram
+    participant Mac as macOS Desktop
+    participant API as AppServer
+    participant Company as DesktopAppService
+    participant LLM as Operator LLM
+    participant Tools as Validated company tools
+
+    Mac->>API: POST /companies/{id}/operator/chat
+    API->>Company: user message + current automation mode
+    Company->>LLM: compact company context + allowed tool schema (local Ollama Gemma preferred)
+    LLM-->>Company: JSON plan with toolCalls
+    Company->>Tools: validate and execute allowed calls
+    Company->>LLM: actual tool results
+    LLM-->>Company: final natural-language answer
+    Company-->>API: message, actions, sources, summary
+    API-->>Mac: chat timeline payload
+```
+
+Operator chat is LLM-first for selected-company messages. The planner prefers local Ollama Gemma when a local Gemma-family model is discovered, then falls back to the selected company execution model. Keyword recognizers remain as compatibility helpers and concrete tool implementations, but they do not decide the primary user-facing answer.
 
 ### Desktop company run
 

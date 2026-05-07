@@ -60,6 +60,29 @@ sequenceDiagram
     Runtime-->>CLI: 최종 요약
 ```
 
+### 운영 채팅
+
+```mermaid
+sequenceDiagram
+    participant Mac as macOS Desktop
+    participant API as AppServer
+    participant Company as DesktopAppService
+    participant LLM as Operator LLM
+    participant Tools as 검증된 회사 도구
+
+    Mac->>API: POST /companies/{id}/operator/chat
+    API->>Company: 사용자 메시지 + 현재 자동화 모드
+    Company->>LLM: 압축된 회사 context + 허용 tool schema (로컬 Ollama Gemma 우선)
+    LLM-->>Company: toolCalls가 들어 있는 JSON plan
+    Company->>Tools: 허용된 호출 검증 및 실행
+    Company->>LLM: 실제 tool 결과
+    LLM-->>Company: 최종 자연어 답변
+    Company-->>API: message, actions, sources, summary
+    API-->>Mac: 채팅 timeline payload
+```
+
+선택된 회사의 운영 채팅은 LLM-first로 동작합니다. planner는 로컬 Gemma 계열 모델이 발견되면 로컬 Ollama Gemma를 먼저 쓰고, 없을 때 선택된 회사 실행 모델로 fallback합니다. 키워드 recognizer는 호환용 helper와 실제 tool 구현으로 남지만, 사용자에게 보이는 기본 답변을 결정하지 않습니다.
+
 ### 데스크톱 회사 실행
 
 ```mermaid

@@ -14,6 +14,7 @@
 - 기본 interactive와 분리된 `cotor company tui` 표면 추가
 - OpenCode가 `--model`을 전달하고 기본 모델을 무료 `opencode/nemotron-3-super-free`로 정리
 - 새 회사 시드 에이전트 기본값을 `opencode` 우선으로 조정
+- 운영 채팅은 선택된 회사 메시지를 LLM-first planner로 보내고, 가능한 경우 로컬 Ollama Gemma를 우선 사용하며, planner가 검증된 회사 도구를 고른 뒤 실제 tool 결과를 근거로 답하도록 변경
 - 운영 채팅 모델 변경은 무료/Nemotron 요청을 `opencode/nemotron-3-super-free`로 유지하고, DeepSeek는 명시 요청일 때만 선택
 - HR이 새로 만든 에이전트는 별도 기본값으로 초기화하지 않고 회사의 현재 실행 모델 정책을 상속
 - 조직도 다중선택 배치 편집이 실제 저장되도록 연결

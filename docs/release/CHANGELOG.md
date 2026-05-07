@@ -20,6 +20,7 @@
 - Updated OpenCode docs and implementation notes for the default `opencode/nemotron-3-super-free` free model, explicit-only DeepSeek aliasing, and lower-cost company defaults.
 
 ### Changed
+- Operator Chat now routes selected-company messages through an LLM-first planner that prefers local Ollama Gemma when available, selects validated company tools, and writes answers from actual tool results instead of keyword-matched canned responses.
 - OpenCode now forwards `--model` when configured and defaults to `opencode/nemotron-3-super-free`.
 - Company-seeded agents now prefer `opencode` over `codex` when the executable is available.
 - Operator Chat model updates keep free/Nemotron requests on `opencode/nemotron-3-super-free`; DeepSeek is selected only when explicitly requested.
