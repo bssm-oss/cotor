@@ -234,10 +234,12 @@ class CompanyRuntimeRetention(
         } || state.reviewQueue.any {
             it.worktreePath.normalizedPath() == path && it.pullRequestNumber != null && scope.includes(it.companyId)
         }
-        val companyId = (activeRuns.mapNotNull { companyIdForRun(state, it) } +
-            openIssues.map { it.companyId } +
-            reviewItems.map { it.companyId } +
-            terminalRuns.mapNotNull { companyIdForRun(state, it) })
+        val companyId = (
+            activeRuns.mapNotNull { companyIdForRun(state, it) } +
+                openIssues.map { it.companyId } +
+                reviewItems.map { it.companyId } +
+                terminalRuns.mapNotNull { companyIdForRun(state, it) }
+            )
             .firstOrNull { it.isNotBlank() }
         return WorktreeReferences(activeRuns, terminalRuns, openIssues, reviewItems, prLinked, companyId)
     }

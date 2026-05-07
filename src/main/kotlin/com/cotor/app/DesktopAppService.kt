@@ -11,8 +11,8 @@ package com.cotor.app
  */
 
 import com.cotor.app.runtime.CompanyRuntimeBindingService
-import com.cotor.app.runtime.CompanyRuntimeLoopFailureDisposition
 import com.cotor.app.runtime.CompanyRuntimeLoopDisposition
+import com.cotor.app.runtime.CompanyRuntimeLoopFailureDisposition
 import com.cotor.app.runtime.CompanyRuntimeMachine
 import com.cotor.app.runtime.RuntimeCommand
 import com.cotor.app.runtime.WorkQueue
