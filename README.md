@@ -10,6 +10,7 @@ Smoke test: `cotor version`
 - Local web editor with YAML export and run support
 - macOS desktop shell backed by `cotor app-server`
 - Multi-company operations layer with companies, agent definitions, goals, issues, review queue, activity feed, and runtime start/stop/status
+- Built-in HR Manager role that can conservatively add missing specialists and assign a mentor for each company agent
 - Estimated AI spend tracking per company with configurable daily and monthly cost guardrails
 - Per-agent git branch and worktree isolation for delegated execution
 - Runtime hardening for command validation, durable replay side-effect approval, and desktop/backend token consistency
@@ -165,6 +166,7 @@ Current desktop model:
 - company CEO/chief approval agents can satisfy PR creation policy gates internally, so publish retries do not stop on a user-facing approval prompt when the company has an approval authority
 - Company Operator supports `ASK_ME`, `AGENT_APPROVED`, and `FULL_AUTO`; `AGENT_APPROVED` is the default, while `FULL_AUTO` still blocks hard-gated actions such as repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks
 - company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, Ollama, LM Studio, and app-managed local Gemma models; Cotor prefers installed Gemma 4 models and falls back to installed Gemma-family models instead of failing on a missing default alias
+- company agent definitions also store an optional mentor, shown as one compact team-card line and editable from the advanced assignment controls
 - selecting the Marketing Operator skill on a company agent exposes a delegation-policy panel for owned/social channels, allowed domains, publish limits, brand rules, and session/secret references
 - stale Cotor-managed retry PRs are reconciled and closed in batches so repeated review loops do not keep hundreds of obsolete open PRs around
 - legacy CEO merge-conflict blockers are pushed back into execution so the company can rebase, republish, and continue instead of staying stuck in a blocked approval lane
@@ -186,6 +188,7 @@ The current build includes a working local operations layer:
 - connect an existing GitHub repository from the desktop app by signing in with `gh` and saving the repository URL as `origin`
 - define company agents with only title, CLI, and role summary
 - optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:e2b` alias is not present.
+- seed new companies with an HR Manager plus mentor relationships, and let Operator Chat handle requests such as team staffing or mentor assignment without adding another always-visible control panel
 - use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory
 - delegate Marketing Operator browser publishing only through a prior policy; out-of-policy owned/social actions are denied rather than sent to a user approval queue
 - create company goals
@@ -198,6 +201,7 @@ The current build includes a working local operations layer:
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page with a default repository `Map`, a visible `Agent Meeting` table for live coordination, synthesized runtime/backend/review/session wall events, and animated agent presence in the floor view
 - use the Operator Chat surface to ask for status, change all selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
+- ask the HR Manager through Operator Chat to hire missing specialists or assign mentors; HR uses `opencode/nemotron-3-super-free`, avoids duplicate roles, and caps automatic hiring so teams do not grow without bounds
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel
 - inspect compact runtime status and recent issues from the company summary page, then open advanced details only when needed

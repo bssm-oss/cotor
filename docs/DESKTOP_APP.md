@@ -114,6 +114,7 @@ The current macOS shell has two top-level modes.
   - company creation bound to one root folder
   - direct `Meeting Room` navigation that opens to a plain repository `Map`, falls back to a simple folder map when prepared graph data is missing, and exposes `Agent Meeting` plus live floor views without showing technical graph paths
   - agent-definition composer
+  - compact mentor assignment in the agent editor and team cards, with new companies seeded with an HR Manager who can assign mentors and hire missing specialists
   - Marketing Operator skill selection that reveals a delegation-policy panel for allowed channels, domains, daily publish limits, brand rules, session/secret references, and recent marketing run logs
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
@@ -205,6 +206,8 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - bind each company to one working folder
 - define company agents with minimal user input
 - store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:e2b` alias is unavailable.
+- store an optional `mentorAgentId` per company agent; mentor choices are limited to active agents in the same company and clearable from the advanced assignment controls.
+- seed every new company with an HR Manager role plus default mentor relationships across CEO, product, engineering, builder, QA, and release roles.
 - show the built-in skill catalog in the company agent editor and save each agent's friendly skill selections into the `SKILL_RUN` capability allowlist.
 - configure a Marketing Operator delegation policy from the agent editor; the policy opens browser and marketing publish capabilities only for allowed owned/social domains and channels, while out-of-policy actions are denied instead of routed to user approval.
 - expose the repository map as a built-in company-agent choice when the local map tool is available, and inject lightweight workspace-map guidance into every company agent execution memory bundle
@@ -220,6 +223,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to a plain repository `Map`, with synthesized runtime/backend/review/session wall events and floor-view summaries
 - use the Operator Chat surface to ask for status, bulk switch selected-company agents to OpenCode DeepSeek (`opencode-go/deepseek-v4-flash`), start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one message-style command chat
+- use Operator Chat for HR staffing requests such as hiring missing specialists or assigning mentors. HR hires use `opencode/nemotron-3-super-free`, avoid duplicate role coverage, and stay capped per chat command and runtime tick.
 - turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step
 - choose `ASK_ME`, `AGENT_APPROVED`, or `FULL_AUTO` automation; `AGENT_APPROVED` is the default and routes recoverable sensitive actions to CEO/QA/Reviewer approval instead of a user confirmation rail
 - keep hard-gated actions blocked in every mode, including repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks
