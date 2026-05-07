@@ -462,7 +462,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = service.createCompany(name = "Operator Status", rootPath = appHome.toString())
 
@@ -475,14 +476,15 @@ class DesktopAppServiceTest : FunSpec({
         stateStore.load().agentMessages.any { it.kind == "operator-result" && it.fromAgentName == "Company Operator" } shouldBe true
     }
 
-    test("operator command maps opencode deepseek to the default OpenCode model") {
+    test("operator command maps opencode deepseek only when deepseek is explicit") {
         val appHome = Files.createTempDirectory("operator-model-home")
         val stateStore = DesktopStateStore { appHome }
         val service = DesktopAppService(
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = service.createCompany(name = "Operator Model", rootPath = appHome.toString())
 
@@ -493,7 +495,57 @@ class DesktopAppServiceTest : FunSpec({
         response.shouldHideRawOperatorInternals()
         persisted.shouldNotBeEmpty()
         persisted.all { it.agentCli == "opencode" } shouldBe true
-        persisted.all { it.model == com.cotor.model.OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
+        persisted.all { it.model == OpenCodeDefaults.DEEPSEEK_FLASH_MODEL } shouldBe true
+        response.actions.single { it.type == "agent-model-update" }.detail shouldContain OpenCodeDefaults.DEEPSEEK_FLASH_MODEL
+    }
+
+    test("operator command keeps explicit nemotron free model instead of deepseek fallback") {
+        val appHome = Files.createTempDirectory("operator-free-model-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Free Model", rootPath = appHome.toString())
+
+        val response = service.runOperatorCommand(company.id, "모든 에이전트 opencode/nemotron-3-super-free 모델로 바꿔줘")
+        val persisted = service.listCompanyAgentDefinitions(company.id)
+
+        response.actions.any { it.type == "agent-model-update" && it.status == "DONE" } shouldBe true
+        persisted.shouldNotBeEmpty()
+        persisted.all { it.agentCli == "opencode" } shouldBe true
+        persisted.all { it.model == OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
+        response.actions.single { it.type == "agent-model-update" }.detail shouldContain "Requested model: opencode/nemotron-3-super-free"
+    }
+
+    test("operator command routes complex cross-functional work to CEO intake before HR staffing") {
+        val appHome = Files.createTempDirectory("operator-work-intake-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(name = "Operator Work Intake", rootPath = appHome.toString())
+
+        val response = service.runOperatorCommand(
+            company.id,
+            "Create a cross-functional reliability launch improvement: HR should hire one marketing specialist if needed, Marketing Operator should write a Cotor-specific owned website and organic social plan, Builder should add docs/runtime-reliability-e2e.md with concrete evidence, QA should review, and CEO should approve and merge."
+        )
+        val state = stateStore.load()
+        val createdGoal = state.goals.singleOrNull { it.companyId == company.id }.shouldNotBeNull()
+        val goalIssues = state.issues.filter { it.goalId == createdGoal.id }
+
+        response.actions.any { it.type == "company-work-intake" && it.status == "DONE" } shouldBe true
+        response.actions.none { it.type == "hr-staffing" } shouldBe true
+        createdGoal.operatingPolicy shouldContain "Company Operator work intake"
+        goalIssues.filter { it.kind.equals("planning", ignoreCase = true) }.shouldHaveSize(1)
+        goalIssues.filterNot { it.kind.equals("planning", ignoreCase = true) }.shouldBeEmpty()
+        goalIssues.joinToString { it.title } shouldNotContain "Implement the backend and app UI path needed for chat-only work intake"
     }
 
     test("operator chat answers agent performance questions from company evidence") {
@@ -684,11 +736,18 @@ class DesktopAppServiceTest : FunSpec({
         )
         val company = service.createCompany(name = "HR Operator", rootPath = appHome.toString())
         val initial = stateStore.load()
+        val inheritedModel = "opencode/minimax-m2.5-free"
         val narrowedDefinitions = initial.companyAgentDefinitions
             .filter { it.companyId != company.id || it.title in setOf("CEO", "HR Manager", "Engineering Lead") }
             .map { definition ->
                 if (definition.companyId == company.id && definition.title == "Engineering Lead") {
-                    definition.copy(roleSummary = "mentor engineering hires", specialties = listOf("mentorship"))
+                    definition.copy(
+                        model = inheritedModel,
+                        roleSummary = "mentor engineering hires",
+                        specialties = listOf("mentorship")
+                    )
+                } else if (definition.companyId == company.id) {
+                    definition.copy(model = inheritedModel)
                 } else {
                     definition
                 }
@@ -724,7 +783,7 @@ class DesktopAppServiceTest : FunSpec({
         confirmed.actions.any { it.type == "hr-staffing" && it.status == "DONE" } shouldBe true
         confirmed.shouldHideRawOperatorInternals()
         hired.agentCli shouldBe "opencode"
-        hired.model shouldBe OpenCodeDefaults.DEFAULT_MODEL
+        hired.model shouldBe inheritedModel
         hired.mentorAgentId shouldBe engineeringLead.id
         stateStore.load().agentMessages.any {
             it.kind == "hr-onboarding" && it.fromAgentName == "HR Manager" && it.toAgentName == hired.title
@@ -1846,6 +1905,95 @@ class DesktopAppServiceTest : FunSpec({
 
         prompt shouldContain "Only read or write files reachable from the current working directory."
         prompt shouldContain "Never write to absolute paths, parent directories, or unrelated repository checkouts."
+    }
+
+    test("marketing execution prompts require Cotor-specific owned channel work") {
+        val appHome = Files.createTempDirectory("desktop-app-service-marketing-prompt-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = Company(
+            id = "company-marketing-prompt",
+            name = "Cotor Marketing Co",
+            rootPath = appHome.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "main",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val goal = CompanyGoal(
+            id = "goal-marketing-prompt",
+            companyId = company.id,
+            title = "Launch Cotor",
+            description = "Prepare owned/social launch work.",
+            status = GoalStatus.ACTIVE,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val issue = CompanyIssue(
+            id = "issue-marketing-prompt",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Create Cotor owned social launch plan",
+            description = "Write a marketing plan for Cotor owned website and organic social only.",
+            status = IssueStatus.PLANNED,
+            priority = 2,
+            kind = "execution",
+            codeProducing = true,
+            acceptanceCriteria = listOf("Plan is specific to Cotor", "No paid ads or DMs"),
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        stateStore.save(
+            DesktopAppState(
+                repositories = listOf(
+                    ManagedRepository(
+                        id = REPOSITORY_ID,
+                        name = "repo",
+                        localPath = appHome.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = WORKSPACE_ID,
+                        repositoryId = REPOSITORY_ID,
+                        name = "repo · main",
+                        baseBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                companies = listOf(company),
+                goals = listOf(goal),
+                issues = listOf(issue)
+            )
+        )
+
+        val prompt = service.buildIssueExecutionPromptForTesting(
+            stateStore.load(),
+            issue,
+            OrgAgentProfile(
+                id = "profile-marketing-prompt",
+                companyId = company.id,
+                roleName = "Marketing Operator",
+                executionAgentName = "opencode",
+                capabilities = listOf("marketing", "social")
+            )
+        )
+
+        prompt shouldContain "make the output Cotor-specific"
+        prompt shouldContain "owned website/CMS plus owned organic social"
+        prompt shouldContain "Do not propose paid ads"
+        prompt shouldContain "third-party community/group posting"
     }
 
     test("runTask clears stale review metadata when a validation-only follow-up completes without publishing") {
@@ -3471,6 +3619,11 @@ class DesktopAppServiceTest : FunSpec({
         val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
 
         service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
+        withTimeout(5_000) {
+            while (stateStore.load().issues.single { it.id == planningIssue.id }.status == IssueStatus.PLANNED) {
+                delay(50)
+            }
+        }
 
         val state = stateStore.load()
         val executionIssues = state.issues.filter { it.goalId == goal.id && it.kind == "execution" }
@@ -3657,6 +3810,11 @@ class DesktopAppServiceTest : FunSpec({
         val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
 
         service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
+        withTimeout(5_000) {
+            while (stateStore.load().issues.single { it.id == planningIssue.id }.status == IssueStatus.PLANNED) {
+                delay(50)
+            }
+        }
 
         val state = stateStore.load()
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" }.shouldBeEmpty()
@@ -3666,6 +3824,113 @@ class DesktopAppServiceTest : FunSpec({
         state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "CEO planning blocked"
         val executionLogEntry = service.executionLog(company.id).first { it["issueId"] == planningIssue.id }
         executionLogEntry["blockedReasonCode"] shouldBe BlockedReasonCode.CEO_PLANNING_INVALID_OUTPUT.name
+    }
+
+    test("interrupted CEO planning run is not classified as invalid output") {
+        val appHome = Files.createTempDirectory("desktop-ceo-interrupted-plan-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-interrupted-plan-test").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-interrupted-plan-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/ceo-interrupted-plan/opencode",
+            worktreePath = worktreeRoot
+        )
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = false,
+            output = "",
+            error = "opencode run exited with code 143",
+            duration = 10,
+            metadata = emptyMap(),
+            processId = 143L
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "CEO Interrupted Plan Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Plan while stopping runtime",
+            description = "The CEO run is interrupted by runtime stop.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+        val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
+        val now = System.currentTimeMillis()
+        val failedTask = AgentTask(
+            id = "task-ceo-interrupted-plan",
+            workspaceId = planningIssue.workspaceId,
+            issueId = planningIssue.id,
+            title = planningIssue.title,
+            prompt = planningIssue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.FAILED,
+            createdAt = now - 1_000,
+            updatedAt = now
+        )
+        val failedRun = AgentRun(
+            id = "run-ceo-interrupted-plan",
+            taskId = failedTask.id,
+            workspaceId = planningIssue.workspaceId,
+            repositoryId = company.repositoryId,
+            agentName = "opencode",
+            repoRoot = repoRoot.toString(),
+            baseBranch = "master",
+            branchName = "codex/cotor/ceo-interrupted-plan/opencode",
+            worktreePath = worktreeRoot.toString(),
+            status = AgentRunStatus.FAILED,
+            output = "",
+            error = "opencode run exited with code 143",
+            durationMs = 10,
+            createdAt = now - 1_000,
+            updatedAt = now
+        )
+        stateStore.save(
+            stateStore.load().let { state ->
+                state.copy(
+                    issues = state.issues.map { issue ->
+                        if (issue.id == planningIssue.id) {
+                            issue.copy(
+                                status = IssueStatus.BLOCKED,
+                                providerBlockReason = "opencode run exited with code 143",
+                                transitionReason = "Runtime stopped while execution was in progress; the issue was returned to the queue.",
+                                updatedAt = now
+                            )
+                        } else {
+                            issue
+                        }
+                    },
+                    tasks = state.tasks + failedTask,
+                    runs = state.runs + failedRun
+                )
+            }
+        )
+
+        val state = stateStore.load()
+        state.issues.filter { it.goalId == goal.id && it.kind == "execution" }.shouldBeEmpty()
+        val blockedPlanningIssue = state.issues.single { it.id == planningIssue.id }
+        blockedPlanningIssue.status shouldBe IssueStatus.BLOCKED
+        blockedPlanningIssue.providerBlockReason shouldBe "opencode run exited with code 143"
+        blockedPlanningIssue.transitionReason shouldBe "Runtime stopped while execution was in progress; the issue was returned to the queue."
+        state.goalDecisions.none {
+            it.issueId == planningIssue.id && it.title == "CEO planning blocked"
+        } shouldBe true
+        val executionLogEntry = service.executionLog(company.id).first { it["issueId"] == planningIssue.id }
+        executionLogEntry["blockedReasonCode"] shouldBe BlockedReasonCode.RUNTIME_INTERRUPTED.name
     }
 
     test("manual fallback planning marks downstream issues as fallback sourced") {
@@ -10871,6 +11136,35 @@ class DesktopAppServiceTest : FunSpec({
             updatedAt = now - 4_000,
             workflowLineage = executionIssue.workflowLineage
         )
+        val reviewTask = AgentTask(
+            id = "task-review-resync-guard",
+            workspaceId = workspace.id,
+            title = reviewIssue.title,
+            prompt = reviewIssue.description,
+            agents = listOf("codex"),
+            issueId = reviewIssue.id,
+            status = DesktopTaskStatus.COMPLETED,
+            createdAt = now - 3_000,
+            updatedAt = now - 2_500,
+            workflowLineage = executionIssue.workflowLineage
+        )
+        val reviewRun = AgentRun(
+            id = "run-review-resync-guard",
+            taskId = reviewTask.id,
+            workspaceId = workspace.id,
+            repositoryId = company.repositoryId,
+            agentName = "codex",
+            repoRoot = repoRoot.toString(),
+            baseBranch = "master",
+            status = AgentRunStatus.COMPLETED,
+            output = "QA_VERDICT: PASS\nQA already approved this PR.",
+            branchName = executionIssue.branchName!!,
+            worktreePath = executionIssue.worktreePath!!,
+            durationMs = 100,
+            createdAt = now - 3_000,
+            updatedAt = now - 2_500,
+            workflowLineage = executionIssue.workflowLineage
+        )
         val reviewQueueItem = ReviewQueueItem(
             id = "rq-execution-resync-guard",
             companyId = company.id,
@@ -10896,8 +11190,8 @@ class DesktopAppServiceTest : FunSpec({
             baseState.copy(
                 goals = baseState.goals + goal,
                 issues = baseState.issues + listOf(executionIssue, reviewIssue, approvalIssue),
-                tasks = baseState.tasks + executionTask,
-                runs = baseState.runs + executionRun,
+                tasks = baseState.tasks + listOf(executionTask, reviewTask),
+                runs = baseState.runs + listOf(executionRun, reviewRun),
                 reviewQueue = baseState.reviewQueue + reviewQueueItem,
                 companyRuntimes = listOf(
                     CompanyRuntimeSnapshot(
@@ -10917,6 +11211,11 @@ class DesktopAppServiceTest : FunSpec({
         refreshed.issues.first { it.id == executionIssue.id }.status shouldBe IssueStatus.READY_FOR_CEO
         refreshed.issues.first { it.id == reviewIssue.id }.status shouldBe IssueStatus.DONE
         refreshed.issues.first { it.id == approvalIssue.id }.status shouldBe IssueStatus.IN_PROGRESS
+        refreshed.reviewQueue.first { it.id == reviewQueueItem.id }.status shouldBe ReviewQueueStatus.READY_FOR_CEO
+        refreshed.reviewQueue.first { it.id == reviewQueueItem.id }.qaVerdict shouldBe "PASS"
+        refreshed.issues.count {
+            it.kind.equals("review", ignoreCase = true) && it.dependsOn.contains(executionIssue.id)
+        } shouldBe 1
         refreshed.companyActivity.none { it.title == "Reopened QA review issue" } shouldBe true
     }
 
