@@ -1085,7 +1085,7 @@ private struct PixelAgentSprite: View {
 
     private var bubbleText: String {
         guard let speech = sceneAgent.speechText else {
-            return agent.actionLine
+            return agent.lastLogLine ?? agent.actionLine
         }
         switch speech {
         case "Approval requested":
@@ -1239,7 +1239,31 @@ private struct PixelAgentSprite: View {
         Color(red: 0.05, green: 0.07, blue: 0.08)
     }
 
+    private var providerAccentColor: Color? {
+        switch agent.cli.lowercased() {
+        case "claude":
+            return Color(red: 0.62, green: 0.45, blue: 0.82)
+        case "codex":
+            return Color(red: 0.28, green: 0.78, blue: 0.54)
+        case "opencode":
+            return Color(red: 0.95, green: 0.64, blue: 0.25)
+        case "gemini":
+            return Color(red: 0.36, green: 0.62, blue: 0.95)
+        case "cursor":
+            return Color(red: 0.45, green: 0.72, blue: 0.98)
+        case "echo":
+            return ShellPalette.muted
+        default:
+            guard !agent.cli.isEmpty else { return nil }
+            let hue = Double(abs(agent.cli.hashValue) % 360) / 360.0
+            return Color(hue: hue, saturation: 0.62, brightness: 0.78)
+        }
+    }
+
     private var robotAccentTint: Color {
+        if let provider = providerAccentColor {
+            return provider
+        }
         if lowerRole.contains("ceo") || lowerRole.contains("lead") {
             return ShellPalette.warning
         }
