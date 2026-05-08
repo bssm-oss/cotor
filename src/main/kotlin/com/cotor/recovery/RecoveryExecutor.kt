@@ -10,6 +10,7 @@ package com.cotor.recovery
 
 import com.cotor.data.registry.AgentRegistry
 import com.cotor.domain.executor.AgentExecutor
+import com.cotor.domain.orchestrator.StuckDetector
 import com.cotor.model.*
 import com.cotor.validation.output.OutputValidator
 import kotlinx.coroutines.delay
@@ -66,16 +67,43 @@ class RecoveryExecutor(
         var delayMs = recovery.retryDelayMs
         var lastResult: AgentResult? = null
         var currentInput = input
+        val stuckDetector = StuckDetector()
 
         repeat(attempts) { attempt ->
             val currentAttempt = attempt + 1
             logger.debug("Executing stage ${stage.id} attempt $currentAttempt/$attempts")
-            val result = runAgent(agentConfig, stage, currentInput, pipelineContext)
+            val effectiveAgent = agentConfig.escalatedForAttempt(currentAttempt)
+            val result = runAgent(effectiveAgent, stage, currentInput, pipelineContext)
+                .let { executionResult ->
+                    if (effectiveAgent === agentConfig) {
+                        executionResult
+                    } else {
+                        executionResult.copy(
+                            metadata = executionResult.metadata + mapOf(
+                                "escalatedModel" to requireNotNull(agentConfig.escalateModel),
+                                "escalatedFromAgent" to agentConfig.name,
+                                "escalatedAttempt" to currentAttempt.toString()
+                            )
+                        )
+                    }
+                }
             if (result.isSuccess) {
                 return result
             }
 
             lastResult = result
+            stuckDetector.record(result)?.let { signal ->
+                return result.copy(
+                    error = listOfNotNull(
+                        result.error,
+                        "Stage ${stage.id} stopped early because stuck detector signaled $signal"
+                    ).joinToString("\n"),
+                    metadata = result.metadata + mapOf(
+                        "stuckSignal" to signal.name,
+                        "failureCategory" to FailureCategory.AGENT_ERROR.name
+                    )
+                )
+            }
             if (!isRetryable(result.error, recovery.retryOn)) {
                 logger.debug("Stage ${stage.id} failure not retryable: ${result.error}")
                 return result
@@ -108,6 +136,13 @@ class RecoveryExecutor(
         }
 
         return lastResult ?: failureResult(agentConfig.name, "Stage ${stage.id} failed without result")
+    }
+
+    private fun AgentConfig.escalatedForAttempt(attempt: Int): AgentConfig {
+        val afterAttempt = escalateAfterAttempt ?: return this
+        val targetModel = escalateModel?.takeIf { it.isNotBlank() } ?: return this
+        if (attempt < afterAttempt.coerceAtLeast(1)) return this
+        return copy(parameters = parameters + ("model" to targetModel))
     }
 
     private suspend fun executeWithFallback(

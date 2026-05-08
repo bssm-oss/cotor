@@ -10,6 +10,8 @@ package com.cotor.event
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -49,18 +51,20 @@ interface EventBus {
 /**
  * Coroutine-based event bus implementation
  */
-class CoroutineEventBus : EventBus {
+class CoroutineEventBus(
+    capacity: Int = DEFAULT_CAPACITY
+) : EventBus, AutoCloseable {
     private val subscribers = ConcurrentHashMap<KClass<out CotorEvent>, MutableList<EventSubscription>>()
-    private val eventChannel = Channel<CotorEvent>(Channel.UNLIMITED)
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private val eventChannel = Channel<CotorEvent>(capacity)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val processor = scope.launch {
+        for (event in eventChannel) {
+            processEvent(event)
+        }
+    }
 
     init {
-        // Start event processing coroutine
-        scope.launch {
-            for (event in eventChannel) {
-                processEvent(event)
-            }
-        }
+        require(capacity > 0) { "Event bus capacity must be positive" }
     }
 
     override suspend fun emit(event: CotorEvent) {
@@ -95,5 +99,16 @@ class CoroutineEventBus : EventBus {
                 }
             }
         }
+    }
+
+    override fun close() {
+        eventChannel.close()
+        processor.cancel()
+        scope.cancel()
+        subscribers.clear()
+    }
+
+    private companion object {
+        private const val DEFAULT_CAPACITY = 1024
     }
 }

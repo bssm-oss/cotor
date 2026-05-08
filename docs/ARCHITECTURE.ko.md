@@ -31,7 +31,7 @@ flowchart LR
 | CLI | 명령 파싱, interactive/TUI 실행, packaged lifecycle 명령 | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/` |
 | App server | 로컬 HTTP API와 데스크톱 계약 | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
 | Company workflow | 회사 상태 머신, 목표, 이슈, 리뷰 큐, 런타임 tick, 런타임 retention, 보고서, 운영 채팅 | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
-| Pipeline runtime | 범용 파이프라인 계획, 오케스트레이션, 실행, 집계, 조건 평가 | `src/main/kotlin/com/cotor/domain/` |
+| Pipeline runtime | 범용 파이프라인 계획, 오케스트레이션, 실행, deterministic guard, stuck/conflict detection, 집계, 조건 평가 | `src/main/kotlin/com/cotor/domain/` |
 | Agent/tool execution | provider plugin, 로컬 프로세스 실행, 모델 기본값, 명령 adapter | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` |
 | Context/memory/evidence | 프롬프트 context, durable snapshot, knowledge, provenance, verification bundle | `src/main/kotlin/com/cotor/context/`, `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/verification/` |
 | Policy/security | action policy 판정, 위험 gate, executable/path 검증 | `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/security/` |
@@ -141,6 +141,8 @@ app-server 계약이 Kotlin과 Swift 사이의 경계입니다. payload field는
 - merge conflict 복구와 stale PR 정리는 superseded lineage와 연결되어야 회사가 stale review artifact 없이 계속 진행할 수 있습니다.
 - no-diff code-producing run은 실제 변경 없이 완료를 주장하지 않고, 파일 수정 지시로 1회 재시도한 뒤 block합니다.
 - 런타임 tick의 recoverable 실패는 retry budget이 소진되기 전까지 `RUNNING` 상태와 실패 카운터로 남깁니다. 사용자 중지와 cancellation은 일반 runtime error가 아니라 interruption 상태입니다.
+- 에이전트 output은 downstream review state가 소비하기 전에 deterministic pipeline guard를 통과합니다. Guard finding은 범용 pipeline runtime에 머물며 company UI 개념을 import하지 않고 stage를 annotate 또는 block할 수 있습니다.
+- 병렬 pipeline 실행은 stage input이 같은 파일이나 dependency를 가리킬 때 conflict-safe batch로 나뉩니다. 같은 target을 쓰는 두 writer를 한 wave에서 동시에 실행하지 않습니다.
 
 ## 7. Autonomous Runtime v1
 

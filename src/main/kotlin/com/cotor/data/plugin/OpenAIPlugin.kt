@@ -11,6 +11,7 @@ package com.cotor.data.plugin
 import com.cotor.data.http.CotorHttpClients
 import com.cotor.data.process.ProcessManager
 import com.cotor.model.*
+import com.cotor.security.NetworkEndpointPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -58,6 +59,13 @@ class OpenAIPlugin : AgentPlugin {
                 defaultValue = "https://api.openai.com/v1"
             ),
             AgentParameter(
+                name = "allowPrivateBaseUrl",
+                type = ParameterType.BOOLEAN,
+                required = false,
+                description = "Allow localhost/private OpenAI-compatible endpoints. Disabled by default to prevent SSRF.",
+                defaultValue = "false"
+            ),
+            AgentParameter(
                 name = "apiKeyEnv",
                 type = ParameterType.STRING,
                 required = false,
@@ -100,7 +108,13 @@ class OpenAIPlugin : AgentPlugin {
         val prompt = context.input ?: throw IllegalArgumentException("Input prompt is required")
 
         val model = context.parameters["model"] ?: "gpt-4o-mini"
-        val baseUrl = (context.parameters["baseUrl"] ?: "https://api.openai.com/v1").trimEnd('/')
+        val rawBaseUrl = context.parameters["baseUrl"] ?: "https://api.openai.com/v1"
+        val allowPrivateBaseUrl = context.parameters["allowPrivateBaseUrl"]?.toBooleanStrictOrNull() ?: false
+        val baseUrl = NetworkEndpointPolicy.requirePublicHttpUrl(
+            rawUrl = rawBaseUrl,
+            label = "OpenAI baseUrl",
+            allowPrivateHosts = allowPrivateBaseUrl
+        ).toString().trimEnd('/')
         val apiKeyEnv = context.parameters["apiKeyEnv"] ?: "OPENAI_API_KEY"
         val apiKey = resolveApiKey(context, apiKeyEnv)
         val system = context.parameters["system"].orEmpty()

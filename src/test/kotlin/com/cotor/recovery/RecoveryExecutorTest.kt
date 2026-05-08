@@ -130,7 +130,7 @@ class RecoveryExecutorTest : FunSpec({
             recoveryExecutor.executeWithRecovery(stage, "input", null)
         }
 
-        coVerify(exactly = 3) {
+        coVerify(exactly = 2) {
             agentExecutor.executeAgent(any(), any(), any())
         }
     }
@@ -160,7 +160,7 @@ class RecoveryExecutorTest : FunSpec({
             recoveryExecutor.executeWithRecovery(stage, "input", null)
         }
 
-        coVerify(exactly = 3) {
+        coVerify(exactly = 2) {
             agentExecutor.executeAgent(any(), any(), any())
         }
     }
@@ -190,6 +190,55 @@ class RecoveryExecutorTest : FunSpec({
         coVerify(exactly = 1) {
             agentExecutor.executeAgent(any(), any(), any())
         }
+    }
+
+    test("retry escalation swaps model parameters after configured attempt") {
+        val agentExecutor = mockk<AgentExecutor>()
+        val outputValidator = mockk<OutputValidator>(relaxed = true)
+        val registryWithEscalation = InMemoryAgentRegistry().apply {
+            registerAgent(
+                AgentConfig(
+                    name = "primary",
+                    pluginClass = "com.cotor.data.plugin.EchoPlugin",
+                    parameters = mapOf("model" to "cheap-model"),
+                    escalateAfterAttempt = 2,
+                    escalateModel = "strong-model"
+                )
+            )
+        }
+        val recoveryExecutor = RecoveryExecutor(agentExecutor, registryWithEscalation, outputValidator, logger)
+        val models = mutableListOf<String?>()
+        val stage = PipelineStage(
+            id = "stage1",
+            agent = AgentReference("primary"),
+            recovery = RecoveryConfig(
+                strategy = RecoveryStrategy.RETRY,
+                maxRetries = 2,
+                retryDelayMs = 0,
+                backoffStrategy = BackoffStrategy.FIXED,
+                retryOn = listOf("timeout")
+            )
+        )
+
+        coEvery {
+            agentExecutor.executeAgent(any(), any(), any())
+        } answers {
+            val agent = firstArg<AgentConfig>()
+            models += agent.parameters["model"]
+            if (models.size == 1) {
+                AgentResult("primary", false, null, "timeout on first attempt", 0, emptyMap())
+            } else {
+                AgentResult("primary", true, "ok", null, 0, emptyMap())
+            }
+        }
+
+        val result = runBlocking {
+            recoveryExecutor.executeWithRecovery(stage, "input", null)
+        }
+
+        result.isSuccess shouldBe true
+        models shouldBe listOf("cheap-model", "strong-model")
+        result.metadata["escalatedModel"] shouldBe "strong-model"
     }
 
     test("validation failure retries with a self-repair prompt that includes violations and prior output") {

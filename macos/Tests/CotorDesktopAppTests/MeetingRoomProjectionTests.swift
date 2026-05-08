@@ -923,6 +923,9 @@ private func session(agentId: String, agentName: String, issueId: String?, statu
         backendKind: "LOCAL_COTOR",
         processId: 123,
         outputSnippet: "working",
+        currentActivity: nil,
+        progressPercent: nil,
+        lastLogLine: nil,
         startedAt: 0,
         updatedAt: 10
     )

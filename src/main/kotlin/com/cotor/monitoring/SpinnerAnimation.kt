@@ -27,13 +27,17 @@ class SpinnerAnimation(
     private val frames = listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
     private var currentFrame = 0
     private val startTime = Instant.now()
+    private var scope: CoroutineScope? = null
     private var job: Job? = null
 
     /**
      * Start the spinner animation
      */
     fun start() {
-        job = CoroutineScope(Dispatchers.Default).launch {
+        if (job?.isActive == true) return
+        val animationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        scope = animationScope
+        job = animationScope.launch {
             while (isActive) {
                 render()
                 delay(80)
@@ -47,6 +51,9 @@ class SpinnerAnimation(
      */
     fun stop(finalMessage: String? = null) {
         job?.cancel()
+        job = null
+        scope?.cancel()
+        scope = null
         clearLine()
         if (finalMessage != null) {
             terminal.println(finalMessage)
@@ -128,10 +135,14 @@ class DotsAnimation(private val message: String) {
     private val terminal = Terminal()
     private var dots = ""
     private val maxDots = 3
+    private var scope: CoroutineScope? = null
     private var job: Job? = null
 
     fun start() {
-        job = CoroutineScope(Dispatchers.Default).launch {
+        if (job?.isActive == true) return
+        val animationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        scope = animationScope
+        job = animationScope.launch {
             while (isActive) {
                 clearLine()
                 terminal.print("\r$message$dots")
@@ -143,6 +154,9 @@ class DotsAnimation(private val message: String) {
 
     fun stop(finalMessage: String? = null) {
         job?.cancel()
+        job = null
+        scope?.cancel()
+        scope = null
         clearLine()
         if (finalMessage != null) {
             terminal.println(finalMessage)

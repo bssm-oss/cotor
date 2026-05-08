@@ -38,9 +38,25 @@ interface ProcessManager {
         environment: Map<String, String>,
         timeout: Long,
         workingDirectory: Path? = null,
-        onStart: ((Long) -> Unit)? = null,
-        onStdoutChunk: ((String) -> Unit)? = null
+        onStart: ((Long) -> Unit)? = null
     ): ProcessResult
+
+    suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path? = null,
+        onStart: ((Long) -> Unit)? = null,
+        onStdoutChunk: ((String) -> Unit)?
+    ): ProcessResult = executeProcess(
+        command = command,
+        input = input,
+        environment = environment,
+        timeout = timeout,
+        workingDirectory = workingDirectory,
+        onStart = onStart
+    )
 }
 
 /**
@@ -49,6 +65,23 @@ interface ProcessManager {
 class CoroutineProcessManager(
     private val logger: Logger
 ) : ProcessManager {
+
+    override suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?
+    ): ProcessResult = executeProcess(
+        command = command,
+        input = input,
+        environment = environment,
+        timeout = timeout,
+        workingDirectory = workingDirectory,
+        onStart = onStart,
+        onStdoutChunk = null
+    )
 
     override suspend fun executeProcess(
         command: List<String>,
