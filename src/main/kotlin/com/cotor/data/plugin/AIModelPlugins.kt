@@ -90,7 +90,8 @@ class ClaudePlugin : AgentPlugin {
             environment = context.environment,
             timeout = context.timeout,
             workingDirectory = context.workingDirectory,
-            onStart = context.onProcessStarted
+            onStart = context.onProcessStarted,
+            onStdoutChunk = context.onStdoutChunk
         )
 
         if (!result.isSuccess) {
