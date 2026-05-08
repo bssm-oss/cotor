@@ -180,6 +180,7 @@ class DefaultAgentExecutor(
                     pipelineContext = metadata.pipelineContext,
                     currentStageId = metadata.stageId,
                     onProcessStarted = metadata.onProcessStarted,
+                    onStdoutChunk = metadata.onStdoutChunk,
                     validateCommand = securityValidator::validateCommand
                 )
 

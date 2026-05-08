@@ -404,6 +404,7 @@ data class ExecutionContext(
     val pipelineContext: PipelineContext? = null,
     val currentStageId: String? = null,
     val onProcessStarted: ((Long) -> Unit)? = null,
+    val onStdoutChunk: ((String) -> Unit)? = null,
     val validateCommand: ((List<String>) -> Unit)? = null
 )
 
@@ -424,7 +425,8 @@ data class AgentExecutionMetadata(
     // through every public agent-facing API.
     @Serializable(with = NullablePathSerializer::class)
     val workingDirectory: Path? = null,
-    val onProcessStarted: ((Long) -> Unit)? = null
+    val onProcessStarted: ((Long) -> Unit)? = null,
+    val onStdoutChunk: ((String) -> Unit)? = null
 )
 
 /**

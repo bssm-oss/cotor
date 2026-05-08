@@ -516,7 +516,7 @@ enum MeetingRoomSceneReducer {
                 movementStartedAt: shouldMove ? now : (existing?.movementStartedAt ?? now),
                 movementDuration: shouldMove ? movementDuration(for: focusEvent?.kind) : 0,
                 isSimplified: plan.mode != .full,
-                speechText: speechText(for: agent.id, event: focusEvent),
+                speechText: speechText(for: agent.id, event: focusEvent, liveActivity: agent.liveActivity),
                 focusEvent: focusEvent,
                 isFreshInteraction: isFresh
             )
@@ -711,8 +711,8 @@ enum MeetingRoomSceneReducer {
         }
     }
 
-    private static func speechText(for agentId: String, event: MeetingRoomInteractionEvent?) -> String? {
-        guard let event else { return nil }
+    private static func speechText(for agentId: String, event: MeetingRoomInteractionEvent?, liveActivity: String? = nil) -> String? {
+        guard let event else { return liveActivity }
         if event.fromAgentId == agentId {
             return event.speechText
         }

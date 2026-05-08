@@ -448,6 +448,9 @@ data class RunningAgentSession(
     val backendKind: ExecutionBackendKind? = null,
     val processId: Long? = null,
     val outputSnippet: String? = null,
+    val currentActivity: String? = null,
+    val progressPercent: Double? = null,
+    val lastLogLine: String? = null,
     val startedAt: Long,
     val updatedAt: Long
 )
@@ -739,6 +742,9 @@ data class AgentRun(
     val estimatedCostCents: Int? = null,
     val a2aSessionId: String? = null,
     val a2aEndpoint: String? = null,
+    val liveActivity: String? = null,
+    val liveProgressPercent: Double? = null,
+    val lastLogLine: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
     val workflowLineage: WorkflowLineageSnapshot? = null

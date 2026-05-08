@@ -58,6 +58,8 @@ struct MeetingRoomProjectionAgent: Identifiable, Hashable {
     let progress: Double
     let messageCount: Int
     let pullRequestState: String?
+    let liveActivity: String?
+    let lastLogLine: String?
 }
 
 struct MeetingRoomFlowItem: Identifiable, Hashable {
@@ -254,11 +256,13 @@ struct MeetingRoomProjection: Hashable {
                 visualState: visualState,
                 expression: messageCount > 0 ? .talking : expression(for: visualState),
                 zone: zone(for: visualState),
-                actionLine: actionLine(for: visualState, role: agent.title),
-                detailLine: detailLine(agent: agent, session: session, issue: issue, reviewCount: scopedReviews.count, runtime: runtime),
+                actionLine: session?.currentActivity ?? actionLine(for: visualState, role: agent.title),
+                detailLine: session?.lastLogLine ?? detailLine(agent: agent, session: session, issue: issue, reviewCount: scopedReviews.count, runtime: runtime),
                 progress: progress(for: visualState, session: session, issue: issue, enabled: agent.enabled),
                 messageCount: messageCount,
-                pullRequestState: issue?.pullRequestState
+                pullRequestState: issue?.pullRequestState,
+                liveActivity: session?.currentActivity,
+                lastLogLine: session?.lastLogLine
             )
         }
 
