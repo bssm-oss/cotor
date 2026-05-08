@@ -1019,6 +1019,9 @@ struct RunningAgentSessionRecord: Codable, Hashable, Identifiable {
     let backendKind: String?
     let processId: Int64?
     let outputSnippet: String?
+    let currentActivity: String?
+    let progressPercent: Double?
+    let lastLogLine: String?
     let startedAt: Int64
     let updatedAt: Int64
 }
