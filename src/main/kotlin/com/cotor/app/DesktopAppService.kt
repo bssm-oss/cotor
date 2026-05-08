@@ -13235,6 +13235,9 @@ class DesktopAppService(
                     backendKind = run.backendKind,
                     processId = run.processId,
                     outputSnippet = run.output?.lineSequence()?.take(3)?.joinToString("\n"),
+                    currentActivity = run.liveActivity,
+                    progressPercent = run.liveProgressPercent,
+                    lastLogLine = run.lastLogLine,
                     startedAt = run.createdAt,
                     updatedAt = run.updatedAt
                 )
@@ -13975,6 +13978,7 @@ class DesktopAppService(
                 }
             }
 
+            var lastLiveChunkMs = 0L
             val executionMetadata = AgentExecutionMetadata(
                 repoRoot = Path.of(repository.localPath),
                 workspaceId = workspace.id,
@@ -13991,6 +13995,22 @@ class DesktopAppService(
                                 updatedAt = System.currentTimeMillis()
                             )
                         )
+                    }
+                },
+                onStdoutChunk = handler@{ chunk ->
+                    val line = chunk.trim().ifBlank { return@handler }
+                    val now = System.currentTimeMillis()
+                    if (now - lastLiveChunkMs < 750L) return@handler
+                    lastLiveChunkMs = now
+                    val sanitized = line.take(200).replace(Regex("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]"), "")
+                    runBlocking {
+                        val existing = stateStore.load().runs.firstOrNull { it.id == startedRun.id }
+                            ?: return@runBlocking
+                        replaceRun(existing.copy(
+                            liveActivity = sanitized,
+                            lastLogLine = sanitized,
+                            updatedAt = System.currentTimeMillis()
+                        ))
                     }
                 }
             )
