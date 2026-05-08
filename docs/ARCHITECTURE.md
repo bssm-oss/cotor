@@ -29,7 +29,7 @@ flowchart LR
 | CLI | command parsing, interactive/TUI launch, packaged lifecycle commands | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/` |
 | App server | local HTTP API and desktop contract | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
 | Company workflow | company state machine, goals, issues, review queue, runtime ticks, runtime retention, reports, operator chat | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
-| Pipeline runtime | generic pipeline planning, orchestration, execution, aggregation, condition evaluation | `src/main/kotlin/com/cotor/domain/` |
+| Pipeline runtime | generic pipeline planning, orchestration, execution, deterministic guards, stuck/conflict detection, aggregation, condition evaluation | `src/main/kotlin/com/cotor/domain/` |
 | Agent/tool execution | provider plugins, local process execution, model defaults, command adapters | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` |
 | Context/memory/evidence | prompt context, durable snapshots, knowledge, provenance, verification bundles | `src/main/kotlin/com/cotor/context/`, `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/verification/` |
 | Policy/security | action policy decisions, risk gates, executable/path validation | `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/security/` |
@@ -139,6 +139,8 @@ The company automation layer has stricter invariants than the generic pipeline r
 - Merge-conflict recovery and stale PR cleanup stay tied to the superseded lineage so the company can continue without stale review artifacts.
 - No-diff code-producing runs retry once with explicit file-edit instructions and then block instead of claiming completion without changes.
 - Runtime loop recoverable tick failures remain `RUNNING` with failure counters until the retry budget is exhausted; user stop/cancellation is interruption state, not a generic runtime error.
+- Agent outputs pass through deterministic pipeline guards before downstream review state consumes them. Guard findings stay generic to the pipeline runtime and may annotate or block a stage without importing company UI concepts.
+- Parallel pipeline execution uses conflict-safe batches when stage inputs indicate overlapping files or dependencies, so generic parallel mode does not knowingly launch two writers against the same target in one wave.
 
 ## 7. Autonomous Runtime v1
 

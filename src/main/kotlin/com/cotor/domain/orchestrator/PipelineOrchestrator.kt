@@ -88,7 +88,9 @@ class DefaultPipelineOrchestrator(
     private val checkpointManager: CheckpointManager = CheckpointManager(),
     private val templateValidator: PipelineTemplateValidator = PipelineTemplateValidator(TemplateEngine()),
     private val observability: ObservabilityService = NoopObservabilityService,
-    private val durableRuntimeService: DurableRuntimeService = DurableRuntimeService()
+    private val durableRuntimeService: DurableRuntimeService = DurableRuntimeService(),
+    private val pipelineGuardService: PipelineGuardService = PipelineGuardService(),
+    private val stageConflictDetector: StageConflictDetector = StageConflictDetector()
 ) : PipelineOrchestrator {
     constructor(
         agentExecutor: AgentExecutor,
@@ -368,12 +370,15 @@ class DefaultPipelineOrchestrator(
         pipeline.stages.firstOrNull { it.type != StageType.EXECUTION }?.let {
             throw PipelineException("Stage ${it.id} uses ${it.type} which is not supported in PARALLEL mode")
         }
-        val results = pipeline.stages.map { stage ->
-            async(Dispatchers.Default) {
-                val interpolatedInput = stage.input?.let { templateEngine.interpolate(it, pipelineContext) }
-                executeStageWithGuards(stage, pipelineId, pipelineContext, interpolatedInput)
+        val results = stageConflictDetector.conflictSafeBatches(pipeline.stages, pipelineContext)
+            .flatMap { batch ->
+                batch.map { stage ->
+                    async(Dispatchers.Default) {
+                        val interpolatedInput = stage.input?.let { templateEngine.interpolate(it, pipelineContext) }
+                        executeStageWithGuards(stage, pipelineId, pipelineContext, interpolatedInput)
+                    }
+                }.awaitAll()
             }
-        }.awaitAll()
 
         aggregateResults(results, pipelineContext)
     }
@@ -594,7 +599,11 @@ class DefaultPipelineOrchestrator(
             return timeoutResult
         }
 
-        val stageResult = result.withStageMetadata(stage)
+        val stageResult = pipelineGuardService.apply(
+            stage = stage,
+            result = result.withStageMetadata(stage),
+            context = pipelineContext
+        )
         pipelineContext.addStageResult(stage.id, stageResult)
 
         if (stageResult.isSuccess) {

@@ -60,6 +60,7 @@ import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -849,7 +850,9 @@ internal fun Application.cotorAppModule(
                     if (path.isBlank()) {
                         return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "path must not be blank"))
                     }
-                    call.respond(desktopService.evidenceForFile(path))
+                    respondDesktopRequest {
+                        desktopService.evidenceForFile(path)
+                    }
                 }
 
                 get("/pull-requests/{pullRequestNumber}") {
@@ -2487,7 +2490,7 @@ private fun truncateForApi(value: String, maxChars: Int): String {
 private suspend fun RoutingContext.requireToken(token: String?): Boolean {
     val expected = token?.takeIf { it.isNotBlank() } ?: return true
     val actual = call.request.header(HttpHeaders.Authorization)
-    if (actual == "Bearer $expected") {
+    if (isBearerTokenMatch(actual, expected)) {
         return true
     }
     call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Unauthorized"))
@@ -2501,6 +2504,27 @@ private suspend fun RoutingContext.requireControlToken(controlToken: String?): B
         return false
     }
     return requireToken(expected)
+}
+
+private fun isBearerTokenMatch(header: String?, expected: String): Boolean {
+    val actual = header
+        ?.takeIf { it.startsWith("Bearer ") }
+        ?.removePrefix("Bearer ")
+        ?: return false
+    return constantTimeEquals(actual, expected)
+}
+
+private fun constantTimeEquals(actual: String, expected: String): Boolean {
+    val actualBytes = actual.toByteArray(StandardCharsets.UTF_8)
+    val expectedBytes = expected.toByteArray(StandardCharsets.UTF_8)
+    val maxLength = maxOf(actualBytes.size, expectedBytes.size)
+    var diff = actualBytes.size xor expectedBytes.size
+    for (index in 0 until maxLength) {
+        val actualByte = actualBytes.getOrNull(index)?.toInt() ?: 0
+        val expectedByte = expectedBytes.getOrNull(index)?.toInt() ?: 0
+        diff = diff or (actualByte xor expectedByte)
+    }
+    return diff == 0
 }
 
 /**

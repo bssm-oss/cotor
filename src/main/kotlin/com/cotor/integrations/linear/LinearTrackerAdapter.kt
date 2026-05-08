@@ -11,6 +11,7 @@ package com.cotor.integrations.linear
 import com.cotor.app.CompanyIssue
 import com.cotor.app.LinearConnectionConfig
 import com.cotor.data.http.CotorHttpClients
+import com.cotor.security.NetworkEndpointPolicy
 import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,7 +23,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -68,8 +68,9 @@ class LinearClient(
                 put("query", JsonPrimitive(query))
                 put("variables", variables)
             }
+            val endpoint = NetworkEndpointPolicy.requirePublicHttpUrl(config.endpoint, "Linear endpoint")
             val request = HttpRequest.newBuilder()
-                .uri(URI.create(config.endpoint))
+                .uri(endpoint)
                 .timeout(Duration.ofSeconds(30))
                 .header(HttpHeaders.Authorization, token)
                 .header(HttpHeaders.ContentType, "application/json")

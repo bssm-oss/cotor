@@ -4305,6 +4305,7 @@ final class DesktopStore: ObservableObject {
         let generation = companyEventStreamGeneration
         companyEventTask = Task { [weak self] in
             guard let self else { return }
+            var reconnectDelaySeconds = 1
             defer {
                 Task { @MainActor [weak self] in
                     guard let self, self.companyEventStreamGeneration == generation else { return }
@@ -4333,6 +4334,7 @@ final class DesktopStore: ObservableObject {
                                 self.syncBackendFormState()
                             }
                         }
+                        reconnectDelaySeconds = 1
                         if envelope.companyDashboard == nil && envelope.dashboard == nil {
                             await self.refreshCompanyDashboard(restartEventStream: false)
                         }
@@ -4357,7 +4359,8 @@ final class DesktopStore: ObservableObject {
                     }
                     guard shouldRetry else { return }
                     await self.refreshCompanyDashboard(restartEventStream: false)
-                    try? await Task.sleep(for: .seconds(1))
+                    try? await Task.sleep(for: .seconds(reconnectDelaySeconds))
+                    reconnectDelaySeconds = min(reconnectDelaySeconds * 2, 15)
                 }
             }
         }
@@ -4367,6 +4370,11 @@ final class DesktopStore: ObservableObject {
         guard companyPollingTask == nil else { return }
         companyPollingTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.companyPollingTask = nil
+                }
+            }
             while !Task.isCancelled {
                 let pollState = await MainActor.run { () -> (shouldRefresh: Bool, isOffline: Bool) in
                     (
@@ -4390,7 +4398,12 @@ final class DesktopStore: ObservableObject {
 
     private func startEmbeddedBackendWatchdog() {
         guard backendWatchdogTask == nil else { return }
-        backendWatchdogTask = Task {
+        backendWatchdogTask = Task { [weak self] in
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.backendWatchdogTask = nil
+                }
+            }
             while !Task.isCancelled {
                 await EmbeddedBackendLauncher.shared.ensureRunning()
                 try? await Task.sleep(for: .seconds(5))
@@ -4584,6 +4597,13 @@ final class DesktopStore: ObservableObject {
         tuiPollingTask = Task { [weak self] in
             guard let self else { return }
             var refreshCounter = 0
+            defer {
+                Task { @MainActor [weak self] in
+                    guard let self, self.polledTuiSessionID == sessionID else { return }
+                    self.tuiPollingTask = nil
+                    self.polledTuiSessionID = nil
+                }
+            }
 
             while !Task.isCancelled {
                 do {

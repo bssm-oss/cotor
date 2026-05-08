@@ -148,7 +148,7 @@ class MetricsCollector {
     }
 
     fun getMetrics(agentName: String): AgentMetrics {
-        val executionTimes = agentExecutionTimes[agentName] ?: emptyList()
+        val executionTimes = snapshotDurations(agentExecutionTimes[agentName])
         val successCount = agentSuccessRates[agentName]?.get() ?: 0
         val failureCount = agentFailureRates[agentName]?.get() ?: 0
 
@@ -193,13 +193,13 @@ class MetricsCollector {
         duration: Long,
         success: Boolean
     ) {
-        executionTimes.computeIfAbsent(name) { Collections.synchronizedList(mutableListOf()) }
-            .apply {
-                add(duration)
-                while (size > MAX_DURATION_SAMPLES_PER_KEY) {
-                    removeAt(0)
-                }
+        val samples = executionTimes.computeIfAbsent(name) { Collections.synchronizedList(mutableListOf()) }
+        synchronized(samples) {
+            samples.add(duration)
+            while (samples.size > MAX_DURATION_SAMPLES_PER_KEY) {
+                samples.removeAt(0)
             }
+        }
 
         if (success) {
             successRates.computeIfAbsent(name) { AtomicInteger(0) }
@@ -216,7 +216,7 @@ class MetricsCollector {
         successCount: Int?,
         failureCount: Int?
     ): ExecutionMetrics {
-        val durations = executionTimes ?: emptyList()
+        val durations = snapshotDurations(executionTimes)
         val successes = successCount ?: 0
         val failures = failureCount ?: 0
 
@@ -229,6 +229,11 @@ class MetricsCollector {
             minDuration = durations.minOrNull() ?: 0,
             maxDuration = durations.maxOrNull() ?: 0
         )
+    }
+
+    private fun snapshotDurations(executionTimes: List<Long>?): List<Long> {
+        if (executionTimes == null) return emptyList()
+        return synchronized(executionTimes) { executionTimes.toList() }
     }
 }
 

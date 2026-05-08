@@ -247,6 +247,7 @@ class DesktopAppService(
         private const val SUPERSEDED_PR_RECONCILIATION_INTERVAL_MS = 5L * 60_000L
         private const val NO_OP_PR_REUSE_REFRESH_INTERVAL_MS = 60_000L
         private const val PR_METADATA_REFRESH_CACHE_MS = 60_000L
+        private const val AGENT_MODEL_DISCOVERY_CACHE_MS = 5L * 60_000L
         private const val CEO_PLANNING_SOURCE = "ceo-planning"
         private const val FALLBACK_PLANNING_SOURCE_PREFIX = "fallback-planning:"
         private const val CEO_PLANNING_INVALID_OUTPUT = "CEO_PLANNING_INVALID_OUTPUT"
@@ -288,6 +289,7 @@ class DesktopAppService(
     // cannot be partially overwritten when multiple agent runs finish at once.
     private val stateMutex = Mutex()
     private val companyRuntimeTickMutexes = mutableMapOf<String, Mutex>()
+    private val runtimeLifecycleLock = Any()
 
     // Runs execute in background coroutines so the API can return immediately after
     // the user presses "Run Task" in the desktop client.
@@ -339,10 +341,13 @@ class DesktopAppService(
 
     fun shutdown() {
         runBlocking {
-            val jobsToJoin = buildList {
-                addAll(activeTaskJobs.values.filterNotNull())
-                addAll(companyRuntimeJobs.values.filterNotNull())
-                addAll(automationRefreshJobs.values.filterNotNull())
+            serviceScope.cancel("DesktopAppService shutdown")
+            val jobsToJoin = synchronized(runtimeLifecycleLock) {
+                buildList {
+                    addAll(activeTaskJobs.values.filterNotNull())
+                    addAll(companyRuntimeJobs.values.filterNotNull())
+                    addAll(automationRefreshJobs.values.filterNotNull())
+                }.distinct()
             }.distinct()
             jobsToJoin.forEach { it.cancel() }
             withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
@@ -352,16 +357,19 @@ class DesktopAppService(
                 interruptActiveTasksForShutdown()
             }
         }
-        activeTaskJobs.clear()
-        companyRuntimeJobs.clear()
-        companyRuntimeTickMutexes.clear()
-        companyRuntimeWakeSignals.clear()
-        automationRefreshJobs.clear()
+        synchronized(runtimeLifecycleLock) {
+            activeTaskJobs.clear()
+            companyRuntimeJobs.clear()
+            companyRuntimeTickMutexes.clear()
+            companyRuntimeWakeSignals.clear()
+            automationRefreshJobs.clear()
+        }
         intentionallyInterruptedTaskIds.clear()
         recentCompanyAutomationTraceKeys.clear()
         recentSupersededPullRequestCleanupAt.clear()
         recentNoOpPullRequestRefreshAt.clear()
         recentPullRequestMetadataRefreshes.clear()
+        recentAgentModelDiscoveries.clear()
         codexAppServerManager.stopAll()
         serviceScope.cancel()
         liveServicesForTesting -= this
@@ -387,10 +395,20 @@ class DesktopAppService(
         "interruptedTaskIds" to intentionallyInterruptedTaskIds.size,
         "traceKeys" to recentCompanyAutomationTraceKeys.size,
         "supersededPrTimestamps" to recentSupersededPullRequestCleanupAt.size,
-        "pullRequestMetadataRefreshes" to recentPullRequestMetadataRefreshes.size
+        "pullRequestMetadataRefreshes" to recentPullRequestMetadataRefreshes.size,
+        "agentModelDiscoveries" to recentAgentModelDiscoveries.size
     )
 
+    private fun pruneRuntimeCaches(now: Long = System.currentTimeMillis()) {
+        recentCompanyAutomationTraceKeys.entries.removeIf { now - it.value > COMPANY_TRACE_DEDUP_WINDOW_MS }
+        recentSupersededPullRequestCleanupAt.entries.removeIf { now - it.value > SUPERSEDED_PR_RECONCILIATION_INTERVAL_MS * 2 }
+        recentNoOpPullRequestRefreshAt.entries.removeIf { now - it.value > NO_OP_PR_REUSE_REFRESH_INTERVAL_MS * 2 }
+        recentPullRequestMetadataRefreshes.entries.removeIf { now - it.value.refreshedAt > PR_METADATA_REFRESH_CACHE_MS * 2 }
+        recentAgentModelDiscoveries.entries.removeIf { now - it.value.discoveredAt > AGENT_MODEL_DISCOVERY_CACHE_MS * 2 }
+    }
+
     suspend fun dashboard(): DashboardResponse {
+        pruneRuntimeCaches()
         // Every dashboard read is also a chance to heal background loops after an app-server
         // restart. The read path stays cheap, but it nudges the automation layer back into the
         // expected steady state before serializing the full desktop snapshot.
@@ -2885,7 +2903,9 @@ class DesktopAppService(
         provenanceService.bundleForRun(runId)
 
     suspend fun evidenceForFile(path: String): EvidenceBundle =
-        provenanceService.bundleForFile(path)
+        provenanceService.bundleForFile(
+            EvidencePathPolicy.requireAllowedFilePath(path, stateStore.load()).toString()
+        )
 
     suspend fun evidenceForPullRequest(pullRequestNumber: Int): EvidenceBundle =
         provenanceService.bundleForPullRequest(pullRequestNumber)
@@ -12544,6 +12564,7 @@ class DesktopAppService(
     }
 
     fun settings(): DesktopSettings {
+        pruneRuntimeCaches()
         val state = runBlocking { stateStore.load() }
         val githubPublishStatus = runBlocking { computeGitHubPublishStatus(state = state) }
         val availableAgentModels = listOf("opencode", "gemma4", "ollama", "lmstudio")
@@ -12626,7 +12647,7 @@ class DesktopAppService(
     private fun discoverLocalModelsCached(cacheKey: String, discover: () -> List<String>): List<String> {
         val now = System.currentTimeMillis()
         recentAgentModelDiscoveries[cacheKey]
-            ?.takeIf { now - it.discoveredAt < 5 * 60_000L }
+            ?.takeIf { now - it.discoveredAt < AGENT_MODEL_DISCOVERY_CACHE_MS }
             ?.let { return it.models }
         val models = runCatching(discover).getOrDefault(emptyList())
         recentAgentModelDiscoveries[cacheKey] = CachedAgentModels(now, models)
@@ -12645,7 +12666,7 @@ class DesktopAppService(
     private fun discoverOpenCodeModelsCached(): List<String> {
         val now = System.currentTimeMillis()
         recentAgentModelDiscoveries["opencode"]
-            ?.takeIf { now - it.discoveredAt < 5 * 60_000L }
+            ?.takeIf { now - it.discoveredAt < AGENT_MODEL_DISCOVERY_CACHE_MS }
             ?.let { return it.models }
         if (!isExecutableAvailable("opencode")) {
             recentAgentModelDiscoveries["opencode"] = CachedAgentModels(now, emptyList())
@@ -14006,11 +14027,13 @@ class DesktopAppService(
                     runBlocking {
                         val existing = stateStore.load().runs.firstOrNull { it.id == startedRun.id }
                             ?: return@runBlocking
-                        replaceRun(existing.copy(
-                            liveActivity = sanitized,
-                            lastLogLine = sanitized,
-                            updatedAt = System.currentTimeMillis()
-                        ))
+                        replaceRun(
+                            existing.copy(
+                                liveActivity = sanitized,
+                                lastLogLine = sanitized,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
                     }
                 }
             )

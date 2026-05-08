@@ -16,7 +16,7 @@ Use this guide when changing source layout, public entrypoints, route payloads, 
 | --- | --- | --- | --- |
 | CLI and presentation | command parsing, interactive/TUI launch, web adapters, output formatting | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/Commands.kt`, `src/main/kotlin/com/cotor/presentation/cli/InteractiveCommand.kt` | `src/test/kotlin/com/cotor/presentation/cli/`, CLI-focused integration tests |
 | App server and company workflow | localhost `/api/app` routes, company dashboard/runtime/goals/issues/reviews/reports/operator chat, runtime retention | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt` | `src/test/kotlin/com/cotor/app/` |
-| Generic pipeline runtime | pipeline orchestration, stage execution, conditions, aggregation, checkpoints | `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/` | domain/orchestrator and executor tests under `src/test/kotlin/com/cotor/` |
+| Generic pipeline runtime | pipeline orchestration, stage execution, deterministic guards, stuck/conflict detection, conditions, aggregation, checkpoints | `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/` | domain/orchestrator and executor tests under `src/test/kotlin/com/cotor/` |
 | Agent/provider execution | provider plugins, local process execution, model routing, OpenCode/Codex/local model adapters | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` | plugin/model/process tests under `src/test/kotlin/com/cotor/` |
 | Runtime evidence and memory | durable actions, provenance, knowledge memory, verification bundles, A2A context | `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/verification/`, `src/main/kotlin/com/cotor/context/` | runtime/provenance/knowledge/verification tests |
 | Policy and security | action allow/deny/approval decisions, executable allow-list, path and destructive command checks | `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/security/` | policy/security tests |
@@ -47,12 +47,12 @@ Use this guide when changing source layout, public entrypoints, route payloads, 
 
 ### Generic pipeline runtime
 
-- Responsibility: execute configured pipelines independently from the desktop company product layer.
+- Responsibility: execute configured pipelines independently from the desktop company product layer, including deterministic guard checks and conflict-safe parallel batching.
 - Public entrypoints: orchestrator/executor packages and validation/config APIs.
 - Internal-only files: stage aggregation, loop/condition internals, checkpoint internals.
 - May depend on: config, validation, monitoring, provider execution interfaces.
 - Must not depend on: `app/DesktopAppService.kt`, `/api/app` DTOs, macOS DTOs.
-- Common changes: pipeline semantics, stage execution, retry behavior, checkpoint output. Update pipeline tests and command docs.
+- Common changes: pipeline semantics, stage execution, guard/stuck/conflict behavior, retry behavior, checkpoint output. Update pipeline tests and command docs.
 
 ### Agent/provider execution
 

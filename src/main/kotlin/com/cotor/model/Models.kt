@@ -40,6 +40,8 @@ data class AgentConfig(
     val environment: Map<String, String> = emptyMap(),
     val timeout: Long = 30000, // 30 seconds
     val retryPolicy: RetryPolicy = RetryPolicy(),
+    val escalateAfterAttempt: Int? = null,
+    val escalateModel: String? = null,
     val tags: List<String> = emptyList(),
     val inputFormat: DataFormat = DataFormat.JSON,
     val outputFormat: DataFormat = DataFormat.JSON

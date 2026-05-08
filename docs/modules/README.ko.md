@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | CLI and presentation | 명령 파싱, interactive/TUI 실행, web adapter, 출력 formatting | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/Commands.kt`, `src/main/kotlin/com/cotor/presentation/cli/InteractiveCommand.kt` | `src/test/kotlin/com/cotor/presentation/cli/`, CLI 중심 integration test |
 | App server and company workflow | localhost `/api/app` route, 회사 dashboard/runtime/goals/issues/reviews/reports/operator chat, runtime retention | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt` | `src/test/kotlin/com/cotor/app/` |
-| Generic pipeline runtime | pipeline orchestration, stage execution, condition, aggregation, checkpoint | `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/` | `src/test/kotlin/com/cotor/` 아래 domain/orchestrator/executor test |
+| Generic pipeline runtime | pipeline orchestration, stage execution, deterministic guard, stuck/conflict detection, condition, aggregation, checkpoint | `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/` | `src/test/kotlin/com/cotor/` 아래 domain/orchestrator/executor test |
 | Agent/provider execution | provider plugin, local process 실행, model routing, OpenCode/Codex/local model adapter | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` | plugin/model/process test |
 | Runtime evidence and memory | durable action, provenance, knowledge memory, verification bundle, A2A context | `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/verification/`, `src/main/kotlin/com/cotor/context/` | runtime/provenance/knowledge/verification test |
 | Policy and security | action allow/deny/approval 판정, executable allow-list, path/destructive command 검증 | `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/security/` | policy/security test |
@@ -49,12 +49,12 @@
 
 ### Generic pipeline runtime
 
-- 책임: desktop company product layer와 독립적인 configured pipeline 실행.
+- 책임: desktop company product layer와 독립적인 configured pipeline 실행. deterministic guard 검사와 conflict-safe parallel batching도 포함합니다.
 - Public entrypoint: orchestrator/executor package와 validation/config API.
 - 내부 전용: stage aggregation, loop/condition 내부, checkpoint 내부.
 - 의존 가능: config, validation, monitoring, provider execution interface.
 - 의존 금지: `app/DesktopAppService.kt`, `/api/app` DTO, macOS DTO.
-- 자주 바꾸는 작업: pipeline semantics, stage execution, retry behavior, checkpoint output. pipeline test와 command docs를 갱신합니다.
+- 자주 바꾸는 작업: pipeline semantics, stage execution, guard/stuck/conflict behavior, retry behavior, checkpoint output. pipeline test와 command docs를 갱신합니다.
 
 ### Agent/provider execution
 
