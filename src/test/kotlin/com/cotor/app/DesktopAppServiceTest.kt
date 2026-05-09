@@ -3731,6 +3731,208 @@ class DesktopAppServiceTest : FunSpec({
         state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "CEO planned execution graph"
     }
 
+    test("CEO planning run with long JSON output materializes before persistence compaction can break it") {
+        val appHome = Files.createTempDirectory("desktop-ceo-long-plan-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-long-plan-test").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-long-plan-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/ceo-long-plan/opencode",
+            worktreePath = worktreeRoot
+        )
+        val longDescription = "Preserve full planning output. ".repeat(180)
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = true,
+            output = """
+                ```json
+                {"goalSummary":"$longDescription","issues":[{"refId":"exec-1","title":"Implement long CEO plan","description":"$longDescription","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":false,"dependsOn":[],"acceptanceCriteria":["Long CEO planning JSON remains parseable"],"reviewRequired":false,"approvalRequired":false}]}
+                ```
+            """.trimIndent(),
+            error = null,
+            duration = 10,
+            metadata = emptyMap(),
+            processId = 124L
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "CEO Long Plan Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Plan with long CEO JSON",
+            description = "The CEO output is longer than the persisted compaction threshold.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+        val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
+
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
+        withTimeout(5_000) {
+            while (stateStore.load().issues.single { it.id == planningIssue.id }.status == IssueStatus.PLANNED) {
+                delay(50)
+            }
+        }
+
+        val state = stateStore.load()
+        state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
+        state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
+    }
+
+    test("blocked CEO planning issue recovers from legacy landing page plan file") {
+        val appHome = Files.createTempDirectory("desktop-ceo-legacy-plan-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-legacy-plan-test").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-legacy-plan-worktree").resolve("repo"))
+        Files.writeString(
+            worktreeRoot.resolve("landing_page_plan.json"),
+            """{"goalSummary":"Recovered landing plan","issues":[{"refId":"exec-1","title":"Implement recovered landing page","description":"Build the recovered landing page slice.","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":false,"dependsOn":[],"acceptanceCriteria":["Recovered landing page issue exists"],"reviewRequired":false,"approvalRequired":false}]}"""
+        )
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "CEO Legacy Recovery Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Recover legacy plan",
+            description = "Recover a blocked CEO planning issue from the worktree file.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+        val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
+        val state = stateStore.load()
+        val blockedPlanningIssue = planningIssue.copy(
+            status = IssueStatus.BLOCKED,
+            transitionReason = "CEO_PLANNING_INVALID_OUTPUT: compacted output.",
+            providerBlockReason = "CEO_PLANNING_INVALID_OUTPUT: compacted output.",
+            updatedAt = 20L
+        )
+        val task = AgentTask(
+            id = "legacy-task",
+            workspaceId = planningIssue.workspaceId,
+            issueId = planningIssue.id,
+            title = planningIssue.title,
+            prompt = "prompt",
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.COMPLETED,
+            createdAt = 10L,
+            updatedAt = 10L
+        )
+        val run = AgentRun(
+            id = "legacy-run",
+            taskId = task.id,
+            workspaceId = planningIssue.workspaceId,
+            repositoryId = company.repositoryId,
+            agentName = "opencode",
+            branchName = "codex/cotor/legacy/opencode",
+            worktreePath = worktreeRoot.toString(),
+            status = AgentRunStatus.COMPLETED,
+            output = "```json\n{\"goalSummary\":\"cut off\"\n\n[compacted 22 chars]",
+            createdAt = 10L,
+            updatedAt = 10L
+        )
+        stateStore.save(
+            state.copy(
+                issues = state.issues.map { if (it.id == planningIssue.id) blockedPlanningIssue else it },
+                tasks = state.tasks + task,
+                runs = state.runs + run
+            )
+        )
+
+        service.decomposeGoal(goal.id)
+
+        val recovered = stateStore.load()
+        recovered.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
+        recovered.issues.single { it.id == planningIssue.id }.providerBlockReason shouldBe null
+        recovered.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
+        recovered.issues.single { it.title == "Implement recovered landing page" }.transitionReason shouldContain "CEO planning run assigned this issue"
+    }
+
+    test("CEO planning blocks with diagnostics when repair prose claims a missing file") {
+        val appHome = Files.createTempDirectory("desktop-ceo-missing-plan-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-missing-plan-test").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-missing-plan-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/ceo-missing-plan/opencode",
+            worktreePath = worktreeRoot
+        )
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = true,
+            output = "The JSON has been written to the prompt file as instructed.",
+            error = null,
+            duration = 10,
+            metadata = emptyMap(),
+            processId = 125L
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "CEO Missing Plan Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Plan with missing file",
+            description = "The CEO claims a file exists but does not create one.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+        val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
+
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 15_000)
+        withTimeout(15_000) {
+            while (stateStore.load().issues.single { it.id == planningIssue.id }.status != IssueStatus.BLOCKED) {
+                delay(50)
+            }
+        }
+
+        val blockedIssue = stateStore.load().issues.single { it.id == planningIssue.id }
+        blockedIssue.providerBlockReason shouldContain "CEO_PLANNING_INVALID_OUTPUT"
+        blockedIssue.providerBlockReason shouldContain "no complete JSON object found"
+        blockedIssue.providerBlockReason shouldContain ".cotor/runtime/run-outputs"
+    }
+
     test("autonomous CEO planning retries invalid output once and accepts repaired JSON") {
         val appHome = Files.createTempDirectory("desktop-ceo-repair-plan-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-repair-plan-test").resolve("repo"))
@@ -3801,7 +4003,9 @@ class DesktopAppServiceTest : FunSpec({
         service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
 
         runCount shouldBe 2
+        prompts.first().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
         prompts.last().orEmpty() shouldContain "CEO_PLANNING_REPAIR"
+        prompts.last().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
         val state = stateStore.load()
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
         state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
