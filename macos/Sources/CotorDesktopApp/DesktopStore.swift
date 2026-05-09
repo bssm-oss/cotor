@@ -449,6 +449,9 @@ final class DesktopStore: ObservableObject {
     @Published var availableSkills: [SkillCatalogEntryRecord] = []
     @Published var marketingDelegationPolicies: [MarketingDelegationPolicyRecord] = []
     @Published var marketingRuns: [MarketingRunRecord] = []
+    @Published var skillRuns: [SkillRunRecord] = []
+    @Published var recentSkillRunResults: [SkillRunResultRecord] = []
+    @Published var runningSkillRunKeys: Set<String> = []
     @Published var operatorCommandDraft = ""
     @Published var operatorCommandResponses: [OperatorCommandResponsePayload] = []
     @Published var operatorChatMessages: [OperatorChatMessage] = []
@@ -1137,6 +1140,7 @@ final class DesktopStore: ObservableObject {
             dashboard = fresh
             marketingDelegationPolicies = fresh.marketingDelegationPolicies
             marketingRuns = fresh.marketingRuns
+            skillRuns = fresh.skillRuns
             availableSkills = skillCatalog
             await refreshMarketingState()
             syncDefaultCompanyAgentSkillsIfNeeded()
@@ -1272,6 +1276,7 @@ final class DesktopStore: ObservableObject {
         let mergedAgentMessages = dashboard.agentMessages.filter { $0.companyId != companyId } + snapshot.agentMessages
         let mergedMarketingPolicies = marketingDelegationPolicies.filter { $0.companyId != companyId } + snapshot.marketingDelegationPolicies
         let mergedMarketingRuns = marketingRuns.filter { $0.companyId != companyId } + snapshot.marketingRuns
+        let mergedSkillRuns = skillRuns.filter { $0.companyId != companyId } + snapshot.skillRuns
         let mergedAgentPerformance = dashboard.agentPerformance.filter { performance in
             !snapshot.companyAgentDefinitions.contains { $0.id == performance.agentId }
         } + snapshot.agentPerformance
@@ -1306,10 +1311,12 @@ final class DesktopStore: ObservableObject {
             agentMessages: mergedAgentMessages.sorted { $0.createdAt > $1.createdAt },
             marketingDelegationPolicies: mergedMarketingPolicies.sorted { $0.name < $1.name },
             marketingRuns: mergedMarketingRuns.sorted { $0.createdAt > $1.createdAt },
+            skillRuns: mergedSkillRuns.sorted { $0.updatedAt > $1.updatedAt },
             agentPerformance: mergedAgentPerformance
         )
         marketingDelegationPolicies = dashboard.marketingDelegationPolicies
         marketingRuns = dashboard.marketingRuns
+        skillRuns = dashboard.skillRuns
         companyStreamStatusMessage = nil
         reconcileWorkflowLeadAgent()
         reconcileCompanySelection()
@@ -3200,6 +3207,9 @@ final class DesktopStore: ObservableObject {
     func operatorSuggestedCommands() -> [OperatorChatCommand] {
         [
             OperatorChatCommand(title: language("Check status", "상태 확인"), prompt: language("Check whether the agents are running well.", "에이전트들 잘 돌아가고 있는지 확인해줘")),
+            OperatorChatCommand(title: language("Map repo", "리포 맵"), prompt: language("Run graphify and summarize the repository structure.", "graphify 실행해서 리포지토리 구조 알려줘")),
+            OperatorChatCommand(title: language("Browser check", "브라우저 확인"), prompt: language("Open the app in a browser and collect smoke-test evidence.", "브라우저로 앱을 확인하고 증거 남겨줘")),
+            OperatorChatCommand(title: language("Marketing report", "마케팅 성과"), prompt: language("Summarize marketing performance and next actions.", "마케팅 성과랑 다음 액션 요약해줘")),
             OperatorChatCommand(title: language("Staff team", "팀 보강"), prompt: language("Ask HR Manager to hire missing agents and assign mentors.", "HR 매니저가 필요한 사람을 고용하고 사수를 지정하게 해줘")),
             OperatorChatCommand(title: language("Assign mentors", "사수 지정"), prompt: language("Ask HR Manager to assign mentors for agents that need one.", "사수가 없는 에이전트들에게 사수를 지정해줘")),
             OperatorChatCommand(title: language("Start company", "회사 시작"), prompt: language("Start this company.", "회사 시작해줘")),
@@ -3209,6 +3219,50 @@ final class DesktopStore: ObservableObject {
             OperatorChatCommand(title: language("Check GitHub", "GitHub 확인"), prompt: language("Check GitHub readiness.", "GitHub 확인해줘")),
             OperatorChatCommand(title: language("Resync Linear", "Linear 재동기화"), prompt: language("Resync Linear.", "Linear 재동기화해줘"))
         ]
+    }
+
+    func runSkill(
+        skillName: String,
+        agentId: String,
+        input: String? = nil,
+        parameters: [String: String] = [:]
+    ) async {
+        guard let companyId = selectedCompanyID else { return }
+        let key = "\(agentId):\(skillName)"
+        runningSkillRunKeys.insert(key)
+        defer { runningSkillRunKeys.remove(key) }
+
+        do {
+            let result = try await api.runSkill(
+                name: skillName,
+                companyId: companyId,
+                agentId: agentId,
+                input: input,
+                parameters: parameters
+            )
+            recentSkillRunResults = ([result] + recentSkillRunResults).prefix(20).map { $0 }
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            let record = SkillRunRecord(
+                id: result.runId ?? "\(skillName)-\(now)",
+                companyId: companyId,
+                agentId: agentId,
+                skill: result.skill,
+                status: result.status,
+                actions: result.actions,
+                evidence: result.evidence,
+                summary: result.summary,
+                output: result.output,
+                error: result.error,
+                createdAt: now,
+                updatedAt: now,
+                completedAt: result.status == "RUNNING" ? nil : now
+            )
+            skillRuns = ([record] + skillRuns.filter { $0.id != record.id })
+                .sorted { $0.updatedAt > $1.updatedAt }
+            await refreshCompanyDashboard(restartEventStream: false)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func submitOperatorChatCommand(_ command: OperatorChatCommand) async {
@@ -4177,6 +4231,7 @@ final class DesktopStore: ObservableObject {
                 agentMessages: dashboard.agentMessages,
                 marketingDelegationPolicies: dashboard.marketingDelegationPolicies,
                 marketingRuns: dashboard.marketingRuns,
+                skillRuns: dashboard.skillRuns,
                 agentPerformance: dashboard.agentPerformance
             )
             syncBackendFormState()
@@ -4329,6 +4384,7 @@ final class DesktopStore: ObservableObject {
                                 self.dashboard = dashboard
                                 self.marketingDelegationPolicies = dashboard.marketingDelegationPolicies
                                 self.marketingRuns = dashboard.marketingRuns
+                                self.skillRuns = dashboard.skillRuns
                                 self.reconcileWorkflowLeadAgent()
                                 self.reconcileSelection()
                                 self.syncBackendFormState()

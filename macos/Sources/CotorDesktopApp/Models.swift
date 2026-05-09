@@ -221,6 +221,60 @@ struct SkillCatalogEntryRecord: Codable, Identifiable, Hashable {
     let dangerous: Bool
 }
 
+struct CapabilitySimulationResultRecord: Codable, Hashable {
+    let action: String
+    let capability: String
+    let mode: String
+    let allowed: Bool
+    let requiresApproval: Bool
+    let reason: String
+}
+
+struct SkillRunEvidenceRecord: Codable, Identifiable, Hashable {
+    var id: String { "\(type)-\(path ?? url ?? title)-\(detail ?? "")" }
+    let type: String
+    let path: String?
+    let url: String?
+    let title: String
+    let detail: String?
+}
+
+struct SkillRunResultRecord: Codable, Identifiable, Hashable {
+    var id: String { runId ?? "\(skill)-\(status)-\(summary ?? output ?? error ?? "")" }
+    let skill: String
+    let status: String
+    let capability: CapabilitySimulationResultRecord
+    let runId: String?
+    let actions: [String]
+    let evidence: [SkillRunEvidenceRecord]
+    let summary: String?
+    let output: String?
+    let error: String?
+}
+
+struct SkillRunRecord: Codable, Identifiable, Hashable {
+    let id: String
+    let companyId: String
+    let agentId: String
+    let skill: String
+    let status: String
+    let actions: [String]
+    let evidence: [SkillRunEvidenceRecord]
+    let summary: String?
+    let output: String?
+    let error: String?
+    let createdAt: Int64
+    let updatedAt: Int64
+    let completedAt: Int64?
+}
+
+struct SkillRunRequestPayload: Codable {
+    let companyId: String
+    let agentId: String
+    let input: String?
+    let parameters: [String: String]
+}
+
 struct AgentCapabilitySettingRecord: Codable, Hashable {
     let enabled: Bool
     let mode: String
@@ -1147,6 +1201,7 @@ struct CompanyDashboardPayload: Codable {
     let agentMessages: [AgentMessageRecord]
     var marketingDelegationPolicies: [MarketingDelegationPolicyRecord] = []
     var marketingRuns: [MarketingRunRecord] = []
+    var skillRuns: [SkillRunRecord] = []
     var agentPerformance: [AgentPerformanceSnapshotRecord] = []
 
     private enum CodingKeys: String, CodingKey {
@@ -1172,6 +1227,7 @@ struct CompanyDashboardPayload: Codable {
         case agentMessages
         case marketingDelegationPolicies
         case marketingRuns
+        case skillRuns
         case agentPerformance
     }
 
@@ -1199,6 +1255,7 @@ struct CompanyDashboardPayload: Codable {
         agentMessages = try container.decodeValue([AgentMessageRecord].self, forKey: .agentMessages, default: [])
         marketingDelegationPolicies = try container.decodeValue([MarketingDelegationPolicyRecord].self, forKey: .marketingDelegationPolicies, default: [])
         marketingRuns = try container.decodeValue([MarketingRunRecord].self, forKey: .marketingRuns, default: [])
+        skillRuns = try container.decodeValue([SkillRunRecord].self, forKey: .skillRuns, default: [])
         agentPerformance = try container.decodeValue([AgentPerformanceSnapshotRecord].self, forKey: .agentPerformance, default: [])
     }
 }
@@ -1401,6 +1458,7 @@ struct DashboardPayload: Codable {
     let agentMessages: [AgentMessageRecord]
     var marketingDelegationPolicies: [MarketingDelegationPolicyRecord] = []
     var marketingRuns: [MarketingRunRecord] = []
+    var skillRuns: [SkillRunRecord] = []
     let agentPerformance: [AgentPerformanceSnapshotRecord]
 }
 
@@ -1459,6 +1517,7 @@ extension DashboardPayload {
         agentMessages: [],
         marketingDelegationPolicies: [],
         marketingRuns: [],
+        skillRuns: [],
         agentPerformance: []
     )
 
@@ -1486,6 +1545,7 @@ extension DashboardPayload {
         case agentMessages
         case marketingDelegationPolicies
         case marketingRuns
+        case skillRuns
         case agentPerformance
     }
 
@@ -1514,6 +1574,7 @@ extension DashboardPayload {
         agentMessages = try container.decodeValue([AgentMessageRecord].self, forKey: .agentMessages, default: [])
         marketingDelegationPolicies = try container.decodeValue([MarketingDelegationPolicyRecord].self, forKey: .marketingDelegationPolicies, default: [])
         marketingRuns = try container.decodeValue([MarketingRunRecord].self, forKey: .marketingRuns, default: [])
+        skillRuns = try container.decodeValue([SkillRunRecord].self, forKey: .skillRuns, default: [])
         agentPerformance = try container.decodeValue([AgentPerformanceSnapshotRecord].self, forKey: .agentPerformance, default: [])
     }
 }

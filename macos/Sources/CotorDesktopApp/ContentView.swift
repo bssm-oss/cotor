@@ -3788,6 +3788,8 @@ private struct OrgChartNode: View {
 private struct AgentSkillCardView: View {
     let card: AgentSkillCardRecord
     let language: AppLanguage
+    let isRunning: Bool
+    let onRun: () -> Void
     let onEdit: () -> Void
 
     var body: some View {
@@ -3847,8 +3849,48 @@ private struct AgentSkillCardView: View {
             if !policyTags.isEmpty {
                 compactTags(policyTags)
             }
+
+            Divider()
+                .overlay(ShellPalette.line.opacity(0.7))
+
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(recentRunTitle)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(recentRunTint)
+                        .lineLimit(1)
+                    Text(recentRunDetail)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+                Button(action: onRun) {
+                    HStack(spacing: 5) {
+                        if isRunning {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.55)
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        Text(isRunning ? language("Running", "실행 중") : language("Run", "실행"))
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(ShellPalette.text)
+                    .padding(.horizontal, 8)
+                    .frame(height: 24)
+                    .background(ShellPalette.panelRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isRunning || card.selectedSkills.isEmpty)
+                .opacity(card.selectedSkills.isEmpty ? 0.45 : 1)
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 156, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
         .padding(12)
         .background(ShellPalette.panelAlt)
         .overlay(
@@ -3876,6 +3918,36 @@ private struct AgentSkillCardView: View {
             tags.append((language("Some off", "일부 권한 꺼짐"), ShellPalette.muted))
         }
         return tags
+    }
+
+    private var recentRunTitle: String {
+        guard let run = card.recentRun else { return language("No skill run yet", "아직 실행 없음") }
+        return "\(run.skill) · \(run.status)"
+    }
+
+    private var recentRunDetail: String {
+        guard let run = card.recentRun else {
+            return language("Runs leave actions and evidence here.", "실행하면 action/evidence가 남습니다.")
+        }
+        if !run.evidence.isEmpty {
+            return language("Evidence", "증거") + " \(run.evidence.count) · " + (run.summary ?? run.error ?? "")
+        }
+        return run.summary ?? run.error ?? language("Skill run recorded.", "스킬 실행 기록됨")
+    }
+
+    private var recentRunTint: Color {
+        switch card.recentRun?.status.uppercased() {
+        case "COMPLETED":
+            return ShellPalette.success
+        case "DENIED", "APPROVAL_REQUIRED":
+            return ShellPalette.warning
+        case "FAILED", "FAILED_SETUP":
+            return ShellPalette.danger
+        case "RUNNING":
+            return ShellPalette.accent
+        default:
+            return ShellPalette.faint
+        }
     }
 
     private func compactTags(_ tags: [(String, Color)]) -> some View {
@@ -6267,7 +6339,22 @@ private struct CenterPaneView: View {
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 238), spacing: 10)], alignment: .leading, spacing: 10) {
                 ForEach(store.agentSkillCards) { card in
-                    AgentSkillCardView(card: card, language: l) {
+                    AgentSkillCardView(
+                        card: card,
+                        language: l,
+                        isRunning: store.runningSkillRunKeys.contains("\(card.id):\(card.selectedSkills.first?.id ?? "")"),
+                        onRun: {
+                            guard let skill = card.selectedSkills.first else { return }
+                            Task {
+                                await store.runSkill(
+                                    skillName: skill.id,
+                                    agentId: card.id,
+                                    input: defaultSkillInput(for: skill.id),
+                                    parameters: defaultSkillParameters(for: skill.id)
+                                )
+                            }
+                        }
+                    ) {
                         if let agent = store.companyAgentDefinitions.first(where: { $0.id == card.id }) {
                             store.beginEditingCompanyAgent(agent)
                         }
@@ -6277,6 +6364,28 @@ private struct CenterPaneView: View {
         }
         .padding(16)
         .shellInset()
+    }
+
+    private func defaultSkillInput(for skillID: String) -> String? {
+        switch skillID {
+        case "video-plan":
+            return l("Create a short product video plan for the current company workflow.", "현재 회사 워크플로우를 설명하는 짧은 제품 영상 계획을 만들어줘")
+        case "audience-scout", "analytics-reporter":
+            return l("Summarize recent marketing evidence and next actions.", "최근 마케팅 증거와 다음 액션을 요약해줘")
+        case "marketing-operator", "content-publisher", "social-publisher":
+            return l("Publish a concise product update inside delegated channels.", "위임된 채널 안에서 짧은 제품 업데이트를 발행해줘")
+        default:
+            return nil
+        }
+    }
+
+    private func defaultSkillParameters(for skillID: String) -> [String: String] {
+        switch skillID {
+        case "graphify":
+            return ["refresh": "false"]
+        default:
+            return [:]
+        }
     }
 
     private var organizationWorkPanel: some View {
