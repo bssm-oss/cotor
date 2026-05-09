@@ -745,6 +745,46 @@ class DesktopAppServiceTest : FunSpec({
         response.blockedActions.shouldBeEmpty()
     }
 
+    test("operator chat can route natural requests into a real skill run") {
+        val appHome = Files.createTempDirectory("operator-chat-skill-run-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = operatorChatLlmExecutor(
+                """{"reply":"리포지토리 맵을 확인할게요.","toolCalls":[{"tool":"run_skill","reason":"User asked for repository structure.","args":{"skill":"graphify","refresh":"false"}}],"answerSourceHints":["skill-run"]}""",
+                "graphify가 리포지토리 맵 증거를 읽었습니다."
+            )
+        )
+        val company = service.createCompany(name = "Operator Chat Skill", rootPath = appHome.toString())
+        Path.of(company.rootPath).resolve("graphify-out").also { Files.createDirectories(it) }
+            .resolve("GRAPH_REPORT.md")
+            .toFile()
+            .writeText("# Graph\n\n- operator skill path")
+        val ceo = service.listCompanyAgentDefinitions(company.id).first { it.title == "CEO" }
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = ceo.id,
+            settings = mapOf(
+                CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                    enabled = true,
+                    mode = CapabilityMode.AUTO,
+                    skillAllowlist = listOf("graphify")
+                ),
+                CapabilityKey.KNOWLEDGE_GRAPH_READ to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.READ_ONLY)
+            )
+        )
+
+        val response = service.runOperatorChat(company.id, "리포 구조 알려줘")
+
+        val skillAction = (response.actions + response.blockedActions).single()
+        skillAction.type shouldBe "skill-run"
+        skillAction.status shouldBe "COMPLETED"
+        response.answerSources.any { it.type == "skill-run" } shouldBe true
+        stateStore.load().skillRuns.single().skill shouldBe "graphify"
+    }
+
     test("operator chat hard gates destructive policy changes") {
         val appHome = Files.createTempDirectory("operator-chat-hard-gate-home")
         val stateStore = DesktopStateStore { appHome }

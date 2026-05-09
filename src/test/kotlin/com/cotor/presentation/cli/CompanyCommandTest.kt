@@ -290,7 +290,7 @@ class CompanyCommandTest : FunSpec({
     test("skill run prints backend skill payload") {
         coEvery { service.runSkill("graphify", "company-1", "agent-1", "map-repo") } returns com.cotor.app.SkillRunResult(
             skill = "graphify",
-            status = "READY",
+            status = "COMPLETED",
             capability = com.cotor.app.CapabilitySimulationResult(
                 action = "skill.run",
                 capability = com.cotor.app.CapabilityKey.SKILL_RUN,
@@ -298,14 +298,15 @@ class CompanyCommandTest : FunSpec({
                 allowed = true,
                 reason = "allowed"
             ),
-            output = "Graphify is allowed."
+            summary = "Graphify returned repository map evidence.",
+            output = "Graphify returned repository map evidence."
         )
 
         val result = SkillCommand().test("run graphify --company company-1 --agent agent-1 --input map-repo")
 
         result.statusCode shouldBe 0
         result.output shouldContain "\"skill\": \"graphify\""
-        result.output shouldContain "\"status\": \"READY\""
+        result.output shouldContain "\"status\": \"COMPLETED\""
     }
 
     test("provider test prints provider availability payload") {

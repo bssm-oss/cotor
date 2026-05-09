@@ -445,9 +445,9 @@ class AppServerTest : FunSpec({
             displayName = "Graphify",
             description = "Query repository graph."
         )
-        coEvery { desktopService.runSkill("graphify", "company-1", "agent-1", "map repo") } returns SkillRunResult(
+        coEvery { desktopService.runSkill("graphify", "company-1", "agent-1", "map repo", emptyMap()) } returns SkillRunResult(
             skill = "graphify",
-            status = "READY",
+            status = "COMPLETED",
             capability = CapabilitySimulationResult(
                 action = "skill.run",
                 capability = CapabilityKey.SKILL_RUN,
@@ -455,7 +455,8 @@ class AppServerTest : FunSpec({
                 allowed = true,
                 reason = "allowed"
             ),
-            output = "Graphify is allowed."
+            summary = "Graphify returned repository map evidence.",
+            output = "Graphify returned repository map evidence."
         )
 
         testApplication {
@@ -482,9 +483,9 @@ class AppServerTest : FunSpec({
             }
 
             response.status shouldBe HttpStatusCode.OK
-            response.bodyAsText() shouldContain "\"status\":\"READY\""
-            response.bodyAsText() shouldContain "Graphify is allowed."
-            coVerify(exactly = 1) { desktopService.runSkill("graphify", "company-1", "agent-1", "map repo") }
+            response.bodyAsText() shouldContain "\"status\":\"COMPLETED\""
+            response.bodyAsText() shouldContain "Graphify returned repository map evidence."
+            coVerify(exactly = 1) { desktopService.runSkill("graphify", "company-1", "agent-1", "map repo", emptyMap()) }
         }
     }
 
