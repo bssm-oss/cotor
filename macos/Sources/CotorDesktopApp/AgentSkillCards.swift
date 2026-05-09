@@ -69,12 +69,14 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
     let capabilityScopes: [AgentSkillScope]
     let policyChips: [AgentSkillPolicy]
     let hasDisabledCapabilities: Bool
+    let recentRun: SkillRunRecord?
 
     init(
         agent: CompanyAgentDefinitionRecord,
         profile: AgentCapabilityProfileRecord?,
         skillCatalog: [SkillCatalogEntryRecord],
-        defaultSkillIDs: Set<String> = []
+        defaultSkillIDs: Set<String> = [],
+        recentRuns: [SkillRunRecord] = []
     ) {
         id = agent.id
         companyId = agent.companyId
@@ -137,6 +139,11 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
         }
         policyChips = AgentSkillPolicy.allCases.filter { policies.contains($0) }
         hasDisabledCapabilities = agent.enabled && disabledCapabilitiesFound
+        let selectedSkillSet = Set(selectedSkillIDs)
+        recentRun = recentRuns
+            .filter { $0.companyId == agent.companyId && $0.agentId == agent.id && selectedSkillSet.contains($0.skill) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .first
     }
 
     private static func selectedSkillIDs(
@@ -247,7 +254,8 @@ extension DesktopStore {
                 agent: agent,
                 profile: profile,
                 skillCatalog: availableSkills,
-                defaultSkillIDs: defaultCompanyAgentSkillIDs
+                defaultSkillIDs: defaultCompanyAgentSkillIDs,
+                recentRuns: skillRuns
             )
         }
     }

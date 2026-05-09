@@ -1242,6 +1242,7 @@ data class DesktopAppState(
     val agentMessages: List<AgentMessage> = emptyList(),
     val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
     val marketingRuns: List<MarketingRunRecord> = emptyList(),
+    val skillRuns: List<SkillRunRecord> = emptyList(),
     val problemSignals: List<CompanyProblemSignal> = emptyList()
 )
 

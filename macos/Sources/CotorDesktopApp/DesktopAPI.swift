@@ -265,6 +265,24 @@ struct DesktopAPI {
         try await get(path: "api/app/skills")
     }
 
+    func runSkill(
+        name: String,
+        companyId: String,
+        agentId: String,
+        input: String? = nil,
+        parameters: [String: String] = [:]
+    ) async throws -> SkillRunResultRecord {
+        try await post(
+            path: "api/app/skills/\(name)/run",
+            body: SkillRunRequestPayload(
+                companyId: companyId,
+                agentId: agentId,
+                input: input,
+                parameters: parameters
+            )
+        )
+    }
+
     func updateAgentCapabilities(
         companyId: String,
         agentId: String,

@@ -45,6 +45,8 @@ import com.cotor.providers.github.GitHubSyncResponse
 import com.cotor.providers.github.MergeQueueState
 import com.cotor.providers.github.MergeRequirement
 import com.cotor.providers.github.PullRequestSnapshot
+import com.cotor.runtime.actions.ActionEvidence
+import com.cotor.runtime.actions.ActionExecutionService
 import com.cotor.runtime.actions.ActionKind
 import com.cotor.runtime.actions.ActionRequest
 import com.cotor.runtime.actions.ActionScope
@@ -241,6 +243,10 @@ class DesktopAppService(
         appHomeProvider = { stateStore.appHome() },
         commandAvailability = commandAvailability
     ),
+    private val browserSkillRunner: BrowserSkillRunner = LocalPlaywrightBrowserSkillRunner(
+        appHomeProvider = { stateStore.appHome() },
+        commandAvailability = commandAvailability
+    ),
     private val autoStartAutomationRefresh: Boolean = true
 ) {
     companion object {
@@ -276,6 +282,13 @@ class DesktopAppService(
             "Execution was interrupted because the app-server stopped before the run finished."
         private const val INTERRUPTED_ISSUE_REASON =
             "Runtime stopped while execution was in progress; the issue was returned to the queue."
+        private val marketingSkillNames = setOf(
+            "marketing-operator",
+            "audience-scout",
+            "content-publisher",
+            "social-publisher",
+            "analytics-reporter"
+        )
         private val localModelHttpThreadCounter = java.util.concurrent.atomic.AtomicInteger()
         private val localModelHttpClient = java.net.http.HttpClient.newBuilder()
             .connectTimeout(java.time.Duration.ofSeconds(2))
@@ -317,6 +330,11 @@ class DesktopAppService(
     private val companyEventStream = MutableSharedFlow<CompanyEventEnvelope>(replay = 0, extraBufferCapacity = 64)
     private val recentAgentModelDiscoveries = ConcurrentHashMap<String, CachedAgentModels>()
     private val backendJson = Json { ignoreUnknownKeys = true }
+    private val skillActionExecutionService = ActionExecutionService(
+        actionStore = ActionStore { stateStore.appHome() },
+        durableRuntimeService = durableRuntimeService,
+        provenanceService = provenanceService
+    )
     private val dailyReportJson = Json {
         ignoreUnknownKeys = true
         prettyPrint = true
@@ -469,6 +487,7 @@ class DesktopAppService(
             agentMessages = state.agentMessages.sortedByDescending { it.createdAt },
             marketingDelegationPolicies = CompanyMarketingDashboardProjection.policies(state),
             marketingRuns = CompanyMarketingDashboardProjection.runs(state),
+            skillRuns = state.skillRuns.sortedByDescending { it.updatedAt },
             agentPerformance = computeAgentPerformance(state, companyId = null, orgProfiles = orgProfiles)
         ).redactedForApi()
     }
@@ -1005,6 +1024,9 @@ class DesktopAppService(
                 .sortedByDescending { it.createdAt },
             marketingDelegationPolicies = CompanyMarketingDashboardProjection.policies(state, companyId),
             marketingRuns = CompanyMarketingDashboardProjection.runs(state, companyId),
+            skillRuns = state.skillRuns
+                .filter { companyId == null || it.companyId == companyId }
+                .sortedByDescending { it.updatedAt },
             agentPerformance = computeAgentPerformance(
                 state = state,
                 companyId = companyId,
@@ -2041,40 +2063,835 @@ class DesktopAppService(
         return parseSkillManifest(raw)
     }
 
-    suspend fun runSkill(name: String, companyId: String, agentId: String, input: String? = null): SkillRunResult {
+    suspend fun runSkill(
+        name: String,
+        companyId: String,
+        agentId: String,
+        input: String? = null,
+        parameters: Map<String, String> = emptyMap()
+    ): SkillRunResult {
         val skill = inspectSkill(name)
+        val runId = UUID.randomUUID().toString()
+        val startedAt = System.currentTimeMillis()
         val simulation = simulateAgentCapability(
             companyId = companyId,
             agentId = agentId,
             action = ActionKind.SKILL_RUN.wireValue,
             skill = skill.name
         )
-        return when {
+        val result = when {
             !simulation.allowed -> SkillRunResult(
                 skill = skill.name,
                 status = "DENIED",
                 capability = simulation,
+                runId = runId,
+                summary = "${skill.displayName} was denied by capability policy.",
                 error = simulation.reason
             )
             simulation.requiresApproval -> SkillRunResult(
                 skill = skill.name,
                 status = "APPROVAL_REQUIRED",
                 capability = simulation,
+                runId = runId,
+                summary = "${skill.displayName} requires explicit pre-delegation before it can run.",
                 error = simulation.reason
             )
+            else -> runCatching {
+                val request = ActionRequest(
+                    kind = ActionKind.SKILL_RUN,
+                    label = "skill.run:${skill.name}",
+                    scope = ActionScope.COMPANY,
+                    subject = ActionSubject(runId = runId, companyId = companyId, agentName = agentId),
+                    replaySafe = false,
+                    approvalRequiredOnReplay = false,
+                    metadata = skillRunMetadata(skill, input, parameters),
+                    evidence = ActionEvidence()
+                )
+                skillActionExecutionService.run(
+                    request = request,
+                    onSuccess = { completed: SkillRunResult ->
+                        ActionEvidence(filePaths = completed.evidence.mapNotNull { it.path })
+                    },
+                    onFailure = { ActionEvidence() }
+                ) {
+                    dispatchSkillRun(
+                        skill = skill,
+                        companyId = companyId,
+                        agentId = agentId,
+                        input = input,
+                        parameters = parameters,
+                        runId = runId,
+                        baseCapability = simulation
+                    )
+                }
+            }.getOrElse { error ->
+                SkillRunResult(
+                    skill = skill.name,
+                    status = if (error is IllegalArgumentException) "FAILED_SETUP" else "FAILED",
+                    capability = simulation,
+                    runId = runId,
+                    summary = "${skill.displayName} failed before it could produce evidence.",
+                    error = error.message ?: error::class.simpleName.orEmpty()
+                )
+            }
+        }
+        persistSkillRunResult(companyId, agentId, result, startedAt)
+        return result
+    }
+
+    private suspend fun dispatchSkillRun(
+        skill: SkillCatalogEntry,
+        companyId: String,
+        agentId: String,
+        input: String?,
+        parameters: Map<String, String>,
+        runId: String,
+        baseCapability: CapabilitySimulationResult
+    ): SkillRunResult =
+        when (skill.name) {
+            "graphify" -> runGraphifySkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
+            "browser-smoke" -> runBrowserSmokeSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
+            "marketing-operator",
+            "content-publisher",
+            "social-publisher" -> runMarketingSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
+            "audience-scout",
+            "analytics-reporter" -> runMarketingReportSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
+            "video-plan" -> runVideoPlanSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
             else -> SkillRunResult(
                 skill = skill.name,
-                status = "READY",
-                capability = simulation,
-                output = buildString {
-                    append(skill.displayName)
-                    append(" is allowed for this agent. ")
-                    append("Use the dedicated skill runtime to execute the next concrete step.")
-                    input?.trim()?.takeIf { it.isNotBlank() }?.let { append(" Input: ").append(it) }
+                status = "FAILED_SETUP",
+                capability = baseCapability,
+                runId = runId,
+                summary = "No runtime runner is registered for ${skill.displayName}.",
+                error = "No runner registered for skill: ${skill.name}"
+            )
+        }
+
+    private suspend fun runGraphifySkill(
+        skill: SkillCatalogEntry,
+        companyId: String,
+        agentId: String,
+        input: String?,
+        parameters: Map<String, String>,
+        runId: String,
+        baseCapability: CapabilitySimulationResult
+    ): SkillRunResult = withContext(Dispatchers.IO) {
+        val company = stateStore.load().companies.firstOrNull { it.id == companyId }
+            ?: throw IllegalArgumentException("Company not found: $companyId")
+        val root = Path.of(company.rootPath).toAbsolutePath().normalize()
+        val evidenceDir = skillRunEvidenceDir(skill.name, runId)
+        val reportPath = root.resolve("graphify-out").resolve("GRAPH_REPORT.md")
+        val actions = mutableListOf<String>()
+        val evidence = mutableListOf<SkillRunEvidence>()
+        val output = StringBuilder()
+
+        val readCheck = simulateCapabilityKey(
+            companyId = companyId,
+            agentId = agentId,
+            capability = CapabilityKey.KNOWLEDGE_GRAPH_READ,
+            action = "knowledge.graph-read",
+            path = root.toString()
+        )
+        if (!readCheck.allowed || readCheck.requiresApproval) {
+            return@withContext blockedSkillRunResult(skill, runId, readCheck, "Graphify read access is blocked.")
+        }
+
+        val refreshRequested = parameters["refresh"].isTruthy() || !Files.exists(reportPath)
+        if (refreshRequested) {
+            val writeCheck = simulateCapabilityKey(
+                companyId = companyId,
+                agentId = agentId,
+                capability = CapabilityKey.KNOWLEDGE_GRAPH_WRITE,
+                action = "knowledge.graph-write",
+                path = root.toString()
+            )
+            if (!writeCheck.allowed || writeCheck.requiresApproval) {
+                return@withContext blockedSkillRunResult(skill, runId, writeCheck, "Graphify refresh is blocked by policy.")
+            }
+            if (!commandAvailability("graphify")) {
+                return@withContext SkillRunResult(
+                    skill = skill.name,
+                    status = "FAILED_SETUP",
+                    capability = baseCapability,
+                    runId = runId,
+                    summary = "graphify is not available on PATH.",
+                    error = "graphify command was not found."
+                )
+            }
+            val updateOutputPath = evidenceDir.resolve("graphify-update.txt")
+            val updateOutput = runSkillProcess(listOf("graphify", "update", "."), root, timeoutSeconds = 180)
+            Files.writeString(updateOutputPath, updateOutput)
+            actions += "graphify update ."
+            evidence += SkillRunEvidence(
+                type = "command-output",
+                path = updateOutputPath.toString(),
+                title = "graphify update output",
+                detail = updateOutput.take(500)
+            )
+        }
+
+        if (Files.exists(reportPath)) {
+            val reportSummary = Files.readString(reportPath)
+                .lineSequence()
+                .filter { it.isNotBlank() }
+                .take(80)
+                .joinToString("\n")
+            actions += "read graphify-out/GRAPH_REPORT.md"
+            evidence += SkillRunEvidence(
+                type = "file",
+                path = reportPath.toString(),
+                title = "Graph report",
+                detail = "graphify-out/GRAPH_REPORT.md"
+            )
+            output.appendLine(reportSummary)
+        }
+
+        input?.trim()?.takeIf { it.isNotBlank() }?.let { question ->
+            if (!commandAvailability("graphify")) {
+                return@withContext SkillRunResult(
+                    skill = skill.name,
+                    status = "FAILED_SETUP",
+                    capability = baseCapability,
+                    runId = runId,
+                    actions = actions,
+                    evidence = evidence,
+                    summary = "graphify explain could not run because graphify is not available.",
+                    output = output.toString().trim().takeIf { it.isNotBlank() },
+                    error = "graphify command was not found."
+                )
+            }
+            val explainOutputPath = evidenceDir.resolve("graphify-explain.txt")
+            val explainOutput = runSkillProcess(listOf("graphify", "explain", question), root, timeoutSeconds = 120)
+            Files.writeString(explainOutputPath, explainOutput)
+            actions += "graphify explain"
+            evidence += SkillRunEvidence(
+                type = "command-output",
+                path = explainOutputPath.toString(),
+                title = "graphify explain output",
+                detail = question.take(200)
+            )
+            output.appendLine()
+            output.appendLine(explainOutput)
+        }
+
+        if (output.isBlank()) {
+            return@withContext SkillRunResult(
+                skill = skill.name,
+                status = "FAILED_SETUP",
+                capability = baseCapability,
+                runId = runId,
+                actions = actions,
+                evidence = evidence,
+                summary = "No graphify report or explain output was available.",
+                error = "graphify-out/GRAPH_REPORT.md is missing and refresh did not produce it."
+            )
+        }
+        SkillRunResult(
+            skill = skill.name,
+            status = "COMPLETED",
+            capability = baseCapability,
+            runId = runId,
+            actions = actions,
+            evidence = evidence,
+            summary = "Graphify returned repository map evidence.",
+            output = output.toString().trim().take(8_000)
+        )
+    }
+
+    private suspend fun runBrowserSmokeSkill(
+        skill: SkillCatalogEntry,
+        companyId: String,
+        agentId: String,
+        input: String?,
+        parameters: Map<String, String>,
+        runId: String,
+        baseCapability: CapabilitySimulationResult
+    ): SkillRunResult {
+        val url = parameters["url"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: extractFirstUrl(input.orEmpty())
+            ?: return SkillRunResult(
+                skill = skill.name,
+                status = "FAILED_SETUP",
+                capability = baseCapability,
+                runId = runId,
+                summary = "Browser smoke needs a URL.",
+                error = "Missing required parameter: url"
+            )
+        val trace = parameters["trace"].isTruthy()
+        val stepsJson = parameters["stepsJson"]?.trim()?.takeIf { it.isNotBlank() }
+        val planned = planBrowserSmoke(
+            BrowserSmokeRequest(
+                companyId = companyId,
+                agentId = agentId,
+                url = url,
+                screenshot = true,
+                trace = trace,
+                record = false,
+                interact = !stepsJson.isNullOrBlank()
+            )
+        )
+        if (planned.status != "READY") {
+            val capability = planned.checks.firstOrNull { !it.allowed || it.requiresApproval } ?: baseCapability
+            return SkillRunResult(
+                skill = skill.name,
+                status = planned.status,
+                capability = capability,
+                runId = runId,
+                summary = planned.message,
+                output = planned.command.joinToString(" "),
+                error = planned.error
+            )
+        }
+
+        val evidenceDir = skillRunEvidenceDir(skill.name, runId)
+        val screenshotPath = evidenceDir.resolve("screenshot.png")
+        val tracePath = if (trace) evidenceDir.resolve("trace.zip") else null
+        val result = browserSkillRunner.execute(
+            BrowserSkillCommand(
+                url = url,
+                screenshotPath = screenshotPath.toString(),
+                stepsJson = stepsJson,
+                tracePath = tracePath?.toString(),
+                maxRuntimeSeconds = parameters["timeoutSeconds"]?.toIntOrNull()?.coerceAtLeast(15) ?: 60
+            )
+        )
+        val evidence = buildList {
+            result.screenshotPath?.let {
+                add(SkillRunEvidence(type = "screenshot", path = it, title = "Browser screenshot", detail = result.finalUrl))
+            }
+            result.tracePath?.let {
+                add(SkillRunEvidence(type = "trace", path = it, title = "Browser trace", detail = result.finalUrl))
+            }
+            add(SkillRunEvidence(type = "url", url = result.finalUrl, title = "Final URL", detail = result.title))
+        }
+        return SkillRunResult(
+            skill = skill.name,
+            status = "COMPLETED",
+            capability = baseCapability,
+            runId = runId,
+            actions = result.actions,
+            evidence = evidence,
+            summary = "Visited ${result.finalUrl} (${result.consoleErrors.size} console error(s)).",
+            output = buildString {
+                appendLine("Title: ${result.title.ifBlank { "(untitled)" }}")
+                appendLine("Final URL: ${result.finalUrl}")
+                if (result.consoleErrors.isNotEmpty()) {
+                    appendLine("Console errors:")
+                    result.consoleErrors.take(20).forEach { appendLine("- $it") }
                 }
+            }.trim()
+        )
+    }
+
+    private suspend fun runMarketingSkill(
+        skill: SkillCatalogEntry,
+        companyId: String,
+        agentId: String,
+        input: String?,
+        parameters: Map<String, String>,
+        runId: String,
+        baseCapability: CapabilitySimulationResult
+    ): SkillRunResult {
+        val objective = parameters["objective"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: input?.trim()?.takeIf { it.isNotBlank() }
+            ?: return SkillRunResult(
+                skill = skill.name,
+                status = "FAILED_SETUP",
+                capability = baseCapability,
+                runId = runId,
+                summary = "${skill.displayName} needs an objective.",
+                error = "Missing required objective/input."
+            )
+        val requestedChannels = parseSkillChannels(parameters["channels"])
+        val channels = when (skill.name) {
+            "content-publisher" -> constrainMarketingSkillChannels(
+                companyId = companyId,
+                agentId = agentId,
+                delegationPolicyId = parameters["delegationPolicyId"],
+                requestedChannels = requestedChannels,
+                predicate = ::isOwnedContentChannel
+            )
+            "social-publisher" -> constrainMarketingSkillChannels(
+                companyId = companyId,
+                agentId = agentId,
+                delegationPolicyId = parameters["delegationPolicyId"],
+                requestedChannels = requestedChannels,
+                predicate = ::isOrganicSocialChannel
+            )
+            else -> requestedChannels
+        }
+        if (channels == null) {
+            return SkillRunResult(
+                skill = skill.name,
+                status = "DENIED",
+                capability = baseCapability,
+                runId = runId,
+                summary = "${skill.displayName} was denied because the requested channel is outside its scope.",
+                error = "Requested channels: ${requestedChannels.joinToString(", ")}"
+            )
+        }
+        if (skill.name in setOf("content-publisher", "social-publisher") && channels.isEmpty()) {
+            return SkillRunResult(
+                skill = skill.name,
+                status = "DENIED",
+                capability = baseCapability,
+                runId = runId,
+                summary = "${skill.displayName} has no delegated channel inside its scope.",
+                error = "No MarketingDelegationPolicy channel matched ${skill.name}."
+            )
+        }
+        val run = runCatching {
+            createMarketingRun(
+                MarketingRunRequest(
+                    companyId = companyId,
+                    agentId = agentId,
+                    objective = objective,
+                    channels = channels,
+                    delegationPolicyId = parameters["delegationPolicyId"]?.trim()?.takeIf { it.isNotBlank() }
+                )
+            )
+        }.getOrElse { error ->
+            return SkillRunResult(
+                skill = skill.name,
+                status = if ((error.message ?: "").contains("not found", ignoreCase = true)) "FAILED_SETUP" else "FAILED",
+                capability = baseCapability,
+                runId = runId,
+                summary = "${skill.displayName} could not start a MarketingRun.",
+                error = error.message ?: error::class.simpleName.orEmpty()
+            )
+        }
+        return SkillRunResult(
+            skill = skill.name,
+            status = when (run.status) {
+                MarketingRunStatus.COMPLETED -> "COMPLETED"
+                MarketingRunStatus.DENIED -> "DENIED"
+                MarketingRunStatus.FAILED -> "FAILED"
+                MarketingRunStatus.RUNNING -> "RUNNING"
+            },
+            capability = baseCapability,
+            runId = runId,
+            actions = run.actions.map { "${it.channel}: ${it.status}${it.error?.let { error -> " · $error" }.orEmpty()}" },
+            evidence = run.actions.flatMap { action ->
+                buildList {
+                    action.screenshotPath?.let {
+                        add(SkillRunEvidence(type = "screenshot", path = it, title = "${action.channel} screenshot", detail = action.targetUrl))
+                    }
+                    action.postedUrl?.let {
+                        add(SkillRunEvidence(type = "url", url = it, title = "${action.channel} result URL", detail = action.status.name))
+                    }
+                }
+            },
+            summary = "MarketingRun ${run.id} finished with ${run.status}.",
+            output = run.actions.joinToString("\n") { action ->
+                "${action.channel}: ${action.status} -> ${action.postedUrl ?: action.targetUrl}${action.error?.let { " ($it)" }.orEmpty()}"
+            },
+            error = run.error
+        )
+    }
+
+    private suspend fun runMarketingReportSkill(
+        skill: SkillCatalogEntry,
+        companyId: String,
+        agentId: String,
+        input: String?,
+        parameters: Map<String, String>,
+        runId: String,
+        baseCapability: CapabilitySimulationResult
+    ): SkillRunResult = withContext(Dispatchers.IO) {
+        val analyticsCheck = checkSkillCapability(companyId, agentId, ActionKind.MARKETING_ANALYTICS_READ)
+        if (!analyticsCheck.allowed || analyticsCheck.requiresApproval) {
+            return@withContext blockedSkillRunResult(skill, runId, analyticsCheck, "${skill.displayName} needs delegated analytics read access.")
+        }
+        val state = stateStore.load()
+        val policies = state.marketingDelegationPolicies.filter { it.companyId == companyId && it.agentId == agentId }
+        val runs = state.marketingRuns.filter { it.companyId == companyId }
+            .sortedByDescending { it.createdAt }
+            .take(20)
+        val successfulActions = runs.flatMap { it.actions }.count { it.status == MarketingActionStatus.SUCCEEDED }
+        val failedActions = runs.flatMap { it.actions }.count { it.status == MarketingActionStatus.FAILED }
+        val deniedActions = runs.flatMap { it.actions }.count { it.status == MarketingActionStatus.DENIED }
+        val report = buildString {
+            appendLine("# ${skill.displayName}")
+            appendLine()
+            appendLine("Input: ${input?.trim()?.ifBlank { "(none)" } ?: "(none)"}")
+            appendLine("Policies: ${policies.size}")
+            appendLine("Recent runs: ${runs.size}")
+            appendLine("Succeeded actions: $successfulActions")
+            appendLine("Failed actions: $failedActions")
+            appendLine("Denied actions: $deniedActions")
+            appendLine()
+            appendLine("## Recent evidence")
+            if (runs.isEmpty()) {
+                appendLine("- No MarketingRun evidence is available yet.")
+            } else {
+                runs.forEach { run ->
+                    appendLine("- ${run.id}: ${run.status} · ${run.channels.joinToString(", ")} · ${run.objective.take(120)}")
+                    run.actions.take(5).forEach { action ->
+                        appendLine("  - ${action.channel}: ${action.status} ${action.postedUrl ?: action.error ?: action.targetUrl}")
+                    }
+                }
+            }
+            appendLine()
+            appendLine("## Next actions")
+            appendLine("- Keep publishing inside configured MarketingDelegationPolicy channels.")
+            appendLine("- Add analytics/browser dashboard accounts if this report needs live dashboard screenshots.")
+        }
+        val evidenceDir = skillRunEvidenceDir(skill.name, runId)
+        val reportPath = evidenceDir.resolve("report.md")
+        Files.writeString(reportPath, report)
+        val evidence = mutableListOf(
+            SkillRunEvidence(type = "file", path = reportPath.toString(), title = "${skill.displayName} report")
+        )
+        val actions = mutableListOf("summarized ${runs.size} marketing run(s)")
+        val url = parameters["url"]?.trim()?.takeIf { it.isNotBlank() }
+        if (url != null) {
+            val screenshotCheck = checkSkillCapability(
+                companyId = companyId,
+                agentId = agentId,
+                action = ActionKind.BROWSER_SCREENSHOT,
+                networkTarget = browserNetworkTarget(url)?.hostWithPort
+            )
+            if (!screenshotCheck.allowed || screenshotCheck.requiresApproval) {
+                return@withContext blockedSkillRunResult(skill, runId, screenshotCheck, "Analytics dashboard screenshot is blocked by policy.")
+            }
+            val screenshotPath = evidenceDir.resolve("dashboard.png")
+            val browser = browserSkillRunner.execute(
+                BrowserSkillCommand(url = url, screenshotPath = screenshotPath.toString(), maxRuntimeSeconds = 60)
+            )
+            actions += browser.actions
+            evidence += SkillRunEvidence(type = "screenshot", path = screenshotPath.toString(), title = "Dashboard screenshot", detail = browser.finalUrl)
+        }
+        SkillRunResult(
+            skill = skill.name,
+            status = "COMPLETED",
+            capability = baseCapability,
+            runId = runId,
+            actions = actions,
+            evidence = evidence,
+            summary = "${skill.displayName} summarized ${runs.size} recent run(s).",
+            output = report.take(8_000)
+        )
+    }
+
+    private suspend fun runVideoPlanSkill(
+        skill: SkillCatalogEntry,
+        companyId: String,
+        agentId: String,
+        input: String?,
+        parameters: Map<String, String>,
+        runId: String,
+        baseCapability: CapabilitySimulationResult
+    ): SkillRunResult = withContext(Dispatchers.IO) {
+        val request = VideoPlanRequest(
+            companyId = companyId,
+            agentId = agentId,
+            issueId = parameters["issueId"]?.trim()?.takeIf { it.isNotBlank() },
+            prompt = parameters["prompt"]?.trim()?.takeIf { it.isNotBlank() } ?: input?.trim()?.takeIf { it.isNotBlank() },
+            projectPath = parameters["projectPath"]?.trim()?.takeIf { it.isNotBlank() },
+            provider = parameters["provider"]?.trim()?.takeIf { it.isNotBlank() }
+        )
+        val plan = planVideoScript(request)
+        if (plan.status != "READY") {
+            val capability = plan.checks.firstOrNull { !it.allowed || it.requiresApproval } ?: baseCapability
+            return@withContext SkillRunResult(
+                skill = skill.name,
+                status = plan.status,
+                capability = capability,
+                runId = runId,
+                summary = plan.message,
+                output = plan.command.joinToString(" "),
+                error = plan.error
+            )
+        }
+        val provider = request.provider ?: "remotion"
+        val evidenceDir = skillRunEvidenceDir(skill.name, runId)
+        val planPath = evidenceDir.resolve("plan.md")
+        val commandsPath = evidenceDir.resolve("commands.sh")
+        val prompt = request.prompt ?: "Create a concise Cotor product video."
+        val planMarkdown = buildString {
+            appendLine("# Video Plan")
+            appendLine()
+            appendLine("- Provider: $provider")
+            request.issueId?.let { appendLine("- Issue: $it") }
+            request.projectPath?.let { appendLine("- Project path: $it") }
+            appendLine("- Prompt: $prompt")
+            appendLine()
+            appendLine("## Storyboard")
+            appendLine("1. Open with the current product state and the user problem.")
+            appendLine("2. Show the autonomous company workflow and evidence trail.")
+            appendLine("3. End with the measurable outcome and next action.")
+            appendLine()
+            appendLine("## Validation")
+            appendLine("- Render/upload are intentionally not executed by video-plan.")
+            appendLine("- Use the command artifact after a separate video render capability is delegated.")
+        }
+        val commands = when (provider.lowercase()) {
+            "ffmpeg" -> "ffmpeg -y -f lavfi -i color=c=0x0B0F17:s=1920x1080:d=8 -vf drawtext=text='Cotor':fontcolor=white:fontsize=72:x=(w-text_w)/2:y=(h-text_h)/2 output.mp4"
+            "manim" -> "manim -pql scene.py CotorScene"
+            else -> "npx remotion render src/Video.tsx CotorVideo out/cotor-video.mp4"
+        }
+        Files.writeString(planPath, planMarkdown)
+        Files.writeString(commandsPath, "#!/usr/bin/env bash\nset -euo pipefail\n$commands\n")
+        SkillRunResult(
+            skill = skill.name,
+            status = "COMPLETED",
+            capability = baseCapability,
+            runId = runId,
+            actions = listOf("wrote video plan", "wrote validation commands"),
+            evidence = listOf(
+                SkillRunEvidence(type = "file", path = planPath.toString(), title = "Video plan"),
+                SkillRunEvidence(type = "file", path = commandsPath.toString(), title = "Video commands")
+            ),
+            summary = "Created local video planning artifacts without rendering or uploading.",
+            output = planMarkdown
+        )
+    }
+
+    private suspend fun persistSkillRunResult(
+        companyId: String,
+        agentId: String,
+        result: SkillRunResult,
+        startedAt: Long
+    ) {
+        val runId = result.runId ?: return
+        val now = System.currentTimeMillis()
+        val record = SkillRunRecord(
+            id = runId,
+            companyId = companyId,
+            agentId = agentId,
+            skill = result.skill,
+            status = result.status,
+            actions = result.actions,
+            evidence = result.evidence,
+            summary = result.summary,
+            output = result.output,
+            error = result.error,
+            createdAt = startedAt,
+            updatedAt = now,
+            completedAt = if (result.status == "RUNNING") null else now
+        )
+        stateMutex.withLock {
+            val state = stateStore.load()
+            stateStore.save(
+                state.copy(skillRuns = state.skillRuns.filterNot { it.id == runId } + record)
+                    .recordCompanyActivity(
+                        companyId = companyId,
+                        source = "skill-run",
+                        title = "Ran ${result.skill}",
+                        detail = "${result.status} · ${result.summary ?: result.error ?: "Skill run finished."}"
+                    )
+                    .withDerivedMetrics()
             )
         }
     }
+
+    private fun skillRunEvidenceDir(skillName: String, runId: String): Path =
+        stateStore.appHome()
+            .resolve("runtime")
+            .resolve("skills")
+            .resolve(safeSkillPathSegment(skillName))
+            .resolve(safeSkillPathSegment(runId))
+            .also { Files.createDirectories(it) }
+
+    private fun safeSkillPathSegment(raw: String): String =
+        raw.trim().replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "skill" }
+
+    private fun skillRunMetadata(
+        skill: SkillCatalogEntry,
+        input: String?,
+        parameters: Map<String, String>
+    ): Map<String, String> =
+        (
+            mapOf(
+                "skill" to skill.name,
+                "skillName" to skill.name,
+                "displayName" to skill.displayName,
+                "input" to input.orEmpty().take(500)
+            ) + parameters.mapKeys { "parameter.${it.key}" }.mapValues { it.value.take(500) }
+            )
+            .filterValues { it.isNotBlank() }
+
+    private suspend fun checkSkillCapability(
+        companyId: String,
+        agentId: String,
+        action: ActionKind,
+        skill: String? = null,
+        path: String? = null,
+        networkTarget: String? = null,
+        channel: String? = null
+    ): CapabilitySimulationResult =
+        simulateAgentCapability(
+            companyId = companyId,
+            agentId = agentId,
+            action = action.wireValue,
+            path = path,
+            networkTarget = networkTarget,
+            skill = skill,
+            channel = channel
+        )
+
+    private suspend fun simulateCapabilityKey(
+        companyId: String,
+        agentId: String,
+        capability: CapabilityKey,
+        action: String,
+        path: String? = null
+    ): CapabilitySimulationResult {
+        val state = stateStore.load()
+        val definition = state.companyAgentDefinitions.firstOrNull { definition ->
+            definition.companyId == companyId &&
+                (
+                    definition.id.equals(agentId, ignoreCase = true) ||
+                        definition.agentCli.equals(agentId, ignoreCase = true) ||
+                        definition.title.equals(agentId, ignoreCase = true)
+                    )
+        }
+        val resolvedAgentId = definition?.id ?: agentId
+        val setting = state.agentCapabilityProfiles
+            .firstOrNull { it.companyId == companyId && it.agentId == resolvedAgentId }
+            ?.settings
+            ?.get(capability)
+            ?: defaultAgentCapabilitySettings().getValue(capability)
+        val mode = if (!setting.enabled) CapabilityMode.DISABLED else setting.mode
+        val allowedByPath = if (setting.pathAllowlist.isEmpty()) {
+            true
+        } else {
+            val requestedPath = path?.let { runCatching { Path.of(it).toAbsolutePath().normalize() }.getOrNull() }
+            requestedPath != null && setting.pathAllowlist.any { allowlist ->
+                val allowlistPath = runCatching { Path.of(allowlist).toAbsolutePath().normalize() }.getOrNull()
+                allowlistPath != null && (requestedPath == allowlistPath || requestedPath.startsWith(allowlistPath))
+            }
+        }
+        val scope = "company=$companyId agent=$resolvedAgentId"
+        return when {
+            !allowedByPath -> CapabilitySimulationResult(
+                action = action,
+                capability = capability,
+                mode = mode,
+                allowed = false,
+                reason = "Capability $capability rejected $action for $scope because path allowlist constraints did not match."
+            )
+            mode == CapabilityMode.DISABLED -> CapabilitySimulationResult(
+                action = action,
+                capability = capability,
+                mode = mode,
+                allowed = false,
+                reason = "Capability $capability is disabled for $scope."
+            )
+            mode == CapabilityMode.PROPOSE_ONLY || mode == CapabilityMode.APPROVAL_REQUIRED -> CapabilitySimulationResult(
+                action = action,
+                capability = capability,
+                mode = mode,
+                allowed = true,
+                requiresApproval = true,
+                reason = "Capability $capability requires pre-delegation for $scope."
+            )
+            else -> CapabilitySimulationResult(
+                action = action,
+                capability = capability,
+                mode = mode,
+                allowed = true,
+                reason = "Capability $capability allows $action for $scope."
+            )
+        }
+    }
+
+    private fun blockedSkillRunResult(
+        skill: SkillCatalogEntry,
+        runId: String,
+        capability: CapabilitySimulationResult,
+        summary: String
+    ): SkillRunResult =
+        SkillRunResult(
+            skill = skill.name,
+            status = if (capability.requiresApproval) "APPROVAL_REQUIRED" else "DENIED",
+            capability = capability,
+            runId = runId,
+            summary = summary,
+            error = capability.reason
+        )
+
+    private suspend fun runSkillProcess(
+        command: List<String>,
+        workingDirectory: Path,
+        timeoutSeconds: Long
+    ): String = withContext(Dispatchers.IO) {
+        val process = ProcessBuilder(command)
+            .directory(workingDirectory.toFile())
+            .redirectErrorStream(true)
+            .start()
+        val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
+        val output = process.inputStream.bufferedReader().readText()
+        if (!finished) {
+            process.destroyForcibly()
+            error("${command.joinToString(" ")} timed out after ${timeoutSeconds}s.")
+        }
+        if (process.exitValue() != 0) {
+            error(output.ifBlank { "${command.joinToString(" ")} failed with exit ${process.exitValue()}." })
+        }
+        output
+    }
+
+    private fun parseSkillChannels(raw: String?): List<String> =
+        raw.orEmpty()
+            .split(",", "|", "\n")
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+    private suspend fun constrainMarketingSkillChannels(
+        companyId: String,
+        agentId: String,
+        delegationPolicyId: String?,
+        requestedChannels: List<String>,
+        predicate: (String) -> Boolean
+    ): List<String>? =
+        if (requestedChannels.isEmpty()) {
+            defaultMarketingPolicyChannels(companyId, agentId, delegationPolicyId, predicate)
+        } else if (requestedChannels.all(predicate)) {
+            requestedChannels
+        } else {
+            null
+        }
+
+    private suspend fun defaultMarketingPolicyChannels(
+        companyId: String,
+        agentId: String,
+        delegationPolicyId: String?,
+        predicate: (String) -> Boolean
+    ): List<String> =
+        runCatching {
+            val state = stateStore.load()
+            val definition = state.companyAgentDefinitions.firstOrNull {
+                it.companyId == companyId && it.id == agentId
+            } ?: return@runCatching emptyList()
+            val policy = resolveMarketingPolicy(
+                state = state,
+                request = MarketingRunRequest(
+                    companyId = companyId,
+                    agentId = agentId,
+                    objective = "skill channel resolution",
+                    delegationPolicyId = delegationPolicyId?.trim()?.takeIf { it.isNotBlank() }
+                ),
+                definition = definition
+            )
+            policy.channelAccounts
+                .map { it.channel.trim().lowercase() }
+                .filter { it.isNotBlank() && predicate(it) }
+                .distinct()
+        }.getOrDefault(emptyList())
+
+    private fun isOwnedContentChannel(channel: String): Boolean =
+        channel.lowercase() in setOf("web", "cms", "blog", "site", "docs")
+
+    private fun isOrganicSocialChannel(channel: String): Boolean =
+        channel.lowercase() in setOf("x", "twitter", "linkedin", "social", "mastodon", "threads")
+
+    private fun String?.isTruthy(): Boolean =
+        this?.trim()?.lowercase() in setOf("true", "1", "yes", "y", "on")
+
+    private fun extractFirstUrl(text: String): String? =
+        Regex("""https?://[^\s)>\]]+""").find(text)?.value?.trimEnd('.', ',', ';')
 
     suspend fun planBrowserSmoke(request: BrowserSmokeRequest): BrowserSmokeResult {
         val normalizedUrl = request.url.trim()
@@ -2628,7 +3445,7 @@ class DesktopAppService(
         return profile?.settings?.get(CapabilityKey.SKILL_RUN)
             ?.skillAllowlist
             .orEmpty()
-            .any { it.equals("marketing-operator", ignoreCase = true) }
+            .any { allowedSkill -> marketingSkillNames.any { it.equals(allowedSkill, ignoreCase = true) } }
     }
 
     private fun marketingTargetUrl(
@@ -5129,6 +5946,17 @@ class DesktopAppService(
     private fun coerceOperatorChatPlanFromModelText(output: String): OperatorChatLlmPlan? {
         val normalized = output.lowercase()
         val tool = when {
+            "run_skill" in normalized ||
+                "graphify" in normalized ||
+                "repo" in normalized ||
+                "repository" in normalized ||
+                "리포" in normalized ||
+                "브라우저" in normalized ||
+                "browser" in normalized ||
+                "마케팅" in normalized ||
+                "marketing" in normalized ||
+                "영상" in normalized ||
+                "video" in normalized -> "run_skill"
             "inspect_runtime" in normalized ||
                 "runtime" in normalized ||
                 "running" in normalized ||
@@ -5167,7 +5995,11 @@ class DesktopAppService(
                 OperatorChatToolCall(
                     tool = tool,
                     reason = "Recovered from non-JSON operator model output.",
-                    args = emptyMap()
+                    args = if (tool == "run_skill") {
+                        mapOf("skill" to inferOperatorSkillName(output))
+                    } else {
+                        emptyMap()
+                    }
                 )
             ),
             answerSourceHints = emptyList()
@@ -5356,7 +6188,7 @@ class DesktopAppService(
             appendLine("""Schema: {"reply":"short natural Korean/English acknowledgement","toolCalls":[{"tool":"inspect_runtime","reason":"why","args":{}}],"answerSourceHints":[]}""")
             appendLine()
             appendLine("Allowed tools:")
-            appendLine("inspect_runtime, inspect_performance, inspect_blocked, inspect_reviews, update_agent_models, create_goal, start_runtime, stop_runtime, retry_blocked, hr_staffing, github_status, configure_github_origin, linear_sync, generate_report, inspect_problem_signals, ask_clarifying_question, blocked_by_policy")
+            appendLine("inspect_runtime, inspect_performance, inspect_blocked, inspect_reviews, run_skill, update_agent_models, create_goal, start_runtime, stop_runtime, retry_blocked, hr_staffing, github_status, configure_github_origin, linear_sync, generate_report, inspect_problem_signals, ask_clarifying_question, blocked_by_policy")
             appendLine()
             appendLine("Examples:")
             appendLine("""User: 에이전트들 잘 돌아가?""")
@@ -5365,6 +6197,10 @@ class DesktopAppService(
             appendLine("""JSON: {"reply":"막힌 이슈를 확인해볼게요.","toolCalls":[{"tool":"inspect_blocked","reason":"User asked about blocked work.","args":{}}],"answerSourceHints":["issue"]}""")
             appendLine("""User: opencode/nemotron-3-super-free로 바꿔""")
             appendLine("""JSON: {"reply":"모델 변경을 적용해볼게요.","toolCalls":[{"tool":"update_agent_models","reason":"User requested model update.","args":{"model":"opencode/nemotron-3-super-free"}}],"answerSourceHints":["agent-models"]}""")
+            appendLine("""User: 브라우저로 http://localhost:3000 확인해줘""")
+            appendLine("""JSON: {"reply":"브라우저 스킬로 확인해볼게요.","toolCalls":[{"tool":"run_skill","reason":"User asked for browser evidence.","args":{"skill":"browser-smoke","url":"http://localhost:3000"}}],"answerSourceHints":["skill-run"]}""")
+            appendLine("""User: 리포 구조 알려줘""")
+            appendLine("""JSON: {"reply":"리포지토리 맵을 확인해볼게요.","toolCalls":[{"tool":"run_skill","reason":"User asked for repo structure.","args":{"skill":"graphify","refresh":"false"}}],"answerSourceHints":["skill-run"]}""")
             appendLine()
             appendLine("Company context:")
             appendLine("company=${company.name}, mode=${company.operatorAutomationMode}, runtime=${summary.runtimeStatus}, activeAgentRuns=${summary.activeAgentCount}, blockedIssues=${summary.blockedIssueCount}, reviews=${summary.reviewQueueCount}, pendingApprovals=${summary.pendingApprovalCount}, budgetPaused=${summary.budgetPaused}")
@@ -5386,6 +6222,7 @@ class DesktopAppService(
             "inspect_performance", "performance", "hr_performance" -> inspectOperatorPerformanceTool(companyId)
             "inspect_blocked", "blocked", "failures" -> inspectOperatorBlockedTool(companyId)
             "inspect_reviews", "review", "approval", "merge_status" -> inspectOperatorReviewTool(companyId)
+            "run_skill", "skill_run", "execute_skill" -> runOperatorSkillTool(companyId, userMessage, toolCall)
             "update_agent_models", "set_agent_models", "model_update" -> {
                 val requested = toolCall.args["model"]
                     ?: toolCall.args["requestedModel"]
@@ -5636,6 +6473,104 @@ class DesktopAppService(
             else -> OperatorChatToolExecution(
                 resultLines = listOf("unknown tool ignored: ${toolCall.tool}")
             )
+        }
+    }
+
+    private suspend fun runOperatorSkillTool(
+        companyId: String,
+        userMessage: String,
+        toolCall: OperatorChatToolCall
+    ): OperatorChatToolExecution {
+        val skillName = (
+            toolCall.args["skill"]
+                ?: toolCall.args["skillName"]
+                ?: inferOperatorSkillName(userMessage)
+            ).trim()
+        val agentId = toolCall.args["agentId"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: resolveOperatorSkillAgent(companyId, skillName)
+        if (agentId.isNullOrBlank()) {
+            val action = OperatorCommandAction(
+                type = "skill-run",
+                title = "Skill agent not configured",
+                detail = "No enabled company agent is allowed to run $skillName.",
+                status = "FAILED_SETUP"
+            )
+            return OperatorChatToolExecution(
+                blockedActions = listOf(action),
+                answerSources = listOf(OperatorAnswerSource("skill-run", action.title, action.detail)),
+                resultLines = listOf("skill $skillName: FAILED_SETUP - no allowed agent")
+            )
+        }
+        val parameters = toolCall.args
+            .filterKeys { key -> key !in setOf("skill", "skillName", "agentId", "input", "objective") }
+            .toMutableMap()
+        if (skillName == "browser-smoke" && parameters["url"].isNullOrBlank()) {
+            extractFirstUrl(userMessage)?.let { parameters["url"] = it }
+        }
+        val result = runSkill(
+            name = skillName,
+            companyId = companyId,
+            agentId = agentId,
+            input = toolCall.args["input"] ?: toolCall.args["objective"] ?: userMessage.takeUnless { skillName == "graphify" },
+            parameters = parameters
+        )
+        val action = OperatorCommandAction(
+            type = "skill-run",
+            title = "Ran ${result.skill}",
+            detail = "${result.status} · ${result.summary ?: result.error ?: result.output?.take(180).orEmpty()}",
+            status = result.status
+        )
+        val sourceDetail = buildString {
+            append("runId=${result.runId ?: "unknown"}")
+            if (result.evidence.isNotEmpty()) {
+                append(", evidence=${result.evidence.size}")
+            }
+            result.evidence.firstOrNull()?.let { first ->
+                first.path?.let { append(", path=$it") }
+                first.url?.let { append(", url=$it") }
+            }
+        }
+        return OperatorChatToolExecution(
+            actions = if (result.status in setOf("COMPLETED", "RUNNING")) listOf(action) else emptyList(),
+            blockedActions = if (result.status in setOf("DENIED", "FAILED", "FAILED_SETUP", "APPROVAL_REQUIRED")) listOf(action) else emptyList(),
+            answerSources = listOf(OperatorAnswerSource("skill-run", result.skill, sourceDetail, result.runId)),
+            resultLines = listOf(
+                "skill ${result.skill}: ${result.status} - ${result.summary ?: result.error ?: result.output?.take(400).orEmpty()}",
+                "skill evidence: ${result.evidence.joinToString("; ") { it.path ?: it.url ?: it.title }.take(800)}"
+            ).filter { it.substringAfter(":").trim().isNotBlank() }
+        )
+    }
+
+    private suspend fun resolveOperatorSkillAgent(companyId: String, skillName: String): String? {
+        val state = stateStore.load()
+        val enabledDefinitions = state.companyAgentDefinitions.filter { it.companyId == companyId && it.enabled }
+        val byAllowlist = enabledDefinitions.firstOrNull { definition ->
+            val setting = state.agentCapabilityProfiles
+                .firstOrNull { it.companyId == companyId && it.agentId == definition.id }
+                ?.settings
+                ?.get(CapabilityKey.SKILL_RUN)
+            setting?.enabled == true &&
+                setting.mode != CapabilityMode.DISABLED &&
+                (setting.skillAllowlist.isEmpty() || setting.skillAllowlist.any { it.equals(skillName, ignoreCase = true) })
+        }
+        if (byAllowlist != null) {
+            return byAllowlist.id
+        }
+        return enabledDefinitions.firstOrNull()?.id
+    }
+
+    private fun inferOperatorSkillName(message: String): String {
+        val normalized = message.lowercase()
+        return when {
+            "browser" in normalized || "브라우저" in normalized || "screenshot" in normalized || "스크린샷" in normalized -> "browser-smoke"
+            "graphify" in normalized || "repo" in normalized || "repository" in normalized || "리포" in normalized || "구조" in normalized -> "graphify"
+            "video" in normalized || "영상" in normalized -> "video-plan"
+            "audience" in normalized || "audience-scout" in normalized || "고객" in normalized || "타깃" in normalized -> "audience-scout"
+            "analytics" in normalized || "성과" in normalized || "report" in normalized || "리포트" in normalized -> "analytics-reporter"
+            "social" in normalized || "linkedin" in normalized || "twitter" in normalized || "x " in normalized || "소셜" in normalized -> "social-publisher"
+            "content" in normalized || "blog" in normalized || "cms" in normalized || "블로그" in normalized -> "content-publisher"
+            "marketing" in normalized || "마케팅" in normalized || "홍보" in normalized -> "marketing-operator"
+            else -> "graphify"
         }
     }
 

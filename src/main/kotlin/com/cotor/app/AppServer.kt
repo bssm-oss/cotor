@@ -471,7 +471,8 @@ internal fun Application.cotorAppModule(
                             name = name,
                             companyId = request.companyId,
                             agentId = request.agentId,
-                            input = request.input
+                            input = request.input,
+                            parameters = request.parameters
                         )
                     }
                 }

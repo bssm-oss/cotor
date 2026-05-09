@@ -232,6 +232,7 @@ class DesktopStateStore(
             agentMessages = decodeList("agentMessages", AgentMessage.serializer()),
             marketingDelegationPolicies = decodeList("marketingDelegationPolicies", MarketingDelegationPolicy.serializer()),
             marketingRuns = decodeList("marketingRuns", MarketingRunRecord.serializer()),
+            skillRuns = decodeList("skillRuns", SkillRunRecord.serializer()),
             opsMetrics = decodeObject("opsMetrics", OpsMetricSnapshot.serializer(), OpsMetricSnapshot()),
             signals = decodeList("signals", OpsSignal.serializer()),
             backendSettings = decodeObject("backendSettings", DesktopBackendSettings.serializer(), DesktopBackendSettings()),
@@ -466,6 +467,7 @@ class DesktopStateStore(
                 signals = signals.sortedByDescending { it.createdAt }.take(150),
                 goalDecisions = goalDecisions.sortedByDescending { it.createdAt }.take(150),
                 marketingRuns = marketingRuns.sortedByDescending { it.createdAt }.take(200),
+                skillRuns = skillRuns.sortedByDescending { it.updatedAt }.take(200),
                 problemSignals = problemSignals.sortedByDescending { it.updatedAt }.take(200)
             )
         }
