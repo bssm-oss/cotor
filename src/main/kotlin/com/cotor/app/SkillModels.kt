@@ -30,7 +30,8 @@ data class SkillValidationResult(
 data class SkillRunRequest(
     val companyId: String,
     val agentId: String,
-    val input: String? = null
+    val input: String? = null,
+    val parameters: Map<String, String> = emptyMap()
 )
 
 @Serializable
@@ -38,8 +39,38 @@ data class SkillRunResult(
     val skill: String,
     val status: String,
     val capability: CapabilitySimulationResult,
+    val runId: String? = null,
+    val actions: List<String> = emptyList(),
+    val evidence: List<SkillRunEvidence> = emptyList(),
+    val summary: String? = null,
     val output: String? = null,
     val error: String? = null
+)
+
+@Serializable
+data class SkillRunEvidence(
+    val type: String,
+    val path: String? = null,
+    val url: String? = null,
+    val title: String,
+    val detail: String? = null
+)
+
+@Serializable
+data class SkillRunRecord(
+    val id: String,
+    val companyId: String,
+    val agentId: String,
+    val skill: String,
+    val status: String,
+    val actions: List<String> = emptyList(),
+    val evidence: List<SkillRunEvidence> = emptyList(),
+    val summary: String? = null,
+    val output: String? = null,
+    val error: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = createdAt,
+    val completedAt: Long? = null
 )
 
 fun skillCatalog(): List<SkillCatalogEntry> = listOf(

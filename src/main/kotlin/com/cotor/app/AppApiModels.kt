@@ -402,6 +402,7 @@ data class CompanyDashboardResponse(
     val agentMessages: List<AgentMessage> = emptyList(),
     val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
     val marketingRuns: List<MarketingRunRecord> = emptyList(),
+    val skillRuns: List<SkillRunRecord> = emptyList(),
     val agentPerformance: List<AgentPerformanceSnapshot> = emptyList()
 )
 
@@ -461,6 +462,7 @@ data class DashboardResponse(
     val agentMessages: List<AgentMessage> = emptyList(),
     val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
     val marketingRuns: List<MarketingRunRecord> = emptyList(),
+    val skillRuns: List<SkillRunRecord> = emptyList(),
     val agentPerformance: List<AgentPerformanceSnapshot> = emptyList()
 )
 
