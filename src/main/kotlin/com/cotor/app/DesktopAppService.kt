@@ -45,8 +45,8 @@ import com.cotor.providers.github.GitHubSyncResponse
 import com.cotor.providers.github.MergeQueueState
 import com.cotor.providers.github.MergeRequirement
 import com.cotor.providers.github.PullRequestSnapshot
-import com.cotor.runtime.actions.ActionExecutionService
 import com.cotor.runtime.actions.ActionEvidence
+import com.cotor.runtime.actions.ActionExecutionService
 import com.cotor.runtime.actions.ActionKind
 import com.cotor.runtime.actions.ActionRequest
 import com.cotor.runtime.actions.ActionScope
@@ -2701,12 +2701,14 @@ class DesktopAppService(
         input: String?,
         parameters: Map<String, String>
     ): Map<String, String> =
-        (mapOf(
-            "skill" to skill.name,
-            "skillName" to skill.name,
-            "displayName" to skill.displayName,
-            "input" to input.orEmpty().take(500)
-        ) + parameters.mapKeys { "parameter.${it.key}" }.mapValues { it.value.take(500) })
+        (
+            mapOf(
+                "skill" to skill.name,
+                "skillName" to skill.name,
+                "displayName" to skill.displayName,
+                "input" to input.orEmpty().take(500)
+            ) + parameters.mapKeys { "parameter.${it.key}" }.mapValues { it.value.take(500) }
+            )
             .filterValues { it.isNotBlank() }
 
     private suspend fun checkSkillCapability(
