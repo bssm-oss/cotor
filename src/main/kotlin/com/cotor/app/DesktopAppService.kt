@@ -139,6 +139,14 @@ private data class CeoPlanningPayload(
     val issues: List<CeoPlannedIssue> = emptyList()
 )
 
+private data class CeoPlanningPayloadResolution(
+    val payload: CeoPlanningPayload?,
+    val source: String? = null,
+    val diagnostics: List<String> = emptyList()
+) {
+    val isValid: Boolean get() = payload != null
+}
+
 @kotlinx.serialization.Serializable
 private data class CeoPlannedIssue(
     val refId: String,
@@ -252,6 +260,9 @@ class DesktopAppService(
         private const val FALLBACK_PLANNING_SOURCE_PREFIX = "fallback-planning:"
         private const val CEO_PLANNING_INVALID_OUTPUT = "CEO_PLANNING_INVALID_OUTPUT"
         private const val CEO_PLANNING_REPAIR_MARKER = "CEO_PLANNING_REPAIR"
+        private const val CEO_PLANNING_OUTPUT_FILE = ".cotor/runtime/ceo-plan.json"
+        private const val CEO_PLANNING_OUTPUT_ARTIFACT_DIR = ".cotor/runtime/run-outputs"
+        private const val CEO_PLANNING_MAX_OUTPUT_FILE_BYTES = 256L * 1024L
         private const val RUN_PROCESS_TERMINATION_TIMEOUT_MS = 2_000L
         private const val QA_REVIEW_SOURCE_PREFIX = "qa-review:"
         private const val CEO_APPROVAL_SOURCE_PREFIX = "ceo-approval:"
@@ -7506,6 +7517,97 @@ class DesktopAppService(
         issue
     }
 
+    private fun recoverBlockedCeoPlanningIssueFromArtifacts(
+        state: DesktopAppState,
+        planningIssue: CompanyIssue,
+        now: Long
+    ): DesktopAppState? {
+        val goal = state.goals.firstOrNull { it.id == planningIssue.goalId } ?: return null
+        val company = state.companies.firstOrNull { it.id == planningIssue.companyId } ?: return null
+        val workspace = state.workspaces.firstOrNull { it.id == planningIssue.workspaceId } ?: return null
+        val existingNonPlanning = state.issues.filter {
+            it.goalId == goal.id && !it.kind.equals("planning", ignoreCase = true)
+        }
+        if (existingNonPlanning.any { it.status != IssueStatus.DONE && it.status != IssueStatus.CANCELED }) {
+            return null
+        }
+        val taskRuns = state.tasks
+            .filter { it.issueId == planningIssue.id }
+            .sortedByDescending { it.updatedAt }
+            .flatMap { task ->
+                state.runs
+                    .filter { run -> run.taskId == task.id }
+                    .sortedByDescending { it.updatedAt }
+                    .map { run -> task to run }
+            }
+        val resolved = taskRuns.firstNotNullOfOrNull { (task, run) ->
+            resolveCeoPlanningPayload(task, run)
+                .takeIf { it.isValid }
+                ?.let { resolution -> task to (run to resolution) }
+        } ?: return null
+        val resolution = resolved.second.second
+        val parsedPlan = resolution.payload ?: return null
+        val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+        val plannedIssues = materializePlannedIssues(
+            goal = goal,
+            workspace = workspace,
+            profiles = profiles,
+            plan = parsedPlan,
+            now = now,
+            planningSource = "ceo"
+        )
+        val dependencyRecords = plannedIssues.flatMap { createdIssue ->
+            createdIssue.dependsOn.map { dependencyId ->
+                IssueDependency(
+                    id = UUID.randomUUID().toString(),
+                    issueId = createdIssue.id,
+                    dependsOnIssueId = dependencyId
+                )
+            }
+        }
+        val planningReason = "CEO planning recovered ${plannedIssues.size} downstream issues from ${resolution.source ?: "stored run output"}."
+        val updatedPlanningIssue = planningIssue.copy(
+            status = IssueStatus.DONE,
+            transitionReason = planningReason,
+            providerBlockReason = null,
+            blockedBy = emptyList(),
+            updatedAt = now
+        )
+        val decision = GoalOrchestrationDecision(
+            id = UUID.randomUUID().toString(),
+            companyId = company.id,
+            goalId = goal.id,
+            issueId = planningIssue.id,
+            title = "CEO planned execution graph",
+            summary = "CEO planning for \"${goal.title}\" was recovered from stored output and decomposed into ${plannedIssues.size} branchable issues.",
+            createdIssues = plannedIssues.map { it.id },
+            assignments = plannedIssues.mapNotNull { createdIssue ->
+                val assignee = profiles.firstOrNull { it.id == createdIssue.assigneeProfileId }?.roleName
+                assignee?.let { "${createdIssue.title} -> $it" }
+            },
+            escalations = emptyList(),
+            createdAt = now
+        )
+        return applyVerificationProjection(
+            state.copy(
+                issues = state.issues.filterNot { it.id == planningIssue.id } + updatedPlanningIssue + plannedIssues,
+                issueDependencies = state.issueDependencies.filterNot { dependency ->
+                    dependency.issueId == planningIssue.id
+                } + dependencyRecords,
+                goalDecisions = state.goalDecisions + decision
+            )
+        ).recordCompanyActivity(
+            companyId = company.id,
+            projectContextId = planningIssue.projectContextId,
+            goalId = goal.id,
+            issueId = planningIssue.id,
+            source = "ceo-planning",
+            title = "Recovered CEO planning",
+            detail = planningReason,
+            severity = "warning"
+        ).withDerivedMetrics()
+    }
+
     suspend fun decomposeGoal(goalId: String): List<CompanyIssue> {
         val planningIssueId = stateMutex.withLock {
             val state = stateStore.load()
@@ -7533,6 +7635,17 @@ class DesktopAppService(
                 listOf(existingPlanningIssue.transitionReason, existingPlanningIssue.providerBlockReason)
                     .any { it?.contains(CEO_PLANNING_INVALID_OUTPUT) == true }
             ) {
+                val recoveredState = recoverBlockedCeoPlanningIssueFromArtifacts(
+                    state = state,
+                    planningIssue = existingPlanningIssue,
+                    now = System.currentTimeMillis()
+                )
+                if (recoveredState != null) {
+                    stateStore.save(recoveredState)
+                    return recoveredState.issues
+                        .filter { it.goalId == goalId }
+                        .sortedByDescending { it.updatedAt }
+                }
                 return existing.sortedByDescending { it.updatedAt }
             }
             if (existingPlanningIssue != null &&
@@ -14234,6 +14347,9 @@ class DesktopAppService(
                 estimatedCostCents = estimatedCostCents.takeIf { it > 0 },
                 updatedAt = System.currentTimeMillis()
             )
+            if (issue?.kind.equals("planning", ignoreCase = true)) {
+                persistRunOutputArtifact(settledRun)
+            }
             replaceRun(
                 settledRun
             )
@@ -14393,6 +14509,30 @@ class DesktopAppService(
             branchName = "codex/cotor/${task.id.take(8)}/$normalizedAgent",
             worktreePath = Path.of(repository.localPath)
         )
+    }
+
+    private fun persistRunOutputArtifact(run: AgentRun) {
+        val output = run.output?.takeIf { it.isNotBlank() } ?: return
+        val worktreePath = run.worktreePath.takeIf { it.isNotBlank() }?.let { Path.of(it) } ?: return
+        runCatching {
+            val worktreeReal = worktreePath.toRealPath()
+            val artifactDir = worktreeReal.resolve(CEO_PLANNING_OUTPUT_ARTIFACT_DIR).normalize()
+            if (!artifactDir.startsWith(worktreeReal)) {
+                return
+            }
+            Files.createDirectories(artifactDir)
+            val artifactPath = artifactDir.resolve("${run.id}.txt").normalize()
+            if (!artifactPath.startsWith(artifactDir)) {
+                return
+            }
+            Files.writeString(
+                artifactPath,
+                output,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE
+            )
+        }
     }
 
     private suspend fun replaceRun(run: AgentRun) {
@@ -15520,6 +15660,8 @@ class DesktopAppService(
             appendLine("```json")
             appendLine("""{"goalSummary":"...","issues":[{"refId":"exec-1","title":"...","description":"...","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":true,"dependsOn":[],"acceptanceCriteria":["..."],"reviewRequired":true,"approvalRequired":true}]}""")
             appendLine("```")
+            appendLine("Also write the exact same JSON object to $CEO_PLANNING_OUTPUT_FILE if you use tools or create files.")
+            appendLine("Do not write planning JSON to the prompt file or any other path.")
             memoryBundle?.let { memory ->
                 appendLine()
                 appendLine(renderMemorySections(memory))
@@ -15547,6 +15689,105 @@ class DesktopAppService(
                 issue.refId.isNotBlank() && issue.title.isNotBlank() && issue.assigneeRole.isNotBlank()
             }
         }
+    }
+
+    private fun resolveCeoPlanningPayload(
+        task: AgentTask,
+        run: AgentRun?
+    ): CeoPlanningPayloadResolution {
+        val diagnostics = mutableListOf<String>()
+        parseCeoPlanningPayload(run?.output)?.let { payload ->
+            return CeoPlanningPayloadResolution(payload = payload, source = "run.output")
+        }
+        diagnostics += "run.output: ${describeCeoPlanningParseFailure(run?.output)}"
+
+        val worktree = run?.worktreePath
+            ?.takeIf { it.isNotBlank() }
+            ?.let { Path.of(it) }
+        if (worktree == null) {
+            diagnostics += "worktree: missing run worktree path"
+            return CeoPlanningPayloadResolution(payload = null, diagnostics = diagnostics)
+        }
+
+        val candidatePaths = buildList {
+            run.id.takeIf { it.isNotBlank() }?.let { runId ->
+                add("$CEO_PLANNING_OUTPUT_ARTIFACT_DIR/$runId.txt" to "run output artifact")
+            }
+            add(CEO_PLANNING_OUTPUT_FILE to "ceo plan file")
+            add("cotor-ceo-plan.json" to "ceo plan file")
+            add("landing_page_plan.json" to "legacy landing plan file")
+        }
+
+        var foundCandidateFile = false
+        candidatePaths.forEach { (relativePath, sourceName) ->
+            val readResult = readCeoPlanningCandidateFile(worktree, relativePath)
+            if (readResult.fileExists) {
+                foundCandidateFile = true
+            }
+            val content = readResult.content
+            if (content != null) {
+                parseCeoPlanningPayload(content)?.let { payload ->
+                    return CeoPlanningPayloadResolution(
+                        payload = payload,
+                        source = "$sourceName: $relativePath",
+                        diagnostics = diagnostics
+                    )
+                }
+                diagnostics += "$relativePath: ${describeCeoPlanningParseFailure(content)}"
+            } else if (readResult.diagnostic != null) {
+                diagnostics += "$relativePath: ${readResult.diagnostic}"
+            }
+        }
+        if (!foundCandidateFile) {
+            diagnostics += "worktree: no allowed CEO planning output file found for task ${task.id}"
+        }
+        return CeoPlanningPayloadResolution(payload = null, diagnostics = diagnostics)
+    }
+
+    private data class CeoPlanningFileReadResult(
+        val fileExists: Boolean,
+        val content: String? = null,
+        val diagnostic: String? = null
+    )
+
+    private fun readCeoPlanningCandidateFile(
+        worktreePath: Path,
+        relativePath: String
+    ): CeoPlanningFileReadResult {
+        val worktreeReal = runCatching { worktreePath.toRealPath() }.getOrNull()
+            ?: return CeoPlanningFileReadResult(fileExists = false, diagnostic = "worktree does not exist")
+        val candidate = worktreeReal.resolve(relativePath).normalize()
+        if (!Files.exists(candidate)) {
+            return CeoPlanningFileReadResult(fileExists = false)
+        }
+        val candidateReal = runCatching { candidate.toRealPath() }.getOrNull()
+            ?: return CeoPlanningFileReadResult(fileExists = true, diagnostic = "could not resolve canonical path")
+        if (!candidateReal.startsWith(worktreeReal)) {
+            return CeoPlanningFileReadResult(fileExists = true, diagnostic = "outside run worktree")
+        }
+        val size = runCatching { Files.size(candidateReal) }.getOrNull()
+            ?: return CeoPlanningFileReadResult(fileExists = true, diagnostic = "could not read file size")
+        if (size > CEO_PLANNING_MAX_OUTPUT_FILE_BYTES) {
+            return CeoPlanningFileReadResult(fileExists = true, diagnostic = "file exceeds ${CEO_PLANNING_MAX_OUTPUT_FILE_BYTES} byte limit")
+        }
+        val content = runCatching { Files.readString(candidateReal) }.getOrElse { error ->
+            return CeoPlanningFileReadResult(fileExists = true, diagnostic = "read failed: ${error.message ?: error::class.simpleName}")
+        }
+        return CeoPlanningFileReadResult(fileExists = true, content = content)
+    }
+
+    private fun describeCeoPlanningParseFailure(output: String?): String {
+        val text = output?.trim().orEmpty()
+        if (text.isBlank()) {
+            return "blank output"
+        }
+        if (text.contains("[compacted ", ignoreCase = true) || text.contains("[truncated ", ignoreCase = true)) {
+            return "output was compacted or truncated before a complete planning JSON block could be parsed"
+        }
+        if (extractJsonObject(text) == null) {
+            return "no complete JSON object found"
+        }
+        return "JSON object did not match CEO planning schema"
     }
 
     private fun extractJsonObject(text: String): String? {
@@ -17921,11 +18162,17 @@ class DesktopAppService(
     private fun ceoPlanningInvalidOutputReason(
         task: AgentTask,
         run: AgentRun?,
-        finalStatus: DesktopTaskStatus
+        finalStatus: DesktopTaskStatus,
+        resolution: CeoPlanningPayloadResolution = resolveCeoPlanningPayload(task, run)
     ): String {
         val runRef = run?.id ?: "none"
         val summary = ceoPlanningRunOutputSummary(run)
-        return "$CEO_PLANNING_INVALID_OUTPUT: CEO planning task ${task.id} run $runRef ended with ${finalStatus.name} but did not produce a valid planning JSON block. Output summary: $summary"
+        val diagnostics = resolution.diagnostics
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString("; ")
+            ?.let { " Diagnostics: $it." }
+            .orEmpty()
+        return "$CEO_PLANNING_INVALID_OUTPUT: CEO planning task ${task.id} run $runRef ended with ${finalStatus.name} but did not produce a valid planning JSON block.$diagnostics Output summary: $summary"
     }
 
     private fun isRetryableCeoPlanningInterruption(
@@ -17995,6 +18242,8 @@ class DesktopAppService(
             appendLine("$CEO_PLANNING_REPAIR_MARKER:")
             appendLine("The previous CEO planning run did not produce valid planning JSON, so this is the only automatic repair attempt.")
             appendLine("Return JSON only inside one ```json fenced block. Do not use tools, do not inspect files, and do not write prose outside the JSON block.")
+            appendLine("If you still create a file, write the exact same JSON object to $CEO_PLANNING_OUTPUT_FILE in the current worktree and still return the fenced JSON.")
+            appendLine("Do not write planning JSON to the prompt file or any other path.")
             appendLine("Required schema:")
             appendLine("```json")
             appendLine("""{"goalSummary":"...","issues":[{"refId":"exec-1","title":"...","description":"...","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":true,"dependsOn":[],"acceptanceCriteria":["..."],"reviewRequired":true,"approvalRequired":true}]}""")
@@ -18125,7 +18374,12 @@ class DesktopAppService(
                 return@withLock
             }
 
-            val parsedPlan = if (finalStatus == DesktopTaskStatus.COMPLETED) parseCeoPlanningPayload(primaryRun?.output) else null
+            val planningResolution = if (finalStatus == DesktopTaskStatus.COMPLETED) {
+                resolveCeoPlanningPayload(task, primaryRun)
+            } else {
+                CeoPlanningPayloadResolution(payload = null, diagnostics = listOf("task ended with ${finalStatus.name}"))
+            }
+            val parsedPlan = planningResolution.payload
             if (parsedPlan == null) {
                 val retryableInterruption = isRetryableCeoPlanningInterruption(task, primaryRun, finalStatus)
                 if (retryableInterruption) {
@@ -18254,7 +18508,7 @@ class DesktopAppService(
                     stateStore.save(nextState)
                     return@withLock
                 }
-                val invalidPlanningReason = ceoPlanningInvalidOutputReason(task, primaryRun, finalStatus)
+                val invalidPlanningReason = ceoPlanningInvalidOutputReason(task, primaryRun, finalStatus, planningResolution)
                 val repairAttempts = state.tasks.count { candidate ->
                     candidate.issueId == currentIssue.id &&
                         candidate.prompt.contains(CEO_PLANNING_REPAIR_MARKER)
@@ -18382,7 +18636,11 @@ class DesktopAppService(
                     )
                 }
             }
-            val planningReason = "CEO planning run created ${decomposition.first.size} downstream issues."
+            val planningSourceDetail = planningResolution.source
+                ?.takeIf { it.isNotBlank() && it != "run.output" }
+                ?.let { " from $it" }
+                .orEmpty()
+            val planningReason = "CEO planning run created ${decomposition.first.size} downstream issues$planningSourceDetail."
             val updatedPlanningIssue = currentIssue.copy(
                 status = IssueStatus.DONE,
                 transitionReason = planningReason,

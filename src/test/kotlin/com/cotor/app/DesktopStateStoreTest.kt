@@ -342,4 +342,61 @@ class DesktopStateStoreTest : FunSpec({
         persisted.shouldContain(longPrompt.take(200))
         persisted.shouldNotContain("[compacted ")
     }
+
+    test("save preserves full run output for unresolved issue tasks") {
+        val appHome = Files.createTempDirectory("desktop-state-store-unresolved-output-home")
+        val store = DesktopStateStore { appHome }
+        val longOutput = "```json\n{\"goalSummary\":\"" + "plan-".repeat(900) + "\",\"issues\":[{\"refId\":\"exec-1\",\"title\":\"Work\",\"description\":\"Do work\",\"assigneeRole\":\"Builder\"}]}\n```"
+        val state = DesktopAppState(
+            issues = listOf(
+                CompanyIssue(
+                    id = "issue-1",
+                    companyId = "company-1",
+                    projectContextId = "project-1",
+                    goalId = "goal-1",
+                    workspaceId = "workspace-1",
+                    title = "Blocked planning issue",
+                    description = "Still needs planning sync.",
+                    status = IssueStatus.BLOCKED,
+                    kind = "planning",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            tasks = listOf(
+                AgentTask(
+                    id = "task-1",
+                    workspaceId = "workspace-1",
+                    issueId = "issue-1",
+                    title = "Planning task",
+                    prompt = "prompt",
+                    agents = listOf("opencode"),
+                    status = DesktopTaskStatus.COMPLETED,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            runs = listOf(
+                AgentRun(
+                    id = "run-1",
+                    taskId = "task-1",
+                    workspaceId = "workspace-1",
+                    repositoryId = "repo-1",
+                    agentName = "opencode",
+                    branchName = "codex/cotor/test",
+                    worktreePath = "/tmp/worktree",
+                    status = AgentRunStatus.COMPLETED,
+                    output = longOutput,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            )
+        )
+
+        store.save(state)
+        val persisted = appHome.resolve("state.json").readText()
+
+        store.load().runs.single().output shouldBe longOutput
+        persisted.shouldNotContain("[compacted ")
+    }
 })

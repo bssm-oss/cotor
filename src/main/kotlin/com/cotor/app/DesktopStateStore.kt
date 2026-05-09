@@ -433,6 +433,13 @@ class DesktopStateStore(
                     task.id in latestRetainedTaskIds
             }
             val retainedTaskIds = retainedTasks.mapTo(linkedSetOf()) { it.id }
+            val unresolvedTaskIds = retainedTasks
+                .filter { task ->
+                    task.issueId in unresolvedIssueIds ||
+                        task.status == DesktopTaskStatus.RUNNING ||
+                        task.status == DesktopTaskStatus.QUEUED
+                }
+                .mapTo(linkedSetOf()) { it.id }
             val retainedRuns = runs
                 .groupBy { it.taskId }
                 .flatMap { (taskId, taskRuns) ->
@@ -453,7 +460,7 @@ class DesktopStateStore(
             }
             copy(
                 tasks = retainedTasks.map { compactTaskForPersistence(it, unresolvedIssueIds) },
-                runs = retainedRuns.map(::compactRunForPersistence),
+                runs = retainedRuns.map { compactRunForPersistence(it, unresolvedTaskIds) },
                 reviewQueue = reviewQueue.filter { it.issueId in retainedReviewQueueIssueIds },
                 companyActivity = companyActivity.sortedByDescending { it.createdAt }.take(200),
                 signals = signals.sortedByDescending { it.createdAt }.take(150),
@@ -485,8 +492,12 @@ class DesktopStateStore(
         )
     }
 
-    private fun compactRunForPersistence(run: AgentRun): AgentRun =
-        if (run.status == AgentRunStatus.RUNNING || run.status == AgentRunStatus.QUEUED) {
+    private fun compactRunForPersistence(run: AgentRun, unresolvedTaskIds: Set<String>): AgentRun =
+        if (
+            run.taskId in unresolvedTaskIds ||
+            run.status == AgentRunStatus.RUNNING ||
+            run.status == AgentRunStatus.QUEUED
+        ) {
             run
         } else {
             run.copy(output = compactText(run.output, MAX_PERSISTED_RUN_OUTPUT_CHARS))
