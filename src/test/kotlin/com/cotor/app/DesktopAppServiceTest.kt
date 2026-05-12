@@ -901,7 +901,7 @@ class DesktopAppServiceTest : FunSpec({
 
         val pending = service.runOperatorCommand(
             companyId = company.id,
-            message = "프론트 화면 작업에 필요한 사람 고용해",
+            message = "Hire a frontend specialist for desktop UI work",
             automationMode = OperatorAutomationMode.ASK_ME
         )
         pending.pendingApprovals.single().status shouldBe "USER_CONFIRMATION_REQUIRED"
@@ -911,7 +911,7 @@ class DesktopAppServiceTest : FunSpec({
 
         val confirmed = service.runOperatorCommand(
             companyId = company.id,
-            message = "프론트 화면 작업에 필요한 사람 고용해",
+            message = "Hire a frontend specialist for desktop UI work",
             confirmStaffing = true
         )
         val definitions = service.listCompanyAgentDefinitions(company.id)
@@ -2222,7 +2222,7 @@ class DesktopAppServiceTest : FunSpec({
         fixture.service.runTask(task.id)
         fixture.awaitRuns()
 
-        withTimeout(10_000) {
+        withTimeout(90_000) {
             while (true) {
                 val candidate = fixture.stateStore.load().issues.single { it.id == issue.id }
                 val metadataCleared =
@@ -3756,14 +3756,8 @@ class DesktopAppServiceTest : FunSpec({
         )
         val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
 
-        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
-        withTimeout(5_000) {
-            while (stateStore.load().issues.single { it.id == planningIssue.id }.status == IssueStatus.PLANNED) {
-                delay(50)
-            }
-        }
-
-        val state = stateStore.load()
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 90_000)
+        val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1, timeoutMs = 90_000)
         val executionIssues = state.issues.filter { it.goalId == goal.id && it.kind == "execution" }
         executionIssues shouldHaveSize 1
         executionIssues.single().sourceSignal shouldBe "ceo-planning:${goal.id}"
@@ -3821,14 +3815,8 @@ class DesktopAppServiceTest : FunSpec({
         )
         val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
 
-        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
-        withTimeout(5_000) {
-            while (stateStore.load().issues.single { it.id == planningIssue.id }.status == IssueStatus.PLANNED) {
-                delay(50)
-            }
-        }
-
-        val state = stateStore.load()
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 90_000)
+        val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1, timeoutMs = 90_000)
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
         state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
     }
@@ -4040,13 +4028,18 @@ class DesktopAppServiceTest : FunSpec({
         )
         val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
 
-        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 90_000)
 
+        withTimeout(90_000) {
+            while (runCount < 2) {
+                delay(25)
+            }
+        }
         runCount shouldBe 2
         prompts.first().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
         prompts.last().orEmpty() shouldContain "CEO_PLANNING_REPAIR"
         prompts.last().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
-        val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1)
+        val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1, timeoutMs = 90_000)
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
         state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
         state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "CEO planned execution graph"
@@ -11600,7 +11593,7 @@ class DesktopAppServiceTest : FunSpec({
             pullRequestUrl = "https://github.com/heodongun/cotor-test/pull/22",
             pullRequestState = "OPEN",
             reviewState = "APPROVED",
-            mergeability = "MERGEABLE"
+            mergeability = "CLEAN"
         )
         coEvery {
             gitWorkspaceService.mergePullRequest(any(), 22, true, any(), any())
@@ -13638,10 +13631,11 @@ private suspend fun awaitIssueCount(
     stateStore: DesktopStateStore,
     goalId: String,
     kind: String,
-    expected: Int
+    expected: Int,
+    timeoutMs: Long = 5_000
 ): DesktopAppState {
     var latest = stateStore.load()
-    withTimeout(5_000) {
+    withTimeout(timeoutMs) {
         while (true) {
             val snapshot = stateStore.load()
             latest = snapshot

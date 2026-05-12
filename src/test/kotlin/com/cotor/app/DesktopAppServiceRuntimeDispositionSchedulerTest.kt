@@ -412,6 +412,86 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         stateStore.load().tasks.filter { it.issueId == issueId }.size shouldBe 1
         coVerify(exactly = 0) { agentExecutor.executeAgent(any(), any(), any()) }
     }
+
+    test("runCompanyRuntimeTick starts backlog issues when dependency edges are complete") {
+        val appHome = Files.createTempDirectory("desktop-runtime-backlog-dependency-home")
+        val repoRoot =
+            Files.createDirectories(Files.createTempDirectory("desktop-runtime-backlog-dependency-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        val companyId = "company-1"
+        val dependencyId = "issue-dependency"
+        val issueId = "issue-backlog-after-dependency"
+        seedRuntimeDispositionWorkspace(stateStore, repoRoot, companyId)
+
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/backlog-after-dependency/opencode",
+            worktreePath = repoRoot.resolve(".cotor/worktrees/backlog-after-dependency/opencode")
+        )
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns
+            PublishMetadata()
+
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } coAnswers {
+            delay(500)
+            AgentResult(
+                agentName = "opencode",
+                isSuccess = true,
+                output = "dependency-ready issue finished",
+                error = null,
+                duration = 500,
+                metadata = emptyMap()
+            )
+        }
+
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = agentExecutor
+        )
+
+        val state = stateStore.load()
+        stateStore.save(
+            state.copy(
+                backendSettings = state.backendSettings.copy(codePublishMode = CodePublishMode.ALLOW_LOCAL_GIT),
+                companies = listOf(runtimeDispositionCompany(companyId, repoRoot)),
+                goals = listOf(runtimeDispositionGoal(companyId, "goal-dependency", autonomyEnabled = true)),
+                issues = listOf(
+                    runtimeDispositionIssue(
+                        companyId = companyId,
+                        issueId = dependencyId,
+                        goalId = "goal-dependency",
+                        status = IssueStatus.DONE
+                    ),
+                    runtimeDispositionIssue(
+                        companyId = companyId,
+                        issueId = issueId,
+                        goalId = "goal-dependency",
+                        status = IssueStatus.BACKLOG
+                    )
+                ),
+                issueDependencies = listOf(
+                    IssueDependency(
+                        id = "edge-dependency-to-backlog",
+                        issueId = issueId,
+                        dependsOnIssueId = dependencyId
+                    )
+                ),
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+                )
+            )
+        )
+
+        val snapshot = service.runCompanyRuntimeTick(companyId)
+        val refreshed = stateStore.load()
+
+        snapshot.lastAction shouldBe "started:$issueId"
+        refreshed.tasks.shouldNotBeEmpty()
+        refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
+        coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
+    }
 })
 
 private suspend fun seedRuntimeDispositionWorkspace(

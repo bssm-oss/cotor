@@ -670,6 +670,9 @@ private fun assertOpenCodeRunCommand(command: List<String>, model: String, expec
 
 private fun localRoutingServer(handler: (HttpExchange) -> Unit): HttpServer {
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+    server.executor = java.util.concurrent.Executor { command ->
+        Thread(command, "opencode-plugin-http-test").apply { isDaemon = true }.start()
+    }
     server.createContext("/") { exchange ->
         handler(exchange)
     }

@@ -275,6 +275,35 @@ struct ModelsTests {
     }
 
     @Test
+    func desktopAPIPreservesConfiguredBasePathWhenBuildingRoutes() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DesktopAPICapturingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        var capturedPath: String?
+        DesktopAPICapturingURLProtocol.requestHandler = { request in
+            capturedPath = request.url?.path
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(#"{"ok":true}"#.utf8))
+        }
+        defer { DesktopAPICapturingURLProtocol.requestHandler = nil }
+        let api = DesktopAPI(
+            baseURL: try #require(URL(string: "http://127.0.0.1:8787/prefix")),
+            token: nil,
+            session: session
+        )
+
+        let ok = try await api.health()
+
+        #expect(ok)
+        #expect(capturedPath == "/prefix/api/app/health")
+    }
+
+    @Test
     func desktopSettingsDecodesMissingAgentModelFieldsAsEmpty() throws {
         let encoded = try JSONEncoder().encode(DashboardPayload.empty.settings)
         var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
@@ -556,4 +585,32 @@ struct ModelsTests {
         #expect(decoded.specialties == ["qa", "review"])
         #expect(decoded.enabled == false)
     }
+}
+
+final class DesktopAPICapturingURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        do {
+            let (response, data) = try Self.requestHandler?(request) ?? {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!
+                return (response, Data())
+            }()
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

@@ -1854,11 +1854,14 @@ internal fun Application.cotorAppModule(
 
                     patch("/{pipelineId}") {
                         if (!requireToken(token)) return@patch
+                        val companyId = call.parameters["companyId"]
+                            ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
                         val pipelineId = call.parameters["pipelineId"]
                             ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "pipelineId is required"))
                         val request = call.receive<UpdatePipelineRequest>()
                         respondDesktopRequest {
                             desktopService.updatePipeline(
+                                companyId = companyId,
                                 pipelineId = pipelineId,
                                 name = request.name,
                                 stages = request.stages?.mapIndexed { idx, s ->
@@ -1880,9 +1883,11 @@ internal fun Application.cotorAppModule(
 
                     delete("/{pipelineId}") {
                         if (!requireToken(token)) return@delete
+                        val companyId = call.parameters["companyId"]
+                            ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
                         val pipelineId = call.parameters["pipelineId"]
                             ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "pipelineId is required"))
-                        respondDesktopRequest { desktopService.deletePipeline(pipelineId) }
+                        respondDesktopRequest { desktopService.deletePipeline(companyId, pipelineId) }
                     }
 
                     post("/{pipelineId}/set-default") {
@@ -1926,10 +1931,14 @@ internal fun Application.cotorAppModule(
 
                     delete("/{entryId}") {
                         if (!requireToken(token)) return@delete
+                        val companyId = call.parameters["companyId"]
+                            ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
                         val entryId = call.parameters["entryId"]
                             ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "entryId is required"))
-                        desktopService.deleteContextEntry(entryId)
-                        call.respond(HttpStatusCode.OK, mapOf("deleted" to entryId))
+                        respondDesktopRequest {
+                            desktopService.deleteContextEntry(companyId, entryId)
+                            mapOf("deleted" to entryId)
+                        }
                     }
                 }
 

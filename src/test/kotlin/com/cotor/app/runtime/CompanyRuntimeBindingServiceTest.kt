@@ -8,6 +8,7 @@ import com.cotor.app.CompanyRuntimeStatus
 import com.cotor.app.DesktopAppState
 import com.cotor.app.DesktopTaskStatus
 import com.cotor.app.ExecutionBackendKind
+import com.cotor.app.IssueDependency
 import com.cotor.app.IssueStatus
 import com.cotor.app.ReviewQueueItem
 import com.cotor.app.ReviewQueueStatus
@@ -33,6 +34,7 @@ import com.cotor.runtime.durable.DurableRuntimeService
 import com.cotor.runtime.durable.DurableRuntimeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import java.nio.file.Files
 
@@ -374,6 +376,112 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.issues.single().runtimeDisposition shouldBe "RUNNABLE"
         bound.runtime.pendingIssueIds shouldContain issueId
     }
+
+    test("bind treats backlog issues with completed dependencies as runnable") {
+        val appHome = Files.createTempDirectory("company-runtime-backlog-ready")
+        val companyId = "company-backlog-ready"
+        val dependencyId = "issue-dependency"
+        val issueId = "issue-backlog-ready"
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))),
+            actionStore = ActionStore { appHome },
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(testCompany(companyId)),
+                issues = listOf(
+                    CompanyIssue(
+                        id = dependencyId,
+                        companyId = companyId,
+                        goalId = "goal-ready",
+                        workspaceId = "workspace-ready",
+                        title = "Dependency",
+                        description = "done",
+                        status = IssueStatus.DONE,
+                        createdAt = 1L,
+                        updatedAt = 2L
+                    ),
+                    CompanyIssue(
+                        id = issueId,
+                        companyId = companyId,
+                        goalId = "goal-ready",
+                        workspaceId = "workspace-ready",
+                        title = "Backlog work",
+                        description = "ready",
+                        status = IssueStatus.BACKLOG,
+                        dependsOn = listOf(dependencyId),
+                        createdAt = 1L,
+                        updatedAt = 2L
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.issues.first { it.id == issueId }.runtimeDisposition shouldBe "RUNNABLE"
+        bound.runtime.pendingIssueIds shouldContain issueId
+        bound.runtime.blockedIssueIds shouldNotContain issueId
+    }
+
+    test("bind marks backlog issues with unresolved explicit dependencies as waiting") {
+        val appHome = Files.createTempDirectory("company-runtime-backlog-waiting")
+        val companyId = "company-backlog-waiting"
+        val dependencyId = "issue-unfinished-dependency"
+        val issueId = "issue-backlog-waiting"
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))),
+            actionStore = ActionStore { appHome },
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(testCompany(companyId)),
+                issues = listOf(
+                    CompanyIssue(
+                        id = dependencyId,
+                        companyId = companyId,
+                        goalId = "goal-waiting",
+                        workspaceId = "workspace-waiting",
+                        title = "Dependency",
+                        description = "not done",
+                        status = IssueStatus.IN_PROGRESS,
+                        createdAt = 1L,
+                        updatedAt = 2L
+                    ),
+                    CompanyIssue(
+                        id = issueId,
+                        companyId = companyId,
+                        goalId = "goal-waiting",
+                        workspaceId = "workspace-waiting",
+                        title = "Backlog work",
+                        description = "blocked",
+                        status = IssueStatus.BACKLOG,
+                        createdAt = 1L,
+                        updatedAt = 2L
+                    )
+                ),
+                issueDependencies = listOf(
+                    IssueDependency(
+                        id = "dependency-edge",
+                        issueId = issueId,
+                        dependsOnIssueId = dependencyId
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.issues.first { it.id == issueId }.runtimeDisposition shouldBe "WAITING_FOR_DEPENDENCY"
+        bound.runtime.pendingIssueIds shouldNotContain issueId
+        bound.runtime.blockedIssueIds shouldContain issueId
+    }
 })
 
 private fun bindSingleIssueForRuntimeDisposition(
@@ -388,18 +496,7 @@ private fun bindSingleIssueForRuntimeDisposition(
         gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
     ).bind(
         state = DesktopAppState(
-            companies = listOf(
-                Company(
-                    id = companyId,
-                    name = "Runtime Disposition",
-                    rootPath = ".",
-                    repositoryId = "repo-runtime-disposition",
-                    defaultBaseBranch = "main",
-                    backendKind = ExecutionBackendKind.LOCAL_COTOR,
-                    createdAt = 1L,
-                    updatedAt = 1L
-                )
-            ),
+            companies = listOf(testCompany(companyId)),
             issues = listOf(issue),
             tasks = tasks
         ),
@@ -407,6 +504,18 @@ private fun bindSingleIssueForRuntimeDisposition(
         runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
     )
 }
+
+private fun testCompany(companyId: String): Company =
+    Company(
+        id = companyId,
+        name = "Test",
+        rootPath = ".",
+        repositoryId = "repo-$companyId",
+        defaultBaseBranch = "main",
+        backendKind = ExecutionBackendKind.LOCAL_COTOR,
+        createdAt = 1L,
+        updatedAt = 1L
+    )
 
 private fun runtimeDispositionIssue(
     issueId: String,

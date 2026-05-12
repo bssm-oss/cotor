@@ -4,7 +4,6 @@ import com.cotor.app.CompanyIssue
 import com.cotor.app.CompanyRuntimeSnapshot
 import com.cotor.app.DesktopAppState
 import com.cotor.app.DesktopTaskStatus
-import com.cotor.app.IssueStatus
 import com.cotor.app.ReviewQueueItem
 import com.cotor.policy.PolicyEngine
 import com.cotor.providers.github.GitHubControlPlaneService
@@ -25,16 +24,6 @@ class CompanyRuntimeBindingService(
     private val policyEngine: PolicyEngine = PolicyEngine(),
     private val gitHubControlPlaneService: GitHubControlPlaneService = GitHubControlPlaneService()
 ) {
-    companion object {
-        private const val RUNNABLE = "RUNNABLE"
-        private const val ACTIVE = "ACTIVE"
-        private const val WAITING_FOR_APPROVAL = "WAITING_FOR_APPROVAL"
-        private const val WAITING_FOR_CI = "WAITING_FOR_CI"
-        private const val QUARANTINED = "QUARANTINED"
-        private const val RECOVERABLE = "RECOVERABLE"
-        private const val TERMINAL = "TERMINAL"
-    }
-
     fun bind(state: DesktopAppState, companyId: String, runtime: CompanyRuntimeSnapshot): BoundCompanyRuntime {
         val boundRunIds = state.issues
             .filter { it.companyId == companyId }
@@ -111,33 +100,14 @@ class CompanyRuntimeBindingService(
                 val matchingRun = runs.firstOrNull { run ->
                     run.runId == issue.durableRunId || run.pipelineName == issue.pipelineId
                 }
-                val runtimeDisposition = when {
-                    matchingRun?.status == DurableRunStatus.WAITING_FOR_APPROVAL || matchingRun?.approvalPauses?.any { it.status.name == "PENDING" } == true ->
-                        WAITING_FOR_APPROVAL
-                    issue.status == IssueStatus.WAITING_FOR_APPROVAL ->
-                        WAITING_FOR_APPROVAL
-                    issuePullRequest?.checksSummary?.contains("FAILURE", ignoreCase = true) == true ->
-                        WAITING_FOR_CI
-                    matchingRun?.status == DurableRunStatus.FAILED && issue.status == IssueStatus.BLOCKED ->
-                        QUARANTINED
-                    issue.status == IssueStatus.BLOCKED && !issue.providerBlockReason.isNullOrBlank() ->
-                        QUARANTINED
-                    issue.status == IssueStatus.BLOCKED &&
-                        (issuePullRequest?.checksSummary?.contains("SUCCESS", ignoreCase = true) == true) ->
-                        RECOVERABLE
-                    issue.status in setOf(
-                        IssueStatus.PLANNED,
-                        IssueStatus.BACKLOG,
-                        IssueStatus.DELEGATED
-                    ) -> RUNNABLE
-                    issue.status == IssueStatus.IN_PROGRESS && issue.id in activeIssueIds ->
-                        ACTIVE
-                    issue.status == IssueStatus.IN_PROGRESS ->
-                        RUNNABLE
-                    issue.status in setOf(IssueStatus.DONE, IssueStatus.CANCELED) ->
-                        TERMINAL
-                    else -> TERMINAL
-                }
+                val runtimeDisposition = CompanyIssueReadiness.runtimeDisposition(
+                    issue = issue,
+                    state = state,
+                    pullRequestChecksSummary = issuePullRequest?.checksSummary,
+                    matchingRunStatus = matchingRun?.status,
+                    hasPendingApprovalPause = matchingRun?.approvalPauses?.any { it.status.name == "PENDING" } == true,
+                    hasActiveTask = issue.id in activeIssueIds
+                )
                 issue.copy(
                     durableRunId = matchingRun?.runId ?: issue.durableRunId,
                     approvalPauseId = matchingRun?.approvalPauses?.firstOrNull { it.status.name == "PENDING" }?.id ?: issue.approvalPauseId,
@@ -157,16 +127,16 @@ class CompanyRuntimeBindingService(
             } else {
                 val snapshot = item.pullRequestNumber?.let(providerBlockByPr::get)
                 val runtimeDisposition = when {
-                    item.approvalPauseId != null -> WAITING_FOR_APPROVAL
-                    snapshot?.checksSummary?.contains("FAILURE", ignoreCase = true) == true -> WAITING_FOR_CI
-                    item.status == com.cotor.app.ReviewQueueStatus.FAILED_CHECKS -> RECOVERABLE
+                    item.approvalPauseId != null -> CompanyIssueReadiness.WAITING_FOR_APPROVAL
+                    snapshot?.checksSummary?.contains("FAILURE", ignoreCase = true) == true -> CompanyIssueReadiness.WAITING_FOR_CI
+                    item.status == com.cotor.app.ReviewQueueStatus.FAILED_CHECKS -> CompanyIssueReadiness.RECOVERABLE
                     item.status in setOf(
                         com.cotor.app.ReviewQueueStatus.AWAITING_QA,
                         com.cotor.app.ReviewQueueStatus.READY_FOR_CEO,
                         com.cotor.app.ReviewQueueStatus.READY_TO_MERGE
-                    ) -> RUNNABLE
-                    item.status == com.cotor.app.ReviewQueueStatus.MERGED -> TERMINAL
-                    else -> TERMINAL
+                    ) -> CompanyIssueReadiness.RUNNABLE
+                    item.status == com.cotor.app.ReviewQueueStatus.MERGED -> CompanyIssueReadiness.TERMINAL
+                    else -> CompanyIssueReadiness.TERMINAL
                 }
                 item.copy(
                     approvalPauseId = boundIssues.firstOrNull { it.id == item.issueId }?.approvalPauseId ?: item.approvalPauseId,
@@ -175,15 +145,23 @@ class CompanyRuntimeBindingService(
                 )
             }
         }
-        val pendingIssueIds = boundIssues.filter { it.runtimeDisposition == RUNNABLE }.map { it.id }
+        val pendingIssueIds = boundIssues.filter { it.runtimeDisposition == CompanyIssueReadiness.RUNNABLE }.map { it.id }
         val pendingApprovalIssueIds = boundIssues
-            .filter { it.runtimeDisposition == WAITING_FOR_APPROVAL && it.durableRunId !in pendingApprovalRunIds }
+            .filter { it.runtimeDisposition == CompanyIssueReadiness.WAITING_FOR_APPROVAL && it.durableRunId !in pendingApprovalRunIds }
             .map { it.id }
         val blockedIssueIds = boundIssues.filter {
-            it.runtimeDisposition in setOf(WAITING_FOR_CI, QUARANTINED)
+            it.runtimeDisposition in setOf(
+                CompanyIssueReadiness.WAITING_FOR_CI,
+                CompanyIssueReadiness.WAITING_FOR_DEPENDENCY,
+                CompanyIssueReadiness.QUARANTINED
+            )
         }.map { it.id }
         val reviewQueueAttentionIds = boundQueue.filter {
-            it.runtimeDisposition in setOf(WAITING_FOR_APPROVAL, WAITING_FOR_CI, RECOVERABLE)
+            it.runtimeDisposition in setOf(
+                CompanyIssueReadiness.WAITING_FOR_APPROVAL,
+                CompanyIssueReadiness.WAITING_FOR_CI,
+                CompanyIssueReadiness.RECOVERABLE
+            )
         }.map { it.id }
         return BoundCompanyRuntime(
             runtime = runtime.copy(
