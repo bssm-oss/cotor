@@ -180,6 +180,31 @@ struct ModelsTests {
     }
 
     @Test
+    func desktopAPIUsesOnlyConfiguredOrRuntimeToken() throws {
+        #expect(DesktopAPI.configuredAppToken(processEnvironment: [:]) == nil)
+        #expect(DesktopAPI.configuredAppToken(processEnvironment: ["COTOR_APP_TOKEN": " configured-token "]) == "configured-token")
+
+        let appHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cotor-desktop-token-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: appHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: appHome) }
+
+        #expect(DesktopAPI.readRuntimeAppToken(appHome: appHome) == nil)
+        let tokenURL = try #require(DesktopAPI.writeRuntimeAppToken("runtime-token", appHome: appHome))
+
+        #expect(tokenURL.lastPathComponent == "app-server.token")
+        #expect(DesktopAPI.readRuntimeAppToken(appHome: appHome) == "runtime-token")
+    }
+
+    @Test
+    func desktopAPIEncodesDynamicPathSegments() throws {
+        let api = DesktopAPI(baseURL: try #require(URL(string: "http://127.0.0.1:8787")), token: "token")
+        let url = try api.makeURL(pathSegments: ["api", "app", "companies", "company/a?b#c", "dashboard"])
+
+        #expect(url.absoluteString == "http://127.0.0.1:8787/api/app/companies/company%2Fa%3Fb%23c/dashboard")
+    }
+
+    @Test
     func desktopSettingsDecodesMissingAgentModelFieldsAsEmpty() throws {
         let encoded = try JSONEncoder().encode(DashboardPayload.empty.settings)
         var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])

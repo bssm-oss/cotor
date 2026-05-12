@@ -91,6 +91,26 @@ class A2aApiTest : FunSpec({
         }
     }
 
+    test("auth missing returns unauthorized when server token is not configured") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = null,
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/a2a/v1/sessions") {
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(A2aHelloRequest(agentId = "agent-1", capabilities = listOf("task.assign"), tenant = A2aTenant("company-1"))))
+            }
+
+            response.status shouldBe HttpStatusCode.Unauthorized
+            response.bodyAsText() shouldContain "App server token is not configured"
+        }
+    }
+
     test("duplicate dedupe key returns already_processed") {
         testApplication {
             application {

@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 
 // MARK: - File Overview
@@ -11,9 +12,75 @@ import Foundation
 /// Keeping transport concerns here lets the view model stay focused on user intent
 /// and state transitions instead of URLSession boilerplate.
 struct DesktopAPI {
-    static let embeddedAppToken = "cotor-desktop-local-token"
-    static var appToken: String {
-        ProcessInfo.processInfo.environment["COTOR_APP_TOKEN"] ?? embeddedAppToken
+    static var appToken: String? {
+        configuredAppToken() ?? readRuntimeAppToken() ?? processGeneratedAppToken
+    }
+
+    static func ensureAppToken() -> String {
+        appToken ?? processGeneratedAppToken
+    }
+
+    private static let processGeneratedAppToken: String = {
+        let token = generateAppToken()
+        _ = writeRuntimeAppToken(token)
+        return token
+    }()
+
+    internal static func configuredAppToken(processEnvironment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+        nonEmpty(processEnvironment["COTOR_APP_TOKEN"])
+    }
+
+    internal static func readRuntimeAppToken(appHome: URL = defaultDesktopAppHome()) -> String? {
+        let tokenURL = runtimeAppTokenURL(appHome: appHome)
+        guard let token = try? String(contentsOf: tokenURL, encoding: .utf8) else {
+            return nil
+        }
+        return nonEmpty(token)
+    }
+
+    @discardableResult
+    internal static func writeRuntimeAppToken(_ token: String, appHome: URL = defaultDesktopAppHome()) -> URL? {
+        guard let token = nonEmpty(token) else {
+            return nil
+        }
+        let tokenURL = runtimeAppTokenURL(appHome: appHome)
+        do {
+            try FileManager.default.createDirectory(
+                at: tokenURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            try token.write(to: tokenURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
+            return tokenURL
+        } catch {
+            AppLogger.warning("Failed to persist app-server token: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    internal static func runtimeAppTokenURL(appHome: URL = defaultDesktopAppHome()) -> URL {
+        appHome
+            .appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("backend", isDirectory: true)
+            .appendingPathComponent("app-server.token")
+    }
+
+    internal static func defaultDesktopAppHome() -> URL {
+        let userHome = FileManager.default.homeDirectoryForCurrentUser
+        return userHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("CotorDesktop", isDirectory: true)
+    }
+
+    private static func generateAppToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        if status == errSecSuccess {
+            return Data(bytes).base64URLEncodedString()
+        }
+        return "\(UUID().uuidString)-\(UUID().uuidString)"
     }
     static func decodeCompanyEventLine(_ line: String) -> CompanyEventEnvelopePayload? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -37,7 +104,12 @@ struct DesktopAPI {
             preconditionFailure("Default app server URL must be valid")
         }
         self.baseURL = URL(string: rawURL) ?? fallbackURL
-        self.token = Self.appToken
+        self.token = Self.ensureAppToken()
+    }
+
+    internal init(baseURL: URL, token: String?) {
+        self.baseURL = baseURL
+        self.token = token
     }
 
     /// Fetch the full dashboard payload used to bootstrap most of the app state.
@@ -47,23 +119,23 @@ struct DesktopAPI {
 
     /// Fetch the focused company snapshot used for live company-mode updates.
     func companyDashboard(companyId: String) async throws -> CompanyDashboardPayload {
-        try await get(path: "api/app/companies/\(companyId)/dashboard")
+        try await get(pathSegments: ["api", "app", "companies", companyId, "dashboard"])
     }
 
     func agentPerformance(companyId: String) async throws -> [AgentPerformanceSnapshotRecord] {
-        try await get(path: "api/app/companies/\(companyId)/agents/performance")
+        try await get(pathSegments: ["api", "app", "companies", companyId, "agents", "performance"])
     }
 
     func companyReports(companyId: String) async throws -> [CompanyDailyReportSummaryRecord] {
-        try await get(path: "api/app/companies/\(companyId)/reports")
+        try await get(pathSegments: ["api", "app", "companies", companyId, "reports"])
     }
 
     func companyReport(companyId: String, date: String) async throws -> CompanyDailyReportRecord {
-        try await get(path: "api/app/companies/\(companyId)/reports/\(date)")
+        try await get(pathSegments: ["api", "app", "companies", companyId, "reports", date])
     }
 
     func generateCompanyReport(companyId: String) async throws -> CompanyDailyReportRecord {
-        try await post(path: "api/app/companies/\(companyId)/reports/generate", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "reports", "generate"], body: EmptyPayload())
     }
 
     func companyMemorySnapshot(companyId: String, issueId: String?, agentProfileId: String?) async throws -> CompanyMemorySnapshotPayload {
@@ -74,24 +146,24 @@ struct DesktopAPI {
         if let agentProfileId, !agentProfileId.isEmpty {
             query.append(URLQueryItem(name: "agentProfileId", value: agentProfileId))
         }
-        return try await get(path: "api/app/companies/\(companyId)/memory-snapshot", query: query)
+        return try await get(pathSegments: ["api", "app", "companies", companyId, "memory-snapshot"], query: query)
     }
 
     func companyProblemSignals(companyId: String) async throws -> [CompanyProblemSignalRecord] {
-        try await get(path: "api/app/companies/\(companyId)/problem-signals")
+        try await get(pathSegments: ["api", "app", "companies", companyId, "problem-signals"])
     }
 
     func runCompanyDiscoveryScan(companyId: String) async throws -> [CompanyProblemSignalRecord] {
-        try await post(path: "api/app/companies/\(companyId)/autonomy/discovery-scan", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "autonomy", "discovery-scan"], body: EmptyPayload())
     }
 
     func companyGitHubStatus(companyId: String) async throws -> GitHubPublishStatusPayload {
-        try await get(path: "api/app/companies/\(companyId)/github/status")
+        try await get(pathSegments: ["api", "app", "companies", companyId, "github", "status"])
     }
 
     func configureCompanyGitHubOrigin(companyId: String, remoteURL: String) async throws -> GitHubPublishStatusPayload {
         try await post(
-            path: "api/app/companies/\(companyId)/github/origin",
+            pathSegments: ["api", "app", "companies", companyId, "github", "origin"],
             body: ConfigureGitHubOriginPayload(remoteUrl: remoteURL)
         )
     }
@@ -114,7 +186,7 @@ struct DesktopAPI {
 
     /// Return the selectable base branches for the currently focused repository.
     func repositoryBranches(repositoryId: String) async throws -> [String] {
-        try await get(path: "api/app/repositories/\(repositoryId)/branches")
+        try await get(pathSegments: ["api", "app", "repositories", repositoryId, "branches"])
     }
 
     /// Expose the built-in agent roster advertised by the backend.
@@ -134,16 +206,16 @@ struct DesktopAPI {
 
     /// Fetch all persisted runs belonging to one company issue.
     func issueRuns(issueId: String) async throws -> [RunRecord] {
-        try await get(path: "api/app/issues/\(issueId)/runs")
+        try await get(pathSegments: ["api", "app", "issues", issueId, "runs"])
     }
 
     func issueExecutionDetails(issueId: String) async throws -> [IssueAgentExecutionDetailRecord] {
-        try await get(path: "api/app/issues/\(issueId)/execution-details")
+        try await get(pathSegments: ["api", "app", "issues", issueId, "execution-details"])
     }
 
     /// Fetch the git diff summary for one task/agent pair.
     func changes(taskId: String, agentName: String) async throws -> ChangeSummaryPayload {
-        try await get(path: "api/app/tasks/\(taskId)/changes/\(agentName)")
+        try await get(pathSegments: ["api", "app", "tasks", taskId, "changes", agentName])
     }
 
     /// Fetch the git diff summary for one concrete run.
@@ -154,7 +226,7 @@ struct DesktopAPI {
     /// Fetch the nested file tree rooted at one agent worktree.
     func files(taskId: String, agentName: String, path: String?) async throws -> [FileTreeNodePayload] {
         let query = path.flatMap { $0.isEmpty ? nil : URLQueryItem(name: "path", value: $0) }.map { [$0] } ?? []
-        return try await get(path: "api/app/tasks/\(taskId)/files/\(agentName)", query: query)
+        return try await get(pathSegments: ["api", "app", "tasks", taskId, "files", agentName], query: query)
     }
 
     /// Fetch the nested file tree rooted at one concrete run worktree.
@@ -165,7 +237,7 @@ struct DesktopAPI {
 
     /// Fetch ports exposed by the process attached to one agent run.
     func ports(taskId: String, agentName: String) async throws -> [PortEntryPayload] {
-        try await get(path: "api/app/tasks/\(taskId)/ports/\(agentName)")
+        try await get(pathSegments: ["api", "app", "tasks", taskId, "ports", agentName])
     }
 
     /// Fetch ports exposed by one concrete run process.
@@ -193,7 +265,7 @@ struct DesktopAPI {
 
     func updateWorkspaceBaseBranch(workspaceId: String, baseBranch: String) async throws -> WorkspaceRecord {
         try await patch(
-            path: "api/app/workspaces/\(workspaceId)/base-branch",
+            pathSegments: ["api", "app", "workspaces", workspaceId, "base-branch"],
             body: UpdateWorkspaceBaseBranchPayload(baseBranch: baseBranch)
         )
     }
@@ -208,7 +280,7 @@ struct DesktopAPI {
 
     func createGoal(companyId: String, title: String, description: String, successMetrics: [String] = [], autonomyEnabled: Bool = true) async throws -> GoalRecord {
         try await post(
-            path: "api/app/companies/\(companyId)/goals",
+            pathSegments: ["api", "app", "companies", companyId, "goals"],
             body: CreateGoalPayload(
                 title: title,
                 description: description,
@@ -220,7 +292,7 @@ struct DesktopAPI {
 
     func createChatIntake(companyId: String, message: String, startRuntime: Bool = false) async throws -> ChatIntakeResponsePayload {
         try await post(
-            path: "api/app/companies/\(companyId)/chat-intake",
+            pathSegments: ["api", "app", "companies", companyId, "chat-intake"],
             body: ChatIntakeRequestPayload(message: message, startRuntime: startRuntime)
         )
     }
@@ -233,7 +305,7 @@ struct DesktopAPI {
         confirmStaffing: Bool = false
     ) async throws -> OperatorCommandResponsePayload {
         try await post(
-            path: "api/app/companies/\(companyId)/operator/commands",
+            pathSegments: ["api", "app", "companies", companyId, "operator", "commands"],
             body: OperatorCommandRequestPayload(
                 message: message,
                 automationMode: automationMode,
@@ -251,7 +323,7 @@ struct DesktopAPI {
         confirmStaffing: Bool = false
     ) async throws -> OperatorChatResponsePayload {
         try await post(
-            path: "api/app/companies/\(companyId)/operator/chat",
+            pathSegments: ["api", "app", "companies", companyId, "operator", "chat"],
             body: OperatorCommandRequestPayload(
                 message: message,
                 automationMode: automationMode,
@@ -273,7 +345,7 @@ struct DesktopAPI {
         parameters: [String: String] = [:]
     ) async throws -> SkillRunResultRecord {
         try await post(
-            path: "api/app/skills/\(name)/run",
+            pathSegments: ["api", "app", "skills", name, "run"],
             body: SkillRunRequestPayload(
                 companyId: companyId,
                 agentId: agentId,
@@ -289,38 +361,36 @@ struct DesktopAPI {
         settings: [String: AgentCapabilitySettingRecord]
     ) async throws -> AgentCapabilityProfileRecord {
         try await patch(
-            path: "api/app/companies/\(companyId)/agents/\(agentId)/capabilities",
+            pathSegments: ["api", "app", "companies", companyId, "agents", agentId, "capabilities"],
             body: UpdateAgentCapabilitiesPayload(settings: settings)
         )
     }
 
     func marketingPolicies(companyId: String? = nil, agentId: String? = nil) async throws -> [MarketingDelegationPolicyRecord] {
-        var queryItems: [String] = []
+        var queryItems: [URLQueryItem] = []
         if let companyId, !companyId.isEmpty {
-            queryItems.append("companyId=\(companyId)")
+            queryItems.append(URLQueryItem(name: "companyId", value: companyId))
         }
         if let agentId, !agentId.isEmpty {
-            queryItems.append("agentId=\(agentId)")
+            queryItems.append(URLQueryItem(name: "agentId", value: agentId))
         }
-        let suffix = queryItems.isEmpty ? "" : "?\(queryItems.joined(separator: "&"))"
-        return try await get(path: "api/app/marketing/policies\(suffix)")
+        return try await get(path: "api/app/marketing/policies", query: queryItems)
     }
 
     func marketingRuns(companyId: String? = nil, agentId: String? = nil) async throws -> [MarketingRunRecord] {
-        var queryItems: [String] = []
+        var queryItems: [URLQueryItem] = []
         if let companyId, !companyId.isEmpty {
-            queryItems.append("companyId=\(companyId)")
+            queryItems.append(URLQueryItem(name: "companyId", value: companyId))
         }
         if let agentId, !agentId.isEmpty {
-            queryItems.append("agentId=\(agentId)")
+            queryItems.append(URLQueryItem(name: "agentId", value: agentId))
         }
-        let suffix = queryItems.isEmpty ? "" : "?\(queryItems.joined(separator: "&"))"
-        return try await get(path: "api/app/marketing/runs\(suffix)")
+        return try await get(path: "api/app/marketing/runs", query: queryItems)
     }
 
     func upsertMarketingPolicy(_ payload: UpsertMarketingDelegationPolicyPayload) async throws -> MarketingDelegationPolicyRecord {
         if let id = payload.id, !id.isEmpty {
-            return try await patch(path: "api/app/marketing/policies/\(id)", body: payload)
+            return try await patch(pathSegments: ["api", "app", "marketing", "policies", id], body: payload)
         }
         return try await post(path: "api/app/marketing/policies", body: payload)
     }
@@ -334,7 +404,7 @@ struct DesktopAPI {
         autonomyEnabled: Bool = true
     ) async throws -> GoalRecord {
         try await patch(
-            path: "api/app/companies/\(companyId)/goals/\(goalId)",
+            pathSegments: ["api", "app", "companies", companyId, "goals", goalId],
             body: UpdateGoalPayload(
                 title: title,
                 description: description,
@@ -345,7 +415,7 @@ struct DesktopAPI {
     }
 
     func deleteGoal(companyId: String, goalId: String) async throws -> GoalRecord {
-        try await delete(path: "api/app/companies/\(companyId)/goals/\(goalId)")
+        try await delete(pathSegments: ["api", "app", "companies", companyId, "goals", goalId])
     }
 
     func createCompany(
@@ -378,7 +448,7 @@ struct DesktopAPI {
         monthlyBudgetCents: Int? = nil
     ) async throws -> CompanyRecord {
         try await patch(
-            path: "api/app/companies/\(companyId)",
+            pathSegments: ["api", "app", "companies", companyId],
             body: UpdateCompanyPayload(
                 name: name,
                 defaultBaseBranch: defaultBaseBranch,
@@ -470,7 +540,7 @@ struct DesktopAPI {
         useGlobalDefault: Bool
     ) async throws -> CompanyRecord {
         try await patch(
-            path: "api/app/companies/\(companyId)/backend",
+            pathSegments: ["api", "app", "companies", companyId, "backend"],
             body: UpdateCompanyBackendPayload(
                 backendKind: backendKind,
                 launchMode: launchMode,
@@ -489,19 +559,19 @@ struct DesktopAPI {
     }
 
     func companyBackendStatus(companyId: String) async throws -> ExecutionBackendStatusPayload {
-        try await get(path: "api/app/companies/\(companyId)/backend")
+        try await get(pathSegments: ["api", "app", "companies", companyId, "backend"])
     }
 
     func startCompanyBackend(companyId: String) async throws -> ExecutionBackendStatusPayload {
-        try await post(path: "api/app/companies/\(companyId)/backend/start", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "backend", "start"], body: EmptyPayload())
     }
 
     func stopCompanyBackend(companyId: String) async throws -> ExecutionBackendStatusPayload {
-        try await post(path: "api/app/companies/\(companyId)/backend/stop", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "backend", "stop"], body: EmptyPayload())
     }
 
     func restartCompanyBackend(companyId: String) async throws -> ExecutionBackendStatusPayload {
-        try await post(path: "api/app/companies/\(companyId)/backend/restart", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "backend", "restart"], body: EmptyPayload())
     }
 
     func updateCompanyLinear(
@@ -514,7 +584,7 @@ struct DesktopAPI {
         useGlobalDefault: Bool
     ) async throws -> CompanyRecord {
         try await patch(
-            path: "api/app/companies/\(companyId)/linear",
+            pathSegments: ["api", "app", "companies", companyId, "linear"],
             body: UpdateCompanyLinearPayload(
                 enabled: enabled,
                 endpoint: endpoint,
@@ -528,11 +598,11 @@ struct DesktopAPI {
     }
 
     func resyncCompanyLinear(companyId: String) async throws -> LinearSyncResponsePayload {
-        try await post(path: "api/app/companies/\(companyId)/linear/resync", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "linear", "resync"], body: EmptyPayload())
     }
 
     func deleteCompany(companyId: String) async throws -> CompanyRecord {
-        try await delete(path: "api/app/companies/\(companyId)")
+        try await delete(pathSegments: ["api", "app", "companies", companyId])
     }
 
     func createIssue(
@@ -544,7 +614,7 @@ struct DesktopAPI {
         kind: String = "manual"
     ) async throws -> IssueRecord {
         try await post(
-            path: "api/app/companies/\(companyId)/issues",
+            pathSegments: ["api", "app", "companies", companyId, "issues"],
             body: CreateIssuePayload(
                 goalId: goalId,
                 title: title,
@@ -556,11 +626,11 @@ struct DesktopAPI {
     }
 
     func decomposeGoal(goalId: String) async throws -> [IssueRecord] {
-        try await post(path: "api/app/goals/\(goalId)/decompose", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "goals", goalId, "decompose"], body: EmptyPayload())
     }
 
     func deleteIssue(companyId: String, issueId: String) async throws -> IssueRecord {
-        try await delete(path: "api/app/companies/\(companyId)/issues/\(issueId)")
+        try await delete(pathSegments: ["api", "app", "companies", companyId, "issues", issueId])
     }
 
     func createCompanyAgent(
@@ -577,7 +647,7 @@ struct DesktopAPI {
         enabled: Bool = true
     ) async throws -> CompanyAgentDefinitionRecord {
         try await post(
-            path: "api/app/companies/\(companyId)/agents",
+            pathSegments: ["api", "app", "companies", companyId, "agents"],
             body: CreateCompanyAgentPayload(
                 title: title,
                 agentCli: agentCli,
@@ -608,7 +678,7 @@ struct DesktopAPI {
         enabled: Bool
     ) async throws -> CompanyAgentDefinitionRecord {
         try await patch(
-            path: "api/app/companies/\(companyId)/agents/\(agentId)",
+            pathSegments: ["api", "app", "companies", companyId, "agents", agentId],
             body: UpdateCompanyAgentPayload(
                 title: title,
                 agentCli: agentCli,
@@ -634,7 +704,7 @@ struct DesktopAPI {
         enabled: Bool?
     ) async throws -> [CompanyAgentDefinitionRecord] {
         try await patch(
-            path: "api/app/companies/\(companyId)/agents/batch",
+            pathSegments: ["api", "app", "companies", companyId, "agents", "batch"],
             body: BatchUpdateCompanyAgentsPayload(
                 agentIds: agentIds,
                 agentCli: agentCli,
@@ -646,42 +716,42 @@ struct DesktopAPI {
     }
 
     func startCompanyRuntime(companyId: String) async throws -> CompanyRuntimeSnapshotRecord {
-        try await post(path: "api/app/companies/\(companyId)/runtime/start", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "runtime", "start"], body: EmptyPayload())
     }
 
     func stopCompanyRuntime(companyId: String) async throws -> CompanyRuntimeSnapshotRecord {
-        try await post(path: "api/app/companies/\(companyId)/runtime/stop", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "companies", companyId, "runtime", "stop"], body: EmptyPayload())
     }
 
     func runIssue(issueId: String) async throws -> IssueRecord {
-        try await post(path: "api/app/issues/\(issueId)/run", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "issues", issueId, "run"], body: EmptyPayload())
     }
 
     func delegateIssue(issueId: String) async throws -> IssueRecord {
-        try await post(path: "api/app/issues/\(issueId)/delegate", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "issues", issueId, "delegate"], body: EmptyPayload())
     }
 
     func submitQaReviewVerdict(itemId: String, verdict: String, feedback: String?) async throws -> ReviewQueueItemRecord {
         try await post(
-            path: "api/app/review-queue/\(itemId)/qa",
+            pathSegments: ["api", "app", "review-queue", itemId, "qa"],
             body: ReviewQueueVerdictPayload(verdict: verdict, feedback: feedback)
         )
     }
 
     func submitCeoReviewVerdict(itemId: String, verdict: String, feedback: String?) async throws -> ReviewQueueItemRecord {
         try await post(
-            path: "api/app/review-queue/\(itemId)/ceo",
+            pathSegments: ["api", "app", "review-queue", itemId, "ceo"],
             body: ReviewQueueVerdictPayload(verdict: verdict, feedback: feedback)
         )
     }
 
     func mergeReviewQueueItem(itemId: String) async throws -> ReviewQueueItemRecord {
-        try await post(path: "api/app/review-queue/\(itemId)/merge", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "review-queue", itemId, "merge"], body: EmptyPayload())
     }
 
     /// Ask the backend to start executing an already-created task.
     func runTask(taskId: String) async throws -> TaskRecord {
-        try await post(path: "api/app/tasks/\(taskId)/run", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "tasks", taskId, "run"], body: EmptyPayload())
     }
 
     /// Open or reuse the interactive TUI session for one workspace.
@@ -700,32 +770,32 @@ struct DesktopAPI {
 
     /// Fetch the latest rolling transcript for an active TUI session.
     func tuiSession(sessionId: String) async throws -> TuiSessionRecord {
-        try await get(path: "api/app/tui/sessions/\(sessionId)")
+        try await get(pathSegments: ["api", "app", "tui", "sessions", sessionId])
     }
 
     /// Fetch only the terminal bytes appended after the provided cursor.
     func tuiDelta(sessionId: String, offset: Int64) async throws -> TuiSessionDeltaPayload {
         try await get(
-            path: "api/app/tui/sessions/\(sessionId)/delta",
+            pathSegments: ["api", "app", "tui", "sessions", sessionId, "delta"],
             query: [URLQueryItem(name: "offset", value: String(offset))]
         )
     }
 
     /// Forward raw terminal input into the running TUI process.
     func sendTuiInput(sessionId: String, input: String) async throws -> TuiSessionRecord {
-        try await post(path: "api/app/tui/sessions/\(sessionId)/input", body: TuiInputPayload(input: input))
+        try await post(pathSegments: ["api", "app", "tui", "sessions", sessionId, "input"], body: TuiInputPayload(input: input))
     }
 
     /// Gracefully stop the TUI session when the user wants a fresh start.
     func terminateTuiSession(sessionId: String) async throws -> TuiSessionRecord {
-        try await post(path: "api/app/tui/sessions/\(sessionId)/terminate", body: EmptyPayload())
+        try await post(pathSegments: ["api", "app", "tui", "sessions", sessionId, "terminate"], body: EmptyPayload())
     }
 
     func companyEvents(companyId: String) -> AsyncThrowingStream<CompanyEventEnvelopePayload, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var request = URLRequest(url: try makeURL(path: "api/app/companies/\(companyId)/events"))
+                    var request = URLRequest(url: try makeURL(pathSegments: ["api", "app", "companies", companyId, "events"]))
                     request.httpMethod = "GET"
                     addHeaders(to: &request)
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -755,8 +825,23 @@ struct DesktopAPI {
         return try await decode(request)
     }
 
+    private func get<T: Decodable>(pathSegments: [String], query: [URLQueryItem] = []) async throws -> T {
+        var request = URLRequest(url: try makeURL(pathSegments: pathSegments, query: query))
+        request.httpMethod = "GET"
+        addHeaders(to: &request)
+        return try await decode(request)
+    }
+
     private func post<T: Decodable, Body: Encodable>(path: String, body: Body) async throws -> T {
         var request = URLRequest(url: try makeURL(path: path))
+        request.httpMethod = "POST"
+        request.httpBody = try JSONEncoder().encode(body)
+        addHeaders(to: &request)
+        return try await decode(request)
+    }
+
+    private func post<T: Decodable, Body: Encodable>(pathSegments: [String], body: Body) async throws -> T {
+        var request = URLRequest(url: try makeURL(pathSegments: pathSegments))
         request.httpMethod = "POST"
         request.httpBody = try JSONEncoder().encode(body)
         addHeaders(to: &request)
@@ -771,6 +856,14 @@ struct DesktopAPI {
         return try await decode(request)
     }
 
+    private func patch<T: Decodable, Body: Encodable>(pathSegments: [String], body: Body) async throws -> T {
+        var request = URLRequest(url: try makeURL(pathSegments: pathSegments))
+        request.httpMethod = "PATCH"
+        request.httpBody = try JSONEncoder().encode(body)
+        addHeaders(to: &request)
+        return try await decode(request)
+    }
+
     private func delete<T: Decodable>(path: String) async throws -> T {
         var request = URLRequest(url: try makeURL(path: path))
         request.httpMethod = "DELETE"
@@ -778,17 +871,42 @@ struct DesktopAPI {
         return try await decode(request)
     }
 
+    private func delete<T: Decodable>(pathSegments: [String]) async throws -> T {
+        var request = URLRequest(url: try makeURL(pathSegments: pathSegments))
+        request.httpMethod = "DELETE"
+        addHeaders(to: &request)
+        return try await decode(request)
+    }
+
     private func makeURL(path: String, query: [URLQueryItem] = []) throws -> URL {
+        try makeURL(pathSegments: path.split(separator: "/").map(String.init), query: query)
+    }
+
+    internal func makeURL(pathSegments: [String], query: [URLQueryItem] = []) throws -> URL {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        // All routes are relative to the localhost app-server root; callers only pass
-        // the resource path fragment so they do not need to know deployment details.
-        components?.path = "/" + path
+        let encodedPath = try pathSegments
+            .map(Self.percentEncodePathSegment)
+            .joined(separator: "/")
+        components?.percentEncodedPath = "/" + encodedPath
         components?.queryItems = query.isEmpty ? nil : query
         guard let url = components?.url else {
             throw URLError(.badURL)
         }
         return url
     }
+
+    private static func percentEncodePathSegment(_ segment: String) throws -> String {
+        guard let encoded = segment.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) else {
+            throw URLError(.badURL)
+        }
+        return encoded
+    }
+
+    private static let pathSegmentAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#%\\")
+        return allowed
+    }()
 
     private func decode<T: Decodable>(_ request: URLRequest) async throws -> T {
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -805,7 +923,6 @@ struct DesktopAPI {
 
     private func addHeaders(to request: inout URLRequest) {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Bearer auth is optional so local development can stay frictionless when desired.
         if let token, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -813,6 +930,22 @@ struct DesktopAPI {
 }
 
 private struct EmptyPayload: Codable {}
+
+private extension Data {
+    func base64URLEncodedString() -> String {
+        base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+private func nonEmpty(_ value: String?) -> String? {
+    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
+    return trimmed
+}
 
 private struct ConfigureGitHubOriginPayload: Codable {
     let remoteUrl: String

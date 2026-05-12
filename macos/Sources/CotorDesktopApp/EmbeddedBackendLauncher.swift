@@ -242,7 +242,7 @@ actor EmbeddedBackendLauncher {
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 1.5
-        request.setValue("Bearer \(DesktopAPI.appToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(DesktopAPI.ensureAppToken())", forHTTPHeaderField: "Authorization")
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
@@ -261,7 +261,7 @@ actor EmbeddedBackendLauncher {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 1.5
-        request.setValue("Bearer \(DesktopAPI.appToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(DesktopAPI.ensureAppToken())", forHTTPHeaderField: "Authorization")
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
@@ -278,7 +278,7 @@ actor EmbeddedBackendLauncher {
             processEnvironment: ProcessInfo.processInfo.environment,
             javaPath: javaPath,
             appHomePath: defaultDesktopAppHome().path,
-            appToken: DesktopAPI.appToken
+            appToken: DesktopAPI.ensureAppToken()
         )
     }
 

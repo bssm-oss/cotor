@@ -9,11 +9,16 @@ package com.cotor.presentation.cli
  */
 
 import com.cotor.app.AppServer
+import com.cotor.app.appServerTokenPath
+import com.cotor.app.defaultDesktopAppHome
+import com.cotor.app.readPersistedAppServerToken
 import com.github.ajalt.clikt.core.CliktCommand
-import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
+import java.nio.file.Path
+import java.security.SecureRandom
+import java.util.Base64
 
 /**
  * CLI entrypoint used by the native macOS shell.
@@ -34,19 +39,32 @@ class AppServerCommand : CliktCommand(
         .default(System.getenv("COTOR_APP_CONTROL_TOKEN").orEmpty())
 
     override fun run() {
-        if (requiresTokenForHost(host) && token.isBlank()) {
-            throw CliktError("--token or COTOR_APP_TOKEN is required when binding app-server to non-loopback host '$host'")
+        val appHome = defaultDesktopAppHome()
+        val storedToken = readPersistedAppServerToken(appHome)
+        val effectiveToken = resolveAppServerToken(token, appHome)
+        if (token.isBlank() && storedToken == null) {
+            val tokenPath = appServerTokenPath(appHome)
+            println("[cotor-app-server] generated bearer token at $tokenPath")
         }
         AppServer().start(
             host = host,
             port = port,
-            token = token.ifBlank { null },
+            token = effectiveToken,
             controlToken = controlToken.ifBlank { null }
         )
     }
 }
 
-internal fun requiresTokenForHost(host: String): Boolean {
-    val normalized = host.trim().lowercase()
-    return normalized !in setOf("127.0.0.1", "localhost", "::1")
+private val appServerTokenRandom = SecureRandom()
+
+internal fun resolveAppServerToken(configuredToken: String, appHome: Path = defaultDesktopAppHome()): String {
+    return configuredToken.trim().takeIf { it.isNotBlank() }
+        ?: readPersistedAppServerToken(appHome)
+        ?: generateAppServerToken()
+}
+
+internal fun generateAppServerToken(randomBytes: (ByteArray) -> Unit = appServerTokenRandom::nextBytes): String {
+    val bytes = ByteArray(32)
+    randomBytes(bytes)
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 }

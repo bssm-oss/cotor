@@ -30,6 +30,7 @@ import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.request.header
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
+import io.ktor.server.request.uri
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.response.respondTextWriter
@@ -64,6 +65,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
@@ -88,6 +90,9 @@ class AppServer : KoinComponent {
         controlToken: String? = null
     ) {
         val lockRecord = desktopAppServerInstanceGuard.acquire(host = host, port = port)
+        token?.takeIf { it.isNotBlank() }?.let {
+            persistAppServerToken(it, lockRecord.appHome)
+        }
         println(
             "[cotor-app-server] acquired desktop app-server instance lock at " +
                 "${lockRecord.lockPath} for app home ${lockRecord.appHome}"
@@ -260,6 +265,36 @@ internal fun readDesktopAppServerInstanceStatus(appHome: Path): DesktopAppServer
     }.getOrNull() ?: return DesktopAppServerInstanceStatus(active = false)
     val active = ProcessHandle.of(metadata.pid).map(ProcessHandle::isAlive).orElse(false)
     return DesktopAppServerInstanceStatus(active = active, metadata = metadata.takeIf { active })
+}
+
+internal fun appServerTokenPath(appHome: Path = defaultDesktopAppHome()): Path {
+    return appHome.resolve("runtime").resolve("backend").resolve("app-server.token")
+}
+
+internal fun readPersistedAppServerToken(appHome: Path = defaultDesktopAppHome()): String? {
+    return runCatching {
+        Files.readString(appServerTokenPath(appHome)).trim().takeIf(String::isNotBlank)
+    }.getOrNull()
+}
+
+internal fun persistAppServerToken(token: String, appHome: Path = defaultDesktopAppHome()): Path {
+    val tokenPath = appServerTokenPath(appHome)
+    val runtimeDir = tokenPath.parent
+    Files.createDirectories(runtimeDir)
+    runCatching {
+        Files.setPosixFilePermissions(runtimeDir, PosixFilePermissions.fromString("rwx------"))
+    }
+    Files.writeString(
+        tokenPath,
+        token,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.TRUNCATE_EXISTING,
+        StandardOpenOption.WRITE
+    )
+    runCatching {
+        Files.setPosixFilePermissions(tokenPath, PosixFilePermissions.fromString("rw-------"))
+    }
+    return tokenPath
 }
 
 private val mcpJson = Json {
@@ -2484,12 +2519,15 @@ private fun truncateForApi(value: String, maxChars: Int): String {
     }
 }
 
-/**
- * Token auth is intentionally minimal because the server only binds to localhost.
- * The token mainly protects against accidental cross-process access on the same machine.
- */
 private suspend fun RoutingContext.requireToken(token: String?): Boolean {
-    val expected = token?.takeIf { it.isNotBlank() } ?: return true
+    if (!requireSafeRequestPath()) {
+        return false
+    }
+    val expected = token?.takeIf { it.isNotBlank() }
+    if (expected == null) {
+        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "App server token is not configured"))
+        return false
+    }
     val actual = call.request.header(HttpHeaders.Authorization)
     if (isBearerTokenMatch(actual, expected)) {
         return true
@@ -2505,6 +2543,18 @@ private suspend fun RoutingContext.requireControlToken(controlToken: String?): B
         return false
     }
     return requireToken(expected)
+}
+
+private suspend fun RoutingContext.requireSafeRequestPath(): Boolean {
+    val encodedPath = call.request.uri.substringBefore('?').lowercase()
+    val decodedSegments = call.request.path().split('/').filter(String::isNotEmpty)
+    val hasEncodedSeparator = encodedPath.contains("%2f") || encodedPath.contains("%5c")
+    val hasTraversalSegment = decodedSegments.any { it == "." || it == ".." || it.contains('\\') }
+    if (!hasEncodedSeparator && !hasTraversalSegment) {
+        return true
+    }
+    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid path segment"))
+    return false
 }
 
 private fun isBearerTokenMatch(header: String?, expected: String): Boolean {

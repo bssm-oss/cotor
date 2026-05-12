@@ -81,6 +81,61 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("app routes reject requests when server token is not configured") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = null,
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val dashboard = client.get("/api/app/dashboard")
+            val shutdown = client.post("/api/app/shutdown")
+
+            dashboard.status shouldBe HttpStatusCode.Unauthorized
+            dashboard.bodyAsText() shouldContain "App server token is not configured"
+            shutdown.status shouldBe HttpStatusCode.Unauthorized
+        }
+    }
+
+    test("app routes reject requests when server token is blank") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/dashboard")
+
+            response.status shouldBe HttpStatusCode.Unauthorized
+            response.bodyAsText() shouldContain "App server token is not configured"
+        }
+    }
+
+    test("app routes reject encoded path separators") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/companies/company%2Fbad/dashboard") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            response.status shouldBe HttpStatusCode.BadRequest
+            response.bodyAsText() shouldContain "Invalid path segment"
+        }
+    }
+
     test("company agent performance route returns scoped snapshots") {
         coEvery { desktopService.agentPerformance("company-performance") } returns listOf(
             AgentPerformanceSnapshot(
