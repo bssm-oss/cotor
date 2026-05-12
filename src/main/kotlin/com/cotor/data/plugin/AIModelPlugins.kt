@@ -13,6 +13,10 @@ import com.cotor.data.process.ProcessManager
 import com.cotor.model.*
 import com.cotor.model.OpenCodeDefaults
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -34,6 +38,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Claude AI Plugin (Anthropic)
@@ -758,7 +764,13 @@ class OpenCodePlugin : AgentPlugin {
         )
         val initialError = extractOpenCodeError(result)
 
-        if (requestedModel != null && initialError?.contains("Model not found", ignoreCase = true) == true) {
+        if (
+            requestedModel != null &&
+            (
+                initialError?.contains("Model not found", ignoreCase = true) == true ||
+                    initialError?.let(::isOpenCodeProviderRateLimit) == true
+                )
+        ) {
             val fallbackModel = discoverFallbackOpenCodeModel(
                 processManager = processManager,
                 context = executionContext,
@@ -775,8 +787,12 @@ class OpenCodePlugin : AgentPlugin {
             }
         }
 
+        val parsedText = parseOpenCodeJsonOutput(result.stdout)
         val finalError = extractOpenCodeError(result)
             ?.let { normalizeLocalOllamaExecutionError(it, requestedModel) }
+        if (parsedText.isNotBlank() && finalError?.let(::isOpenCodePostTextSerializationError) == true) {
+            return PluginExecutionOutput(parsedText, result.processId)
+        }
         if (!result.isSuccess || finalError != null) {
             throw ProcessExecutionException(
                 message = "OpenCode execution failed",
@@ -793,8 +809,15 @@ class OpenCodePlugin : AgentPlugin {
                 stderr = "opencode run exit 0 but stdout and stderr were both empty"
             )
         }
+        if (parsedText.isBlank() && containsStructuredOpenCodeEvents(result.stdout)) {
+            throw ProcessExecutionException(
+                message = "OpenCode execution failed",
+                exitCode = result.exitCode,
+                stdout = result.stdout,
+                stderr = "opencode run completed without assistant text"
+            )
+        }
 
-        val parsedText = parseOpenCodeJsonOutput(result.stdout)
         return PluginExecutionOutput(parsedText, result.processId)
     }
 
@@ -825,9 +848,24 @@ class OpenCodePlugin : AgentPlugin {
                 Files.writeString(path, prompt)
             }
         }
+        val ephemeralConfig = withContext(Dispatchers.IO) {
+            createEphemeralOpenCodeConfig(context)
+        }
+        val fatalRuntimeError = AtomicReference<String?>(null)
+        val childProcessId = AtomicLong(-1L)
         val command = buildList {
             add("opencode")
             add("run")
+            add("--print-logs")
+            add("--log-level")
+            add("ERROR")
+            context.parameters["agent"]
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let {
+                    add("--agent")
+                    add(it)
+                }
             model?.let {
                 add("--model")
                 add(it)
@@ -839,19 +877,172 @@ class OpenCodePlugin : AgentPlugin {
         }
 
         return try {
-            processManager.executeProcess(
-                command = command,
-                input = null,
-                environment = context.environment,
-                timeout = context.timeout,
-                workingDirectory = context.workingDirectory,
-                onStart = context.onProcessStarted
-            )
+            val result = coroutineScope {
+                val killer = launch(Dispatchers.IO) {
+                    while (isActive && fatalRuntimeError.get() == null) {
+                        delay(100)
+                    }
+                    if (fatalRuntimeError.get() != null) {
+                        repeat(20) {
+                            val pid = childProcessId.get()
+                            if (pid > 0) {
+                                ProcessHandle.of(pid).ifPresent { handle ->
+                                    handle.destroyForcibly()
+                                }
+                                return@launch
+                            }
+                            delay(50)
+                        }
+                    }
+                }
+                try {
+                    processManager.executeProcess(
+                        command = command,
+                        input = null,
+                        environment = context.environment,
+                        timeout = context.timeout,
+                        workingDirectory = context.workingDirectory,
+                        onStart = { pid ->
+                            childProcessId.set(pid)
+                            context.onProcessStarted?.invoke(pid)
+                        },
+                        onStdoutChunk = context.onStdoutChunk,
+                        onStderrChunk = { chunk ->
+                            classifyFatalOpenCodeRuntimeLog(chunk)?.let { reason ->
+                                fatalRuntimeError.compareAndSet(null, reason)
+                            }
+                        }
+                    )
+                } finally {
+                    killer.cancel()
+                }
+            }
+            fatalRuntimeError.get()?.let { reason ->
+                return result.copy(
+                    exitCode = if (result.exitCode == 0) 143 else result.exitCode,
+                    stderr = listOf(result.stderr, reason).filter { it.isNotBlank() }.joinToString("\n"),
+                    isSuccess = false
+                )
+            }
+            result
         } finally {
             withContext(Dispatchers.IO) {
                 runCatching { Files.deleteIfExists(promptFile) }
+                restoreEphemeralOpenCodeConfig(ephemeralConfig)
             }
         }
+    }
+
+    private data class EphemeralOpenCodeConfig(
+        val configPath: Path,
+        val backupPath: Path?
+    )
+
+    private fun createEphemeralOpenCodeConfig(context: ExecutionContext): EphemeralOpenCodeConfig? {
+        val configJson = ephemeralOpenCodeConfigJson(context) ?: return null
+        val workdir = context.workingDirectory ?: return null
+        val configPath = workdir.resolve(".opencode").resolve("opencode.json")
+        Files.createDirectories(configPath.parent)
+        val backupPath = if (Files.exists(configPath)) {
+            val backup = Files.createTempFile(configPath.parent, "opencode.", ".json.bak")
+            Files.move(configPath, backup, StandardCopyOption.REPLACE_EXISTING)
+            backup
+        } else {
+            null
+        }
+        Files.writeString(configPath, configJson)
+        return EphemeralOpenCodeConfig(configPath = configPath, backupPath = backupPath)
+    }
+
+    private fun restoreEphemeralOpenCodeConfig(config: EphemeralOpenCodeConfig?) {
+        if (config == null) return
+        if (config.backupPath != null) {
+            runCatching { Files.deleteIfExists(config.configPath) }
+            runCatching {
+                Files.move(config.backupPath, config.configPath, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } else {
+            runCatching { Files.deleteIfExists(config.configPath) }
+            runCatching { Files.deleteIfExists(config.configPath.parent) }
+        }
+    }
+
+    private fun ephemeralOpenCodeConfigJson(context: ExecutionContext): String? {
+        return when (context.parameters["ephemeralOpencodeProfile"]?.trim()) {
+            "planning-only" -> planningOnlyOpenCodeConfigJson(context)
+            null, "" -> null
+            else -> null
+        }
+    }
+
+    private fun planningOnlyOpenCodeConfigJson(context: ExecutionContext): String {
+        val agentName = context.parameters["agent"]
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "cotor-ceo-planner"
+        val model = context.parameters["model"]
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: context.environment["OPENCODE_MODEL"]
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            ?: OpenCodeDefaults.DEFAULT_MODEL
+
+        fun jsonString(value: String): String = value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+
+        return """
+            {
+              "${'$'}schema": "https://opencode.ai/config.json",
+              "tools": {
+                "read": false,
+                "write": false,
+                "edit": false,
+                "bash": false,
+                "grep": false,
+                "glob": false,
+                "list": false,
+                "task": false,
+                "task_*": false
+              },
+              "permission": {
+                "question": "deny",
+                "task": "deny",
+                "edit": "deny",
+                "bash": "deny",
+                "webfetch": "deny",
+                "external_directory": "deny"
+              },
+              "agent": {
+                "${jsonString(agentName)}": {
+                  "model": "${jsonString(model)}",
+                  "mode": "primary",
+                  "tools": {
+                    "read": false,
+                    "write": false,
+                    "edit": false,
+                    "bash": false,
+                    "grep": false,
+                    "glob": false,
+                    "list": false,
+                    "task": false,
+                    "task_*": false
+                  },
+                  "permission": {
+                    "question": "deny",
+                    "task": "deny",
+                    "edit": "deny",
+                    "bash": "deny",
+                    "webfetch": "deny",
+                    "external_directory": "deny"
+                  },
+                  "prompt": "You are Cotor's CEO planning-only agent. Do not inspect files, do not call tools, and do not modify the repository. Return only the requested fenced JSON planning block."
+                }
+              }
+            }
+        """.trimIndent()
     }
 
     private suspend fun discoverFallbackOpenCodeModel(
@@ -862,6 +1053,13 @@ class OpenCodePlugin : AgentPlugin {
         if (OpenCodeDefaults.isLocalOllamaModel(rejectedModel)) return null
         val models = discoverAvailableOpenCodeModels(processManager, context)
         if (models.isEmpty()) return null
+        listOf(
+            "deepseek/deepseek-v4-flash",
+            OpenCodeDefaults.DEEPSEEK_FLASH_MODEL,
+            "deepseek/deepseek-chat"
+        ).firstOrNull { candidate ->
+            candidate != rejectedModel && candidate in models
+        }?.let { return it }
         return models.firstOrNull { it != rejectedModel && it.endsWith("-free") }
             ?: models.firstOrNull { it != rejectedModel }
     }
@@ -946,6 +1144,7 @@ class OpenCodePlugin : AgentPlugin {
             .find(combined)
             ?.value
             ?.let { return it }
+        classifyFatalOpenCodeRuntimeLog(combined)?.let { return it }
         val json = Json { ignoreUnknownKeys = true }
         fun extract(element: JsonElement): String? = when (element) {
             is JsonArray -> element.firstNotNullOfOrNull(::extract)
@@ -983,6 +1182,46 @@ class OpenCodePlugin : AgentPlugin {
         }
         return error
     }
+
+    private fun isOpenCodePostTextSerializationError(error: String): Boolean =
+        error.contains("[DecimalError]", ignoreCase = true) &&
+            error.contains("Invalid argument", ignoreCase = true)
+
+    private fun isOpenCodeProviderRateLimit(error: String): Boolean =
+        error.contains("FreeUsageLimitError", ignoreCase = true) ||
+            error.contains("rate limit exceeded", ignoreCase = true) ||
+            error.contains("retry-after", ignoreCase = true)
+
+    private fun classifyFatalOpenCodeRuntimeLog(chunk: String): String? {
+        if (isOpenCodeInteractivePermissionRequest(chunk)) {
+            return "OPENCODE_PERMISSION_BLOCKED: OpenCode requested interactive permission during noninteractive execution."
+        }
+        if (!isOpenCodeProviderRateLimit(chunk)) return null
+        val retryAfter = Regex("""retry-after["'\s:=]+(\d+)""", RegexOption.IGNORE_CASE)
+            .find(chunk)
+            ?.groupValues
+            ?.getOrNull(1)
+        return buildString {
+            append("OPENCODE_RATE_LIMIT: OpenCode provider returned a rate limit during execution")
+            retryAfter?.let { append(" (retry-after=${it}s)") }
+            append(".")
+        }
+    }
+
+    private fun isOpenCodeInteractivePermissionRequest(chunk: String): Boolean {
+        val lower = chunk.lowercase()
+        return lower.contains("permission.asked") ||
+            (lower.contains("external_directory") && lower.contains("permission") && lower.contains("ask")) ||
+            (lower.contains("service=permission") && lower.contains("ask"))
+    }
+
+    private fun containsStructuredOpenCodeEvents(rawOutput: String): Boolean =
+        rawOutput.lineSequence().any { line ->
+            val trimmed = line.trim()
+            trimmed.startsWith("{\"type\":\"") ||
+                trimmed.contains("\"sessionID\"") ||
+                trimmed.contains("\"messageID\"")
+        }
 
     private fun parseOpenCodeJsonOutput(rawOutput: String): String {
         if (rawOutput.isBlank()) return rawOutput

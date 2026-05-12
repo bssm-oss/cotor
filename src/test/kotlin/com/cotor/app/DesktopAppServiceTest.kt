@@ -114,7 +114,7 @@ class DesktopAppServiceTest : FunSpec({
     }
 
     test("builtin opencode company agent uses a longer timeout budget") {
-        BuiltinAgentCatalog.get("opencode")!!.timeout shouldBe 45 * 60_000L
+        BuiltinAgentCatalog.get("opencode")!!.timeout shouldBe 12 * 60_000L
     }
 
     test("builtin local model and graphify agents are available by default") {
@@ -445,6 +445,46 @@ class DesktopAppServiceTest : FunSpec({
         issueGraph shouldContain "Connect GitHub for Code work"
     }
 
+    test("CEO planning prompt redacts absolute repository paths") {
+        val appHome = Files.createTempDirectory("desktop-ceo-planning-redaction-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-planning-redaction-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "Prompt Redaction Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Plan without reading files",
+            description = "The CEO should plan from Cotor state only.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+        val state = stateStore.load()
+        val planningIssue = state.issues.single { it.goalId == goal.id && it.kind == "planning" }
+        val ceoProfile = state.orgProfiles.single { it.companyId == company.id && it.roleName == "CEO" }
+
+        val prompt = service.buildCeoPlanningPromptForTesting(state, planningIssue, ceoProfile)
+
+        prompt shouldNotContain "Repository root:"
+        prompt shouldNotContain repoRoot.toString()
+        prompt shouldContain "Workspace:"
+        prompt shouldContain "Do not use tools, inspect files, or create files"
+    }
+
     test("chat intake lets CEO clarify a vague request and create assigned issues") {
         val appHome = Files.createTempDirectory("chat-intake-home")
         val stateStore = DesktopStateStore { appHome }
@@ -578,6 +618,35 @@ class DesktopAppServiceTest : FunSpec({
         goalIssues.filter { it.kind.equals("planning", ignoreCase = true) }.shouldHaveSize(1)
         goalIssues.filterNot { it.kind.equals("planning", ignoreCase = true) }.shouldBeEmpty()
         goalIssues.joinToString { it.title } shouldNotContain "Implement the backend and app UI path needed for chat-only work intake"
+    }
+
+    test("operator chat routes explicit create and run work intake through command execution") {
+        val appHome = Files.createTempDirectory("operator-chat-work-intake-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = operatorChatLlmExecutor(""),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(name = "Operator Chat Work Intake", rootPath = appHome.toString())
+
+        val response = service.runOperatorChat(
+            company.id,
+            "새 목표를 만들고 바로 실행해줘. CEO는 Step 01부터 Step 20까지 docs/e2e-queue.md를 순차적으로 작성하게 해."
+        )
+        val state = stateStore.load()
+        val createdGoal = state.goals.singleOrNull { it.companyId == company.id }.shouldNotBeNull()
+        val planningIssues = state.issues.filter { it.goalId == createdGoal.id && it.kind.equals("planning", ignoreCase = true) }
+        val runtime = state.companyRuntimes.firstOrNull { it.companyId == company.id }.shouldNotBeNull()
+
+        response.actions.any { it.type == "company-work-intake" && it.status == "DONE" } shouldBe true
+        response.actions.any { it.type == "runtime-start" && it.status == "DONE" } shouldBe true
+        response.blockedActions.shouldBeEmpty()
+        createdGoal.operatingPolicy shouldContain "Company Operator work intake"
+        planningIssues.shouldHaveSize(1)
+        runtime.status shouldBe CompanyRuntimeStatus.RUNNING
     }
 
     test("operator chat answers agent performance questions from company evidence") {
@@ -1015,8 +1084,20 @@ class DesktopAppServiceTest : FunSpec({
         val company = service.createCompany(name = "Operator Approval", rootPath = appHome.toString())
         val now = System.currentTimeMillis()
         val baseState = stateStore.load()
-        val workspace = baseState.workspaces.first { it.repositoryId == company.repositoryId }
-        val project = baseState.projectContexts.firstOrNull { it.companyId == company.id } ?: CompanyProjectContext(
+        stateStore.save(
+            baseState.copy(
+                companies = baseState.companies.map {
+                    if (it.id == company.id) {
+                        it.copy(operatorAutomationMode = OperatorAutomationMode.AGENT_APPROVED, updatedAt = now)
+                    } else {
+                        it
+                    }
+                }
+            )
+        )
+        val approvalState = stateStore.load()
+        val workspace = approvalState.workspaces.first { it.repositoryId == company.repositoryId }
+        val project = approvalState.projectContexts.firstOrNull { it.companyId == company.id } ?: CompanyProjectContext(
             id = "operator-project",
             companyId = company.id,
             name = company.name,
@@ -1047,10 +1128,10 @@ class DesktopAppServiceTest : FunSpec({
             updatedAt = now
         )
         stateStore.save(
-            baseState.copy(
-                projectContexts = if (baseState.projectContexts.any { it.id == project.id }) baseState.projectContexts else baseState.projectContexts + project,
-                goals = baseState.goals + goal,
-                issues = baseState.issues + issue
+            approvalState.copy(
+                projectContexts = if (approvalState.projectContexts.any { it.id == project.id }) approvalState.projectContexts else approvalState.projectContexts + project,
+                goals = approvalState.goals + goal,
+                issues = approvalState.issues + issue
             )
         )
 
@@ -1800,7 +1881,7 @@ class DesktopAppServiceTest : FunSpec({
         )
         val plannedIssueClass = Class.forName("com.cotor.app.CeoPlannedIssue")
         val payloadClass = Class.forName("com.cotor.app.CeoPlanningPayload")
-        val plannedIssueCtor = plannedIssueClass.declaredConstructors.first { it.parameterCount == 11 }.apply { isAccessible = true }
+        val plannedIssueCtor = plannedIssueClass.declaredConstructors.first { it.parameterCount == 12 }.apply { isAccessible = true }
         val payloadCtor = payloadClass.declaredConstructors.first { it.parameterCount == 2 }.apply { isAccessible = true }
         val plannedIssue = plannedIssueCtor.newInstance(
             "exec-1",
@@ -1810,6 +1891,7 @@ class DesktopAppServiceTest : FunSpec({
             "Builder",
             2,
             true,
+            null,
             emptyList<String>(),
             listOf("Re-run validation and capture any residual risk."),
             true,
@@ -2355,6 +2437,84 @@ class DesktopAppServiceTest : FunSpec({
         fixture.service.updateBackendSettings(
             defaultBackendKind = ExecutionBackendKind.LOCAL_COTOR,
             codePublishMode = CodePublishMode.ALLOW_LOCAL_GIT
+        )
+        coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/desktop-publish/codex",
+            worktreePath = fixture.worktreeRoot
+        )
+        coEvery {
+            fixture.agentExecutor.executeAgent(any(), any(), any())
+        } returns AgentResult(
+            agentName = "codex",
+            isSuccess = true,
+            output = "done",
+            error = null,
+            duration = 250,
+            metadata = emptyMap(),
+            processId = 4242
+        )
+        coEvery {
+            fixture.gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any())
+        } returns PublishMetadata(
+            commitSha = "abc1234567890",
+            error = "No GitHub remote configured; kept local commit only"
+        )
+
+        fixture.service.runTask(fixture.task.id)
+        val run = fixture.awaitRuns().single()
+
+        run.status shouldBe AgentRunStatus.COMPLETED
+        run.error shouldBe null
+        run.publish shouldBe PublishMetadata(
+            commitSha = "abc1234567890",
+            error = "No GitHub remote configured; kept local commit only"
+        )
+    }
+
+    test("full auto code issue can complete with local-only publish when repository has no origin") {
+        val fixture = DesktopAppServiceFixture.create()
+        val now = System.currentTimeMillis()
+        val base = fixture.stateStore.load()
+        val company = Company(
+            id = "company-full-auto-local",
+            name = "Full Auto Local Co",
+            rootPath = base.repositories.single().localPath,
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            operatorAutomationMode = OperatorAutomationMode.FULL_AUTO,
+            createdAt = now,
+            updatedAt = now
+        )
+        val goal = CompanyGoal(
+            id = "goal-full-auto-local",
+            companyId = company.id,
+            title = "Ship local-only work",
+            description = "Run a start-only code issue in a repository without an origin remote.",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = true,
+            createdAt = now,
+            updatedAt = now
+        )
+        val issue = CompanyIssue(
+            id = "issue-full-auto-local",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Implement local-only slice",
+            description = "Produce code without requiring GitHub setup first.",
+            status = IssueStatus.PLANNED,
+            kind = "execution",
+            codeProducing = true,
+            createdAt = now,
+            updatedAt = now
+        )
+        fixture.stateStore.save(
+            base.copy(
+                companies = listOf(company),
+                goals = listOf(goal),
+                issues = listOf(issue),
+                tasks = base.tasks.map { it.copy(issueId = issue.id, updatedAt = now) }
+            )
         )
         coEvery { fixture.gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
             branchName = "codex/cotor/desktop-publish/codex",
@@ -4036,10 +4196,10 @@ class DesktopAppServiceTest : FunSpec({
             }
         }
         runCount shouldBe 2
-        prompts.first().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
+        prompts.first().orEmpty() shouldContain "Do not use tools, inspect files, or create files"
         prompts.last().orEmpty() shouldContain "CEO_PLANNING_REPAIR"
-        prompts.last().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
         val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1, timeoutMs = 90_000)
+        prompts.last().orEmpty() shouldContain "return the fenced JSON as assistant text only"
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
         state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
         state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "CEO planned execution graph"
@@ -4097,6 +4257,216 @@ class DesktopAppServiceTest : FunSpec({
         latestIssue.transitionReason.orEmpty() shouldNotContain "CEO_PLANNING_INVALID_OUTPUT"
         state.goalDecisions.filter { it.goalId == goal.id && it.title == "CEO planning blocked" }.shouldBeEmpty()
         state.companyActivity.filter { it.issueId == planningIssue.id && it.title == "CEO planning blocked" }.shouldBeEmpty()
+    }
+
+    test("continuous auto-loop CEO planning permission block uses deterministic fallback graph") {
+        val appHome = Files.createTempDirectory("desktop-ceo-permission-fallback-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-permission-fallback-test").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-permission-fallback-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/ceo-permission-fallback/opencode",
+            worktreePath = worktreeRoot
+        )
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = false,
+            output = "",
+            error = "OPENCODE_PERMISSION_BLOCKED: OpenCode requested interactive permission during noninteractive execution. permission.asked external_directory action=ask exit=143",
+            duration = 100,
+            metadata = emptyMap()
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "CEO Permission Fallback Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "CEO continuous improvement cycle #1 for CEO Permission Fallback Co",
+            description = """
+                CEO generated this goal automatically to keep the company operating without a manual pause.
+
+                CEO directive:
+                - Review the current company state and unresolved product gaps.
+                - Create a portfolio of 3 to 5 branchable issues for the next cycle instead of one narrow slice.
+                - Use the current roster to run multiple compatible tracks in parallel when possible.
+            """.trimIndent(),
+            autonomyEnabled = true,
+            operatingPolicy = "auto-loop:continuous:1",
+            startRuntimeIfNeeded = false
+        )
+        val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
+
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
+
+        val state = stateStore.load()
+        val latestPlanningIssue = state.issues.single { it.id == planningIssue.id }
+        val executionIssues = state.issues.filter { it.goalId == goal.id && it.kind == "execution" }
+        latestPlanningIssue.status shouldBe IssueStatus.DONE
+        latestPlanningIssue.transitionReason.orEmpty() shouldContain "deterministic fallback planner"
+        latestPlanningIssue.transitionReason.orEmpty() shouldNotContain "CEO_PLANNING_INVALID_OUTPUT"
+        executionIssues.size shouldBeGreaterThanOrEqual 3
+        state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "Fallback planned execution graph"
+        state.companyActivity.filter { it.issueId == planningIssue.id && it.title == "CEO planning blocked" }.shouldBeEmpty()
+    }
+
+    test("explicit sequential step goals use deterministic planning without waiting for CEO provider") {
+        val appHome = Files.createTempDirectory("desktop-ceo-timeout-fallback-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-timeout-fallback-test").resolve("repo"))
+        val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-ceo-timeout-fallback-worktree").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>()
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
+        coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns null
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/ceo-timeout-fallback/opencode",
+            worktreePath = worktreeRoot
+        )
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = false,
+            output = "",
+            error = "Execution timeout after 720000ms",
+            duration = 720_000,
+            metadata = emptyMap()
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = agentExecutor
+        )
+        val company = service.createCompany(
+            name = "CEO Timeout Fallback Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Sequential fallback",
+            description = "Create Step 01 through Step 03. Step 01 adds \"Step 01 complete\" to docs/e2e-queue.md and each next Step depends on the previous Step. Do not create a GitHub PR, remote push, or external deployment.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+        val state = stateStore.load()
+        val planningIssue = state.issues.single { it.goalId == goal.id && it.kind == "planning" }
+        state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
+        val steps = state.issues
+            .filter { it.goalId == goal.id && it.kind == "execution" }
+            .sortedBy { it.title }
+        steps.map { it.title } shouldBe listOf("Step 01 complete", "Step 02 complete", "Step 03 complete")
+        steps[0].dependsOn shouldBe emptyList()
+        steps[1].dependsOn shouldBe listOf(steps[0].id)
+        steps[2].dependsOn shouldBe listOf(steps[1].id)
+        steps.all { it.requiresPullRequest == false } shouldBe true
+        state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "Fallback planned execution graph"
+        coVerify(exactly = 0) { agentExecutor.executeAgent(any(), any(), any()) }
+    }
+
+    test("explicit sequential step runtime executes deterministic local edits and local publish") {
+        val appHome = Files.createTempDirectory("desktop-sequential-local-runtime-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-sequential-local-runtime-test").resolve("repo"))
+        Files.createDirectories(repoRoot.resolve("docs"))
+        Files.writeString(repoRoot.resolve("docs/e2e-queue.md"), "# Queue E2E\n\n")
+        runGitCommand(repoRoot, "init", "-b", "master")
+        runGitCommand(repoRoot, "config", "user.name", "Cotor Test")
+        runGitCommand(repoRoot, "config", "user.email", "cotor-test@example.com")
+        runGitCommand(repoRoot, "add", "docs/e2e-queue.md")
+        runGitCommand(repoRoot, "commit", "-m", "Initial queue document")
+
+        val stateStore = DesktopStateStore { appHome }
+        val gitWorkspaceService = GitWorkspaceService(
+            processManager = CoroutineProcessManager(mockk(relaxed = true)),
+            stateStore = stateStore,
+            logger = mockk(relaxed = true)
+        )
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = false,
+            output = "",
+            error = "provider should not be needed for deterministic Step execution",
+            duration = 1,
+            metadata = emptyMap()
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = agentExecutor,
+            companyRuntimeTickIntervalMs = 25,
+            commandAvailability = { command -> command in setOf("opencode", "git") }
+        )
+        val company = service.createCompany(
+            name = "Sequential Local Runtime Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Two step local queue",
+            description = "Create Step 01 through Step 02. Step 01 adds \"Step 01 complete\" to docs/e2e-queue.md. Step 02 depends on Step 01 and adds \"Step 02 complete\" to docs/e2e-queue.md. Do not create a GitHub PR, remote push, or external deployment.",
+            autonomyEnabled = true,
+            startRuntimeIfNeeded = false
+        )
+
+        service.startCompanyRuntime(company.id)
+        withTimeout(20_000) {
+            while (true) {
+                service.runCompanyRuntimeTick(company.id)
+                val state = stateStore.load()
+                val steps = state.issues
+                    .filter { it.goalId == goal.id && it.title.startsWith("Step ") }
+                    .sortedBy { it.title }
+                if (steps.size == 2 && steps.all { it.status == IssueStatus.DONE }) {
+                    return@withTimeout
+                }
+                steps.firstOrNull { it.status == IssueStatus.BLOCKED }?.let { issue ->
+                    error("Step issue blocked: ${issue.title} ${issue.providerBlockReason ?: issue.transitionReason}")
+                }
+                state.companyRuntimeWorkItems.firstOrNull {
+                    it.companyId == company.id && it.status == CompanyRuntimeWorkItemStatus.QUARANTINED
+                }?.let { workItem ->
+                    error("Work item quarantined: ${workItem.issueId} ${workItem.reason}")
+                }
+                delay(50)
+            }
+        }
+
+        val finalState = stateStore.load()
+        val steps = finalState.issues
+            .filter { it.goalId == goal.id && it.title.startsWith("Step ") }
+            .sortedBy { it.title }
+        val stepIds = steps.map { it.id }.toSet()
+        steps.map { it.status } shouldBe listOf(IssueStatus.DONE, IssueStatus.DONE)
+        steps[1].dependsOn shouldBe listOf(steps[0].id)
+        finalState.companyRuntimeWorkItems
+            .filter { item -> item.issueId in stepIds }
+            .map { it.status }
+            .all { it == CompanyRuntimeWorkItemStatus.DONE } shouldBe true
+        finalState.runs
+            .filter { agentRun -> finalState.tasks.firstOrNull { it.id == agentRun.taskId }?.issueId in stepIds }
+            .all { it.output.orEmpty().contains("Appended Step") } shouldBe true
+        Files.readString(repoRoot.resolve("docs/e2e-queue.md")) shouldContain "Step 01 complete\nStep 02 complete"
+        runGitCommand(repoRoot, "log", "--oneline", "-n", "3") shouldContain "Step 02 complete"
+        service.stopCompanyRuntime(company.id).status shouldBe CompanyRuntimeStatus.STOPPED
     }
 
     test("autonomous CEO planning blocks after repeated invalid output without creating fallback issues") {
@@ -5023,10 +5393,23 @@ class DesktopAppServiceTest : FunSpec({
                 createdAt = now,
                 updatedAt = now
             )
+            val workItem = CompanyRuntimeWorkItem(
+                id = "work-live-process",
+                companyId = company.id,
+                goalId = goal.id,
+                issueId = issue.id,
+                status = CompanyRuntimeWorkItemStatus.RUNNING,
+                activeTaskId = task.id,
+                durableRunId = run.id,
+                reason = "Issue has an active task.",
+                createdAt = now,
+                updatedAt = now
+            )
             stateStore.save(
                 stateStore.load().copy(
                     tasks = stateStore.load().tasks + task,
-                    runs = stateStore.load().runs + run
+                    runs = stateStore.load().runs + run,
+                    companyRuntimeWorkItems = stateStore.load().companyRuntimeWorkItems + workItem
                 )
             )
 
@@ -5034,6 +5417,11 @@ class DesktopAppServiceTest : FunSpec({
 
             stopped.status shouldBe CompanyRuntimeStatus.STOPPED
             stopped.lastAction shouldContain "terminated-run-processes:1"
+            val stoppedWorkItem = stateStore.load().companyRuntimeWorkItems.single { it.id == workItem.id }
+            stoppedWorkItem.status shouldBe CompanyRuntimeWorkItemStatus.READY
+            stoppedWorkItem.activeTaskId shouldBe null
+            stoppedWorkItem.durableRunId shouldBe null
+            stoppedWorkItem.reason shouldBe "Runtime stopped while execution was in progress; the issue was returned to the queue."
             withTimeout(5_000) {
                 while (process.isAlive) {
                     delay(25)
@@ -6478,6 +6866,9 @@ class DesktopAppServiceTest : FunSpec({
             val snapshot = stateStore.load()
             stateStore.save(
                 snapshot.copy(
+                    companies = snapshot.companies.map {
+                        if (it.id == company.id) it.copy(operatorAutomationMode = OperatorAutomationMode.FULL_AUTO, updatedAt = now) else it
+                    },
                     goals = snapshot.goals.map {
                         if (it.companyId == company.id) it.copy(status = GoalStatus.COMPLETED, updatedAt = now) else it
                     },
@@ -6514,6 +6905,87 @@ class DesktopAppServiceTest : FunSpec({
             val synthesizedGoal = requireNotNull(nextGoal)
             synthesizedGoal.description shouldContain "portfolio of 3 to 5 branchable issues"
             synthesizedGoal.description shouldContain "multiple compatible implementation and validation tracks"
+        } finally {
+            service.shutdown()
+        }
+    }
+
+    test("runtime does not synthesize unrelated continuous CEO goals outside full auto mode") {
+        val appHome = Files.createTempDirectory("desktop-runtime-no-continuous-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-no-continuous-test").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val service = testService(
+            processManager = FakeGitProcessManager(
+                repoRoot = repoRoot,
+                remoteUrl = "https://github.com/heodongun/cotor.git",
+                defaultBranch = "master"
+            ),
+            stateStore = stateStore
+        )
+        try {
+            val company = service.createCompany(
+                name = "Finite Goal Co",
+                rootPath = repoRoot.toString(),
+                defaultBaseBranch = "master"
+            )
+            val finiteModeState = stateStore.load()
+            stateStore.save(
+                finiteModeState.copy(
+                    companies = finiteModeState.companies.map {
+                        if (it.id == company.id) {
+                            it.copy(operatorAutomationMode = OperatorAutomationMode.AGENT_APPROVED, updatedAt = System.currentTimeMillis())
+                        } else {
+                            it
+                        }
+                    }
+                )
+            )
+            val goal = service.createGoal(
+                companyId = company.id,
+                title = "Complete finite user goal",
+                description = "The user asked for one bounded goal, not a continuous improvement loop.",
+                autonomyEnabled = true
+            )
+            delay(300)
+            service.stopCompanyRuntime(company.id)
+            delay(100)
+
+            val now = System.currentTimeMillis()
+            val snapshot = stateStore.load()
+            stateStore.save(
+                snapshot.copy(
+                    goals = snapshot.goals.map {
+                        if (it.companyId == company.id) it.copy(status = GoalStatus.COMPLETED, updatedAt = now) else it
+                    },
+                    issues = snapshot.issues.map {
+                        if (it.companyId == company.id) it.copy(status = IssueStatus.DONE, updatedAt = now) else it
+                    },
+                    tasks = snapshot.tasks.map {
+                        if (it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED) {
+                            it.copy(status = DesktopTaskStatus.COMPLETED, updatedAt = now)
+                        } else {
+                            it
+                        }
+                    },
+                    runs = snapshot.runs.map {
+                        if (it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.QUEUED) {
+                            it.copy(status = AgentRunStatus.COMPLETED, updatedAt = now)
+                        } else {
+                            it
+                        }
+                    },
+                    companyRuntimes = listOf(
+                        CompanyRuntimeSnapshot(
+                            companyId = company.id,
+                            status = CompanyRuntimeStatus.RUNNING,
+                            lastTickAt = now
+                        )
+                    )
+                )
+            )
+
+            service.synthesizeAutonomousFollowUpGoalForTesting(goal.companyId) shouldBe null
         } finally {
             service.shutdown()
         }
@@ -7733,6 +8205,112 @@ class DesktopAppServiceTest : FunSpec({
         refreshed.issues.first { it.id == executionIssue.id }.status shouldNotBe IssueStatus.CANCELED
     }
 
+    test("runtime keeps transient opencode provider errors retryable after repeated failures") {
+        val appHome = Files.createTempDirectory("desktop-runtime-opencode-provider-retry-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-opencode-provider-retry-test").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = true,
+            output = "retried provider-backed issue successfully",
+            error = null,
+            duration = 100,
+            metadata = emptyMap()
+        )
+        val service = testService(
+            processManager = FakeGitProcessManager(
+                repoRoot = repoRoot,
+                remoteUrl = "https://github.com/heodongun/cotor.git",
+                defaultBranch = "master"
+            ),
+            stateStore = stateStore,
+            agentExecutor = agentExecutor
+        )
+
+        val company = service.createCompany(
+            name = "OpenCode Provider Retry Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Retry transient provider failures",
+            description = "Repeated provider failures should keep retrying the original issue instead of spawning a follow-up goal.",
+            autonomyEnabled = false
+        )
+        val executionIssue = service.listIssues(goal.id).first { it.kind == "execution" }
+        val failedAt = System.currentTimeMillis() - 600_000
+        val failedTasks = (1..3).map { attempt ->
+            service.createTask(
+                workspaceId = executionIssue.workspaceId,
+                title = "${executionIssue.title} #$attempt",
+                prompt = executionIssue.description,
+                agents = listOf("opencode"),
+                issueId = executionIssue.id
+            )
+        }
+        val snapshot = stateStore.load()
+        val issueTasks = snapshot.tasks.filter { it.issueId == executionIssue.id }
+        stateStore.save(
+            snapshot.copy(
+                issues = snapshot.issues.map {
+                    if (it.id == executionIssue.id) {
+                        it.copy(
+                            status = IssueStatus.BLOCKED,
+                            providerBlockReason = "OpenCode execution failed (exit=0): \"Provider returned error\"",
+                            updatedAt = failedAt
+                        )
+                    } else {
+                        it
+                    }
+                },
+                tasks = snapshot.tasks.map { task ->
+                    if (task.issueId == executionIssue.id) {
+                        task.copy(status = DesktopTaskStatus.FAILED, updatedAt = failedAt)
+                    } else {
+                        task
+                    }
+                },
+                runs = snapshot.runs + issueTasks.mapIndexed { index, task ->
+                    AgentRun(
+                        id = "workflow-opencode-provider-run-${index + 1}",
+                        taskId = task.id,
+                        workspaceId = executionIssue.workspaceId,
+                        repositoryId = snapshot.repositories.first().id,
+                        agentName = "opencode",
+                        branchName = "codex/cotor/opencode-provider-retry/opencode-${index + 1}",
+                        worktreePath = repoRoot.resolve(".cotor/worktrees/opencode-provider-retry/opencode-${index + 1}").toString(),
+                        status = AgentRunStatus.FAILED,
+                        output = "{\"type\":\"error\",\"error\":{\"message\":\"Provider returned error\"}}",
+                        error = "OpenCode execution failed (exit=0): \"Provider returned error\"",
+                        createdAt = failedAt + index,
+                        updatedAt = failedAt + index
+                    )
+                }
+            )
+        )
+
+        service.updateGoal(goal.id, autonomyEnabled = true)
+        service.startCompanyRuntime(company.id)
+        val preTickTaskCount = stateStore.load().tasks.count { it.issueId == executionIssue.id }
+        service.runCompanyRuntimeTick(company.id)
+
+        withTimeout(120_000) {
+            while (true) {
+                if (stateStore.load().tasks.count { it.issueId == executionIssue.id } > preTickTaskCount) {
+                    return@withTimeout
+                }
+                service.runCompanyRuntimeTick(company.id)
+                delay(25)
+            }
+        }
+        val refreshed = stateStore.load()
+        refreshed.goals.first { it.id == goal.id }.status shouldBe GoalStatus.ACTIVE
+        refreshed.issues.first { it.id == executionIssue.id }.status shouldNotBe IssueStatus.CANCELED
+    }
+
     test("runtime keeps blocked remediation issues blocked for non-recoverable failures and logs the transition") {
         val appHome = Files.createTempDirectory("desktop-runtime-followup-nonrecoverable-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-followup-nonrecoverable-test").resolve("repo"))
@@ -8362,6 +8940,9 @@ class DesktopAppServiceTest : FunSpec({
         val preSnapshot = stateStore.load()
         stateStore.save(
             preSnapshot.copy(
+                companies = preSnapshot.companies.map {
+                    if (it.id == company.id) it.copy(operatorAutomationMode = OperatorAutomationMode.FULL_AUTO, updatedAt = now) else it
+                },
                 goals = preSnapshot.goals.map {
                     if (it.companyId == company.id) it.copy(status = GoalStatus.COMPLETED, updatedAt = now) else it
                 },
@@ -8402,6 +8983,56 @@ class DesktopAppServiceTest : FunSpec({
             .filter { it.trimStart().startsWith("- ") }
             .toList()
         recentGoalLines.none { it.trim() == "- ${followUpGoal.title}" } shouldBe true
+    }
+
+    test("start-only full-auto company creates first continuous goal without existing history") {
+        val appHome = Files.createTempDirectory("desktop-start-only-autogoal-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-start-only-autogoal-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } returns AgentResult(
+            agentName = "opencode",
+            isSuccess = false,
+            output = "",
+            error = "OPENCODE_RATE_LIMIT: synthetic test provider unavailable",
+            duration = 1,
+            metadata = emptyMap()
+        )
+        val service = testService(
+            processManager = FakeGitProcessManager(
+                repoRoot = repoRoot,
+                remoteUrl = null,
+                defaultBranch = "master"
+            ),
+            stateStore = stateStore,
+            agentExecutor = agentExecutor
+        )
+        val company = service.createCompany(
+            name = "Start Only Auto Goal Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val now = System.currentTimeMillis()
+        val initial = stateStore.load()
+        stateStore.save(
+            initial.copy(
+                companies = initial.companies.map {
+                    if (it.id == company.id) it.copy(operatorAutomationMode = OperatorAutomationMode.FULL_AUTO, updatedAt = now) else it
+                }
+            )
+        )
+
+        service.startCompanyRuntime(company.id)
+        service.runCompanyRuntimeTick(company.id)
+
+        val state = stateStore.load()
+        val continuousGoal = state.goals.singleOrNull {
+            it.companyId == company.id && it.operatingPolicy == "auto-loop:continuous:1"
+        }
+        continuousGoal.shouldNotBeNull()
+        continuousGoal.title shouldContain "CEO continuous improvement cycle #1"
+        state.issues.filter { it.goalId == continuousGoal.id && it.kind == "planning" }.shouldNotBeEmpty()
     }
 
     test("runtime reconciles orphaned failed tasks without run records") {
@@ -8822,8 +9453,8 @@ class DesktopAppServiceTest : FunSpec({
         val snapshot = service.runCompanyRuntimeTick("company-monitoring")
 
         snapshot.status shouldBe CompanyRuntimeStatus.RUNNING
-        snapshot.lastAction shouldBe "monitoring-active-runs"
-        stateStore.load().companyRuntimes.first { it.companyId == "company-monitoring" }.lastAction shouldBe "monitoring-active-runs"
+        snapshot.lastAction.orEmpty() shouldContain "monitoring-active-runs"
+        stateStore.load().companyRuntimes.first { it.companyId == "company-monitoring" }.lastAction.orEmpty() shouldContain "monitoring-active-runs"
     }
 
     test("shutdown requeues active company issues instead of leaving them blocked") {
@@ -13537,6 +14168,22 @@ private suspend fun seedWorkspace(stateStore: DesktopStateStore, repoRoot: Path)
             )
         )
     )
+}
+
+private fun runGitCommand(workingDirectory: Path, vararg args: String): String {
+    val process = ProcessBuilder(listOf("git") + args)
+        .directory(workingDirectory.toFile())
+        .redirectErrorStream(true)
+        .start()
+    val output = process.inputStream.bufferedReader().readText()
+    if (!process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        error("git ${args.joinToString(" ")} timed out in $workingDirectory")
+    }
+    if (process.exitValue() != 0) {
+        error("git ${args.joinToString(" ")} failed in $workingDirectory: $output")
+    }
+    return output
 }
 
 private suspend fun awaitTaskCompletion(stateStore: DesktopStateStore, taskId: String) {

@@ -482,7 +482,9 @@ class GitWorkspaceService(
                     "taskId" to task.id,
                     "agentName" to agentName,
                     "branchName" to branchName,
-                    "baseBranch" to baseBranch
+                    "baseBranch" to baseBranch,
+                    "worktreePath" to worktreePath.toAbsolutePath().normalize().toString(),
+                    "requirePullRequest" to requirePullRequest.toString()
                 ) + approvalMetadata(approval)
             ),
             onSuccess = { metadata ->
@@ -513,6 +515,34 @@ class GitWorkspaceService(
                     return@run PublishMetadata(
                         commitSha = commitSha,
                         error = "No changes to publish from $branchName against $baseBranch"
+                    )
+                }
+
+                if (!requirePullRequest) {
+                    val localPublishError = publishLocalBranchToBase(
+                        worktreePath = worktreePath,
+                        branchName = branchName,
+                        baseBranch = baseBranch
+                    )
+                    if (localPublishError != null) {
+                        return@run PublishMetadata(
+                            commitSha = commitSha,
+                            pushedBranch = branchName,
+                            error = localPublishError
+                        )
+                    }
+                    commitSha = gitOutput(repositoryCommonRoot(worktreePath), "rev-parse", "HEAD").trim().takeIf { it.isNotBlank() }
+                    return@run PublishMetadata(
+                        commitSha = commitSha,
+                        pushedBranch = branchName,
+                        pullRequestNumber = null,
+                        pullRequestUrl = null,
+                        pullRequestState = null,
+                        reviewState = null,
+                        checksSummary = null,
+                        mergeability = null,
+                        lastSyncTime = System.currentTimeMillis(),
+                        error = null
                     )
                 }
 
@@ -566,21 +596,6 @@ class GitWorkspaceService(
                     return@run PublishMetadata(
                         commitSha = commitSha,
                         error = "No changes to publish from $branchName against $baseBranch"
-                    )
-                }
-
-                if (!requirePullRequest) {
-                    return@run PublishMetadata(
-                        commitSha = commitSha,
-                        pushedBranch = branchName,
-                        pullRequestNumber = null,
-                        pullRequestUrl = null,
-                        pullRequestState = null,
-                        reviewState = null,
-                        checksSummary = null,
-                        mergeability = null,
-                        lastSyncTime = System.currentTimeMillis(),
-                        error = null
                     )
                 }
 
@@ -643,6 +658,40 @@ class GitWorkspaceService(
             ready = false,
             error = "GitHub is not connected. Configure an existing origin remote before starting GitHub PR work."
         )
+    }
+
+    private suspend fun publishLocalBranchToBase(
+        worktreePath: Path,
+        branchName: String,
+        baseBranch: String
+    ): String? {
+        val repositoryRoot = repositoryCommonRoot(worktreePath)
+        if (hasUncommittedChanges(repositoryRoot)) {
+            return "Local base branch has uncommitted changes; kept local commit on $branchName"
+        }
+        val currentBranch = runGit(
+            repositoryRoot,
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
+            failOnError = false,
+            timeoutMs = 10_000
+        ).stdout.trim()
+        if (currentBranch != baseBranch) {
+            return "Local base checkout is on $currentBranch, not $baseBranch; kept local commit on $branchName"
+        }
+        val merge = runGit(
+            repositoryRoot,
+            "merge",
+            "--ff-only",
+            branchName,
+            failOnError = false,
+            timeoutMs = 30_000
+        )
+        if (!merge.isSuccess) {
+            return "Local git merge failed for $branchName into $baseBranch: ${merge.stderr.ifBlank { merge.stdout }.trim().take(400)}"
+        }
+        return null
     }
 
     private suspend fun actionSubjectForTask(taskId: String, agentName: String): ActionSubject {
@@ -1746,7 +1795,11 @@ class GitWorkspaceService(
     }
 
     private suspend fun hasUncommittedChanges(worktreePath: Path): Boolean {
-        return gitOutput(worktreePath, "status", "--porcelain").isNotBlank()
+        return gitOutput(worktreePath, "status", "--porcelain")
+            .lines()
+            .map { it.trimEnd() }
+            .filter { it.isNotBlank() }
+            .any { !isBenignCotorArtifact(it) }
     }
 
     private suspend fun gitOutput(workingDirectory: Path?, vararg args: String): String {

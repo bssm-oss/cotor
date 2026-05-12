@@ -1226,6 +1226,7 @@ internal fun Application.cotorAppModule(
                             rootPath = request.rootPath,
                             defaultBaseBranch = request.defaultBaseBranch,
                             autonomyEnabled = request.autonomyEnabled,
+                            operatorAutomationMode = request.operatorAutomationMode,
                             dailyBudgetCents = request.dailyBudgetCents,
                             monthlyBudgetCents = request.monthlyBudgetCents
                         )

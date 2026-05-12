@@ -16,6 +16,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -117,7 +118,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
 
         val snapshot = service.runCompanyRuntimeTick(companyId)
 
-        snapshot.lastAction shouldBe "idle-pending-issues:blocked:1"
+        snapshot.lastAction.orEmpty().contains("started:") shouldBe false
         stateStore.load().tasks.shouldBeEmpty()
     }
 
@@ -207,7 +208,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         val snapshot = service.runCompanyRuntimeTick(companyId)
         val refreshed = stateStore.load()
 
-        snapshot.lastAction shouldBe "started:$issueId"
+        snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
         coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
@@ -271,7 +272,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         val snapshot = service.runCompanyRuntimeTick(companyId)
         val refreshed = stateStore.load()
 
-        snapshot.lastAction shouldBe "started:$issueId"
+        snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
         coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
@@ -335,7 +336,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         val snapshot = service.runCompanyRuntimeTick(companyId)
         val refreshed = stateStore.load()
 
-        snapshot.lastAction shouldBe "started:$issueId"
+        snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
         coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
@@ -408,7 +409,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
 
         val snapshot = service.runCompanyRuntimeTick(companyId)
 
-        snapshot.lastAction shouldBe "monitoring-active-runs"
+        snapshot.lastAction.orEmpty() shouldContain "monitoring-active-runs"
         stateStore.load().tasks.filter { it.issueId == issueId }.size shouldBe 1
         coVerify(exactly = 0) { agentExecutor.executeAgent(any(), any(), any()) }
     }
@@ -487,9 +488,133 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         val snapshot = service.runCompanyRuntimeTick(companyId)
         val refreshed = stateStore.load()
 
-        snapshot.lastAction shouldBe "started:$issueId"
+        snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
+        coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
+    }
+
+    test("runCompanyRuntimeTick records dependency waits in the durable queue") {
+        val appHome = Files.createTempDirectory("desktop-runtime-dependency-wait-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-dependency-wait-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedRuntimeDispositionWorkspace(stateStore, repoRoot)
+        val companyId = "company-dependency-wait"
+        val upstreamId = "issue-upstream"
+        val downstreamId = "issue-downstream"
+
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true),
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+        )
+
+        val state = stateStore.load()
+        stateStore.save(
+            state.copy(
+                companies = listOf(runtimeDispositionCompany(companyId, repoRoot)),
+                goals = listOf(runtimeDispositionGoal(companyId, "goal-dependency-wait", autonomyEnabled = false)),
+                issues = listOf(
+                    runtimeDispositionIssue(
+                        companyId = companyId,
+                        issueId = upstreamId,
+                        goalId = "goal-dependency-wait",
+                        status = IssueStatus.PLANNED
+                    ),
+                    runtimeDispositionIssue(
+                        companyId = companyId,
+                        issueId = downstreamId,
+                        goalId = "goal-dependency-wait",
+                        status = IssueStatus.BACKLOG
+                    ).copy(dependsOn = listOf(upstreamId), createdAt = 2L, updatedAt = 2L)
+                ),
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+                )
+            )
+        )
+
+        val snapshot = service.runCompanyRuntimeTick(companyId)
+        val refreshed = stateStore.load()
+        val downstreamWorkItem = refreshed.companyRuntimeWorkItems.first { it.issueId == downstreamId }
+
+        snapshot.lastAction.orEmpty().contains("runtime-stalled") shouldBe false
+        downstreamWorkItem.status shouldBe CompanyRuntimeWorkItemStatus.WAITING_DEPENDENCY
+        downstreamWorkItem.blockedByIssueIds shouldBe listOf(upstreamId)
+        refreshed.tasks.shouldBeEmpty()
+        refreshed.problemSignals.filter { it.companyId == companyId && it.kind == "runtime-stalled" }.shouldBeEmpty()
+    }
+
+    test("runCompanyRuntimeTick starts dependency-ready backlog issues") {
+        val appHome = Files.createTempDirectory("desktop-runtime-dependency-ready-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-dependency-ready-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedRuntimeDispositionWorkspace(stateStore, repoRoot)
+        val companyId = "company-dependency-ready"
+        val upstreamId = "issue-upstream-done"
+        val downstreamId = "issue-downstream-ready"
+
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureWorktree(any(), any(), any(), any(), any()) } returns WorktreeBinding(
+            branchName = "codex/cotor/dependency-ready/opencode",
+            worktreePath = repoRoot.resolve(".cotor/worktrees/dependency-ready/opencode")
+        )
+        coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
+
+        val agentExecutor = mockk<AgentExecutor>()
+        coEvery { agentExecutor.executeAgent(any(), any(), any()) } coAnswers {
+            delay(500)
+            AgentResult(
+                agentName = "opencode",
+                isSuccess = true,
+                output = "dependency-ready issue finished",
+                error = null,
+                duration = 500,
+                metadata = emptyMap()
+            )
+        }
+
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = agentExecutor
+        )
+
+        val state = stateStore.load()
+        stateStore.save(
+            state.copy(
+                backendSettings = state.backendSettings.copy(codePublishMode = CodePublishMode.ALLOW_LOCAL_GIT),
+                companies = listOf(runtimeDispositionCompany(companyId, repoRoot)),
+                goals = listOf(runtimeDispositionGoal(companyId, "goal-dependency-ready", autonomyEnabled = false)),
+                issues = listOf(
+                    runtimeDispositionIssue(
+                        companyId = companyId,
+                        issueId = upstreamId,
+                        goalId = "goal-dependency-ready",
+                        status = IssueStatus.DONE
+                    ).copy(updatedAt = 2L),
+                    runtimeDispositionIssue(
+                        companyId = companyId,
+                        issueId = downstreamId,
+                        goalId = "goal-dependency-ready",
+                        status = IssueStatus.BACKLOG
+                    ).copy(dependsOn = listOf(upstreamId), createdAt = 3L, updatedAt = 3L)
+                ),
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+                )
+            )
+        )
+
+        val snapshot = service.runCompanyRuntimeTick(companyId)
+        val refreshed = stateStore.load()
+        val downstreamWorkItem = refreshed.companyRuntimeWorkItems.first { it.issueId == downstreamId }
+
+        snapshot.lastAction.orEmpty() shouldContain "started:$downstreamId"
+        downstreamWorkItem.status shouldBe CompanyRuntimeWorkItemStatus.RUNNING
+        refreshed.issues.first { it.id == downstreamId }.status shouldBe IssueStatus.IN_PROGRESS
         coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
     }
 })

@@ -433,6 +433,7 @@ struct DesktopAPI {
                 rootPath: rootPath,
                 defaultBaseBranch: defaultBaseBranch,
                 autonomyEnabled: true,
+                operatorAutomationMode: "FULL_AUTO",
                 dailyBudgetCents: dailyBudgetCents,
                 monthlyBudgetCents: monthlyBudgetCents
             )
