@@ -9233,21 +9233,7 @@ class DesktopAppService(
         issue: CompanyIssue,
         dependency: CompanyIssue,
         state: DesktopAppState
-    ): Boolean {
-        if (isSupersededCanceledDependency(dependency, state)) {
-            return true
-        }
-        return when (issue.kind.lowercase()) {
-            "review" ->
-                dependency.status == IssueStatus.IN_REVIEW ||
-                    dependency.status == IssueStatus.READY_FOR_CEO ||
-                    dependency.status == IssueStatus.DONE
-            "approval" ->
-                dependency.status == IssueStatus.READY_FOR_CEO ||
-                    dependency.status == IssueStatus.DONE
-            else -> dependency.status == IssueStatus.DONE
-        }
-    }
+    ): Boolean = CompanyIssueReadiness.isDependencySatisfied(issue, dependency, state)
 
     private fun runnableIssueStatusRank(status: IssueStatus): Int = when (status) {
         IssueStatus.DELEGATED -> 0

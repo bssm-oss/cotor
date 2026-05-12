@@ -7,7 +7,7 @@ import com.cotor.app.DesktopAppState
 import com.cotor.app.IssueStatus
 import java.util.UUID
 
-data class CompanyIssueReadiness(
+data class CompanyIssueReadinessResolution(
     val issueId: String,
     val workItemStatus: CompanyRuntimeWorkItemStatus,
     val runtimeDisposition: String,
@@ -47,9 +47,9 @@ object CompanyIssueReadinessResolver {
         issuesById: Map<String, CompanyIssue>,
         state: DesktopAppState,
         overrides: CompanyIssueReadinessOverrides = CompanyIssueReadinessOverrides()
-    ): CompanyIssueReadiness {
+    ): CompanyIssueReadinessResolution {
         if (issue.status in setOf(IssueStatus.DONE, IssueStatus.CANCELED)) {
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.DONE,
                 runtimeDisposition = TERMINAL,
@@ -57,7 +57,7 @@ object CompanyIssueReadinessResolver {
             )
         }
         overrides.activeTaskId?.let { taskId ->
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.RUNNING,
                 runtimeDisposition = RUNNING,
@@ -67,7 +67,7 @@ object CompanyIssueReadinessResolver {
             )
         }
         if (overrides.waitingForApproval || issue.status == IssueStatus.WAITING_FOR_APPROVAL) {
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.WAITING_APPROVAL,
                 runtimeDisposition = WAITING_FOR_APPROVAL,
@@ -76,7 +76,7 @@ object CompanyIssueReadinessResolver {
             )
         }
         if (overrides.waitingForCi) {
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.WAITING_CI,
                 runtimeDisposition = WAITING_FOR_CI,
@@ -85,7 +85,7 @@ object CompanyIssueReadinessResolver {
             )
         }
         if (overrides.quarantined || (issue.status == IssueStatus.BLOCKED && !issue.providerBlockReason.isNullOrBlank())) {
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.QUARANTINED,
                 runtimeDisposition = QUARANTINED,
@@ -94,7 +94,7 @@ object CompanyIssueReadinessResolver {
             )
         }
         if (overrides.recoverable) {
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.READY,
                 runtimeDisposition = RECOVERABLE,
@@ -103,7 +103,7 @@ object CompanyIssueReadinessResolver {
             )
         }
         if (overrides.retryCooldown) {
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.RETRY_COOLDOWN,
                 runtimeDisposition = RETRY_COOLDOWN,
@@ -117,7 +117,7 @@ object CompanyIssueReadinessResolver {
             !isDependencySatisfied(issue, dependency, state)
         }
         if (unmetDependencies.isNotEmpty()) {
-            return CompanyIssueReadiness(
+            return CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.WAITING_DEPENDENCY,
                 runtimeDisposition = WAITING_DEPENDENCY,
@@ -129,26 +129,26 @@ object CompanyIssueReadinessResolver {
         return when (issue.status) {
             IssueStatus.BACKLOG,
             IssueStatus.PLANNED,
-            IssueStatus.DELEGATED -> CompanyIssueReadiness(
+            IssueStatus.DELEGATED -> CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.READY,
                 runtimeDisposition = RUNNABLE,
                 reason = "All dependencies are satisfied."
             )
-            IssueStatus.IN_PROGRESS -> CompanyIssueReadiness(
+            IssueStatus.IN_PROGRESS -> CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.READY,
                 runtimeDisposition = RUNNABLE,
                 reason = "Issue is marked in progress but has no active task; runtime queue can restart it."
             )
             IssueStatus.IN_REVIEW,
-            IssueStatus.READY_FOR_CEO -> CompanyIssueReadiness(
+            IssueStatus.READY_FOR_CEO -> CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.WAITING_APPROVAL,
                 runtimeDisposition = WAITING_FOR_APPROVAL,
                 reason = "Issue is in review or CEO gate."
             )
-            IssueStatus.BLOCKED -> CompanyIssueReadiness(
+            IssueStatus.BLOCKED -> CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.QUARANTINED,
                 runtimeDisposition = QUARANTINED,
@@ -156,7 +156,7 @@ object CompanyIssueReadinessResolver {
             )
             IssueStatus.WAITING_FOR_APPROVAL,
             IssueStatus.DONE,
-            IssueStatus.CANCELED -> CompanyIssueReadiness(
+            IssueStatus.CANCELED -> CompanyIssueReadinessResolution(
                 issueId = issue.id,
                 workItemStatus = CompanyRuntimeWorkItemStatus.DONE,
                 runtimeDisposition = TERMINAL,
@@ -166,7 +166,7 @@ object CompanyIssueReadinessResolver {
     }
 
     fun toWorkItem(
-        readiness: CompanyIssueReadiness,
+        readiness: CompanyIssueReadinessResolution,
         issue: CompanyIssue,
         previous: CompanyRuntimeWorkItem?,
         now: Long
@@ -185,7 +185,7 @@ object CompanyIssueReadinessResolver {
             updatedAt = if (previous.matches(readiness, issue)) previous!!.updatedAt else now
         )
 
-    private fun CompanyRuntimeWorkItem?.matches(readiness: CompanyIssueReadiness, issue: CompanyIssue): Boolean =
+    private fun CompanyRuntimeWorkItem?.matches(readiness: CompanyIssueReadinessResolution, issue: CompanyIssue): Boolean =
         this != null &&
             companyId == issue.companyId &&
             goalId == issue.goalId &&
