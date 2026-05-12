@@ -146,10 +146,21 @@ tasks.shadowJar {
     }
 }
 
+val generatedCotorResources = layout.buildDirectory.dir("generated/resources/cotor")
+
 tasks.register("generateCotorProperties") {
+    val propertiesFile = generatedCotorResources.map { it.file("cotor.properties") }
+    outputs.file(propertiesFile)
     doLast {
-        val propertiesFile = file("src/main/resources/cotor.properties")
-        propertiesFile.writeText("version=$version\n")
+        val output = propertiesFile.get().asFile
+        output.parentFile.mkdirs()
+        output.writeText("version=$version\n")
+    }
+}
+
+sourceSets {
+    main {
+        resources.srcDir(generatedCotorResources)
     }
 }
 

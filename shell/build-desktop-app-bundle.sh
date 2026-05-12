@@ -27,6 +27,23 @@ if [[ -z "$VERSION" ]]; then
     VERSION="dev"
 fi
 
+refuse_unsafe_staging_root() {
+    local candidate="${1%/}"
+    local project_root="${PROJECT_ROOT%/}"
+    local package_root="${PACKAGE_ROOT%/}"
+    local home_root="${HOME%/}"
+
+    if [[ -z "$candidate" || "$candidate" == "/" ]]; then
+        echo "Refusing to remove unsafe staging root: '${1}'" >&2
+        exit 1
+    fi
+    if [[ "$candidate" == "$project_root" || "$candidate" == "$package_root" || "$candidate" == "$home_root" ]]; then
+        echo "Refusing to remove staging root that points at a source or home directory: '$candidate'" >&2
+        exit 1
+    fi
+}
+
+refuse_unsafe_staging_root "$STAGING_ROOT"
 rm -rf "$STAGING_ROOT"
 mkdir -p "$STAGING_ROOT"
 mkdir -p "$SWIFT_HOME" "$SWIFT_CACHE" "$SWIFT_MODULE_CACHE" "$CLANG_MODULE_CACHE"

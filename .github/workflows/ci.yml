@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [app-core, app-support, app-surface, core, pipeline]
+        shard: [app-core, app-support, app-surface, core, pipeline, security-policy]
 
     steps:
       - name: Checkout
@@ -101,6 +101,13 @@ jobs:
                 --tests 'com.cotor.validation.*' \
                 -x jacocoTestReport -x jacocoTestCoverageVerification
               ;;
+            security-policy)
+              ./gradlew --no-daemon test --stacktrace \
+                --tests 'com.cotor.security.*' \
+                --tests 'com.cotor.policy.*' \
+                --tests 'com.cotor.providers.github.*' \
+                -x jacocoTestReport -x jacocoTestCoverageVerification
+              ;;
             *)
               echo "Unknown shard: ${{ matrix.shard }}" >&2
               exit 1
@@ -108,6 +115,31 @@ jobs:
           esac
 
         timeout-minutes: 60
+
+  verify-scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: verify-format
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Test GitHub scripts
+        run: node --test .github/scripts/*.test.js
+
+      - name: Check Homebrew metadata version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(grep -E '^version = ' build.gradle.kts | head -n 1 | cut -d '"' -f 2)"
+          grep -q "v${version}" Formula/cotor.rb
+          grep -q "v#{version}" Casks/cotor-desktop.rb
 
   verify-app-company:
     runs-on: ubuntu-latest
