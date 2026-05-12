@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-struct MeetingRoomBrainGraph: Hashable {
+struct MeetingRoomBrainGraph: Hashable, Sendable {
     static let maxVisibleNodes = 96
 
     let sourcePath: String?
@@ -291,7 +291,7 @@ private enum MeetingRoomBrainGraphLoadError: Error {
     case missingMap
 }
 
-struct MeetingRoomBrainGraphNode: Identifiable, Hashable {
+struct MeetingRoomBrainGraphNode: Identifiable, Hashable, Sendable {
     let id: String
     let label: String
     let fileType: String
@@ -319,7 +319,7 @@ struct MeetingRoomBrainGraphNode: Identifiable, Hashable {
     }
 }
 
-struct MeetingRoomBrainGraphLink: Identifiable, Hashable {
+struct MeetingRoomBrainGraphLink: Identifiable, Hashable, Sendable {
     let id: String
     let source: String
     let target: String
@@ -400,7 +400,7 @@ struct MeetingRoomBrainGraphPane: View {
             }
         }
         .task(id: rootPath ?? "") {
-            loadGraph()
+            await loadGraph()
         }
         .sheet(item: $selectedNode) { node in
             MeetingRoomBrainGraphNodeSheet(node: node, language: language)
@@ -425,11 +425,16 @@ struct MeetingRoomBrainGraphPane: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func loadGraph() {
-        do {
-            graph = try MeetingRoomBrainGraph.load(rootPath: rootPath)
+    private func loadGraph() async {
+        let path = rootPath
+        let result = await Task.detached(priority: .utility) {
+            Result { try MeetingRoomBrainGraph.load(rootPath: path) }
+        }.value
+        switch result {
+        case let .success(loadedGraph):
+            graph = loadedGraph
             loadError = nil
-        } catch {
+        case .failure:
             graph = .empty(sourcePath: MeetingRoomBrainGraph.graphFileURL(rootPath: rootPath).path)
             loadError = language(
                 "The repository map is not ready yet. Prepare the map when you need this view.",

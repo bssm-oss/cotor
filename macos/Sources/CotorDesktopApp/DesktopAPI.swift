@@ -879,10 +879,18 @@ struct DesktopAPI {
     }
 
     private func makeURL(path: String, query: [URLQueryItem] = []) throws -> URL {
-        try makeURL(pathSegments: path.split(separator: "/").map(String.init), query: query)
+        try Self.makeURL(baseURL: baseURL, path: path, query: query)
     }
 
     internal func makeURL(pathSegments: [String], query: [URLQueryItem] = []) throws -> URL {
+        try Self.makeURL(baseURL: baseURL, pathSegments: pathSegments, query: query)
+    }
+
+    internal static func makeURL(baseURL: URL, path: String, query: [URLQueryItem] = []) throws -> URL {
+        try makeURL(baseURL: baseURL, pathSegments: path.split(separator: "/").map(String.init), query: query)
+    }
+
+    internal static func makeURL(baseURL: URL, pathSegments: [String], query: [URLQueryItem] = []) throws -> URL {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         let encodedPath = try pathSegments
             .map(Self.percentEncodePathSegment)

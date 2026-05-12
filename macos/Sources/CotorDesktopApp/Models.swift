@@ -11,8 +11,7 @@ private extension KeyedDecodingContainer {
         do {
             return try decodeIfPresent(type, forKey: key) ?? defaultValue
         } catch {
-            assertionFailure("Failed to decode \(T.self) for key '\(key.stringValue)': \(error)")
-            return defaultValue
+            throw error
         }
     }
 }
@@ -899,9 +898,19 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
     let monthSpentCents: Int
     let budgetPausedAt: Int64?
     let budgetResetDate: String?
+    let consecutiveFailures: Int
+    let adaptiveTickMs: Int64
+    let resumableRunCount: Int
     let waitingApprovalCount: Int
+    let blockedByPolicyCount: Int
+    let blockedByCiCount: Int
+    let quarantinedRunCount: Int
+    let resumableRunIds: [String]
     let pendingApprovalRunIds: [String]
+    let pendingIssueIds: [String]
+    let blockedIssueIds: [String]
     let reviewQueueAttentionIds: [String]
+    let lastReconciliationAt: Int64?
 
     private enum CodingKeys: String, CodingKey {
         case companyId
@@ -926,9 +935,19 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         case monthSpentCents
         case budgetPausedAt
         case budgetResetDate
+        case consecutiveFailures
+        case adaptiveTickMs
+        case resumableRunCount
         case waitingApprovalCount
+        case blockedByPolicyCount
+        case blockedByCiCount
+        case quarantinedRunCount
+        case resumableRunIds
         case pendingApprovalRunIds
+        case pendingIssueIds
+        case blockedIssueIds
         case reviewQueueAttentionIds
+        case lastReconciliationAt
     }
 
     init(
@@ -954,9 +973,19 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         monthSpentCents: Int = 0,
         budgetPausedAt: Int64? = nil,
         budgetResetDate: String? = nil,
+        consecutiveFailures: Int = 0,
+        adaptiveTickMs: Int64 = 60_000,
+        resumableRunCount: Int = 0,
         waitingApprovalCount: Int = 0,
+        blockedByPolicyCount: Int = 0,
+        blockedByCiCount: Int = 0,
+        quarantinedRunCount: Int = 0,
+        resumableRunIds: [String] = [],
         pendingApprovalRunIds: [String] = [],
-        reviewQueueAttentionIds: [String] = []
+        pendingIssueIds: [String] = [],
+        blockedIssueIds: [String] = [],
+        reviewQueueAttentionIds: [String] = [],
+        lastReconciliationAt: Int64? = nil
     ) {
         self.companyId = companyId
         self.status = status
@@ -980,9 +1009,19 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         self.monthSpentCents = monthSpentCents
         self.budgetPausedAt = budgetPausedAt
         self.budgetResetDate = budgetResetDate
+        self.consecutiveFailures = consecutiveFailures
+        self.adaptiveTickMs = adaptiveTickMs
+        self.resumableRunCount = resumableRunCount
         self.waitingApprovalCount = waitingApprovalCount
+        self.blockedByPolicyCount = blockedByPolicyCount
+        self.blockedByCiCount = blockedByCiCount
+        self.quarantinedRunCount = quarantinedRunCount
+        self.resumableRunIds = resumableRunIds
         self.pendingApprovalRunIds = pendingApprovalRunIds
+        self.pendingIssueIds = pendingIssueIds
+        self.blockedIssueIds = blockedIssueIds
         self.reviewQueueAttentionIds = reviewQueueAttentionIds
+        self.lastReconciliationAt = lastReconciliationAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1009,9 +1048,19 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
         monthSpentCents = try container.decodeValue(Int.self, forKey: .monthSpentCents, default: 0)
         budgetPausedAt = try container.decodeIfPresent(Int64.self, forKey: .budgetPausedAt)
         budgetResetDate = try container.decodeIfPresent(String.self, forKey: .budgetResetDate)
+        consecutiveFailures = try container.decodeValue(Int.self, forKey: .consecutiveFailures, default: 0)
+        adaptiveTickMs = try container.decodeValue(Int64.self, forKey: .adaptiveTickMs, default: 60_000)
+        resumableRunCount = try container.decodeValue(Int.self, forKey: .resumableRunCount, default: 0)
         waitingApprovalCount = try container.decodeValue(Int.self, forKey: .waitingApprovalCount, default: 0)
+        blockedByPolicyCount = try container.decodeValue(Int.self, forKey: .blockedByPolicyCount, default: 0)
+        blockedByCiCount = try container.decodeValue(Int.self, forKey: .blockedByCiCount, default: 0)
+        quarantinedRunCount = try container.decodeValue(Int.self, forKey: .quarantinedRunCount, default: 0)
+        resumableRunIds = try container.decodeValue([String].self, forKey: .resumableRunIds, default: [])
         pendingApprovalRunIds = try container.decodeValue([String].self, forKey: .pendingApprovalRunIds, default: [])
+        pendingIssueIds = try container.decodeValue([String].self, forKey: .pendingIssueIds, default: [])
+        blockedIssueIds = try container.decodeValue([String].self, forKey: .blockedIssueIds, default: [])
         reviewQueueAttentionIds = try container.decodeValue([String].self, forKey: .reviewQueueAttentionIds, default: [])
+        lastReconciliationAt = try container.decodeIfPresent(Int64.self, forKey: .lastReconciliationAt)
     }
 
     var isManuallyStopped: Bool {

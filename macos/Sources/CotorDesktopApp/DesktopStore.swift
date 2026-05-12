@@ -3771,7 +3771,9 @@ final class DesktopStore: ObservableObject {
     func startSelectedCompanyRuntime() async {
         guard let company = selectedCompany else { return }
         do {
-            _ = try await api.startCompanyRuntime(companyId: company.id)
+            _ = try await runWithEmbeddedBackendRecovery {
+                try await api.startCompanyRuntime(companyId: company.id)
+            }
             await refreshDashboard()
         } catch {
             errorMessage = error.localizedDescription
@@ -3781,7 +3783,9 @@ final class DesktopStore: ObservableObject {
     func stopSelectedCompanyRuntime() async {
         guard let company = selectedCompany else { return }
         do {
-            _ = try await api.stopCompanyRuntime(companyId: company.id)
+            _ = try await runWithEmbeddedBackendRecovery {
+                try await api.stopCompanyRuntime(companyId: company.id)
+            }
             await refreshDashboard()
         } catch {
             errorMessage = error.localizedDescription
@@ -4395,7 +4399,17 @@ final class DesktopStore: ObservableObject {
                             await self.refreshCompanyDashboard(restartEventStream: false)
                         }
                     }
-                    return
+                    let shouldReconnect = await MainActor.run { () -> Bool in
+                        guard self.companyEventStreamGeneration == generation,
+                              self.selectedCompanyID == companyID,
+                              self.shellMode == .company else { return false }
+                        self.companyStreamStatusMessage = nil
+                        return true
+                    }
+                    guard shouldReconnect else { return }
+                    await self.refreshCompanyDashboard(restartEventStream: false)
+                    try? await Task.sleep(for: .seconds(reconnectDelaySeconds))
+                    reconnectDelaySeconds = min(reconnectDelaySeconds * 2, 15)
                 } catch is CancellationError {
                     return
                 } catch {

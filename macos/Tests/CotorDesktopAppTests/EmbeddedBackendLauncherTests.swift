@@ -3,6 +3,20 @@ import Testing
 
 struct EmbeddedBackendLauncherTests {
     @Test
+    func backendHealthRequiresOwnedVersionedCotorServer() {
+        let owned = #"{"ok":true,"service":"cotor-app-server","owner":"cotor-desktop","version":"1.0.6","build":"1.0.6"}"#
+            .data(using: .utf8)!
+        let legacy = #"{"ok":true,"service":"cotor-app-server"}"#
+            .data(using: .utf8)!
+        let other = #"{"ok":true,"service":"other","owner":"cotor-desktop","version":"1.0.6","build":"1.0.6"}"#
+            .data(using: .utf8)!
+
+        #expect(isOwnedEmbeddedBackendHealthData(owned))
+        #expect(!isOwnedEmbeddedBackendHealthData(legacy))
+        #expect(!isOwnedEmbeddedBackendHealthData(other))
+    }
+
+    @Test
     func backendLaunchEnvironmentDoesNotInheritParentSecrets() {
         let env = sanitizedEmbeddedBackendEnvironment(
             processEnvironment: [

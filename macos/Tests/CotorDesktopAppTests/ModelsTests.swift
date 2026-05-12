@@ -4,6 +4,18 @@ import Testing
 
 struct ModelsTests {
     @Test
+    func desktopApiUrlBuilderKeepsQueryOutOfPath() throws {
+        let url = try DesktopAPI.makeURL(
+            baseURL: URL(string: "http://127.0.0.1:8787")!,
+            path: "api/app/marketing/policies",
+            query: [URLQueryItem(name: "companyId", value: "company-1")]
+        )
+
+        #expect(url.absoluteString == "http://127.0.0.1:8787/api/app/marketing/policies?companyId=company-1")
+        #expect(!url.path.contains("?"))
+    }
+
+    @Test
     func companySidebarDisclosureStateStartsCollapsed() {
         var state = CompanySidebarDisclosureState()
 
@@ -77,6 +89,64 @@ struct ModelsTests {
 
         #expect(!runtime.isManuallyStopped)
         #expect(runtime.isBudgetPaused)
+    }
+
+    @Test
+    func companyRuntimeSnapshotDecodesSchedulerAndAttentionFields() throws {
+        let json = """
+        {
+          "companyId": "company-1",
+          "status": "RUNNING",
+          "tickIntervalSeconds": 60,
+          "activeGoalCount": 1,
+          "activeIssueCount": 2,
+          "autonomyEnabledGoalCount": 1,
+          "backendKind": "LOCAL_COTOR",
+          "backendHealth": "healthy",
+          "backendLifecycleState": "RUNNING",
+          "todaySpentCents": 3,
+          "monthSpentCents": 9,
+          "consecutiveFailures": 2,
+          "adaptiveTickMs": 15000,
+          "resumableRunCount": 1,
+          "waitingApprovalCount": 1,
+          "blockedByPolicyCount": 2,
+          "blockedByCiCount": 3,
+          "quarantinedRunCount": 4,
+          "resumableRunIds": ["run-1"],
+          "pendingApprovalRunIds": ["run-2"],
+          "pendingIssueIds": ["issue-1"],
+          "blockedIssueIds": ["issue-2"],
+          "reviewQueueAttentionIds": ["review-1"],
+          "lastReconciliationAt": 12345
+        }
+        """.data(using: .utf8)!
+
+        let runtime = try JSONDecoder().decode(CompanyRuntimeSnapshotRecord.self, from: json)
+
+        #expect(runtime.consecutiveFailures == 2)
+        #expect(runtime.adaptiveTickMs == 15000)
+        #expect(runtime.resumableRunIds == ["run-1"])
+        #expect(runtime.pendingIssueIds == ["issue-1"])
+        #expect(runtime.blockedIssueIds == ["issue-2"])
+        #expect(runtime.lastReconciliationAt == 12345)
+    }
+
+    @Test
+    func dashboardPayloadRejectsMalformedCompanyRuntimeFields() {
+        let json = """
+        {
+          "companyRuntimes": [
+            {
+              "status": 42
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        #expect(throws: Error.self) {
+            _ = try JSONDecoder().decode(DashboardPayload.self, from: json)
+        }
     }
 
     @Test
