@@ -8,8 +8,8 @@ import com.cotor.app.CompanyRuntimeStatus
 import com.cotor.app.DesktopAppState
 import com.cotor.app.DesktopTaskStatus
 import com.cotor.app.ExecutionBackendKind
-import com.cotor.app.IssueStatus
 import com.cotor.app.IssueDependency
+import com.cotor.app.IssueStatus
 import com.cotor.app.ReviewQueueItem
 import com.cotor.app.ReviewQueueStatus
 import com.cotor.policy.PolicyEngine

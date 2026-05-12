@@ -63,9 +63,11 @@ object CompanyIssueReadiness {
         }
 
     private fun dependencyIds(issue: CompanyIssue, state: DesktopAppState): Set<String> =
-        (issue.dependsOn + state.issueDependencies
-            .filter { it.issueId == issue.id }
-            .map { it.dependsOnIssueId })
+        (
+            issue.dependsOn + state.issueDependencies
+                .filter { it.issueId == issue.id }
+                .map { it.dependsOnIssueId }
+            )
             .filter { it.isNotBlank() }
             .toSet()
 
