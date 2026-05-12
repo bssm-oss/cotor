@@ -1,10 +1,12 @@
 package com.cotor.app.runtime
 
+import com.cotor.app.AgentTask
 import com.cotor.app.Company
 import com.cotor.app.CompanyIssue
 import com.cotor.app.CompanyRuntimeSnapshot
 import com.cotor.app.CompanyRuntimeStatus
 import com.cotor.app.DesktopAppState
+import com.cotor.app.DesktopTaskStatus
 import com.cotor.app.ExecutionBackendKind
 import com.cotor.app.IssueStatus
 import com.cotor.app.ReviewQueueItem
@@ -317,4 +319,123 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.issues.single().runtimeDisposition shouldBe "QUARANTINED"
         bound.runtime.blockedIssueIds shouldContain issueId
     }
+
+    test("bind marks backlog issues runnable") {
+        val companyId = "company-backlog"
+        val issueId = "issue-backlog"
+        val bound = bindSingleIssueForRuntimeDisposition(
+            companyId = companyId,
+            issue = runtimeDispositionIssue(
+                issueId = issueId,
+                companyId = companyId,
+                status = IssueStatus.BACKLOG
+            )
+        )
+
+        bound.issues.single().runtimeDisposition shouldBe "RUNNABLE"
+        bound.runtime.pendingIssueIds shouldContain issueId
+    }
+
+    test("bind marks in-progress issues with active tasks active") {
+        val companyId = "company-active-in-progress"
+        val issueId = "issue-active-in-progress"
+        val bound = bindSingleIssueForRuntimeDisposition(
+            companyId = companyId,
+            issue = runtimeDispositionIssue(
+                issueId = issueId,
+                companyId = companyId,
+                status = IssueStatus.IN_PROGRESS
+            ),
+            tasks = listOf(
+                runtimeDispositionTask(
+                    taskId = "task-active-in-progress",
+                    issueId = issueId,
+                    status = DesktopTaskStatus.RUNNING
+                )
+            )
+        )
+
+        bound.issues.single().runtimeDisposition shouldBe "ACTIVE"
+        bound.runtime.pendingIssueIds shouldBe emptyList()
+    }
+
+    test("bind marks stranded in-progress issues runnable") {
+        val companyId = "company-stranded-in-progress"
+        val issueId = "issue-stranded-in-progress"
+        val bound = bindSingleIssueForRuntimeDisposition(
+            companyId = companyId,
+            issue = runtimeDispositionIssue(
+                issueId = issueId,
+                companyId = companyId,
+                status = IssueStatus.IN_PROGRESS
+            )
+        )
+
+        bound.issues.single().runtimeDisposition shouldBe "RUNNABLE"
+        bound.runtime.pendingIssueIds shouldContain issueId
+    }
 })
+
+private fun bindSingleIssueForRuntimeDisposition(
+    companyId: String,
+    issue: CompanyIssue,
+    tasks: List<AgentTask> = emptyList()
+) = Files.createTempDirectory("company-runtime-disposition").let { appHome ->
+    CompanyRuntimeBindingService(
+        durableRuntimeService = DurableRuntimeService(runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))),
+        actionStore = ActionStore { appHome },
+        policyEngine = PolicyEngine(PolicyStore { appHome }),
+        gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+    ).bind(
+        state = DesktopAppState(
+            companies = listOf(
+                Company(
+                    id = companyId,
+                    name = "Runtime Disposition",
+                    rootPath = ".",
+                    repositoryId = "repo-runtime-disposition",
+                    defaultBaseBranch = "main",
+                    backendKind = ExecutionBackendKind.LOCAL_COTOR,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            issues = listOf(issue),
+            tasks = tasks
+        ),
+        companyId = companyId,
+        runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+    )
+}
+
+private fun runtimeDispositionIssue(
+    issueId: String,
+    companyId: String,
+    status: IssueStatus
+): CompanyIssue = CompanyIssue(
+    id = issueId,
+    companyId = companyId,
+    goalId = "goal-runtime-disposition",
+    workspaceId = "workspace-runtime-disposition",
+    title = issueId,
+    description = issueId,
+    status = status,
+    createdAt = 1L,
+    updatedAt = 1L
+)
+
+private fun runtimeDispositionTask(
+    taskId: String,
+    issueId: String,
+    status: DesktopTaskStatus
+): AgentTask = AgentTask(
+    id = taskId,
+    workspaceId = "workspace-runtime-disposition",
+    issueId = issueId,
+    title = taskId,
+    prompt = "prompt",
+    agents = listOf("opencode"),
+    status = status,
+    createdAt = 1L,
+    updatedAt = 1L
+)

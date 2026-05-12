@@ -10476,7 +10476,14 @@ class DesktopAppService(
                     issue.goalId in activeGoalIds
                 }
                 .filter { issue -> issue.runtimeDisposition == "RUNNABLE" }
-                .filter { issue -> issue.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED) }
+                .filter { issue ->
+                    issue.status in setOf(
+                        IssueStatus.PLANNED,
+                        IssueStatus.BACKLOG,
+                        IssueStatus.DELEGATED,
+                        IssueStatus.IN_PROGRESS
+                    )
+                }
                 .filterNot { issue ->
                     issue.sourceSignal == "github-readiness"
                 }
@@ -10547,10 +10554,27 @@ class DesktopAppService(
             }
 
             val settledState = stateStore.load()
+            val idlePendingIssueReason = if (actions.isEmpty() && !hasActiveCompanyTasks(settledState, companyId)) {
+                val settledRuntimeForBinding = settledState.companyRuntimes.firstOrNull { it.companyId == companyId }
+                    ?: CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+                idlePendingCompanyIssueReason(
+                    boundIssues = runtimeBindingService.bind(
+                        state = settledState,
+                        companyId = companyId,
+                        runtime = settledRuntimeForBinding
+                    ).issues,
+                    state = settledState,
+                    companyId = companyId,
+                    activeGoalIds = activeGoalIds
+                )
+            } else {
+                null
+            }
             val effectiveLastAction = when {
                 actions.isNotEmpty() -> actions.joinToString(separator = ", ")
                 hasActiveCompanyTasks(settledState, companyId) -> "monitoring-active-runs"
                 hasPendingCompanyIssues(settledState, companyId) -> waitReasonSummary?.let { "idle-pending-issues:$it" }
+                    ?: idlePendingIssueReason?.let { "idle-pending-issues:$it" }
                     ?: "idle-pending-issues"
                 else -> "idle-no-work"
             }
@@ -10621,6 +10645,54 @@ class DesktopAppService(
             .entries
             .sortedBy { it.key }
             .joinToString(separator = ",") { (reason, count) -> "$reason=$count" }
+    }
+
+    private fun idlePendingCompanyIssueReason(
+        boundIssues: List<CompanyIssue>,
+        state: DesktopAppState,
+        companyId: String,
+        activeGoalIds: Set<String>
+    ): String? {
+        val pendingIssues = boundIssues.filter { issue ->
+            issue.companyId == companyId &&
+                issue.status != IssueStatus.DONE &&
+                issue.status != IssueStatus.CANCELED
+        }
+        if (pendingIssues.isEmpty()) {
+            return null
+        }
+        val issueCompanyById = state.issues.associate { it.id to it.companyId }
+        val activeIssueIds = state.tasks
+            .filter { it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED }
+            .mapNotNull { it.issueId }
+            .filter { issueCompanyById[it] == companyId }
+            .toSet()
+        val strandedInProgressCount = pendingIssues.count { issue ->
+            issue.status == IssueStatus.IN_PROGRESS && issue.id !in activeIssueIds
+        }
+        val runnableCount = pendingIssues.count { issue ->
+            issue.goalId in activeGoalIds &&
+                issue.runtimeDisposition == "RUNNABLE" &&
+                issue.id !in activeIssueIds
+        }
+        val blockedCount = pendingIssues.count { issue ->
+            issue.runtimeDisposition in setOf(
+                "WAITING_FOR_APPROVAL",
+                "WAITING_FOR_CI",
+                "QUARANTINED",
+                "RECOVERABLE"
+            )
+        }
+        val inactiveGoalRunnableCount = pendingIssues.count { issue ->
+            issue.runtimeDisposition == "RUNNABLE" && issue.goalId !in activeGoalIds
+        }
+        return when {
+            strandedInProgressCount > 0 -> "stranded-in-progress:$strandedInProgressCount"
+            runnableCount > 0 -> "runnable:$runnableCount"
+            blockedCount > 0 -> "blocked:$blockedCount"
+            inactiveGoalRunnableCount > 0 -> "inactive-goal:$inactiveGoalRunnableCount"
+            else -> "non-terminal:${pendingIssues.size}"
+        }
     }
 
     private fun hasQueuedCompanyIssues(state: DesktopAppState, companyId: String): Boolean =
