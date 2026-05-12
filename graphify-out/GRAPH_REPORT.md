@@ -1,7 +1,7 @@
 # Graph Report - cotor-runtime-queue-fix  (2026-05-12)
 
 ## Corpus Check
-- 354 files · ~592,304 words
+- 354 files · ~592,323 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -328,12 +328,12 @@
 10. `runtime()` - 26 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `userFacingIssueKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `userFacingDecisionTitle()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `localizedSourceKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
+- `language` --calls--> `userFacingIssueKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `userFacingDecisionTitle()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `localizedSourceKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
 - `preparedBrandMark()` --calls--> `Data`  [INFERRED]
   macos/Tools/generate-desktop-icon.swift → macos/Sources/CotorDesktopApp/DesktopAPI.swift
 - `sceneState()` --calls--> `PixelOfficeLayout`  [INFERRED]
