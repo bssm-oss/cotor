@@ -498,8 +498,9 @@ class GitWorkspaceService(
             }
         ) {
             try {
-                if (hasUncommittedChanges(worktreePath)) {
-                    runGit(worktreePath, "add", "-A")
+                val publishablePaths = publishableChangedPaths(worktreePath)
+                if (publishablePaths.isNotEmpty()) {
+                    runGit(worktreePath, "add", "-A", "--", *publishablePaths.toTypedArray())
                     runGit(worktreePath, "commit", "-m", buildCommitMessage(task.title, agentName))
                 }
 
@@ -1573,6 +1574,43 @@ class GitWorkspaceService(
             .all(::isBenignCotorArtifact)
     }
 
+    private suspend fun publishableChangedPaths(worktreePath: Path): List<String> {
+        val statusResult = runGit(
+            worktreePath,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            failOnError = false,
+            timeoutMs = 10_000
+        )
+        if (!statusResult.isSuccess) {
+            return emptyList()
+        }
+        return parsePorcelainStatusPaths(statusResult.stdout)
+            .filterNot(::isLocalOrGeneratedArtifactPath)
+            .distinct()
+    }
+
+    private fun parsePorcelainStatusPaths(stdout: String): List<String> {
+        val tokens = stdout.split('\u0000').filter { it.isNotBlank() }
+        val paths = mutableListOf<String>()
+        var index = 0
+        while (index < tokens.size) {
+            val token = tokens[index]
+            if (token.length >= 4) {
+                val status = token.take(2)
+                paths += token.drop(3)
+                if (status.any { it == 'R' || it == 'C' }) {
+                    tokens.getOrNull(index + 1)?.let(paths::add)
+                    index += 1
+                }
+            }
+            index += 1
+        }
+        return paths
+    }
+
     private fun isBenignCotorArtifact(statusLine: String): Boolean {
         if (statusLine.length < 4) {
             return false
@@ -1582,11 +1620,40 @@ class GitWorkspaceService(
         if (status != "??") {
             return false
         }
-        return path == ".cotor" ||
-            path.startsWith(".cotor/") ||
+        return isLocalOrGeneratedArtifactPath(path)
+    }
+
+    private fun isLocalOrGeneratedArtifactPath(rawPath: String): Boolean {
+        val path = rawPath.removePrefix("./")
+        val firstSegment = path.substringBefore('/')
+        return path == ".DS_Store" ||
+            path == ".env" ||
+            path.startsWith(".env.") ||
             path == "cotor.log" ||
+            path == "firebase-debug.log" ||
+            path == "local.properties" ||
+            path == "cotor.yaml" ||
             path.matches(Regex("""cotor\.\d{4}-\d{2}-\d{2}\.\d+\.log""")) ||
-            path == ".DS_Store"
+            firstSegment in setOf(
+                ".cotor",
+                ".omx",
+                ".claude",
+                ".codex",
+                ".gradle",
+                ".idea",
+                ".kiro",
+                ".omc",
+                ".playwright-mcp",
+                ".sisyphus",
+                ".vscode",
+                "build",
+                "dist",
+                "graphify-out",
+                "qa-artifacts",
+                "test-results"
+            ) ||
+            path.startsWith("macos/.build/") ||
+            path.startsWith("Path(child of ")
     }
 
     private suspend fun repositoryCommonRoot(worktreePath: Path): Path {

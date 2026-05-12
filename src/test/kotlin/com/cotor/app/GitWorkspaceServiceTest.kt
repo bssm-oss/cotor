@@ -1026,8 +1026,16 @@ class GitWorkspaceServiceTest : FunSpec({
         val worktree = Files.createTempDirectory("git-workspace-service-test")
         val processManager = FakeProcessManager(
             listOf(
-                FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, " M src/App.kt\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "add", "-A"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(
+                    listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"),
+                    ProcessResult(
+                        0,
+                        " M src/App.kt\u0000?? .cotor/runtime/state.json\u0000?? graphify-out/report.md\u0000?? Path(child of #1#2)/graphify-out/report.md\u0000?? cotor.log\u0000",
+                        "",
+                        true
+                    )
+                ),
+                FakeProcessManager.Step(listOf("git", "add", "-A", "--", "src/App.kt"), ProcessResult(0, "", "", true)),
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Ship desktop publish flow (codex)"), ProcessResult(0, "[branch abc1234] Ship desktop publish flow\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
@@ -1077,7 +1085,7 @@ class GitWorkspaceServiceTest : FunSpec({
         val worktree = Files.createTempDirectory("git-workspace-service-empty")
         val processManager = FakeProcessManager(
             listOf(
-                FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"), ProcessResult(0, "", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "0\n", "", true))
             )
@@ -1112,8 +1120,8 @@ class GitWorkspaceServiceTest : FunSpec({
         val worktree = Files.createTempDirectory("git-workspace-service-rebase-conflict")
         val processManager = FakeProcessManager(
             listOf(
-                FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, " M index.html\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "add", "-A"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"), ProcessResult(0, " M index.html\u0000", "", true)),
+                FakeProcessManager.Step(listOf("git", "add", "-A", "--", "index.html"), ProcessResult(0, "", "", true)),
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Retry conflicted publish (codex)"), ProcessResult(0, "[branch abc1234] Retry conflicted publish\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
@@ -1155,8 +1163,8 @@ class GitWorkspaceServiceTest : FunSpec({
         val worktree = Files.createTempDirectory("git-workspace-service-local-only")
         val processManager = FakeProcessManager(
             listOf(
-                FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, "?? smoke-artifact.txt\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "add", "-A"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"), ProcessResult(0, "?? smoke-artifact.txt\u0000", "", true)),
+                FakeProcessManager.Step(listOf("git", "add", "-A", "--", "smoke-artifact.txt"), ProcessResult(0, "", "", true)),
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Local-only execution (codex)"), ProcessResult(0, "[branch abc1234] Local-only execution\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
@@ -1193,8 +1201,8 @@ class GitWorkspaceServiceTest : FunSpec({
         val worktree = Files.createTempDirectory("git-workspace-service-no-auto-github")
         val processManager = FakeProcessManager(
             listOf(
-                FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, " M README.md\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "add", "-A"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"), ProcessResult(0, " M README.md\u0000", "", true)),
+                FakeProcessManager.Step(listOf("git", "add", "-A", "--", "README.md"), ProcessResult(0, "", "", true)),
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Do not auto publish to GitHub (codex)"), ProcessResult(0, "[branch abc1234] Do not auto publish to GitHub\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
@@ -1231,8 +1239,8 @@ class GitWorkspaceServiceTest : FunSpec({
         val worktree = Files.createTempDirectory("git-workspace-service-no-pr")
         val processManager = FakeProcessManager(
             listOf(
-                FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, " M README.md\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "add", "-A"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"), ProcessResult(0, " M README.md\u0000", "", true)),
+                FakeProcessManager.Step(listOf("git", "add", "-A", "--", "README.md"), ProcessResult(0, "", "", true)),
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Publish without PR (codex)"), ProcessResult(0, "[branch abc1234] Publish without PR\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
@@ -1279,8 +1287,8 @@ class GitWorkspaceServiceTest : FunSpec({
             markAsGitWorktree(worktree)
             val processManager = FakeProcessManager(
                 listOf(
-                    FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, " M src/App.kt\n", "", true)),
-                    FakeProcessManager.Step(listOf("git", "add", "-A"), ProcessResult(0, "", "", true)),
+                    FakeProcessManager.Step(listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"), ProcessResult(0, " M src/App.kt\u0000", "", true)),
+                    FakeProcessManager.Step(listOf("git", "add", "-A", "--", "src/App.kt"), ProcessResult(0, "", "", true)),
                     FakeProcessManager.Step(listOf("git", "commit", "-m", "Ship desktop publish flow (codex)"), ProcessResult(0, "[branch abc1234] Ship desktop publish flow\n", "", true)),
                     FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                     FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),

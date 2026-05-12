@@ -18,11 +18,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /workspace/build/libs/cotor-*-all.jar /app/cotor.jar
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
+RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD ["curl", "--fail", "--silent", "http://127.0.0.1:8787/health"]
 
-ENTRYPOINT ["java", "-jar", "/app/cotor.jar"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["app-server", "--host", "0.0.0.0", "--port", "8787"]

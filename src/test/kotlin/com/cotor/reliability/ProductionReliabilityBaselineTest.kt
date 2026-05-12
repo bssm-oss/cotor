@@ -28,6 +28,31 @@ class ProductionReliabilityBaselineTest {
             dockerfile.contains("CMD [\"app-server\", \"--host\", \"0.0.0.0\", \"--port\", \"8787\"]"),
             "Dockerfile should bind app-server to all container interfaces for published ports"
         )
+        assertTrue(
+            dockerfile.contains("COPY docker-entrypoint.sh /app/docker-entrypoint.sh") &&
+                dockerfile.contains("ENTRYPOINT [\"/app/docker-entrypoint.sh\"]"),
+            "Dockerfile should launch through the app-server entrypoint"
+        )
+    }
+
+    @Test
+    fun `docker entrypoint generates runtime token for non-loopback app server`() {
+        val dockerfile = Files.readString(Path.of("Dockerfile"))
+        val entrypoint = Files.readString(Path.of("docker-entrypoint.sh"))
+
+        assertTrue(
+            !dockerfile.contains("cotor-desktop-local-token") && !entrypoint.contains("cotor-desktop-local-token"),
+            "Docker startup should not bake the desktop development token into the container"
+        )
+        assertTrue(
+            entrypoint.contains("COTOR_APP_TOKEN") && entrypoint.contains("random_token"),
+            "Entrypoint should generate a runtime token when one is not provided"
+        )
+        assertTrue(
+            entrypoint.contains("! is_loopback_host \"\$host\"") &&
+                entrypoint.contains("[ \"\$command_name\" = \"app-server\" ]"),
+            "Entrypoint should only auto-generate tokens for non-loopback app-server binds"
+        )
     }
 
     @Test
