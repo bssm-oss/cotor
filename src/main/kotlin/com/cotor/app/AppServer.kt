@@ -2585,9 +2585,7 @@ private fun isBearerTokenMatch(header: String?, expected: String): Boolean {
 }
 
 private fun appServerHealthResponse(): HealthResponse =
-    HealthResponse(
-        ok = true,
-        service = "cotor-app-server",
+    HealthResponse(ok = true, service = "cotor-app-server").copy(
         owner = "cotor-desktop",
         version = CotorProperties.version,
         build = System.getProperty("cotor.build", CotorProperties.version)
