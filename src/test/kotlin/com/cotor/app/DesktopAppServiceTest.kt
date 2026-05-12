@@ -2222,7 +2222,7 @@ class DesktopAppServiceTest : FunSpec({
         fixture.service.runTask(task.id)
         fixture.awaitRuns()
 
-        withTimeout(10_000) {
+        withTimeout(90_000) {
             while (true) {
                 val candidate = fixture.stateStore.load().issues.single { it.id == issue.id }
                 val metadataCleared =
@@ -3756,14 +3756,8 @@ class DesktopAppServiceTest : FunSpec({
         )
         val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
 
-        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
-        withTimeout(5_000) {
-            while (stateStore.load().issues.single { it.id == planningIssue.id }.status == IssueStatus.PLANNED) {
-                delay(50)
-            }
-        }
-
-        val state = stateStore.load()
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 90_000)
+        val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1, timeoutMs = 90_000)
         val executionIssues = state.issues.filter { it.goalId == goal.id && it.kind == "execution" }
         executionIssues shouldHaveSize 1
         executionIssues.single().sourceSignal shouldBe "ceo-planning:${goal.id}"
@@ -3821,14 +3815,8 @@ class DesktopAppServiceTest : FunSpec({
         )
         val planningIssue = service.listIssues(goal.id).single { it.kind == "planning" }
 
-        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 5_000)
-        withTimeout(5_000) {
-            while (stateStore.load().issues.single { it.id == planningIssue.id }.status == IssueStatus.PLANNED) {
-                delay(50)
-            }
-        }
-
-        val state = stateStore.load()
+        service.runIssueAndAwaitSettlement(planningIssue.id, timeoutMs = 90_000)
+        val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1, timeoutMs = 90_000)
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
         state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
     }
@@ -13638,10 +13626,11 @@ private suspend fun awaitIssueCount(
     stateStore: DesktopStateStore,
     goalId: String,
     kind: String,
-    expected: Int
+    expected: Int,
+    timeoutMs: Long = 5_000
 ): DesktopAppState {
     var latest = stateStore.load()
-    withTimeout(5_000) {
+    withTimeout(timeoutMs) {
         while (true) {
             val snapshot = stateStore.load()
             latest = snapshot

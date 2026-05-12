@@ -8,6 +8,7 @@ package com.cotor.data.plugin
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
+import com.cotor.data.http.CotorHttpClients
 import com.cotor.data.process.ProcessManager
 import com.cotor.model.*
 import com.cotor.model.OpenCodeDefaults
@@ -27,7 +28,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
@@ -507,7 +507,7 @@ class LocalModelPlugin : AgentPlugin {
     )
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = HttpClient.newBuilder().build()
+    private val client = CotorHttpClients.newClient()
 
     override suspend fun execute(
         context: ExecutionContext,
@@ -723,7 +723,7 @@ class OpenCodePlugin : AgentPlugin {
     )
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val httpClient = HttpClient.newBuilder().build()
+    private val httpClient = CotorHttpClients.newClient()
 
     override suspend fun execute(
         context: ExecutionContext,
