@@ -84,6 +84,9 @@ object CompanyIssueReadiness {
                 dependency.status == IssueStatus.IN_REVIEW ||
                     dependency.status == IssueStatus.READY_FOR_CEO ||
                     dependency.status == IssueStatus.DONE
+            "approval" ->
+                dependency.status == IssueStatus.READY_FOR_CEO ||
+                    dependency.status == IssueStatus.DONE
             else -> dependency.status == IssueStatus.DONE
         }
     }

@@ -1244,14 +1244,12 @@ class GitWorkspaceServiceTest : FunSpec({
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Publish without PR (codex)"), ProcessResult(0, "[branch abc1234] Publish without PR\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
                 FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "1\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(0, "https://github.com/heodongun/cotor.git\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "ls-remote", "--heads", "origin", "master"), ProcessResult(0, "abc123\trefs/heads/master\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "config", "--get", "remote.origin.url"), ProcessResult(0, "https://github.com/heodongun/cotor.git\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "ls-remote", "--heads", "origin", "master"), ProcessResult(0, "abc123\trefs/heads/master\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "fetch", "--no-tags", "origin", "refs/heads/master:refs/remotes/origin/master"), ProcessResult(0, "", "", true)),
-                FakeProcessManager.Step(listOf("git", "rebase", "refs/remotes/origin/master"), ProcessResult(0, "Current branch codex/cotor/publish-without-pr/codex is up to date.\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
-                FakeProcessManager.Step(listOf("git", "rev-list", "--count", "refs/remotes/origin/master..HEAD"), ProcessResult(0, "1\n", "", true))
+                FakeProcessManager.Step(listOf("git", "rev-parse", "--git-common-dir"), ProcessResult(0, ".git\n", "", true)),
+                FakeProcessManager.Step(listOf("git", "status", "--porcelain"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(listOf("git", "rev-parse", "--abbrev-ref", "HEAD"), ProcessResult(0, "master\n", "", true)),
+                FakeProcessManager.Step(listOf("git", "merge", "--ff-only", "codex/cotor/publish-without-pr/codex"), ProcessResult(0, "Updating abc123..def456\nFast-forward\n", "", true)),
+                FakeProcessManager.Step(listOf("git", "rev-parse", "--git-common-dir"), ProcessResult(0, ".git\n", "", true)),
+                FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "def4567890\n", "", true))
             )
         )
         val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
@@ -1274,7 +1272,7 @@ class GitWorkspaceServiceTest : FunSpec({
             requirePullRequest = false
         )
 
-        publish.commitSha shouldBe "abc1234567890"
+        publish.commitSha shouldBe "def4567890"
         publish.pushedBranch shouldBe "codex/cotor/publish-without-pr/codex"
         publish.pullRequestNumber.shouldBeNull()
         publish.error.shouldBeNull()

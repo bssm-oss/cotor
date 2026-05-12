@@ -11,6 +11,8 @@ package com.cotor.app
  */
 
 import com.cotor.app.runtime.CompanyIssueReadiness
+import com.cotor.app.runtime.CompanyIssueReadinessOverrides
+import com.cotor.app.runtime.CompanyIssueReadinessResolver
 import com.cotor.app.runtime.CompanyRuntimeBindingService
 import com.cotor.app.runtime.CompanyRuntimeLoopDisposition
 import com.cotor.app.runtime.CompanyRuntimeLoopFailureDisposition
@@ -53,6 +55,7 @@ import com.cotor.runtime.actions.ActionRequest
 import com.cotor.runtime.actions.ActionScope
 import com.cotor.runtime.actions.ActionStore
 import com.cotor.runtime.actions.ActionSubject
+import com.cotor.runtime.durable.DurableRunStatus
 import com.cotor.runtime.durable.DurableRuntimeContext
 import com.cotor.runtime.durable.DurableRuntimeFlags
 import com.cotor.runtime.durable.DurableRuntimeService
@@ -93,6 +96,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.net.URI
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -159,6 +163,7 @@ private data class CeoPlannedIssue(
     val assigneeRole: String,
     val priority: Int = 3,
     val codeProducing: Boolean? = null,
+    val requiresPullRequest: Boolean? = null,
     val dependsOn: List<String> = emptyList(),
     val acceptanceCriteria: List<String> = emptyList(),
     val reviewRequired: Boolean = true,
@@ -170,6 +175,11 @@ private data class CeoChatIntakeDraft(
     val description: String,
     val successMetrics: List<String>,
     val ceoBrief: String
+)
+
+private data class DeterministicLocalEdit(
+    val relativePath: String,
+    val line: String
 )
 
 @kotlinx.serialization.Serializable
@@ -270,6 +280,8 @@ class DesktopAppService(
         private const val CEO_PLANNING_OUTPUT_FILE = ".cotor/runtime/ceo-plan.json"
         private const val CEO_PLANNING_OUTPUT_ARTIFACT_DIR = ".cotor/runtime/run-outputs"
         private const val CEO_PLANNING_MAX_OUTPUT_FILE_BYTES = 256L * 1024L
+        private const val CEO_PLANNING_OPENCODE_AGENT = "cotor-ceo-planner"
+        private const val CEO_PLANNING_OPENCODE_TIMEOUT_MS = 3L * 60_000L
         private const val RUN_PROCESS_TERMINATION_TIMEOUT_MS = 2_000L
         private const val QA_REVIEW_SOURCE_PREFIX = "qa-review:"
         private const val CEO_APPROVAL_SOURCE_PREFIX = "ceo-approval:"
@@ -1336,7 +1348,8 @@ class DesktopAppService(
                 }
                 val normalizedIssue = issue.copy(
                     executionIntent = inferredExecutionIntent,
-                    codeProducing = normalizedCodeProducing
+                    codeProducing = normalizedCodeProducing,
+                    requiresPullRequest = issue.requiresPullRequest ?: inferIssueRequiresPullRequest(issue.title, issue.description)
                 )
                 if (normalizedIssue == issue) {
                     issue
@@ -4461,6 +4474,7 @@ class DesktopAppService(
         rootPath: String,
         defaultBaseBranch: String? = null,
         autonomyEnabled: Boolean = true,
+        operatorAutomationMode: OperatorAutomationMode? = null,
         dailyBudgetCents: Int? = null,
         monthlyBudgetCents: Int? = null
     ): Company = stateMutex.withLock {
@@ -4507,6 +4521,7 @@ class DesktopAppService(
                 repositoryId = repository.id,
                 defaultBaseBranch = resolvedBranch,
                 autonomyEnabled = autonomyEnabled,
+                operatorAutomationMode = operatorAutomationMode ?: existing.operatorAutomationMode,
                 dailyBudgetCents = normalizeBudgetOverride(dailyBudgetCents, existing.dailyBudgetCents),
                 monthlyBudgetCents = normalizeBudgetOverride(monthlyBudgetCents, existing.monthlyBudgetCents),
                 updatedAt = now
@@ -4541,6 +4556,7 @@ class DesktopAppService(
             defaultBaseBranch = resolvedBranch,
             backendKind = initialBackendKind,
             autonomyEnabled = autonomyEnabled,
+            operatorAutomationMode = operatorAutomationMode ?: OperatorAutomationMode.AGENT_APPROVED,
             dailyBudgetCents = dailyBudgetCents?.takeIf { it > 0 },
             monthlyBudgetCents = monthlyBudgetCents?.takeIf { it > 0 },
             createdAt = now,
@@ -5817,6 +5833,13 @@ class DesktopAppService(
                 confirmFullAuto = confirmFullAuto,
                 confirmStaffing = confirmStaffing
             )
+            val response = summarizeOperatorCommandAsChat(companyId, trimmedMessage, commandResponse)
+            recordOperatorChatConversation(companyId, trimmedMessage, response)
+            return response
+        }
+
+        if (shouldRouteOperatorChatThroughCommand(normalized)) {
+            val commandResponse = runOperatorCommand(companyId = companyId, message = trimmedMessage)
             val response = summarizeOperatorCommandAsChat(companyId, trimmedMessage, commandResponse)
             recordOperatorChatConversation(companyId, trimmedMessage, response)
             return response
@@ -7809,7 +7832,18 @@ class DesktopAppService(
     }
 
     private fun looksLikeRuntimeStart(text: String): Boolean =
-        containsAny(text, "runtime start", "start runtime", "런타임 시작", "실행 시작", "가동")
+        containsAny(
+            text,
+            "runtime start", "start runtime", "start the runtime", "start company", "run now", "start now",
+            "런타임 시작", "실행 시작", "바로 실행", "실행해줘", "실행해 줘", "시작해줘", "시작해 줘", "가동"
+        )
+
+    private fun shouldRouteOperatorChatThroughCommand(text: String): Boolean =
+        looksLikeCompanyWorkIntakeRequest(text) ||
+            looksLikeRuntimeStart(text) ||
+            looksLikeRuntimeStop(text) ||
+            looksLikeBlockedIssueRetry(text) ||
+            looksLikeGitHubSync(text)
 
     private fun looksLikeRuntimeStop(text: String): Boolean =
         containsAny(text, "runtime stop", "stop runtime", "런타임 중지", "실행 중지", "정지")
@@ -8371,6 +8405,7 @@ class DesktopAppService(
             issueDependencies = state.issueDependencies.filterNot {
                 it.issueId == issueId || it.dependsOnIssueId == issueId
             },
+            companyRuntimeWorkItems = state.companyRuntimeWorkItems.filterNot { it.issueId == issueId },
             tasks = state.tasks.filterNot { it.id in deletedTaskIds },
             runs = state.runs.filterNot { it.id in deletedRunIds },
             reviewQueue = state.reviewQueue.filterNot { it.issueId == issueId || it.runId in deletedRunIds },
@@ -8671,7 +8706,10 @@ class DesktopAppService(
             planningIssue.id
         }
         val goalForMode = stateStore.load().goals.firstOrNull { it.id == goalId }
-        if (goalForMode?.autonomyEnabled == false) {
+        val explicitSequentialPlanAvailable = goalForMode
+            ?.description
+            ?.let(::buildExplicitSequentialStepPlanningPayload) != null
+        if (goalForMode?.autonomyEnabled == false || explicitSequentialPlanAvailable) {
             runCatching {
                 stateMutex.withLock {
                     val state = stateStore.load()
@@ -8708,9 +8746,14 @@ class DesktopAppService(
                         definitions = state.companyAgentDefinitions,
                         now = now
                     )
+                    val fallbackReason = if (goal.autonomyEnabled == false) {
+                        "Autonomous CEO planning is disabled, so Cotor used the deterministic fallback planner."
+                    } else {
+                        "Goal contains an explicit sequential Step plan, so Cotor used the deterministic fallback planner without waiting for provider planning."
+                    }
                     val updatedPlanningIssue = planningIssue.copy(
                         status = IssueStatus.DONE,
-                        transitionReason = "Autonomous CEO planning is disabled, so Cotor used the deterministic fallback planner.",
+                        transitionReason = fallbackReason,
                         updatedAt = now
                     )
                     val company = state.companies.firstOrNull { it.id == goal.companyId } ?: return@withLock
@@ -8721,13 +8764,13 @@ class DesktopAppService(
                         goalId = goal.id,
                         issueId = planningIssue.id,
                         title = "Fallback planned execution graph",
-                        summary = "Fallback planner decomposed \"${goal.title}\" into ${fallback.first.size} branchable issues because autonomous CEO planning is disabled.",
+                        summary = "Fallback planner decomposed \"${goal.title}\" into ${fallback.first.size} branchable issues.",
                         createdIssues = fallback.first.map { it.id },
                         assignments = fallback.first.mapNotNull { createdIssue ->
                             val assignee = profiles.firstOrNull { it.id == createdIssue.assigneeProfileId }?.roleName
                             assignee?.let { "${createdIssue.title} -> $it" }
                         },
-                        escalations = listOf(updatedPlanningIssue.transitionReason.orEmpty()),
+                        escalations = listOf(fallbackReason),
                         createdAt = now
                     )
                     val nextState = state.copy(
@@ -9185,6 +9228,12 @@ class DesktopAppService(
             stateStore.save(nextState)
             blockedIssue
         }
+
+    private fun isDependencySatisfied(
+        issue: CompanyIssue,
+        dependency: CompanyIssue,
+        state: DesktopAppState
+    ): Boolean = CompanyIssueReadiness.isDependencySatisfied(issue, dependency, state)
 
     private fun runnableIssueStatusRank(status: IssueStatus): Int = when (status) {
         IssueStatus.DELEGATED -> 0
@@ -10284,10 +10333,25 @@ class DesktopAppService(
                     updatedIssue
                 }
             }
+            val interruptedIssueIds = activeTasks.mapNotNullTo(linkedSetOf()) { it.issueId }
+            val updatedWorkItems = state.companyRuntimeWorkItems.map { workItem ->
+                if (workItem.companyId == companyId && workItem.issueId in interruptedIssueIds) {
+                    workItem.copy(
+                        status = CompanyRuntimeWorkItemStatus.READY,
+                        activeTaskId = null,
+                        durableRunId = null,
+                        reason = INTERRUPTED_ISSUE_REASON,
+                        updatedAt = now
+                    )
+                } else {
+                    workItem
+                }
+            }
             val nextState = state.copy(
                 issues = updatedIssues,
                 tasks = updatedTasks,
-                runs = updatedRuns
+                runs = updatedRuns,
+                companyRuntimeWorkItems = updatedWorkItems
             ).recordSignal(
                 source = "runtime",
                 message = "Interrupted ${activeTasks.size} active task(s) during runtime stop.",
@@ -10362,6 +10426,237 @@ class DesktopAppService(
         return stopCompanyRuntime(companyId)
     }
 
+    private suspend fun reconcileRuntimeWorkQueue(companyId: String): Int {
+        var changedCount = 0
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val now = System.currentTimeMillis()
+            val issuesById = state.issues.associateBy { it.id }
+            val latestRunsByTaskId = state.runs
+                .groupBy { it.taskId }
+                .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
+            val githubPullRequests = gitHubControlPlaneService.listPullRequests(companyId)
+            val providerBlockByPr = githubPullRequests.associateBy { it.number }
+            val providerBlockByIssueId = githubPullRequests
+                .filter { !it.issueId.isNullOrBlank() }
+                .associateBy { it.issueId!! }
+            val boundRunIds = state.issues
+                .filter { it.companyId == companyId }
+                .mapNotNull { it.durableRunId }
+                .toSet() + state.reviewQueue
+                .filter { it.companyId == companyId }
+                .map { it.runId }
+                .filter { it.isNotBlank() }
+                .toSet()
+            val durableRuns = boundRunIds.mapNotNull(durableRuntimeService::inspectRun)
+            val tasksByIssueId = state.tasks
+                .filter { it.issueId != null }
+                .groupBy { it.issueId!! }
+            val activeTaskByIssueId = state.tasks
+                .filter { it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED }
+                .mapNotNull { task ->
+                    val issueId = task.issueId ?: return@mapNotNull null
+                    issueId to task
+                }
+                .toMap()
+            val previousWorkItemsByIssueId = state.companyRuntimeWorkItems
+                .filter { it.companyId == companyId }
+                .associateBy { it.issueId }
+            val companyIssues = state.issues.filter { it.companyId == companyId }
+            val readinessByIssueId = companyIssues.associate { issue ->
+                val issuePullRequest = issue.pullRequestNumber?.let(providerBlockByPr::get)
+                    ?: providerBlockByIssueId[issue.id]
+                val matchingRun = durableRuns.firstOrNull { run ->
+                    run.runId == issue.durableRunId || run.pipelineName == issue.pipelineId
+                }
+                val retryDecision = resolveRecoverableRetryDecision(
+                    tasksByIssueId[issue.id].orEmpty(),
+                    latestRunsByTaskId,
+                    now
+                )
+                val readiness = CompanyIssueReadinessResolver.resolve(
+                    issue = issue,
+                    issuesById = issuesById,
+                    state = state,
+                    overrides = CompanyIssueReadinessOverrides(
+                        retryCooldown = issue.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED) &&
+                            retryDecision.mode == RecoverableRetryMode.WAITING,
+                        waitingForApproval = matchingRun?.status == DurableRunStatus.WAITING_FOR_APPROVAL ||
+                            matchingRun?.approvalPauses?.any { it.status.name == "PENDING" } == true,
+                        waitingForCi = issuePullRequest?.checksSummary?.contains("FAILURE", ignoreCase = true) == true,
+                        quarantined = matchingRun?.status == DurableRunStatus.FAILED && issue.status == IssueStatus.BLOCKED,
+                        activeTaskId = activeTaskByIssueId[issue.id]?.id,
+                        durableRunId = matchingRun?.runId ?: issue.durableRunId,
+                        providerReason = issuePullRequest?.checksSummary ?: issue.providerBlockReason
+                    )
+                )
+                issue.id to readiness
+            }
+            val promotedIssueIds = companyIssues
+                .filter { issue ->
+                    issue.status == IssueStatus.BACKLOG &&
+                        readinessByIssueId[issue.id]?.workItemStatus == CompanyRuntimeWorkItemStatus.READY
+                }
+                .map { it.id }
+                .toSet()
+            val nextIssues = state.issues.map { issue ->
+                val readiness = readinessByIssueId[issue.id]
+                when {
+                    issue.id in promotedIssueIds -> issue.copy(
+                        status = IssueStatus.PLANNED,
+                        blockedBy = emptyList(),
+                        transitionReason = "Dependencies satisfied; runtime queue promoted this issue for execution.",
+                        updatedAt = now
+                    )
+                    issue.companyId == companyId &&
+                        readiness?.workItemStatus == CompanyRuntimeWorkItemStatus.WAITING_DEPENDENCY &&
+                        issue.blockedBy != readiness.blockedByIssueIds -> issue.copy(
+                        blockedBy = readiness.blockedByIssueIds,
+                        transitionReason = readiness.reason,
+                        updatedAt = now
+                    )
+                    issue.companyId == companyId &&
+                        readiness?.workItemStatus == CompanyRuntimeWorkItemStatus.READY &&
+                        issue.blockedBy.isNotEmpty() &&
+                        issue.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED) -> issue.copy(
+                        blockedBy = emptyList(),
+                        updatedAt = now
+                    )
+                    else -> issue
+                }
+            }
+            val nextCompanyWorkItems = companyIssues.map { issue ->
+                CompanyIssueReadinessResolver.toWorkItem(
+                    readiness = readinessByIssueId.getValue(issue.id),
+                    issue = nextIssues.first { it.id == issue.id },
+                    previous = previousWorkItemsByIssueId[issue.id],
+                    now = now
+                )
+            }
+            val nextWorkItems = state.companyRuntimeWorkItems.filterNot { it.companyId == companyId } + nextCompanyWorkItems
+            val changed = nextIssues != state.issues || nextWorkItems != state.companyRuntimeWorkItems
+            if (!changed) {
+                return@withLock
+            }
+            changedCount = nextCompanyWorkItems.count { workItem ->
+                previousWorkItemsByIssueId[workItem.issueId] != workItem
+            } + promotedIssueIds.size
+            val promotedTitles = nextIssues
+                .filter { it.id in promotedIssueIds }
+                .joinToString(limit = 3) { it.title }
+            val nextState = state.copy(
+                issues = nextIssues,
+                companyRuntimeWorkItems = nextWorkItems
+            ).let { updated ->
+                if (promotedIssueIds.isEmpty()) {
+                    updated
+                } else {
+                    updated.recordCompanyActivity(
+                        companyId = companyId,
+                        source = "runtime-queue",
+                        title = "Runtime queue unlocked work",
+                        detail = "Promoted ${promotedIssueIds.size} dependency-ready issue(s): $promotedTitles",
+                        severity = "info"
+                    )
+                }
+            }.withDerivedMetrics()
+            stateStore.save(nextState)
+        }
+        return changedCount
+    }
+
+    private suspend fun recordRuntimeStallIfNeeded(companyId: String): Boolean =
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val activeGoals = state.goals.filter { it.companyId == companyId && it.status == GoalStatus.ACTIVE }
+            if (activeGoals.isEmpty() || hasActiveCompanyTasks(state, companyId)) {
+                return@withLock false
+            }
+            val activeGoalIds = activeGoals.map { it.id }.toSet()
+            val unfinishedIssues = state.issues.filter { issue ->
+                issue.companyId == companyId &&
+                    issue.goalId in activeGoalIds &&
+                    issue.status !in setOf(IssueStatus.DONE, IssueStatus.CANCELED)
+            }
+            if (unfinishedIssues.isEmpty()) {
+                return@withLock false
+            }
+            val itemsByIssueId = state.companyRuntimeWorkItems
+                .filter { it.companyId == companyId }
+                .associateBy { it.issueId }
+            val hasReadyOrRunning = unfinishedIssues.any { issue ->
+                itemsByIssueId[issue.id]?.status in setOf(
+                    CompanyRuntimeWorkItemStatus.READY,
+                    CompanyRuntimeWorkItemStatus.RUNNING
+                )
+            }
+            if (hasReadyOrRunning) {
+                return@withLock false
+            }
+            val allExplicitlyWaitingOrBlocked = unfinishedIssues.all { issue ->
+                val item = itemsByIssueId[issue.id]
+                item != null &&
+                    item.status in setOf(
+                        CompanyRuntimeWorkItemStatus.WAITING_DEPENDENCY,
+                        CompanyRuntimeWorkItemStatus.WAITING_APPROVAL,
+                        CompanyRuntimeWorkItemStatus.WAITING_CI,
+                        CompanyRuntimeWorkItemStatus.RETRY_COOLDOWN,
+                        CompanyRuntimeWorkItemStatus.QUARANTINED
+                    ) &&
+                    !item.reason.isNullOrBlank()
+            }
+            if (allExplicitlyWaitingOrBlocked) {
+                return@withLock false
+            }
+            val now = System.currentTimeMillis()
+            val detail = "Runtime is RUNNING with ${unfinishedIssues.size} unfinished issue(s), but no issue is ready, running, or explicitly waiting on a known gate."
+            val dedupeKey = "runtime-stalled:$companyId"
+            val updatedSignals = if (state.problemSignals.any { it.companyId == companyId && it.dedupeKey == dedupeKey }) {
+                state.problemSignals.map { signal ->
+                    if (signal.companyId == companyId && signal.dedupeKey == dedupeKey) {
+                        signal.copy(
+                            detail = detail,
+                            status = CompanyProblemSignalStatus.OPEN,
+                            lastSeenAt = now,
+                            updatedAt = now
+                        )
+                    } else {
+                        signal
+                    }
+                }
+            } else {
+                state.problemSignals + CompanyProblemSignal(
+                    id = UUID.randomUUID().toString(),
+                    companyId = companyId,
+                    kind = "runtime-stalled",
+                    title = "Runtime stalled",
+                    detail = detail,
+                    severity = "high",
+                    confidence = 0.95,
+                    source = "runtime-queue",
+                    dedupeKey = dedupeKey,
+                    firstSeenAt = now,
+                    lastSeenAt = now,
+                    createdAt = now,
+                    updatedAt = now
+                )
+            }
+            val withSignal = state.copy(problemSignals = updatedSignals)
+            val nextState = if (withSignal.hasRecentCompanyActivity(companyId, "Runtime stalled", detail)) {
+                withSignal
+            } else {
+                withSignal.recordCompanyActivity(
+                    companyId = companyId,
+                    source = "runtime-queue",
+                    title = "Runtime stalled",
+                    detail = detail,
+                    severity = "error"
+                )
+            }.withDerivedMetrics()
+            stateStore.save(nextState)
+            true
+        }
+
     suspend fun runCompanyRuntimeTick(companyId: String): CompanyRuntimeSnapshot {
         val tickMutex = stateMutex.withLock {
             companyRuntimeTickMutexes.getOrPut(companyId) { Mutex() }
@@ -10405,6 +10700,10 @@ class DesktopAppService(
             }
             if (agentApprovedPublishApprovals > 0) {
                 actions += "agent-approved-publish:$agentApprovedPublishApprovals"
+            }
+            val reconciledRuntimeQueue = reconcileRuntimeWorkQueue(companyId)
+            if (reconciledRuntimeQueue > 0) {
+                actions += "queue-reconciled:$reconciledRuntimeQueue"
             }
             val resolvedGitHubReadinessIssues = resolveGitHubReadinessBlockedIssues(companyId)
             if (resolvedGitHubReadinessIssues > 0) {
@@ -10487,6 +10786,10 @@ class DesktopAppService(
                         }
                         is RuntimeCommand.StartIssue -> Unit
                     }
+                }
+                val queueAfterPlanning = reconcileRuntimeWorkQueue(companyId)
+                if (queueAfterPlanning > 0) {
+                    actions += "queue-after-planning:$queueAfterPlanning"
                 }
             }
 
@@ -10605,8 +10908,22 @@ class DesktopAppService(
                     is RuntimeCommand.EnsurePlanningIssue -> Unit
                 }
             }
+            val queueAfterStarts = reconcileRuntimeWorkQueue(companyId)
+            if (queueAfterStarts > 0) {
+                actions += "queue-after-start:$queueAfterStarts"
+            }
 
             val settledState = stateStore.load()
+            if (recordRuntimeStallIfNeeded(companyId)) {
+                actions += "runtime-stalled"
+            }
+            val hasActiveTasks = hasActiveCompanyTasks(settledState, companyId)
+            if (
+                hasActiveTasks &&
+                actions.none { it.startsWith("started:") || it.startsWith("start-blocked:") }
+            ) {
+                actions += "monitoring-active-runs"
+            }
             val idlePendingIssueReason = if (actions.isEmpty() && !hasActiveCompanyTasks(settledState, companyId)) {
                 val settledRuntimeForBinding = settledState.companyRuntimes.firstOrNull { it.companyId == companyId }
                     ?: CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
@@ -10625,7 +10942,7 @@ class DesktopAppService(
             }
             val effectiveLastAction = when {
                 actions.isNotEmpty() -> actions.joinToString(separator = ", ")
-                hasActiveCompanyTasks(settledState, companyId) -> "monitoring-active-runs"
+                hasActiveTasks -> "monitoring-active-runs"
                 hasPendingCompanyIssues(settledState, companyId) -> waitReasonSummary?.let { "idle-pending-issues:$it" }
                     ?: idlePendingIssueReason?.let { "idle-pending-issues:$it" }
                     ?: "idle-pending-issues"
@@ -10681,6 +10998,13 @@ class DesktopAppService(
             ignoreCase = true
         ) == true
         if (issue.updatedAt >= tickStartedAt && reopenedLegacyMergeConflict) return "state-recovery"
+        val recoveredCeoApprovalGate =
+            issue.kind.equals("approval", ignoreCase = true) &&
+                (
+                    issue.transitionReason?.contains("CEO approval can run again", ignoreCase = true) == true ||
+                        issue.transitionReason?.contains("ready for CEO approval", ignoreCase = true) == true
+                    )
+        if (issue.updatedAt >= tickStartedAt && recoveredCeoApprovalGate) return "state-recovery"
         val recoveredInterruptedIssueDuringThisTick = issue.updatedAt >= tickStartedAt &&
             issue.providerBlockReason?.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) == true
         if (recoveredInterruptedIssueDuringThisTick) return "state-recovery"
@@ -12088,9 +12412,18 @@ class DesktopAppService(
     private fun isOpenCodePromptFileArgumentOrderFailure(message: String): Boolean =
         message.contains("file not found: execute the instructions in the attached prompt file", ignoreCase = true)
 
+    private fun isOpenCodeMissingAssistantText(message: String): Boolean =
+        message.contains("opencode run completed without assistant text", ignoreCase = true) ||
+            (
+                message.contains("step_start", ignoreCase = true) &&
+                    !message.contains("\"type\":\"text\"", ignoreCase = true) &&
+                    !message.contains("```json", ignoreCase = true)
+                )
+
     private fun isRecoverableOpenCodeCliFailure(message: String): Boolean =
         message.contains("provider returned error") ||
             isOpenCodePromptFileArgumentOrderFailure(message) ||
+            isOpenCodeMissingAssistantText(message) ||
             (
                 message.contains("decimalerror") &&
                     message.contains("invalid argument: [object object]")
@@ -12171,8 +12504,23 @@ class DesktopAppService(
         return failureSignals(task, run).any { message ->
             message.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) ||
                 isOpenCodeInterruptedBeforePlanningText(message) ||
+                isOpenCodeMissingAssistantText(message) ||
                 CodexDefaults.isRetiredModelAliasFailure(message) ||
                 isOpenCodePromptFileArgumentOrderFailure(message)
+        }
+    }
+
+    private fun shouldKeepRetryingTransientProviderFailure(task: AgentTask, run: AgentRun?): Boolean {
+        if (task.status != DesktopTaskStatus.FAILED && task.status != DesktopTaskStatus.PARTIAL) {
+            return false
+        }
+        return failureSignals(task, run).any { message ->
+            message.contains("provider returned error", ignoreCase = true) ||
+                message.contains("could not connect to the server", ignoreCase = true) ||
+                message.contains("network connection was lost", ignoreCase = true) ||
+                message.contains("connection refused", ignoreCase = true) ||
+                message.contains("submitted too quickly", ignoreCase = true) ||
+                message.contains("timed out", ignoreCase = true)
         }
     }
 
@@ -12204,6 +12552,14 @@ class DesktopAppService(
         }
 
         if (consecutiveFailures >= RECOVERABLE_RETRY_MAX_ATTEMPTS) {
+            if (shouldKeepRetryingTransientProviderFailure(latestTask, latestRun)) {
+                val retryAt = latestTask.updatedAt + computeRecoverableRetryDelayMs(consecutiveFailures)
+                return RecoverableRetryDecision(
+                    mode = if (now >= retryAt) RecoverableRetryMode.READY else RecoverableRetryMode.WAITING,
+                    consecutiveFailures = consecutiveFailures,
+                    retryAt = retryAt
+                )
+            }
             if (shouldResetRecoverableRetryBudget(latestTask, latestRun)) {
                 return RecoverableRetryDecision(
                     mode = RecoverableRetryMode.READY,
@@ -14019,8 +14375,36 @@ class DesktopAppService(
         )
     }
 
-    private fun requiresGitHubPullRequest(issue: CompanyIssue?, state: DesktopAppState): Boolean =
-        requiresCodePublish(issue) && state.backendSettings.codePublishMode == CodePublishMode.REQUIRE_GITHUB_PR
+    private fun requiresGitHubPullRequest(issue: CompanyIssue?, state: DesktopAppState): Boolean {
+        if (!requiresCodePublish(issue)) {
+            return false
+        }
+        return when (issue?.requiresPullRequest) {
+            false -> false
+            true -> true
+            null -> {
+                if (state.backendSettings.codePublishMode != CodePublishMode.REQUIRE_GITHUB_PR) {
+                    return false
+                }
+                val company = issue?.companyId?.let { companyId ->
+                    state.companies.firstOrNull { it.id == companyId }
+                }
+                val repository = issue?.let { repositoryForIssue(it, state) }
+                if (
+                    company?.operatorAutomationMode == OperatorAutomationMode.FULL_AUTO &&
+                    repository?.remoteUrl.isNullOrBlank()
+                ) {
+                    return false
+                }
+                true
+            }
+        }
+    }
+
+    private fun repositoryForIssue(issue: CompanyIssue, state: DesktopAppState): ManagedRepository? {
+        val workspace = state.workspaces.firstOrNull { it.id == issue.workspaceId } ?: return null
+        return state.repositories.firstOrNull { it.id == workspace.repositoryId }
+    }
 
     private fun effectiveBackendConfig(company: Company?, state: DesktopAppState): BackendConnectionConfig {
         val kind = company?.backendKind ?: state.backendSettings.defaultBackendKind
@@ -14607,8 +14991,24 @@ class DesktopAppService(
                 requestedModel = normalizedModel
             )
         }
-        return agent.copy(parameters = agent.parameters + mapOf("model" to normalizedModel))
+        val modelAgent = agent.copy(parameters = agent.parameters + mapOf("model" to normalizedModel))
+        if (
+            issue.sourceSignal == CEO_PLANNING_SOURCE &&
+            definition.agentCli.equals("opencode", ignoreCase = true)
+        ) {
+            return modelAgent.copy(
+                timeout = minOf(modelAgent.timeout, CEO_PLANNING_OPENCODE_TIMEOUT_MS),
+                parameters = modelAgent.parameters + ceoPlanningOpenCodeParameters(normalizedModel)
+            )
+        }
+        return modelAgent
     }
+
+    private fun ceoPlanningOpenCodeParameters(model: String): Map<String, String> =
+        mapOf(
+            "agent" to CEO_PLANNING_OPENCODE_AGENT,
+            "ephemeralOpencodeProfile" to "planning-only"
+        )
 
     private fun gemma4CodeProducingAgentViaOpenCode(
         fallbackAgent: AgentConfig,
@@ -15318,7 +15718,12 @@ class DesktopAppService(
                         )
                     }
 
-                var executionResult = executeWithPrompt(assignedPrompt)
+                var executionResult = runDeterministicLocalEditIfAvailable(
+                    issue = issue,
+                    task = task,
+                    worktreePath = binding.worktreePath,
+                    agentName = effectiveAgent.name
+                ) ?: executeWithPrompt(assignedPrompt)
                 val publishRequired = requiresCodePublish(issue)
                 val noDiffRetryEnabled = publishRequired &&
                     effectiveAgent.parameters["executionMode"] == OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
@@ -15990,6 +16395,125 @@ class DesktopAppService(
         }
     }
 
+    private suspend fun runDeterministicLocalEditIfAvailable(
+        issue: CompanyIssue?,
+        task: AgentTask,
+        worktreePath: Path,
+        agentName: String
+    ): AgentResult? {
+        val edit = deterministicLocalEditFor(issue, task) ?: return null
+        val startedAt = System.currentTimeMillis()
+        return withContext(Dispatchers.IO) {
+            val root = worktreePath.toAbsolutePath().normalize()
+            val target = root.resolve(edit.relativePath).normalize()
+            if (!target.startsWith(root)) {
+                return@withContext AgentResult(
+                    agentName = agentName,
+                    isSuccess = false,
+                    output = null,
+                    error = "Deterministic local edit target escapes the worktree: ${edit.relativePath}",
+                    duration = (System.currentTimeMillis() - startedAt).coerceAtLeast(1),
+                    metadata = mapOf("deterministicLocalEdit" to "true")
+                )
+            }
+            target.parent?.let(Files::createDirectories)
+            val existing = if (Files.exists(target)) {
+                Files.readString(target, StandardCharsets.UTF_8)
+            } else {
+                ""
+            }
+            val alreadyPresent = existing.lineSequence().any { it.trim() == edit.line.trim() }
+            if (!alreadyPresent) {
+                val prefix = if (existing.isNotEmpty() && !existing.endsWith("\n")) "\n" else ""
+                Files.writeString(
+                    target,
+                    "$prefix${edit.line}\n",
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND
+                )
+            }
+            AgentResult(
+                agentName = agentName,
+                isSuccess = true,
+                output = if (alreadyPresent) {
+                    "${edit.relativePath} already contains ${edit.line}"
+                } else {
+                    "Appended ${edit.line} to ${edit.relativePath}"
+                },
+                error = null,
+                duration = (System.currentTimeMillis() - startedAt).coerceAtLeast(1),
+                metadata = mapOf(
+                    "deterministicLocalEdit" to "true",
+                    "targetPath" to edit.relativePath,
+                    "line" to edit.line,
+                    "alreadyPresent" to alreadyPresent.toString()
+                )
+            )
+        }
+    }
+
+    private fun deterministicLocalEditFor(issue: CompanyIssue?, task: AgentTask): DeterministicLocalEdit? {
+        if (issue == null || issue.requiresPullRequest != false) return null
+        if (!issue.kind.equals("execution", ignoreCase = true)) return null
+        val text = listOf(
+            issue.title,
+            issue.description,
+            issue.acceptanceCriteria.joinToString("\n"),
+            task.prompt
+        ).joinToString("\n")
+        if (!text.contains("append", ignoreCase = true) && !text.contains("추가", ignoreCase = true)) {
+            return null
+        }
+        val line = Regex(""""([^"]*Step\s+\d{1,3}\s+complete[^"]*)"""", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?: return null
+        val relativePath = Regex("""(?<![\w./-])([\w./-]+\.md)(?![\w./-])""")
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim('.', ',', ';', ':')
+            ?: return null
+        return DeterministicLocalEdit(relativePath = relativePath, line = line)
+    }
+
+    private fun inferIssueRequiresPullRequest(title: String, description: String): Boolean? {
+        val text = "$title\n$description".lowercase()
+        val disablesRemotePublish = listOf(
+            "no external deployment",
+            "no external publishing",
+            "no github pr",
+            "without github pr",
+            "do not create a github pr",
+            "do not open a github pr",
+            "do not perform external publishing",
+            "do not push",
+            "remote push",
+            "원격 push",
+            "원격 푸시",
+            "외부 배포",
+            "github pr",
+            "깃허브 pr"
+        ).any { marker -> marker in text }
+        if (disablesRemotePublish && listOf("하지 말", "금지", "no ", "without", "do not").any { it in text }) {
+            return false
+        }
+        val explicitlyRequiresPr = listOf(
+            "open a github pr",
+            "create a github pr",
+            "github pull request",
+            "pull request",
+            "pr을",
+            "pr를",
+            "pr "
+        ).any { marker -> marker in text } &&
+            listOf("필수", "must", "required", "open", "create").any { marker -> marker in text }
+        return if (explicitlyRequiresPr) true else null
+    }
+
     private fun buildCeoChatIntakeDraft(company: Company, rawMessage: String): CeoChatIntakeDraft {
         val compactMessage = rawMessage
             .lineSequence()
@@ -16435,6 +16959,26 @@ class DesktopAppService(
         if (deterministicFollowUp != null) {
             return deterministicFollowUp
         }
+        buildExplicitSequentialStepPlanningPayload(goal.description)?.let { explicitPlan ->
+            val issues = materializePlannedIssues(
+                goal = goal,
+                workspace = workspace,
+                profiles = profiles,
+                plan = explicitPlan,
+                now = now,
+                planningSource = "fallback"
+            )
+            val dependencies = issues.flatMap { issue ->
+                issue.dependsOn.map { dependencyId ->
+                    IssueDependency(
+                        id = UUID.randomUUID().toString(),
+                        issueId = issue.id,
+                        dependsOnIssueId = dependencyId
+                    )
+                }
+            }
+            return issues to dependencies
+        }
         val participants = buildPlanningParticipants(goal.companyId, profiles, definitions)
         val plan = taskPlanner.buildPlanForParticipants(
             title = goal.title,
@@ -16486,6 +17030,56 @@ class DesktopAppService(
             }
         }
         return issues to dependencies
+    }
+
+    private fun buildExplicitSequentialStepPlanningPayload(prompt: String): CeoPlanningPayload? {
+        val rangeMatch = Regex("""Step\s*0*(\d{1,3}).{0,80}?Step\s*0*(\d{1,3})""", RegexOption.IGNORE_CASE)
+            .find(prompt)
+            ?: return null
+        val start = rangeMatch.groupValues.getOrNull(1)?.toIntOrNull() ?: return null
+        val end = rangeMatch.groupValues.getOrNull(2)?.toIntOrNull() ?: return null
+        if (start <= 0 || end < start) {
+            return null
+        }
+        val count = end - start + 1
+        if (count !in 2..50) {
+            return null
+        }
+        val width = maxOf(rangeMatch.groupValues[1].length, rangeMatch.groupValues[2].length, 2)
+        val targetPath = Regex("""[\w./-]+\.md""")
+            .find(prompt)
+            ?.value
+            ?.trim('.', ',', ';')
+            ?: "the requested project file"
+        val issues = (start..end).map { step ->
+            val stepLabel = step.toString().padStart(width, '0')
+            val refId = "step-$stepLabel"
+            val previousRef = if (step == start) null else "step-${(step - 1).toString().padStart(width, '0')}"
+            CeoPlannedIssue(
+                refId = refId,
+                title = "Step $stepLabel complete",
+                description = buildString {
+                    append("Append or verify the line \"Step $stepLabel complete\" in $targetPath.")
+                    append(" Keep this slice limited to Step $stepLabel and do not perform external publishing.")
+                },
+                kind = "execution",
+                assigneeRole = "Builder",
+                priority = 2,
+                codeProducing = true,
+                requiresPullRequest = false,
+                dependsOn = listOfNotNull(previousRef),
+                acceptanceCriteria = listOf(
+                    "$targetPath contains the line \"Step $stepLabel complete\".",
+                    "No external deployment, GitHub PR, or remote push is performed for this step."
+                ),
+                reviewRequired = true,
+                approvalRequired = true
+            )
+        }
+        return CeoPlanningPayload(
+            goalSummary = "Complete sequential steps ${start.toString().padStart(width, '0')} through ${end.toString().padStart(width, '0')}",
+            issues = issues
+        )
     }
 
     private fun buildDeterministicMergeConflictFollowUpIssues(
@@ -16692,7 +17286,11 @@ class DesktopAppService(
             appendLine()
             company?.let {
                 appendLine("Company: ${it.name}")
-                appendLine("Repository root: ${it.rootPath}")
+                val workspaceName = runCatching { Path.of(it.rootPath).fileName?.toString() }
+                    .getOrNull()
+                    ?.takeIf { name -> name.isNotBlank() }
+                    ?: it.name
+                appendLine("Workspace: $workspaceName")
                 appendLine("Base branch: ${it.defaultBaseBranch}")
             }
             goal?.let {
@@ -16745,11 +17343,11 @@ class DesktopAppService(
             appendLine("```json")
             appendLine("""{"goalSummary":"...","issues":[{"refId":"exec-1","title":"...","description":"...","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":true,"dependsOn":[],"acceptanceCriteria":["..."],"reviewRequired":true,"approvalRequired":true}]}""")
             appendLine("```")
-            appendLine("Also write the exact same JSON object to $CEO_PLANNING_OUTPUT_FILE if you use tools or create files.")
-            appendLine("Do not write planning JSON to the prompt file or any other path.")
+            appendLine("Do not use tools, inspect files, or create files for this planning task.")
+            appendLine("Return the planning JSON only as assistant text inside the fenced JSON block.")
             memoryBundle?.let { memory ->
                 appendLine()
-                appendLine(renderMemorySections(memory))
+                appendLine(renderPlanningMemorySections(memory))
             }
             appendLine()
             appendLine("Do not include prose outside the JSON block.")
@@ -16944,6 +17542,15 @@ class DesktopAppService(
                     else -> true
                 }
             }
+            val requiresPullRequest = plannedIssue.requiresPullRequest
+                ?: inferIssueRequiresPullRequest(
+                    title = plannedIssue.title,
+                    description = listOf(
+                        goal.description,
+                        plannedIssue.description,
+                        plannedIssue.acceptanceCriteria.joinToString("\n")
+                    ).joinToString("\n")
+                )
             plannedIssue to CompanyIssue(
                 id = issueId,
                 companyId = goal.companyId,
@@ -16962,6 +17569,7 @@ class DesktopAppService(
                 riskLevel = if (codeProducing) "medium" else "low",
                 codeProducing = codeProducing,
                 executionIntent = executionIntent,
+                requiresPullRequest = requiresPullRequest,
                 transitionReason = if (planningSource == "ceo") {
                     "CEO planning run assigned this issue to ${assignee?.roleName ?: plannedIssue.assigneeRole}."
                 } else {
@@ -17517,8 +18125,10 @@ class DesktopAppService(
             it.companyId == companyId && it.status != IssueStatus.DONE && it.status != IssueStatus.CANCELED
         }
         val hasActiveAutonomousGoals = openGoals.any { it.autonomyEnabled && it.status == GoalStatus.ACTIVE }
-        val companyHasHistory = state.goals.any { it.companyId == companyId } || state.companyActivity.any { it.companyId == companyId }
-        if (!companyHasHistory || hasActiveTasks || unresolvedIssues.isNotEmpty() || hasActiveAutonomousGoals) {
+        if (hasActiveTasks || unresolvedIssues.isNotEmpty() || hasActiveAutonomousGoals) {
+            return null
+        }
+        if (company.operatorAutomationMode != OperatorAutomationMode.FULL_AUTO) {
             return null
         }
 
@@ -18253,6 +18863,28 @@ class DesktopAppService(
         appendLine("Agent memory:")
         appendLine(summarizeForPrompt(memory.agentMemory, 220))
     }.trimEnd()
+
+    private fun renderPlanningMemorySections(memory: CompanyMemorySnapshot): String =
+        renderMemorySections(
+            memory.copy(
+                companyMemory = redactPlanningMemoryForProvider(memory.companyMemory),
+                workflowMemory = redactPlanningMemoryForProvider(memory.workflowMemory),
+                projectMemory = redactPlanningMemoryForProvider(memory.projectMemory),
+                teamMemory = redactPlanningMemoryForProvider(memory.teamMemory),
+                agentMemory = redactPlanningMemoryForProvider(memory.agentMemory)
+            )
+        )
+
+    private fun redactPlanningMemoryForProvider(text: String): String =
+        text.lineSequence()
+            .mapNotNull { line ->
+                val trimmed = line.trim()
+                when {
+                    trimmed.startsWith("rootPath=") -> null
+                    else -> line
+                }
+            }
+            .joinToString("\n")
 
     private fun buildCompanyMemorySnapshot(
         state: DesktopAppState,
@@ -18995,7 +19627,7 @@ class DesktopAppService(
     private fun commandBackedAgentConfig(name: String): AgentConfig? {
         val resolvedExecutable = resolveExecutablePath(name)?.toString() ?: return null
         val normalizedName = name.trim().lowercase()
-        val timeoutMs = if (normalizedName == "opencode") 45 * 60_000L else 15 * 60_000L
+        val timeoutMs = if (normalizedName == "opencode") 12 * 60_000L else 15 * 60_000L
         return AgentConfig(
             name = normalizedName,
             pluginClass = "com.cotor.data.plugin.CommandPlugin",
@@ -19260,6 +19892,26 @@ class DesktopAppService(
         return "$CEO_PLANNING_INVALID_OUTPUT: CEO planning task ${task.id} run $runRef ended with ${finalStatus.name} but did not produce a valid planning JSON block.$diagnostics Output summary: $summary"
     }
 
+    private fun shouldAttemptCeoPlanningRepair(
+        finalStatus: DesktopTaskStatus,
+        resolution: CeoPlanningPayloadResolution,
+        repairAttempts: Int
+    ): Boolean {
+        if (repairAttempts > 0 || resolution.payload != null) {
+            return false
+        }
+        if (finalStatus == DesktopTaskStatus.COMPLETED) {
+            return true
+        }
+        return resolution.diagnostics.any { diagnostic ->
+            val lower = diagnostic.lowercase()
+            lower.contains("no complete json object found") ||
+                lower.contains("json object did not match") ||
+                lower.contains("output was compacted") ||
+                lower.contains("output was truncated")
+        }
+    }
+
     private fun isRetryableCeoPlanningInterruption(
         task: AgentTask,
         run: AgentRun?,
@@ -19267,6 +19919,50 @@ class DesktopAppService(
     ): Boolean =
         finalStatus != DesktopTaskStatus.COMPLETED &&
             failureSignals(task, run).any(::isOpenCodeInterruptedBeforePlanningText)
+
+    private fun deterministicCeoPlanningFallbackReason(
+        task: AgentTask,
+        run: AgentRun?,
+        finalStatus: DesktopTaskStatus
+    ): String? {
+        if (finalStatus == DesktopTaskStatus.COMPLETED) {
+            return null
+        }
+        val matchingSignal = failureSignals(task, run).firstOrNull { signal ->
+            val lower = signal.lowercase()
+            lower.contains("opencode_rate_limit") ||
+                lower.contains("opencode_permission_blocked") ||
+                lower.contains("freeusagelimiterror") ||
+                lower.contains("rate limit exceeded") ||
+                lower.contains("retry-after") ||
+                lower.contains("permission.asked") ||
+                (lower.contains("external_directory") && lower.contains("ask")) ||
+                lower.contains("interactive permission") ||
+                lower.contains("no assistant planning text") ||
+                lower.contains("no planning text") ||
+                lower.contains("stdout 0 bytes") ||
+                lower.contains("empty stdout") ||
+                lower.contains("execution timeout after") ||
+                lower.contains("timed out waiting for")
+        } ?: return null
+        return "CEO planning provider did not produce a plan (${matchingSignal.take(220)}); Cotor used the deterministic fallback planner."
+    }
+
+    private fun isContinuousAutonomousGoal(goal: CompanyGoal): Boolean =
+        goal.autonomyEnabled &&
+            (
+                goal.operatingPolicy.orEmpty().startsWith("auto-loop:continuous:") ||
+                    goal.title.startsWith("CEO continuous improvement cycle")
+                )
+
+    private fun shouldUseAutonomousCeoPlanningFallback(
+        goal: CompanyGoal,
+        task: AgentTask,
+        run: AgentRun?,
+        finalStatus: DesktopTaskStatus
+    ): Boolean =
+        isContinuousAutonomousGoal(goal) &&
+            deterministicCeoPlanningFallbackReason(task, run, finalStatus) != null
 
     private fun ceoPlanningInterruptedReason(
         task: AgentTask,
@@ -19327,8 +20023,7 @@ class DesktopAppService(
             appendLine("$CEO_PLANNING_REPAIR_MARKER:")
             appendLine("The previous CEO planning run did not produce valid planning JSON, so this is the only automatic repair attempt.")
             appendLine("Return JSON only inside one ```json fenced block. Do not use tools, do not inspect files, and do not write prose outside the JSON block.")
-            appendLine("If you still create a file, write the exact same JSON object to $CEO_PLANNING_OUTPUT_FILE in the current worktree and still return the fenced JSON.")
-            appendLine("Do not write planning JSON to the prompt file or any other path.")
+            appendLine("Do not create files or write planning JSON anywhere; return the fenced JSON as assistant text only.")
             appendLine("Required schema:")
             appendLine("```json")
             appendLine("""{"goalSummary":"...","issues":[{"refId":"exec-1","title":"...","description":"...","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":true,"dependsOn":[],"acceptanceCriteria":["..."],"reviewRequired":true,"approvalRequired":true}]}""")
@@ -19385,7 +20080,8 @@ class DesktopAppService(
             val company = state.companies.firstOrNull { it.id == currentIssue.companyId } ?: return@withLock
             val workspace = state.workspaces.firstOrNull { it.id == currentIssue.workspaceId } ?: return@withLock
             val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
-            if (isRuntimeInterruptedTaskResult(task, finalStatus, primaryRun)) {
+            val useAutonomousPlanningFallback = shouldUseAutonomousCeoPlanningFallback(goal, task, primaryRun, finalStatus)
+            if (!useAutonomousPlanningFallback && isRuntimeInterruptedTaskResult(task, finalStatus, primaryRun)) {
                 val interruptedPlanningIssue = currentIssue.copy(
                     status = IssueStatus.PLANNED,
                     providerBlockReason = null,
@@ -19459,13 +20155,86 @@ class DesktopAppService(
                 return@withLock
             }
 
-            val planningResolution = if (finalStatus == DesktopTaskStatus.COMPLETED) {
-                resolveCeoPlanningPayload(task, primaryRun)
-            } else {
-                CeoPlanningPayloadResolution(payload = null, diagnostics = listOf("task ended with ${finalStatus.name}"))
+            val planningResolution = resolveCeoPlanningPayload(task, primaryRun).let { resolution ->
+                if (finalStatus == DesktopTaskStatus.COMPLETED) {
+                    resolution
+                } else {
+                    resolution.copy(diagnostics = listOf("task ended with ${finalStatus.name}") + resolution.diagnostics)
+                }
             }
             val parsedPlan = planningResolution.payload
             if (parsedPlan == null) {
+                deterministicCeoPlanningFallbackReason(task, primaryRun, finalStatus)?.let { fallbackReason ->
+                    val fallback = buildFallbackGoalIssues(
+                        state = state,
+                        goal = goal,
+                        workspace = workspace,
+                        profiles = profiles,
+                        definitions = state.companyAgentDefinitions,
+                        now = now
+                    )
+                    if (fallback.first.isNotEmpty()) {
+                        val updatedPlanningIssue = currentIssue.copy(
+                            status = IssueStatus.DONE,
+                            transitionReason = fallbackReason,
+                            providerBlockReason = null,
+                            updatedAt = now
+                        )
+                        val decision = GoalOrchestrationDecision(
+                            id = UUID.randomUUID().toString(),
+                            companyId = company.id,
+                            goalId = goal.id,
+                            issueId = currentIssue.id,
+                            title = "Fallback planned execution graph",
+                            summary = "Fallback planner decomposed \"${goal.title}\" into ${fallback.first.size} branchable issues because CEO planning provider output was unavailable.",
+                            createdIssues = fallback.first.map { it.id },
+                            assignments = fallback.first.mapNotNull { createdIssue ->
+                                val assignee = profiles.firstOrNull { it.id == createdIssue.assigneeProfileId }?.roleName
+                                assignee?.let { "${createdIssue.title} -> $it" }
+                            },
+                            escalations = listOf(fallbackReason),
+                            createdAt = now
+                        )
+                        traceEvents += buildCompanyAutomationTraceEvent(
+                            issue = currentIssue,
+                            goal = goal,
+                            oldStatus = currentIssue.status,
+                            newStatus = updatedPlanningIssue.status,
+                            source = "syncPlanningIssueFromTask",
+                            reason = fallbackReason,
+                            latestTask = task,
+                            latestRun = primaryRun,
+                            retryEligible = false
+                        )
+                        val nextState = applyVerificationProjection(
+                            state.copy(
+                                issues = state.issues.filterNot { it.id == currentIssue.id } + updatedPlanningIssue + fallback.first,
+                                issueDependencies = state.issueDependencies.filterNot { dependency ->
+                                    dependency.issueId == currentIssue.id
+                                } + fallback.second,
+                                goalDecisions = state.goalDecisions + decision
+                            )
+                        ).recordCompanyActivity(
+                            companyId = company.id,
+                            projectContextId = currentIssue.projectContextId,
+                            goalId = goal.id,
+                            issueId = currentIssue.id,
+                            source = "fallback-planning",
+                            title = "Fallback planned goal",
+                            detail = fallbackReason,
+                            severity = "warning"
+                        ).withDerivedMetrics()
+                        stateStore.save(nextState)
+                        val projectContext = nextState.projectContexts.firstOrNull { it.id == currentIssue.projectContextId }
+                        if (projectContext != null) {
+                            writeCompanyContextSnapshot(nextState, company, projectContext)
+                        }
+                        if (nextState.companyRuntimes.firstOrNull { it.companyId == currentIssue.companyId }?.status == CompanyRuntimeStatus.RUNNING) {
+                            runtimeContinuationCompanyId = currentIssue.companyId
+                        }
+                        return@withLock
+                    }
+                }
                 val retryableInterruption = isRetryableCeoPlanningInterruption(task, primaryRun, finalStatus)
                 if (retryableInterruption) {
                     val latestRunsByTaskId = state.runs
@@ -19598,7 +20367,7 @@ class DesktopAppService(
                     candidate.issueId == currentIssue.id &&
                         candidate.prompt.contains(CEO_PLANNING_REPAIR_MARKER)
                 }
-                if (finalStatus == DesktopTaskStatus.COMPLETED && repairAttempts == 0) {
+                if (shouldAttemptCeoPlanningRepair(finalStatus, planningResolution, repairAttempts)) {
                     val repairTask = buildCeoPlanningRepairTask(
                         state = state,
                         issue = currentIssue,
@@ -22059,6 +22828,13 @@ class DesktopAppService(
         issue: CompanyIssue? = null
     ): Boolean {
         if (error.startsWith("No changes to publish") && task?.issueId == null && issue == null) {
+            return true
+        }
+        if (
+            issue != null &&
+            !requiresGitHubPullRequest(issue, state) &&
+            error == "No GitHub remote configured; kept local commit only"
+        ) {
             return true
         }
         if (state.backendSettings.codePublishMode != CodePublishMode.ALLOW_LOCAL_GIT) {

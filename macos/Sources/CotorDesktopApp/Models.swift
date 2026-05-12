@@ -1680,6 +1680,7 @@ struct CreateCompanyPayload: Codable {
     let rootPath: String
     let defaultBaseBranch: String?
     let autonomyEnabled: Bool
+    let operatorAutomationMode: String?
     let dailyBudgetCents: Int?
     let monthlyBudgetCents: Int?
 }
@@ -1885,7 +1886,7 @@ struct MockSeed {
                 monthlyBudgetCents: 20000,
                 createdAt: 0,
                 updatedAt: 0,
-                operatorAutomationMode: "AGENT_APPROVED"
+                operatorAutomationMode: "FULL_AUTO"
             )
         ],
         companyAgentDefinitions: [

@@ -267,6 +267,61 @@ class AgentCapabilityGuardTest : FunSpec({
         write.requiresApproval shouldBe true
     }
 
+    test("local-only publish uses git write capability instead of github pr capability") {
+        val appHome = Files.createTempDirectory("capability-guard-local-publish-home")
+        val allowedRoot = Files.createTempDirectory("capability-local-publish-repo")
+        val store = DesktopStateStore { appHome }
+        store.save(
+            DesktopAppState(
+                companies = listOf(testCompany().copy(rootPath = allowedRoot.toString())),
+                companyAgentDefinitions = listOf(testAgent()),
+                agentCapabilityProfiles = listOf(
+                    AgentCapabilityProfile(
+                        companyId = "company-1",
+                        agentId = "agent-1",
+                        settings = defaultAgentCapabilitySettings() + mapOf(
+                            CapabilityKey.GIT_WRITE to AgentCapabilitySetting(
+                                enabled = true,
+                                mode = CapabilityMode.AUTO,
+                                pathAllowlist = listOf(allowedRoot.toString())
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val guard = AgentCapabilityGuard(store)
+
+        val localPublish = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.GIT_PUBLISH,
+                label = "git.publish:local-branch",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                metadata = mapOf(
+                    "requirePullRequest" to "false",
+                    "worktreePath" to allowedRoot.resolve(".cotor/worktrees/task/opencode").toString()
+                )
+            )
+        )
+        val pullRequestPublish = guard.simulate(
+            ActionRequest(
+                kind = ActionKind.GIT_PUBLISH,
+                label = "git.publish:pr-branch",
+                subject = ActionSubject(companyId = "company-1", agentName = "agent-1"),
+                metadata = mapOf(
+                    "requirePullRequest" to "true",
+                    "worktreePath" to allowedRoot.resolve(".cotor/worktrees/task/opencode").toString()
+                )
+            )
+        )
+
+        localPublish.capability shouldBe CapabilityKey.GIT_WRITE
+        localPublish.allowed shouldBe true
+        localPublish.requiresApproval shouldBe false
+        pullRequestPublish.capability shouldBe CapabilityKey.GITHUB_PR_CREATE
+        pullRequestPublish.requiresApproval shouldBe true
+    }
+
     test("scoped dangerous actions deny missing subjects and honor recorded approval") {
         val appHome = Files.createTempDirectory("capability-guard-subject-home")
         val store = DesktopStateStore { appHome }

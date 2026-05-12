@@ -772,7 +772,7 @@ final class DesktopStore: ObservableObject {
     }
 
     var selectedOperatorAutomationMode: String {
-        selectedCompany?.operatorAutomationMode ?? "AGENT_APPROVED"
+        selectedCompany?.operatorAutomationMode ?? "FULL_AUTO"
     }
 
     func scopedOpsMetrics(companyID: String?) -> OpsMetricSnapshotRecord {

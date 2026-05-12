@@ -57,6 +57,25 @@ interface ProcessManager {
         workingDirectory = workingDirectory,
         onStart = onStart
     )
+
+    suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path? = null,
+        onStart: ((Long) -> Unit)? = null,
+        onStdoutChunk: ((String) -> Unit)?,
+        onStderrChunk: ((String) -> Unit)?
+    ): ProcessResult = executeProcess(
+        command = command,
+        input = input,
+        environment = environment,
+        timeout = timeout,
+        workingDirectory = workingDirectory,
+        onStart = onStart,
+        onStdoutChunk = onStdoutChunk
+    )
 }
 
 /**
@@ -91,6 +110,26 @@ class CoroutineProcessManager(
         workingDirectory: Path?,
         onStart: ((Long) -> Unit)?,
         onStdoutChunk: ((String) -> Unit)?
+    ): ProcessResult = executeProcess(
+        command = command,
+        input = input,
+        environment = environment,
+        timeout = timeout,
+        workingDirectory = workingDirectory,
+        onStart = onStart,
+        onStdoutChunk = onStdoutChunk,
+        onStderrChunk = null
+    )
+
+    override suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?,
+        onStdoutChunk: ((String) -> Unit)?,
+        onStderrChunk: ((String) -> Unit)?
     ): ProcessResult = withContext(Dispatchers.IO) {
         val resolvedCommand = resolveProcessCommand(command)
         val processBuilder = ProcessBuilder(resolvedCommand)
@@ -152,6 +191,7 @@ class CoroutineProcessManager(
                     synchronized(stderrBuffer) {
                         stderrBuffer.append(chunk, 0, read)
                     }
+                    onStderrChunk?.invoke(String(chunk, 0, read))
                 }
             }
         }

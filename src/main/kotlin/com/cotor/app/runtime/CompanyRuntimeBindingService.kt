@@ -2,8 +2,10 @@ package com.cotor.app.runtime
 
 import com.cotor.app.CompanyIssue
 import com.cotor.app.CompanyRuntimeSnapshot
+import com.cotor.app.CompanyRuntimeWorkItemStatus
 import com.cotor.app.DesktopAppState
 import com.cotor.app.DesktopTaskStatus
+import com.cotor.app.IssueStatus
 import com.cotor.app.ReviewQueueItem
 import com.cotor.policy.PolicyEngine
 import com.cotor.providers.github.GitHubControlPlaneService
@@ -85,12 +87,22 @@ class CompanyRuntimeBindingService(
         val providerBlockByIssueId = githubPullRequests
             .filter { !it.issueId.isNullOrBlank() }
             .associateBy { it.issueId!! }
+        val workItemsByIssueId = state.companyRuntimeWorkItems
+            .filter { it.companyId == companyId }
+            .associateBy { it.issueId }
         val issueCompanyById = state.issues.associate { it.id to it.companyId }
         val activeIssueIds = state.tasks
             .filter { it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED }
             .mapNotNull { it.issueId }
             .filter { issueCompanyById[it] == companyId }
             .toSet()
+        val activeTaskByIssueId = state.tasks
+            .filter { it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED }
+            .mapNotNull { task ->
+                val issueId = task.issueId ?: return@mapNotNull null
+                issueId to task.id
+            }
+            .toMap()
         val boundIssues = state.issues.map { issue ->
             if (issue.companyId != companyId) {
                 issue
@@ -100,7 +112,8 @@ class CompanyRuntimeBindingService(
                 val matchingRun = runs.firstOrNull { run ->
                     run.runId == issue.durableRunId || run.pipelineName == issue.pipelineId
                 }
-                val runtimeDisposition = CompanyIssueReadiness.runtimeDisposition(
+                val storedWorkItem = workItemsByIssueId[issue.id]
+                val readinessDisposition = CompanyIssueReadiness.runtimeDisposition(
                     issue = issue,
                     state = state,
                     pullRequestChecksSummary = issuePullRequest?.checksSummary,
@@ -108,6 +121,17 @@ class CompanyRuntimeBindingService(
                     hasPendingApprovalPause = matchingRun?.approvalPauses?.any { it.status.name == "PENDING" } == true,
                     hasActiveTask = issue.id in activeIssueIds
                 )
+                val runtimeDisposition = when (storedWorkItem?.status) {
+                    CompanyRuntimeWorkItemStatus.WAITING_DEPENDENCY -> CompanyIssueReadiness.WAITING_FOR_DEPENDENCY
+                    CompanyRuntimeWorkItemStatus.READY -> CompanyIssueReadiness.RUNNABLE
+                    CompanyRuntimeWorkItemStatus.RUNNING -> CompanyIssueReadiness.ACTIVE
+                    CompanyRuntimeWorkItemStatus.WAITING_APPROVAL -> CompanyIssueReadiness.WAITING_FOR_APPROVAL
+                    CompanyRuntimeWorkItemStatus.WAITING_CI -> CompanyIssueReadiness.WAITING_FOR_CI
+                    CompanyRuntimeWorkItemStatus.RETRY_COOLDOWN -> CompanyIssueReadiness.RECOVERABLE
+                    CompanyRuntimeWorkItemStatus.QUARANTINED -> CompanyIssueReadiness.QUARANTINED
+                    CompanyRuntimeWorkItemStatus.DONE -> CompanyIssueReadiness.TERMINAL
+                    null -> readinessDisposition
+                }
                 issue.copy(
                     durableRunId = matchingRun?.runId ?: issue.durableRunId,
                     approvalPauseId = matchingRun?.approvalPauses?.firstOrNull { it.status.name == "PENDING" }?.id ?: issue.approvalPauseId,
@@ -145,7 +169,11 @@ class CompanyRuntimeBindingService(
                 )
             }
         }
-        val pendingIssueIds = boundIssues.filter { it.runtimeDisposition == CompanyIssueReadiness.RUNNABLE }.map { it.id }
+        val pendingIssueIds = boundIssues
+            .filter { it.runtimeDisposition == CompanyIssueReadiness.RUNNABLE }
+            .filter { it.status in setOf(IssueStatus.BACKLOG, IssueStatus.PLANNED, IssueStatus.DELEGATED, IssueStatus.IN_PROGRESS) }
+            .filterNot { activeTaskByIssueId.containsKey(it.id) }
+            .map { it.id }
         val pendingApprovalIssueIds = boundIssues
             .filter { it.runtimeDisposition == CompanyIssueReadiness.WAITING_FOR_APPROVAL && it.durableRunId !in pendingApprovalRunIds }
             .map { it.id }

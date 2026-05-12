@@ -224,7 +224,54 @@ class OpenCodePluginTest : FunSpec({
         result.output shouldBe "```json\n{\"goalSummary\":\"Plan\",\"issues\":[]}\n```"
     }
 
-    test("tool-only opencode event streams produce empty assistant output") {
+    test("keeps assistant text when opencode appends DecimalError after text") {
+        val plugin = OpenCodePlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = when (command) {
+                listOf("opencode", "models") -> ProcessResult(
+                    exitCode = 1,
+                    stdout = "",
+                    stderr = "models lookup unavailable",
+                    isSuccess = false
+                )
+                else -> {
+                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    ProcessResult(
+                        exitCode = 1,
+                        stdout = """
+                            {"type":"step_start","timestamp":1,"sessionID":"session-1"}
+                            {"type":"text","text":"```json\n{\"ok\":true}\n```"}
+                            {"type":"error","error":{"name":"UnknownError","data":{"message":"Error: [DecimalError] Invalid argument: [object Object]"}}}
+                        """.trimIndent(),
+                        stderr = "",
+                        isSuccess = false
+                    )
+                }
+            }
+        }
+
+        val result = plugin.execute(
+            ExecutionContext(
+                agentName = "opencode",
+                input = "hello",
+                timeout = 1_000,
+                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                environment = emptyMap()
+            ),
+            processManager
+        )
+
+        result.output shouldBe "```json\n{\"ok\":true}\n```"
+    }
+
+    test("tool-only opencode event streams fail instead of pretending success") {
         val plugin = OpenCodePlugin()
         val processManager = object : ProcessManager {
             override suspend fun executeProcess(
@@ -257,18 +304,20 @@ class OpenCodePluginTest : FunSpec({
             }
         }
 
-        val result = plugin.execute(
-            ExecutionContext(
-                agentName = "opencode",
-                input = "hello",
-                timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
-                environment = emptyMap()
-            ),
-            processManager
-        )
+        val error = shouldThrow<ProcessExecutionException> {
+            plugin.execute(
+                ExecutionContext(
+                    agentName = "opencode",
+                    input = "hello",
+                    timeout = 1_000,
+                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    environment = emptyMap()
+                ),
+                processManager
+            )
+        }
 
-        result.output shouldBe ""
+        error.stderr shouldBe "opencode run completed without assistant text"
     }
 
     test("retries with an available opencode model when the configured model is missing") {
@@ -376,6 +425,71 @@ class OpenCodePluginTest : FunSpec({
         commands[0] shouldBe listOf("opencode", "models")
         result.output shouldBe "fixed"
         result.processId shouldBe 101L
+    }
+
+    test("retries with fallback model when opencode provider rate limit is reported") {
+        val plugin = OpenCodePlugin()
+        val runModels = mutableListOf<String>()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult {
+                return when {
+                    command == listOf("opencode", "models") -> ProcessResult(
+                        exitCode = 0,
+                        stdout = """
+                            ${OpenCodeDefaults.DEFAULT_MODEL}
+                            deepseek/deepseek-v4-flash
+                        """.trimIndent(),
+                        stderr = "",
+                        isSuccess = true
+                    )
+                    command.take(2) == listOf("opencode", "run") -> {
+                        val model = command[command.indexOf("--model") + 1]
+                        runModels += model
+                        if (model == OpenCodeDefaults.DEFAULT_MODEL) {
+                            ProcessResult(
+                                exitCode = 143,
+                                stdout = """{"type":"text","text":"partial"}""",
+                                stderr = """FreeUsageLimitError: Rate limit exceeded. retry-after=21907""",
+                                isSuccess = false,
+                                processId = 301L
+                            )
+                        } else {
+                            assertOpenCodeRunCommand(command, "deepseek/deepseek-v4-flash", "hello")
+                            ProcessResult(
+                                exitCode = 0,
+                                stdout = """{"type":"text","text":"fallback ok"}""",
+                                stderr = "",
+                                isSuccess = true,
+                                processId = 302L
+                            )
+                        }
+                    }
+                    else -> error("unexpected command: $command")
+                }
+            }
+        }
+
+        val result = plugin.execute(
+            ExecutionContext(
+                agentName = "opencode",
+                input = "hello",
+                timeout = 1_000,
+                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                environment = emptyMap()
+            ),
+            processManager
+        )
+
+        runModels shouldBe listOf(OpenCodeDefaults.DEFAULT_MODEL, "deepseek/deepseek-v4-flash")
+        result.output shouldBe "fallback ok"
+        result.processId shouldBe 302L
     }
 
     test("passes local Ollama Gemma model to opencode without cloud fallback") {
@@ -651,21 +765,163 @@ class OpenCodePluginTest : FunSpec({
             workDir.toFile().deleteRecursively()
         }
     }
+
+    test("writes planning-only opencode agent config and passes agent flag") {
+        val workDir = Files.createTempDirectory("cotor-test-opencode-config-")
+        val plugin = OpenCodePlugin()
+        var sawAgentFlag = false
+        var configExistedDuringRun = false
+        var configTextDuringRun = ""
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = when (command) {
+                listOf("opencode", "models") -> ProcessResult(
+                    exitCode = 1,
+                    stdout = "",
+                    stderr = "models lookup unavailable",
+                    isSuccess = false
+                )
+                else -> {
+                    sawAgentFlag = command.windowed(2).any { it == listOf("--agent", "cotor-plan") }
+                    val configPath = workDir.resolve(".opencode").resolve("opencode.json")
+                    configExistedDuringRun = Files.exists(configPath)
+                    configTextDuringRun = if (configExistedDuringRun) Files.readString(configPath) else ""
+                    ProcessResult(
+                        exitCode = 0,
+                        stdout = """{"type":"text","text":"done"}""",
+                        stderr = "",
+                        isSuccess = true
+                    )
+                }
+            }
+        }
+
+        try {
+            plugin.execute(
+                ExecutionContext(
+                    agentName = "opencode",
+                    input = "hello",
+                    timeout = 1_000,
+                    parameters = mapOf(
+                        "model" to OpenCodeDefaults.DEFAULT_MODEL,
+                        "agent" to "cotor-plan",
+                        "ephemeralOpencodeProfile" to "planning-only"
+                    ),
+                    environment = emptyMap(),
+                    workingDirectory = workDir
+                ),
+                processManager
+            )
+
+            sawAgentFlag shouldBe true
+            configExistedDuringRun shouldBe true
+            configTextDuringRun.contains("cotor-plan") shouldBe true
+            configTextDuringRun.contains("\"external_directory\": \"deny\"") shouldBe true
+            configTextDuringRun.contains("\"question\": \"deny\"") shouldBe true
+            configTextDuringRun.contains("\"task\": false") shouldBe true
+            configTextDuringRun.contains("\"task\": \"deny\"") shouldBe true
+            configTextDuringRun.contains("\"read\": false") shouldBe true
+            Files.exists(workDir.resolve(".opencode").resolve("opencode.json")) shouldBe false
+        } finally {
+            workDir.toFile().deleteRecursively()
+        }
+    }
+
+    test("planning-only opencode aborts interactive permission requests") {
+        val workDir = Files.createTempDirectory("cotor-test-opencode-permission-")
+        val plugin = OpenCodePlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = ProcessResult(
+                exitCode = 0,
+                stdout = "",
+                stderr = "",
+                isSuccess = true
+            )
+
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?,
+                onStdoutChunk: ((String) -> Unit)?,
+                onStderrChunk: ((String) -> Unit)?
+            ): ProcessResult {
+                if (command == listOf("opencode", "models")) {
+                    return ProcessResult(
+                        exitCode = 1,
+                        stdout = "",
+                        stderr = "models lookup unavailable",
+                        isSuccess = false
+                    )
+                }
+                onStderrChunk?.invoke(
+                    """service=permission permission=external_directory pattern=/tmp/repo/* action={"permission":"external_directory","pattern":"*","action":"ask"} permission.asked"""
+                )
+                return ProcessResult(
+                    exitCode = 143,
+                    stdout = "",
+                    stderr = "permission.asked",
+                    isSuccess = false
+                )
+            }
+        }
+
+        try {
+            val error = shouldThrow<ProcessExecutionException> {
+                plugin.execute(
+                    ExecutionContext(
+                        agentName = "opencode",
+                        input = "hello",
+                        timeout = 1_000,
+                        parameters = mapOf(
+                            "model" to OpenCodeDefaults.DEFAULT_MODEL,
+                            "agent" to "cotor-plan",
+                            "ephemeralOpencodeProfile" to "planning-only"
+                        ),
+                        environment = emptyMap(),
+                        workingDirectory = workDir
+                    ),
+                    processManager
+                )
+            }
+            error.stderr.contains("OPENCODE_PERMISSION_BLOCKED") shouldBe true
+        } finally {
+            workDir.toFile().deleteRecursively()
+        }
+    }
 })
 
 private const val OPENCODE_PROMPT_INSTRUCTION = "Execute the instructions in the attached prompt file."
 
 private fun assertOpenCodeRunCommand(command: List<String>, model: String, expectedPrompt: String) {
-    command.size shouldBe 8
+    command.size shouldBe 11
     command[0] shouldBe "opencode"
     command[1] shouldBe "run"
-    command[2] shouldBe "--model"
-    command[3] shouldBe model
-    command[4] shouldBe "--format"
-    command[5] shouldBe "json"
-    command[6] shouldBe OPENCODE_PROMPT_INSTRUCTION
-    command[7].startsWith("--file=") shouldBe true
-    Files.readString(Path.of(command[7].removePrefix("--file="))) shouldBe expectedPrompt
+    command[2] shouldBe "--print-logs"
+    command[3] shouldBe "--log-level"
+    command[4] shouldBe "ERROR"
+    command[5] shouldBe "--model"
+    command[6] shouldBe model
+    command[7] shouldBe "--format"
+    command[8] shouldBe "json"
+    command[9] shouldBe OPENCODE_PROMPT_INSTRUCTION
+    command[10].startsWith("--file=") shouldBe true
+    Files.readString(Path.of(command[10].removePrefix("--file="))) shouldBe expectedPrompt
 }
 
 private fun localRoutingServer(handler: (HttpExchange) -> Unit): HttpServer {

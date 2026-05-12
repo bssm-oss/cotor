@@ -796,6 +796,7 @@ data class CompanyIssue(
     val riskLevel: String = "medium",
     val codeProducing: Boolean? = null,
     val executionIntent: ExecutionIntent? = null,
+    val requiresPullRequest: Boolean? = null,
     val branchName: String? = null,
     val worktreePath: String? = null,
     val pullRequestNumber: Int? = null,
@@ -831,6 +832,39 @@ data class IssueDependency(
     val issueId: String,
     val dependsOnIssueId: String,
     val relation: String = "blocks"
+)
+
+/**
+ * Runtime scheduler state for one company issue.
+ *
+ * IssueStatus remains the product-facing workflow state. Work-item status is the durable
+ * scheduler view that records why an issue can or cannot be leased for agent execution.
+ */
+@Serializable
+enum class CompanyRuntimeWorkItemStatus {
+    WAITING_DEPENDENCY,
+    READY,
+    RUNNING,
+    WAITING_APPROVAL,
+    WAITING_CI,
+    RETRY_COOLDOWN,
+    QUARANTINED,
+    DONE
+}
+
+@Serializable
+data class CompanyRuntimeWorkItem(
+    val id: String,
+    val companyId: String,
+    val goalId: String? = null,
+    val issueId: String,
+    val status: CompanyRuntimeWorkItemStatus,
+    val blockedByIssueIds: List<String> = emptyList(),
+    val activeTaskId: String? = null,
+    val durableRunId: String? = null,
+    val reason: String? = null,
+    val createdAt: Long,
+    val updatedAt: Long
 )
 
 /**
@@ -1243,6 +1277,7 @@ data class DesktopAppState(
     val marketingDelegationPolicies: List<MarketingDelegationPolicy> = emptyList(),
     val marketingRuns: List<MarketingRunRecord> = emptyList(),
     val skillRuns: List<SkillRunRecord> = emptyList(),
+    val companyRuntimeWorkItems: List<CompanyRuntimeWorkItem> = emptyList(),
     val problemSignals: List<CompanyProblemSignal> = emptyList()
 )
 

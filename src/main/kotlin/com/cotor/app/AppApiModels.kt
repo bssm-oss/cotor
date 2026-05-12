@@ -221,6 +221,7 @@ data class CreateCompanyRequest(
     val rootPath: String,
     val defaultBaseBranch: String? = null,
     val autonomyEnabled: Boolean = true,
+    val operatorAutomationMode: OperatorAutomationMode? = null,
     val dailyBudgetCents: Int? = null,
     val monthlyBudgetCents: Int? = null
 )

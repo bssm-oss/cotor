@@ -169,7 +169,11 @@ class AgentCapabilityGuard(
         ActionKind.VIDEO_TRANSCODE -> CapabilityKey.VIDEO_TRANSCODE
         ActionKind.VIDEO_UPLOAD -> CapabilityKey.VIDEO_UPLOAD
         ActionKind.GIT_WORKTREE -> CapabilityKey.GIT_WRITE
-        ActionKind.GIT_PUBLISH -> CapabilityKey.GITHUB_PR_CREATE
+        ActionKind.GIT_PUBLISH -> if (request.metadata["requirePullRequest"]?.equals("false", ignoreCase = true) == true) {
+            CapabilityKey.GIT_WRITE
+        } else {
+            CapabilityKey.GITHUB_PR_CREATE
+        }
         ActionKind.GITHUB_REVIEW -> CapabilityKey.GITHUB_PR_UPDATE
         ActionKind.GITHUB_COMMENT -> CapabilityKey.GITHUB_PR_UPDATE
         ActionKind.GITHUB_MERGE -> CapabilityKey.GITHUB_MERGE_EXECUTE
