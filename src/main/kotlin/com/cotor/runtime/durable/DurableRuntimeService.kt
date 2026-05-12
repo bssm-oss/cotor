@@ -252,6 +252,17 @@ class DurableRuntimeService(
         val copiedCheckpoints = source.checkpoints
             .filter { it.ordinal <= restoreCheckpoint.ordinal }
             .sortedBy { it.ordinal }
+        val copiedCheckpointIds = copiedCheckpoints.map { it.id }.toSet()
+        val copiedSideEffects = source.sideEffects.filter { effect ->
+            effect.checkpointId == null || effect.checkpointId in copiedCheckpointIds
+        }
+        val copiedSideEffectIds = copiedSideEffects.map { it.id }.toSet()
+        val copiedApprovalPauses = source.approvalPauses.filter { pause ->
+            pause.status == ApprovalPauseStatus.PENDING &&
+                (pause.checkpointId == null || pause.checkpointId in copiedCheckpointIds) &&
+                pause.sideEffectId in copiedSideEffectIds
+        }
+        val now = System.currentTimeMillis()
         val snapshot = DurableRunSnapshot(
             runId = forkRunId,
             pipelineName = source.pipelineName,
@@ -259,10 +270,12 @@ class DurableRuntimeService(
             replayMode = ReplayMode.FORK,
             sourceRunId = sourceRunId,
             sourceCheckpointId = checkpointId,
-            status = DurableRunStatus.RUNNING,
-            createdAt = System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis(),
-            checkpoints = copiedCheckpoints
+            status = if (copiedApprovalPauses.isEmpty()) DurableRunStatus.RUNNING else DurableRunStatus.WAITING_FOR_APPROVAL,
+            createdAt = now,
+            updatedAt = now,
+            checkpoints = copiedCheckpoints,
+            sideEffects = copiedSideEffects,
+            approvalPauses = copiedApprovalPauses
         )
         runtimeStore.saveRun(snapshot)
         return snapshot

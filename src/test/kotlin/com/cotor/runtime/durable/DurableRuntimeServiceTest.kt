@@ -10,6 +10,8 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
@@ -191,5 +193,100 @@ class DurableRuntimeServiceTest : FunSpec({
         val waiting = service.inspectRun("run-invariant")!!
         waiting.approvalPauses.single().status shouldBe ApprovalPauseStatus.PENDING
         waiting.sideEffects.single().approvalRequiredOnReplay shouldBe true
+    }
+
+    test("parallel checkpoint appends preserve every completion with unique ordinals") {
+        val runtimeDir = Files.createTempDirectory("durable-runtime-parallel")
+        val service = DurableRuntimeService(runtimeStore = DurableRuntimeStore(runtimeDir))
+        val pipeline = Pipeline(
+            name = "parallel-checkpoint-pipeline",
+            stages = (1..20).map { index -> PipelineStage(id = "stage-$index") }
+        )
+        val context = PipelineContext(
+            pipelineId = "parallel-run",
+            pipelineName = pipeline.name,
+            totalStages = pipeline.stages.size
+        )
+        DurableRuntimeFlags.enable(context)
+        service.beginPipelineRun(pipeline, context)
+
+        runBlocking {
+            pipeline.stages.map { stage ->
+                async {
+                    service.recordStageCompleted(
+                        context = context,
+                        stage = stage,
+                        result = com.cotor.model.AgentResult(
+                            agentName = "codex",
+                            isSuccess = true,
+                            output = stage.id,
+                            error = null,
+                            duration = 10,
+                            metadata = emptyMap()
+                        )
+                    )
+                }
+            }.awaitAll()
+        }
+
+        val snapshot = service.inspectRun("parallel-run")!!
+        snapshot.checkpoints shouldHaveSize 20
+        snapshot.checkpoints.map { it.ordinal }.sorted() shouldBe (1..20).toList()
+    }
+
+    test("fork copies pending approval state into paused fork snapshot") {
+        val runtimeDir = Files.createTempDirectory("durable-runtime-fork-approval")
+        val service = DurableRuntimeService(runtimeStore = DurableRuntimeStore(runtimeDir))
+        val pipeline = Pipeline(
+            name = "fork-approval-pipeline",
+            stages = listOf(PipelineStage(id = "stage-1"))
+        )
+        val context = PipelineContext(
+            pipelineId = "fork-source",
+            pipelineName = pipeline.name,
+            totalStages = pipeline.stages.size
+        )
+        DurableRuntimeFlags.enable(context)
+        service.beginPipelineRun(pipeline, context)
+        service.recordStageCompleted(
+            context = context,
+            stage = pipeline.stages.first(),
+            result = com.cotor.model.AgentResult(
+                agentName = "codex",
+                isSuccess = true,
+                output = "ok",
+                error = null,
+                duration = 10,
+                metadata = emptyMap()
+            )
+        )
+        val checkpointId = service.inspectRun("fork-source")!!.latestCompletedCheckpoint!!.id
+
+        runCatching {
+            runBlocking {
+                withContext(
+                    DurableRuntimeContext(
+                        runId = "fork-source",
+                        replayMode = ReplayMode.CONTINUE,
+                        sourceRunId = "fork-source",
+                        sourceCheckpointId = checkpointId
+                    )
+                ) {
+                    service.recordSideEffect(
+                        kind = SideEffectKind.GIT_PUBLISH,
+                        label = "git.publish:fork",
+                        replaySafe = false,
+                        approvalRequiredOnReplay = true
+                    )
+                }
+            }
+        }
+
+        val fork = service.createFork("fork-source", "fork-copy", checkpointId)
+
+        fork.status shouldBe DurableRunStatus.WAITING_FOR_APPROVAL
+        fork.sideEffects shouldHaveSize 1
+        fork.approvalPauses shouldHaveSize 1
+        fork.approvalPauses.single().status shouldBe ApprovalPauseStatus.PENDING
     }
 })

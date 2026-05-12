@@ -35,6 +35,53 @@ import io.kotest.matchers.shouldBe
 import java.nio.file.Files
 
 class CompanyRuntimeBindingServiceTest : FunSpec({
+    test("bind marks backlog issues as runnable runtime candidates") {
+        val appHome = Files.createTempDirectory("company-runtime-backlog-runnable")
+        val companyId = "company-backlog"
+        val issueId = "issue-backlog"
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))),
+            actionStore = ActionStore { appHome },
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(
+                    Company(
+                        id = companyId,
+                        name = "Backlog",
+                        rootPath = ".",
+                        repositoryId = "repo-backlog",
+                        defaultBaseBranch = "main",
+                        backendKind = ExecutionBackendKind.LOCAL_COTOR,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                issues = listOf(
+                    CompanyIssue(
+                        id = issueId,
+                        companyId = companyId,
+                        goalId = "goal-backlog",
+                        workspaceId = "workspace-backlog",
+                        title = "Backlog issue",
+                        description = "desc",
+                        status = IssueStatus.BACKLOG,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.issues.single().runtimeDisposition shouldBe "RUNNABLE"
+        bound.runtime.pendingIssueIds shouldContain issueId
+    }
+
     test("bind adds resumable and approval state from durable runs and provider snapshots") {
         val appHome = Files.createTempDirectory("company-runtime-binding")
         val runStore = DurableRuntimeStore(appHome.resolve("runtime"))

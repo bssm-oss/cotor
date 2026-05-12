@@ -118,6 +118,7 @@ class CompanyRuntimeBindingService(
                         RECOVERABLE
                     issue.status in setOf(
                         com.cotor.app.IssueStatus.PLANNED,
+                        com.cotor.app.IssueStatus.BACKLOG,
                         com.cotor.app.IssueStatus.DELEGATED,
                         com.cotor.app.IssueStatus.IN_PROGRESS
                     ) -> RUNNABLE

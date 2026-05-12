@@ -312,13 +312,13 @@ class DesktopAppService(
     // Reads are cheap and frequent, but writes must be serialized so the state file
     // cannot be partially overwritten when multiple agent runs finish at once.
     private val stateMutex = Mutex()
-    private val companyRuntimeTickMutexes = mutableMapOf<String, Mutex>()
+    private val companyRuntimeTickMutexes = ConcurrentHashMap<String, Mutex>()
     private val runtimeLifecycleLock = Any()
 
     // Runs execute in background coroutines so the API can return immediately after
     // the user presses "Run Task" in the desktop client.
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val companyRuntimeJobs: MutableMap<String, Job> = linkedMapOf()
+    private val companyRuntimeJobs: MutableMap<String, Job> = ConcurrentHashMap()
     private val companyRuntimeWakeSignals = ConcurrentHashMap<String, MutableSharedFlow<Unit>>()
     private val automationRefreshJobs: MutableMap<String, Job> = linkedMapOf()
     private val activeTaskJobs: MutableMap<String, Job> = ConcurrentHashMap()
@@ -10471,7 +10471,7 @@ class DesktopAppService(
                 .groupBy { it.taskId }
                 .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
             val now = System.currentTimeMillis()
-            val runnableIssues = boundExecution.issues
+            val runnableIssueCandidates = boundExecution.issues
                 .filter { issue ->
                     issue.goalId in activeGoalIds
                 }
@@ -10485,52 +10485,27 @@ class DesktopAppService(
                         .thenBy { it.priority }
                         .thenBy { it.createdAt }
                 )
-                .filter { issue ->
-                    val dependenciesSatisfied = issue.dependsOn.all { dependencyId ->
-                        val dependency = executionSnapshot.issues.firstOrNull { it.id == dependencyId } ?: return@all false
-                        isDependencySatisfied(issue, dependency, executionSnapshot)
-                    }
-                    val alreadyStarted = executionSnapshot.tasks.any { task ->
-                        task.issueId == issue.id &&
-                            (task.status == DesktopTaskStatus.RUNNING || task.status == DesktopTaskStatus.QUEUED)
-                    }
-                    val retryDecision = resolveRecoverableRetryDecision(
-                        tasksByIssueId[issue.id].orEmpty(),
-                        latestRunsByTaskId,
-                        now
-                    )
-                    val latestTask = tasksByIssueId[issue.id].orEmpty()
-                        .maxByOrNull { it.updatedAt }
-                    val hasFailedExecutionHistory = tasksByIssueId[issue.id].orEmpty().any { task ->
-                        task.status == DesktopTaskStatus.FAILED
-                    }
-                    val recoveredNonAutonomousDuringThisTick =
-                        issue.updatedAt >= tickStartedAt &&
-                            hasFailedExecutionHistory &&
-                            issue.goalId !in autonomousGoalIds
-                    val reopenedLegacyMergeConflict = issue.transitionReason?.contains(
-                        "legacy CEO merge-conflict blocker",
-                        ignoreCase = true
-                    ) == true
-                    val reopenedDuringThisTick = issue.updatedAt >= tickStartedAt && reopenedLegacyMergeConflict
-                    val recoveredInterruptedIssueDuringThisTick = issue.updatedAt >= tickStartedAt &&
-                        issue.providerBlockReason?.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) == true
-                    val waitingForRetryCooldown =
-                        issue.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED) &&
-                            retryDecision.mode == RecoverableRetryMode.WAITING
-                    dependenciesSatisfied &&
-                        !alreadyStarted &&
-                        !waitingForRetryCooldown &&
-                        !recoveredNonAutonomousDuringThisTick &&
-                        !reopenedDuringThisTick &&
-                        !recoveredInterruptedIssueDuringThisTick
-                }
+            val waitReasonsByIssueId = runnableIssueCandidates.mapNotNull { issue ->
+                runtimeIssueWaitReason(
+                    issue = issue,
+                    state = executionSnapshot,
+                    tasksByIssueId = tasksByIssueId,
+                    latestRunsByTaskId = latestRunsByTaskId,
+                    now = now,
+                    tickStartedAt = tickStartedAt,
+                    autonomousGoalIds = autonomousGoalIds
+                )?.let { reason -> issue.id to reason }
+            }.toMap()
+            val waitReasonSummary = summarizeRuntimeWaitReasons(waitReasonsByIssueId.values)
+            val runnableIssues = runnableIssueCandidates.filter { issue -> issue.id !in waitReasonsByIssueId }
             if (autonomousGoals.isEmpty() && runnableIssues.isEmpty()) {
                 val hasOpenProblemSignals = executionSnapshot.problemSignals.any {
                     it.companyId == companyId && it.status == CompanyProblemSignalStatus.OPEN
                 }
                 actions += if (hasOpenProblemSignals) {
                     "idle-open-problem-signals"
+                } else if (waitReasonSummary != null) {
+                    "idle-waiting:$waitReasonSummary"
                 } else {
                     "idle-no-discovered-problems"
                 }
@@ -10575,7 +10550,8 @@ class DesktopAppService(
             val effectiveLastAction = when {
                 actions.isNotEmpty() -> actions.joinToString(separator = ", ")
                 hasActiveCompanyTasks(settledState, companyId) -> "monitoring-active-runs"
-                hasPendingCompanyIssues(settledState, companyId) -> "idle-pending-issues"
+                hasPendingCompanyIssues(settledState, companyId) -> waitReasonSummary?.let { "idle-pending-issues:$it" }
+                    ?: "idle-pending-issues"
                 else -> "idle-no-work"
             }
 
@@ -10592,6 +10568,59 @@ class DesktopAppService(
             (task.status == DesktopTaskStatus.RUNNING || task.status == DesktopTaskStatus.QUEUED) &&
                 task.issueId?.let(issueCompanyById::get) == companyId
         }
+    }
+
+    private fun runtimeIssueWaitReason(
+        issue: CompanyIssue,
+        state: DesktopAppState,
+        tasksByIssueId: Map<String, List<AgentTask>>,
+        latestRunsByTaskId: Map<String, AgentRun>,
+        now: Long,
+        tickStartedAt: Long,
+        autonomousGoalIds: Set<String>
+    ): String? {
+        val dependenciesSatisfied = issue.dependsOn.all { dependencyId ->
+            val dependency = state.issues.firstOrNull { it.id == dependencyId } ?: return "waiting-dependency"
+            isDependencySatisfied(issue, dependency, state)
+        }
+        if (!dependenciesSatisfied) return "waiting-dependency"
+        val alreadyStarted = state.tasks.any { task ->
+            task.issueId == issue.id &&
+                (task.status == DesktopTaskStatus.RUNNING || task.status == DesktopTaskStatus.QUEUED)
+        }
+        if (alreadyStarted) return "active-task"
+        val retryDecision = resolveRecoverableRetryDecision(
+            tasksByIssueId[issue.id].orEmpty(),
+            latestRunsByTaskId,
+            now
+        )
+        if (retryDecision.mode == RecoverableRetryMode.WAITING) return "retry-cooldown"
+        val hasFailedExecutionHistory = tasksByIssueId[issue.id].orEmpty().any { task ->
+            task.status == DesktopTaskStatus.FAILED
+        }
+        val recoveredNonAutonomousDuringThisTick =
+            issue.updatedAt >= tickStartedAt &&
+                hasFailedExecutionHistory &&
+                issue.goalId !in autonomousGoalIds
+        if (recoveredNonAutonomousDuringThisTick) return "state-recovery"
+        val reopenedLegacyMergeConflict = issue.transitionReason?.contains(
+            "legacy CEO merge-conflict blocker",
+            ignoreCase = true
+        ) == true
+        if (issue.updatedAt >= tickStartedAt && reopenedLegacyMergeConflict) return "state-recovery"
+        val recoveredInterruptedIssueDuringThisTick = issue.updatedAt >= tickStartedAt &&
+            issue.providerBlockReason?.contains(INTERRUPTED_RUN_ERROR, ignoreCase = true) == true
+        if (recoveredInterruptedIssueDuringThisTick) return "state-recovery"
+        return null
+    }
+
+    private fun summarizeRuntimeWaitReasons(reasons: Collection<String>): String? {
+        if (reasons.isEmpty()) return null
+        return reasons.groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedBy { it.key }
+            .joinToString(separator = ",") { (reason, count) -> "$reason=$count" }
     }
 
     private fun hasQueuedCompanyIssues(state: DesktopAppState, companyId: String): Boolean =

@@ -4,8 +4,7 @@ class CheckpointGraphStore(
     private val store: DurableRuntimeStore
 ) {
     fun upsertRun(snapshot: DurableRunSnapshot): DurableRunSnapshot {
-        store.saveRun(snapshot)
-        return snapshot
+        return store.replaceRun(snapshot)
     }
 
     fun appendCheckpoint(
@@ -14,15 +13,18 @@ class CheckpointGraphStore(
         status: DurableRunStatus? = null,
         sourceCheckpointId: String? = null
     ): DurableRunSnapshot {
-        val current = store.loadRun(runId) ?: error("Unknown durable run: $runId")
-        val updated = current.copy(
-            status = status ?: current.status,
-            sourceCheckpointId = sourceCheckpointId ?: current.sourceCheckpointId,
-            updatedAt = checkpoint.createdAt,
-            checkpoints = current.checkpoints + checkpoint
-        )
-        store.saveRun(updated)
-        return updated
+        return store.updateRun(runId) { current ->
+            val normalizedCheckpoint = checkpoint.copy(
+                ordinal = (current.checkpoints.maxOfOrNull { it.ordinal } ?: 0) + 1,
+                parentId = current.latestCheckpoint?.id
+            )
+            current.copy(
+                status = status ?: current.status,
+                sourceCheckpointId = sourceCheckpointId ?: current.sourceCheckpointId,
+                updatedAt = normalizedCheckpoint.createdAt,
+                checkpoints = current.checkpoints + normalizedCheckpoint
+            )
+        }
     }
 
     fun updateStatus(
@@ -30,13 +32,16 @@ class CheckpointGraphStore(
         status: DurableRunStatus,
         timestamp: Long = System.currentTimeMillis()
     ): DurableRunSnapshot {
-        val current = store.loadRun(runId) ?: error("Unknown durable run: $runId")
-        val updated = current.copy(
-            status = status,
-            updatedAt = timestamp,
-            completedAt = if (status == DurableRunStatus.COMPLETED || status == DurableRunStatus.FAILED) timestamp else current.completedAt
-        )
-        store.saveRun(updated)
-        return updated
+        return store.updateRun(runId) { current ->
+            current.copy(
+                status = status,
+                updatedAt = timestamp,
+                completedAt = if (status == DurableRunStatus.COMPLETED || status == DurableRunStatus.FAILED) {
+                    timestamp
+                } else {
+                    current.completedAt
+                }
+            )
+        }
     }
 }
