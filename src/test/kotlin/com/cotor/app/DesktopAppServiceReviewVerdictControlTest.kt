@@ -534,6 +534,48 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         coVerify(exactly = 1) { gitWorkspaceService.mergePullRequest(any(), 88, true, any(), any()) }
     }
 
+    test("mergeReviewQueueItem records failed checks without calling merge") {
+        val fixture = mergeGuardFixture(
+            pullRequestNumber = 91,
+            pullRequestState = "OPEN",
+            mergeability = "CLEAN",
+            checksSummary = "ci=COMPLETED/FAILURE"
+        )
+
+        val updated = fixture.service.mergeReviewQueueItem(fixture.queueItem.id)
+        val refreshedIssue = fixture.stateStore.load().issues.first { it.id == fixture.executionIssue.id }
+
+        updated.status shouldBe ReviewQueueStatus.FAILED_CHECKS
+        updated.providerBlockReason shouldBe "ci=COMPLETED/FAILURE"
+        refreshedIssue.status shouldBe IssueStatus.BLOCKED
+        coVerify(exactly = 0) {
+            fixture.gitWorkspaceService.mergePullRequest(any(), 91, any(), any(), any())
+        }
+    }
+
+    test("mergeReviewQueueItem routes non-clean mergeability to remediation without calling merge") {
+        listOf("UNKNOWN", "BLOCKED", "DIRTY").forEachIndexed { index, mergeability ->
+            val pullRequestNumber = 92 + index
+            val fixture = mergeGuardFixture(
+                pullRequestNumber = pullRequestNumber,
+                pullRequestState = "OPEN",
+                mergeability = mergeability,
+                checksSummary = "ci=COMPLETED/SUCCESS"
+            )
+
+            val updated = fixture.service.mergeReviewQueueItem(fixture.queueItem.id)
+            val refreshedIssue = fixture.stateStore.load().issues.first { it.id == fixture.executionIssue.id }
+
+            updated.status shouldBe ReviewQueueStatus.CHANGES_REQUESTED
+            updated.mergeability shouldBe mergeability
+            refreshedIssue.status shouldBe IssueStatus.PLANNED
+            refreshedIssue.executionIntent shouldBe ExecutionIntent.MERGE_CONFLICT_REMEDIATION
+            coVerify(exactly = 0) {
+                fixture.gitWorkspaceService.mergePullRequest(any(), pullRequestNumber, any(), any(), any())
+            }
+        }
+    }
+
     test("submitQaReviewVerdict rejects a missing review queue item") {
         val appHome = Files.createTempDirectory("desktop-review-verdict-missing-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-review-verdict-missing-repo").resolve("repo"))
@@ -555,3 +597,149 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
         (error is IllegalArgumentException) shouldBe true
     }
 })
+
+private data class MergeGuardFixture(
+    val service: DesktopAppService,
+    val stateStore: DesktopStateStore,
+    val gitWorkspaceService: GitWorkspaceService,
+    val queueItem: ReviewQueueItem,
+    val executionIssue: CompanyIssue
+)
+
+private suspend fun mergeGuardFixture(
+    pullRequestNumber: Int,
+    pullRequestState: String,
+    mergeability: String,
+    checksSummary: String
+): MergeGuardFixture {
+    val appHome = Files.createTempDirectory("desktop-review-merge-guard-home")
+    val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-review-merge-guard-repo").resolve("repo"))
+    val stateStore = DesktopStateStore { appHome }
+    val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+    coEvery { gitWorkspaceService.commentOnPullRequest(any(), any(), any(), any(), any()) } returns Unit
+    coEvery {
+        gitWorkspaceService.submitPullRequestReview(
+            any(),
+            pullRequestNumber,
+            PullRequestReviewVerdict.APPROVE,
+            any(),
+            any(),
+            any()
+        )
+    } returns PublishMetadata(
+        pullRequestNumber = pullRequestNumber,
+        pullRequestUrl = "https://github.com/example/cotor/pull/$pullRequestNumber",
+        pullRequestState = pullRequestState,
+        mergeability = mergeability,
+        checksSummary = checksSummary
+    )
+    val service = DesktopAppService(
+        stateStore = stateStore,
+        gitWorkspaceService = gitWorkspaceService,
+        configRepository = mockk<ConfigRepository>(relaxed = true),
+        agentExecutor = mockk<AgentExecutor>(relaxed = true)
+    )
+    val now = System.currentTimeMillis()
+    val company = Company(
+        id = "company-merge-guard-$pullRequestNumber",
+        name = "Merge Guard Co",
+        rootPath = repoRoot.toString(),
+        repositoryId = "repo-merge-guard-$pullRequestNumber",
+        defaultBaseBranch = "master",
+        createdAt = now,
+        updatedAt = now
+    )
+    val workspace = Workspace(
+        id = "workspace-merge-guard-$pullRequestNumber",
+        repositoryId = company.repositoryId,
+        name = "repo · master",
+        baseBranch = "master",
+        createdAt = now,
+        updatedAt = now
+    )
+    val goal = CompanyGoal(
+        id = "goal-merge-guard-$pullRequestNumber",
+        companyId = company.id,
+        title = "Merge guarded work",
+        description = "Only clean PRs should merge.",
+        status = GoalStatus.ACTIVE,
+        autonomyEnabled = true,
+        createdAt = now,
+        updatedAt = now
+    )
+    val executionIssue = CompanyIssue(
+        id = "issue-merge-guard-$pullRequestNumber",
+        companyId = company.id,
+        goalId = goal.id,
+        workspaceId = workspace.id,
+        title = "Implement guarded feature",
+        description = "Ready for CEO merge.",
+        status = IssueStatus.READY_FOR_CEO,
+        priority = 1,
+        kind = "execution",
+        branchName = "codex/cotor/merge-guard-$pullRequestNumber/codex",
+        worktreePath = repoRoot.resolve(".cotor/worktrees/merge-guard-$pullRequestNumber/codex").toString(),
+        pullRequestNumber = pullRequestNumber,
+        pullRequestUrl = "https://github.com/example/cotor/pull/$pullRequestNumber",
+        pullRequestState = "OPEN",
+        qaVerdict = "PASS",
+        createdAt = now,
+        updatedAt = now
+    )
+    val approvalIssue = CompanyIssue(
+        id = "issue-approval-merge-guard-$pullRequestNumber",
+        companyId = company.id,
+        goalId = goal.id,
+        workspaceId = workspace.id,
+        title = "CEO approve guarded feature",
+        description = "Approve or request changes.",
+        status = IssueStatus.PLANNED,
+        priority = 3,
+        kind = "approval",
+        branchName = executionIssue.branchName,
+        worktreePath = executionIssue.worktreePath,
+        pullRequestNumber = executionIssue.pullRequestNumber,
+        pullRequestUrl = executionIssue.pullRequestUrl,
+        pullRequestState = executionIssue.pullRequestState,
+        qaVerdict = "PASS",
+        sourceSignal = "ceo-approval:${executionIssue.id}",
+        createdAt = now,
+        updatedAt = now
+    )
+    val queueItem = ReviewQueueItem(
+        id = "queue-merge-guard-$pullRequestNumber",
+        companyId = company.id,
+        issueId = executionIssue.id,
+        runId = "run-merge-guard-$pullRequestNumber",
+        branchName = executionIssue.branchName,
+        worktreePath = executionIssue.worktreePath,
+        pullRequestNumber = pullRequestNumber,
+        pullRequestUrl = executionIssue.pullRequestUrl,
+        pullRequestState = executionIssue.pullRequestState,
+        status = ReviewQueueStatus.READY_FOR_CEO,
+        mergeability = "CLEAN",
+        checksSummary = "ci=COMPLETED/SUCCESS",
+        qaVerdict = "PASS",
+        ceoVerdict = "APPROVE",
+        ceoFeedback = "Ship it",
+        approvalIssueId = approvalIssue.id,
+        createdAt = now,
+        updatedAt = now
+    )
+    stateStore.save(
+        DesktopAppState(
+            companies = listOf(company),
+            workspaces = listOf(workspace),
+            goals = listOf(goal),
+            issues = listOf(executionIssue, approvalIssue),
+            reviewQueue = listOf(queueItem)
+        )
+    )
+    return MergeGuardFixture(
+        service = service,
+        stateStore = stateStore,
+        gitWorkspaceService = gitWorkspaceService,
+        queueItem = queueItem,
+        executionIssue = executionIssue
+    )
+}

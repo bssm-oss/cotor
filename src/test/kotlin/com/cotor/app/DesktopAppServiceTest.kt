@@ -11600,7 +11600,7 @@ class DesktopAppServiceTest : FunSpec({
             pullRequestUrl = "https://github.com/heodongun/cotor-test/pull/22",
             pullRequestState = "OPEN",
             reviewState = "APPROVED",
-            mergeability = "MERGEABLE"
+            mergeability = "CLEAN"
         )
         coEvery {
             gitWorkspaceService.mergePullRequest(any(), 22, true, any(), any())

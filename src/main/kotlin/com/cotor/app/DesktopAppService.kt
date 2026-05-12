@@ -5037,12 +5037,13 @@ class DesktopAppService(
     }
 
     suspend fun updatePipeline(
+        companyId: String,
         pipelineId: String,
         name: String? = null,
         stages: List<WorkflowStageDefinition>? = null
     ): WorkflowPipelineDefinition = stateMutex.withLock {
         val state = stateStore.load()
-        val current = state.workflowPipelines.firstOrNull { it.id == pipelineId }
+        val current = state.workflowPipelines.firstOrNull { it.id == pipelineId && it.companyId == companyId }
             ?: throw IllegalArgumentException("Pipeline not found: $pipelineId")
         val now = System.currentTimeMillis()
         val updated = current.copy(
@@ -5056,9 +5057,9 @@ class DesktopAppService(
         updated
     }
 
-    suspend fun deletePipeline(pipelineId: String): WorkflowPipelineDefinition = stateMutex.withLock {
+    suspend fun deletePipeline(companyId: String, pipelineId: String): WorkflowPipelineDefinition = stateMutex.withLock {
         val state = stateStore.load()
-        val pipeline = state.workflowPipelines.firstOrNull { it.id == pipelineId }
+        val pipeline = state.workflowPipelines.firstOrNull { it.id == pipelineId && it.companyId == companyId }
             ?: throw IllegalArgumentException("Pipeline not found: $pipelineId")
         require(!pipeline.isDefault) { "Cannot delete the default pipeline" }
         stateStore.save(
@@ -5133,6 +5134,13 @@ class DesktopAppService(
     suspend fun deleteContextEntry(entryId: String) = stateMutex.withLock {
         val state = stateStore.load()
         stateStore.save(state.copy(agentContextEntries = state.agentContextEntries.filterNot { it.id == entryId }).withDerivedMetrics())
+    }
+
+    suspend fun deleteContextEntry(companyId: String, entryId: String) = stateMutex.withLock {
+        val state = stateStore.load()
+        val entry = state.agentContextEntries.firstOrNull { it.id == entryId && it.companyId == companyId }
+            ?: throw IllegalArgumentException("Context entry not found: $entryId")
+        stateStore.save(state.copy(agentContextEntries = state.agentContextEntries.filterNot { it.id == entry.id }).withDerivedMetrics())
     }
 
     suspend fun ingestAgentNote(
@@ -9494,14 +9502,21 @@ class DesktopAppService(
             subject = ceoActionSubject,
             approval = "ceo-review-queue"
         )
-        if (approvedMetadata.mergeability.equals("DIRTY", ignoreCase = true)) {
+        if (checksFailing(approvedMetadata.checksSummary)) {
+            return markReviewQueueFailedChecks(itemId, approvedMetadata)
+        }
+        val approvedPullRequestState = approvedMetadata.pullRequestState.orEmpty()
+        val approvedMergeability = approvedMetadata.mergeability.orEmpty()
+        if (!approvedPullRequestState.equals("OPEN", ignoreCase = true) ||
+            !approvedMergeability.equals("CLEAN", ignoreCase = true)
+        ) {
             return markReviewQueueMergeConflict(
                 itemId = itemId,
                 approvedMetadata = approvedMetadata,
                 mergeError = ProcessExecutionException(
                     message = "GH command failed",
                     exitCode = 1,
-                    stdout = "Pull request #$pullRequestNumber is not mergeable because the merge commit cannot be cleanly created.",
+                    stdout = "Pull request #$pullRequestNumber is not ready to merge. state=${approvedMetadata.pullRequestState ?: "UNKNOWN"}, mergeability=${approvedMetadata.mergeability ?: "UNKNOWN"}.",
                     stderr = ""
                 )
             )
@@ -9952,6 +9967,88 @@ class DesktopAppService(
             mirrorIssueToLinear(
                 executionIssue.id,
                 comment = "Cotor could not merge \"${executionIssue.title}\" because the pull request no longer merges cleanly: $conflictMessage"
+            )
+        }
+        return updatedItem
+    }
+
+    private suspend fun markReviewQueueFailedChecks(
+        itemId: String,
+        approvedMetadata: PublishMetadata
+    ): ReviewQueueItem {
+        val checksMessage = approvedMetadata.checksSummary
+            ?.takeIf { it.isNotBlank() }
+            ?: "Pull request checks failed."
+        val updatedItem = stateMutex.withLock {
+            val state = stateStore.load()
+            val currentItem = state.reviewQueue.firstOrNull { it.id == itemId }
+                ?: throw IllegalArgumentException("Review queue item not found: $itemId")
+            val executionIssue = state.issues.firstOrNull { it.id == currentItem.issueId }
+            val approvalIssue = currentItem.approvalIssueId?.let { approvalIssueId ->
+                state.issues.firstOrNull { it.id == approvalIssueId }
+            }
+            val now = System.currentTimeMillis()
+            val nextItem = currentItem.copy(
+                status = ReviewQueueStatus.FAILED_CHECKS,
+                pullRequestNumber = approvedMetadata.pullRequestNumber ?: currentItem.pullRequestNumber,
+                pullRequestUrl = approvedMetadata.pullRequestUrl ?: currentItem.pullRequestUrl,
+                pullRequestState = approvedMetadata.pullRequestState ?: currentItem.pullRequestState,
+                mergeability = approvedMetadata.mergeability ?: currentItem.mergeability,
+                checksSummary = approvedMetadata.checksSummary ?: currentItem.checksSummary,
+                ceoVerdict = currentItem.ceoVerdict ?: "APPROVE",
+                ceoReviewedAt = currentItem.ceoReviewedAt ?: now,
+                providerBlockReason = checksMessage,
+                updatedAt = now
+            )
+            val nextIssues = state.issues.map { issue ->
+                when (issue.id) {
+                    executionIssue?.id -> issue.copy(
+                        status = IssueStatus.BLOCKED,
+                        pullRequestNumber = nextItem.pullRequestNumber ?: issue.pullRequestNumber,
+                        pullRequestUrl = nextItem.pullRequestUrl ?: issue.pullRequestUrl,
+                        pullRequestState = nextItem.pullRequestState ?: issue.pullRequestState,
+                        providerBlockReason = checksMessage,
+                        transitionReason = "CEO merge blocked because pull request checks failed.",
+                        updatedAt = now
+                    )
+                    approvalIssue?.id -> issue.copy(
+                        status = IssueStatus.BLOCKED,
+                        providerBlockReason = checksMessage,
+                        transitionReason = "CEO merge is waiting for pull request checks to pass.",
+                        updatedAt = now
+                    )
+                    else -> issue
+                }
+            }
+            val nextState = state.copy(
+                reviewQueue = state.reviewQueue.map { if (it.id == itemId) nextItem else it },
+                issues = nextIssues
+            ).recordCompanyActivity(
+                companyId = executionIssue?.companyId ?: currentItem.companyId,
+                projectContextId = executionIssue?.projectContextId ?: currentItem.projectContextId,
+                goalId = executionIssue?.goalId,
+                issueId = executionIssue?.id ?: currentItem.issueId,
+                source = "review-queue",
+                title = "Pull request checks failed",
+                detail = checksMessage,
+                severity = "warning"
+            ).recordSignal(
+                source = "review-queue",
+                message = "PR ${nextItem.pullRequestUrl ?: nextItem.pullRequestNumber} cannot merge until checks pass: $checksMessage",
+                companyId = executionIssue?.companyId ?: currentItem.companyId,
+                projectContextId = executionIssue?.projectContextId ?: currentItem.projectContextId,
+                goalId = executionIssue?.goalId,
+                issueId = executionIssue?.id ?: currentItem.issueId,
+                severity = "warning"
+            ).withDerivedMetrics()
+            stateStore.save(nextState)
+            nextItem
+        }
+        val executionIssue = stateStore.load().issues.firstOrNull { it.id == updatedItem.issueId }
+        if (executionIssue != null) {
+            mirrorIssueToLinear(
+                executionIssue.id,
+                comment = "Cotor paused merge for \"${executionIssue.title}\" because pull request checks failed: $checksMessage"
             )
         }
         return updatedItem
