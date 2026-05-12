@@ -193,18 +193,40 @@ class CoroutineProcessManager(
             logger.warn("Process timeout, destroying process")
             // Force-kill on timeout because some developer tools spawn interactive shells
             // that ignore polite termination and would otherwise leak in the background.
-            process.destroyForcibly()
+            destroyProcessTree(process, logger)
             joinReader(stdoutThread)
             joinReader(stderrThread)
             throw e
         } catch (e: Exception) {
             logger.error("Process execution failed", e)
-            process.destroyForcibly()
+            destroyProcessTree(process, logger)
             joinReader(stdoutThread)
             joinReader(stderrThread)
             throw e
         }
     }
+}
+
+private fun destroyProcessTree(process: Process, logger: Logger) {
+    val descendants = process.toHandle()
+        .descendants()
+        .toArray()
+        .filterIsInstance<ProcessHandle>()
+        .asReversed()
+    descendants.forEach { handle ->
+        if (handle.isAlive) {
+            runCatching { handle.destroyForcibly() }
+                .onFailure { logger.debug("Failed to destroy descendant process ${handle.pid()}", it) }
+        }
+    }
+    if (process.isAlive) {
+        runCatching { process.destroyForcibly() }
+            .onFailure { logger.debug("Failed to destroy process ${process.pid()}", it) }
+    }
+    descendants.forEach { handle ->
+        runCatching { handle.onExit().get(PROCESS_TREE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
+    }
+    runCatching { process.waitFor(PROCESS_TREE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
 }
 
 private fun redactedCommandForLogs(command: List<String>): String {
@@ -224,6 +246,7 @@ private fun joinReader(thread: Thread) {
 }
 
 private const val READER_JOIN_TIMEOUT_MS = 250L
+private const val PROCESS_TREE_JOIN_TIMEOUT_MS = 500L
 
 private fun buildEffectivePath(
     inheritedPath: String?,

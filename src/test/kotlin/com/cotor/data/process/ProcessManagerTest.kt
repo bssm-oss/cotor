@@ -105,6 +105,28 @@ class ProcessManagerTest : FunSpec({
         }
     }
 
+    test("executeProcess kills background descendants when a command times out") {
+        val processManager = CoroutineProcessManager(mockk<Logger>(relaxed = true))
+        val tempDir = Files.createTempDirectory("process-manager-timeout-descendant")
+        val marker = tempDir.resolve("descendant-marker.txt")
+
+        shouldThrow<TimeoutCancellationException> {
+            processManager.executeProcess(
+                command = listOf(
+                    "/bin/sh",
+                    "-c",
+                    "(sleep 1; echo leaked > '${marker.toAbsolutePath()}') & sleep 30"
+                ),
+                input = null,
+                environment = emptyMap(),
+                timeout = 200
+            )
+        }
+        Thread.sleep(1_500)
+
+        Files.exists(marker) shouldBe false
+    }
+
     test("executeProcess returns when a subprocess leaves inherited pipes open") {
         val processManager = CoroutineProcessManager(mockk<Logger>(relaxed = true))
 

@@ -10,6 +10,7 @@ package com.cotor.app
  * goals, issues, tasks, runs, and long-lived company runtime loops.
  */
 
+import com.cotor.app.runtime.CompanyIssueReadiness
 import com.cotor.app.runtime.CompanyRuntimeBindingService
 import com.cotor.app.runtime.CompanyRuntimeLoopDisposition
 import com.cotor.app.runtime.CompanyRuntimeLoopFailureDisposition
@@ -9177,48 +9178,11 @@ class DesktopAppService(
             blockedIssue
         }
 
-    private fun isDependencySatisfied(
-        issue: CompanyIssue,
-        dependency: CompanyIssue,
-        state: DesktopAppState
-    ): Boolean {
-        if (isSupersededCanceledDependency(dependency, state)) {
-            return true
-        }
-        return when (issue.kind.lowercase()) {
-            "review" ->
-                dependency.status == IssueStatus.IN_REVIEW ||
-                    dependency.status == IssueStatus.READY_FOR_CEO ||
-                    dependency.status == IssueStatus.DONE
-            else -> dependency.status == IssueStatus.DONE
-        }
-    }
-
     private fun runnableIssueStatusRank(status: IssueStatus): Int = when (status) {
         IssueStatus.DELEGATED -> 0
         IssueStatus.PLANNED -> 1
         IssueStatus.BACKLOG -> 2
         else -> 3
-    }
-
-    private fun isSupersededCanceledDependency(
-        dependency: CompanyIssue,
-        state: DesktopAppState
-    ): Boolean {
-        if (dependency.status != IssueStatus.CANCELED) {
-            return false
-        }
-        val latestSuccessfulReplacement = state.issues
-            .asSequence()
-            .filter { candidate ->
-                candidate.companyId == dependency.companyId &&
-                    candidate.id != dependency.id &&
-                    candidate.status == IssueStatus.DONE &&
-                    candidate.kind.equals(dependency.kind, ignoreCase = true) &&
-                    candidate.title.trim().equals(dependency.title.trim(), ignoreCase = true)
-            }
-            .maxOfOrNull { it.updatedAt }
-        return latestSuccessfulReplacement != null && latestSuccessfulReplacement > dependency.updatedAt
     }
 
     private data class StructuredVerdict(
@@ -10475,15 +10439,7 @@ class DesktopAppService(
                 .filter { issue ->
                     issue.goalId in activeGoalIds
                 }
-                .filter { issue -> issue.runtimeDisposition == "RUNNABLE" }
-                .filter { issue ->
-                    issue.status in setOf(
-                        IssueStatus.PLANNED,
-                        IssueStatus.BACKLOG,
-                        IssueStatus.DELEGATED,
-                        IssueStatus.IN_PROGRESS
-                    )
-                }
+                .filter { issue -> CompanyIssueReadiness.isRuntimeStartCandidate(issue, executionSnapshot) }
                 .filterNot { issue ->
                     issue.sourceSignal == "github-readiness"
                 }
@@ -10603,11 +10559,7 @@ class DesktopAppService(
         tickStartedAt: Long,
         autonomousGoalIds: Set<String>
     ): String? {
-        val dependenciesSatisfied = issue.dependsOn.all { dependencyId ->
-            val dependency = state.issues.firstOrNull { it.id == dependencyId } ?: return "waiting-dependency"
-            isDependencySatisfied(issue, dependency, state)
-        }
-        if (!dependenciesSatisfied) return "waiting-dependency"
+        if (!CompanyIssueReadiness.dependenciesSatisfied(issue, state)) return "waiting-dependency"
         val alreadyStarted = state.tasks.any { task ->
             task.issueId == issue.id &&
                 (task.status == DesktopTaskStatus.RUNNING || task.status == DesktopTaskStatus.QUEUED)
