@@ -14,6 +14,7 @@ import com.cotor.runtime.actions.ActionRequest
 import com.cotor.runtime.actions.ActionScope
 import com.cotor.runtime.actions.ActionSubject
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
@@ -463,6 +464,9 @@ private class McpServeCommand : CliktCommand(name = "serve") {
         if (!readonly) {
             error("Only read-only MCP exposure is supported in this build.")
         }
-        AppServer().start(port = port, host = host, wait = true, token = token)
+        if (requiresTokenForHost(host) && token.isNullOrBlank()) {
+            throw CliktError("--token is required when binding read-only MCP app-server to non-loopback host '$host'")
+        }
+        AppServer().start(port = port, host = host, wait = true, token = token, readOnlyMode = true)
     }
 }

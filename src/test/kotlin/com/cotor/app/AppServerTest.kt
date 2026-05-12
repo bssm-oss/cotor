@@ -136,6 +136,32 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("read-only app server rejects mutating api routes") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService,
+                    readOnlyMode = true
+                )
+            }
+
+            val readResponse = client.get("/api/app/health") {
+                header("Authorization", "Bearer secret-token")
+            }
+            readResponse.status shouldBe HttpStatusCode.OK
+
+            val writeResponse = client.post("/api/app/companies") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("{}")
+            }
+            writeResponse.status shouldBe HttpStatusCode.Forbidden
+            writeResponse.bodyAsText() shouldContain "read-only mode"
+        }
+    }
+
     test("company agent performance route returns scoped snapshots") {
         coEvery { desktopService.agentPerformance("company-performance") } returns listOf(
             AgentPerformanceSnapshot(

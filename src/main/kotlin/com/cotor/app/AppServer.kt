@@ -10,15 +10,18 @@ package com.cotor.app
 
 import com.cotor.a2a.A2aRouter
 import com.cotor.a2a.installA2aRoutes
+import com.cotor.data.config.CotorProperties
 import com.cotor.provenance.EvidenceBundle
 import com.cotor.runtime.durable.DurableResumeCoordinator
 import com.cotor.runtime.durable.DurableRunSnapshot
 import com.cotor.runtime.durable.DurableRuntimeService
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.call
 import io.ktor.server.application.install
@@ -28,6 +31,7 @@ import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.request.header
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.request.uri
@@ -87,8 +91,12 @@ class AppServer : KoinComponent {
         host: String = "127.0.0.1",
         wait: Boolean = true,
         token: String? = null,
-        controlToken: String? = null
+        controlToken: String? = null,
+        readOnlyMode: Boolean = false
     ) {
+        if (requiresBoundHostToken(host) && token.isNullOrBlank()) {
+            error("A bearer token is required when binding app-server to non-loopback host '$host'")
+        }
         val lockRecord = desktopAppServerInstanceGuard.acquire(host = host, port = port)
         token?.takeIf { it.isNotBlank() }?.let {
             persistAppServerToken(it, lockRecord.appHome)
@@ -114,6 +122,7 @@ class AppServer : KoinComponent {
                 durableRuntimeService = durableRuntimeService,
                 durableResumeCoordinator = durableResumeCoordinator,
                 controlToken = controlToken,
+                readOnlyMode = readOnlyMode,
                 shutdownHandler = {
                     Thread {
                         server.stop(1000, 5000)
@@ -316,6 +325,7 @@ internal fun Application.cotorAppModule(
     durableRuntimeService: DurableRuntimeService? = null,
     durableResumeCoordinator: DurableResumeCoordinator? = null,
     controlToken: String? = null,
+    readOnlyMode: Boolean = false,
     shutdownHandler: (() -> Unit)? = null
 ) {
     val ktorJson = Json {
@@ -337,24 +347,33 @@ internal fun Application.cotorAppModule(
     }
 
     routing {
+        if (readOnlyMode) {
+            intercept(ApplicationCallPipeline.Call) {
+                if (call.request.path().startsWith("/api/app") && call.request.httpMethod in readOnlyDeniedMethods) {
+                    call.respond(HttpStatusCode.Forbidden, mapOf("error" to "App server is running in read-only mode"))
+                    finish()
+                }
+            }
+        }
+
         installA2aRoutes(token, a2aRouter) { expectedToken ->
             this.requireToken(expectedToken)
         }
 
         get("/") {
-            call.respond(HealthResponse(ok = true, service = "cotor-app-server"))
+            call.respond(appServerHealthResponse())
         }
 
         // Health stays unauthenticated so the app can distinguish "server down"
         // from "server up but auth misconfigured".
         get("/health") {
-            call.respond(HealthResponse(ok = true, service = "cotor-app-server"))
+            call.respond(appServerHealthResponse())
         }
 
         // Ready is the probe that deployment platforms should use to keep the
         // desktop API on the load balancer only once the HTTP stack is available.
         get("/ready") {
-            call.respond(HealthResponse(ok = true, service = "cotor-app-server"))
+            call.respond(appServerHealthResponse())
         }
 
         route("/api/app") {
@@ -363,7 +382,7 @@ internal fun Application.cotorAppModule(
             // of dashboards, companies, issues, and sessions rather than raw persistence details.
             get("/health") {
                 if (!requireToken(token)) return@get
-                call.respond(HealthResponse(ok = true, service = "cotor-app-server"))
+                call.respond(appServerHealthResponse())
             }
 
             get("/help-guide") {
@@ -374,7 +393,7 @@ internal fun Application.cotorAppModule(
 
             post("/shutdown") {
                 if (!requireToken(token)) return@post
-                call.respond(HttpStatusCode.Accepted, HealthResponse(ok = true, service = "cotor-app-server"))
+                call.respond(HttpStatusCode.Accepted, appServerHealthResponse())
                 shutdownHandler?.invoke()
             }
 
@@ -2564,6 +2583,22 @@ private fun isBearerTokenMatch(header: String?, expected: String): Boolean {
         ?: return false
     return constantTimeEquals(actual, expected)
 }
+
+private fun appServerHealthResponse(): HealthResponse =
+    HealthResponse(
+        ok = true,
+        service = "cotor-app-server",
+        owner = "cotor-desktop",
+        version = CotorProperties.version,
+        build = System.getProperty("cotor.build", CotorProperties.version)
+    )
+
+internal fun requiresBoundHostToken(host: String): Boolean {
+    val normalized = host.trim().lowercase()
+    return normalized !in setOf("127.0.0.1", "localhost", "::1")
+}
+
+private val readOnlyDeniedMethods = setOf(HttpMethod.Post, HttpMethod.Put, HttpMethod.Patch, HttpMethod.Delete)
 
 private fun constantTimeEquals(actual: String, expected: String): Boolean {
     val actualBytes = actual.toByteArray(StandardCharsets.UTF_8)
