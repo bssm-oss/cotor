@@ -3,6 +3,8 @@ package com.cotor.app.runtime
 import com.cotor.app.CompanyIssue
 import com.cotor.app.CompanyRuntimeSnapshot
 import com.cotor.app.DesktopAppState
+import com.cotor.app.DesktopTaskStatus
+import com.cotor.app.IssueStatus
 import com.cotor.app.ReviewQueueItem
 import com.cotor.policy.PolicyEngine
 import com.cotor.providers.github.GitHubControlPlaneService
@@ -25,6 +27,7 @@ class CompanyRuntimeBindingService(
 ) {
     companion object {
         private const val RUNNABLE = "RUNNABLE"
+        private const val ACTIVE = "ACTIVE"
         private const val WAITING_FOR_APPROVAL = "WAITING_FOR_APPROVAL"
         private const val WAITING_FOR_CI = "WAITING_FOR_CI"
         private const val QUARANTINED = "QUARANTINED"
@@ -93,6 +96,12 @@ class CompanyRuntimeBindingService(
         val providerBlockByIssueId = githubPullRequests
             .filter { !it.issueId.isNullOrBlank() }
             .associateBy { it.issueId!! }
+        val issueCompanyById = state.issues.associate { it.id to it.companyId }
+        val activeIssueIds = state.tasks
+            .filter { it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED }
+            .mapNotNull { it.issueId }
+            .filter { issueCompanyById[it] == companyId }
+            .toSet()
         val boundIssues = state.issues.map { issue ->
             if (issue.companyId != companyId) {
                 issue
@@ -105,24 +114,27 @@ class CompanyRuntimeBindingService(
                 val runtimeDisposition = when {
                     matchingRun?.status == DurableRunStatus.WAITING_FOR_APPROVAL || matchingRun?.approvalPauses?.any { it.status.name == "PENDING" } == true ->
                         WAITING_FOR_APPROVAL
-                    issue.status == com.cotor.app.IssueStatus.WAITING_FOR_APPROVAL ->
+                    issue.status == IssueStatus.WAITING_FOR_APPROVAL ->
                         WAITING_FOR_APPROVAL
                     issuePullRequest?.checksSummary?.contains("FAILURE", ignoreCase = true) == true ->
                         WAITING_FOR_CI
-                    matchingRun?.status == DurableRunStatus.FAILED && issue.status == com.cotor.app.IssueStatus.BLOCKED ->
+                    matchingRun?.status == DurableRunStatus.FAILED && issue.status == IssueStatus.BLOCKED ->
                         QUARANTINED
-                    issue.status == com.cotor.app.IssueStatus.BLOCKED && !issue.providerBlockReason.isNullOrBlank() ->
+                    issue.status == IssueStatus.BLOCKED && !issue.providerBlockReason.isNullOrBlank() ->
                         QUARANTINED
-                    issue.status == com.cotor.app.IssueStatus.BLOCKED &&
+                    issue.status == IssueStatus.BLOCKED &&
                         (issuePullRequest?.checksSummary?.contains("SUCCESS", ignoreCase = true) == true) ->
                         RECOVERABLE
                     issue.status in setOf(
-                        com.cotor.app.IssueStatus.PLANNED,
-                        com.cotor.app.IssueStatus.BACKLOG,
-                        com.cotor.app.IssueStatus.DELEGATED,
-                        com.cotor.app.IssueStatus.IN_PROGRESS
+                        IssueStatus.PLANNED,
+                        IssueStatus.BACKLOG,
+                        IssueStatus.DELEGATED
                     ) -> RUNNABLE
-                    issue.status in setOf(com.cotor.app.IssueStatus.DONE, com.cotor.app.IssueStatus.CANCELED) ->
+                    issue.status == IssueStatus.IN_PROGRESS && issue.id in activeIssueIds ->
+                        ACTIVE
+                    issue.status == IssueStatus.IN_PROGRESS ->
+                        RUNNABLE
+                    issue.status in setOf(IssueStatus.DONE, IssueStatus.CANCELED) ->
                         TERMINAL
                     else -> TERMINAL
                 }
