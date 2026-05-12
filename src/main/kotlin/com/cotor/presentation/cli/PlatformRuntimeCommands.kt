@@ -6,6 +6,7 @@ import com.cotor.app.CapabilityKey
 import com.cotor.app.DesktopAppService
 import com.cotor.app.VideoPlanRequest
 import com.cotor.app.capabilityCatalog
+import com.cotor.app.requiresBoundHostToken
 import com.cotor.policy.PolicyDocument
 import com.cotor.policy.PolicyEngine
 import com.cotor.policy.PolicyStore
@@ -464,7 +465,7 @@ private class McpServeCommand : CliktCommand(name = "serve") {
         if (!readonly) {
             error("Only read-only MCP exposure is supported in this build.")
         }
-        if (requiresTokenForHost(host) && token.isNullOrBlank()) {
+        if (requiresBoundHostToken(host) && token.isNullOrBlank()) {
             throw CliktError("--token is required when binding read-only MCP app-server to non-loopback host '$host'")
         }
         AppServer().start(port = port, host = host, wait = true, token = token, readOnlyMode = true)
