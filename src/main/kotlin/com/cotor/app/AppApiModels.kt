@@ -478,7 +478,10 @@ internal fun DashboardResponse.redactedForApi(): DashboardResponse = copy(
 @Serializable
 data class HealthResponse(
     val ok: Boolean,
-    val service: String
+    val service: String,
+    val owner: String = "cotor-desktop",
+    val version: String = "unknown",
+    val build: String = "unknown"
 )
 
 // ── Pipeline API Models ─────────────────────────────────────────────

@@ -188,10 +188,16 @@ coverage/
 
 # Local runtime/state
 .cotor/
+/.cotor/stats/
 
 # Graphify local extraction cache
 graphify-out/cache/
 graphify-out/.graphify_*
+graphify-out/cost.json
+graphify-out/graph.html
+graphify-out/graph.json
+graphify-out/manifest.json
+src/main/resources/cotor.properties
 
 # Documentation builds
 docs/_build/
@@ -206,11 +212,17 @@ pids
 *.pid
 *.seed
 *.pid.lock
-/.cotor/stats/
+test-results/
 
 # Accidental shell-redirection artifacts at repo root
+/=
 /claude
 /codex
+/exporting
+/fibonacci.py
 /gemini
+/naming
 /openai
 /echo
+/transferring
+/writing

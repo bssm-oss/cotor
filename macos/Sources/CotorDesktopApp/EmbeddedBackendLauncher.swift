@@ -133,7 +133,7 @@ actor EmbeddedBackendLauncher {
             return
         }
         do {
-            let stalePids = try staleBundledBackendPids(for: jarPath)
+            let stalePids = try staleBundledBackendPids(for: jarPath, excluding: process?.processIdentifier)
             if stalePids.isEmpty {
                 return
             }
@@ -141,7 +141,8 @@ actor EmbeddedBackendLauncher {
                 _ = kill(pid, SIGTERM)
             }
             try? await Task.sleep(for: .milliseconds(800))
-            let survivors = try staleBundledBackendPids(for: jarPath).filter { stalePids.contains($0) }
+            let survivors = try staleBundledBackendPids(for: jarPath, excluding: process?.processIdentifier)
+                .filter { stalePids.contains($0) }
             survivors.forEach { pid in
                 _ = kill(pid, SIGKILL)
             }
@@ -159,7 +160,7 @@ actor EmbeddedBackendLauncher {
         }
     }
 
-    private func staleBundledBackendPids(for jarPath: String) throws -> [Int32] {
+    private func staleBundledBackendPids(for jarPath: String, excluding currentPid: Int32?) throws -> [Int32] {
         let runtimeDir = defaultDesktopAppHome()
             .appendingPathComponent("runtime", isDirectory: true)
             .appendingPathComponent("backend", isDirectory: true)
@@ -183,11 +184,11 @@ actor EmbeddedBackendLauncher {
                     guard !trimmed.isEmpty, (matchesBundledJar || matchesRuntimeJar), trimmed.contains("app-server") else {
                         return nil
                     }
-                    guard !trimmed.contains("--port \(port)") else {
-                        return nil
-                    }
                     let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "\t" })
                     guard let first = parts.first, let pid = Int32(first) else {
+                        return nil
+                    }
+                    if let currentPid, pid == currentPid {
                         return nil
                     }
                     return pid
@@ -244,9 +245,12 @@ actor EmbeddedBackendLauncher {
         request.timeoutInterval = 1.5
         request.setValue("Bearer \(DesktopAPI.ensureAppToken())", forHTTPHeaderField: "Authorization")
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
-                return (200 ..< 300).contains(http.statusCode)
+                guard (200 ..< 300).contains(http.statusCode) else {
+                    return false
+                }
+                return isOwnedEmbeddedBackendHealthData(data)
             }
         } catch {
             return false
@@ -406,6 +410,25 @@ actor EmbeddedBackendLauncher {
         self.process = nil
         return terminated
     }
+}
+
+private struct EmbeddedBackendHealthPayload: Decodable {
+    let ok: Bool
+    let service: String
+    let owner: String
+    let version: String
+    let build: String
+}
+
+internal func isOwnedEmbeddedBackendHealthData(_ data: Data) -> Bool {
+    guard let payload = try? JSONDecoder().decode(EmbeddedBackendHealthPayload.self, from: data) else {
+        return false
+    }
+    return payload.ok &&
+        payload.service == "cotor-app-server" &&
+        payload.owner == "cotor-desktop" &&
+        !payload.version.isEmpty &&
+        !payload.build.isEmpty
 }
 
 internal func sanitizedEmbeddedBackendEnvironment(

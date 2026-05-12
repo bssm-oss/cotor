@@ -381,7 +381,7 @@ rm -rf ~/.claude/settings/cotor-settings.json
 ## 🤝 도움이 필요하신가요?
 
 문제가 해결되지 않으면:
-1. [GitHub Issues](https://github.com/yourusername/cotor/issues)에 문제 보고
+1. [GitHub Issues](https://github.com/bssm-oss/cotor/issues)에 문제 보고
 2. 테스트 스크립트 결과 첨부: `./test-claude-integration.sh > test-results.txt`
 3. 파일 구조 첨부: `ls -laR ~/.claude/ > file-structure.txt`
 
@@ -400,4 +400,3 @@ gradle test
 cotor validate <pipeline.yaml>
 cotor lint <pipeline.yaml>
 ```
-

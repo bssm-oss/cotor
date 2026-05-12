@@ -4046,7 +4046,7 @@ class DesktopAppServiceTest : FunSpec({
         prompts.first().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
         prompts.last().orEmpty() shouldContain "CEO_PLANNING_REPAIR"
         prompts.last().orEmpty() shouldContain ".cotor/runtime/ceo-plan.json"
-        val state = stateStore.load()
+        val state = awaitIssueCount(stateStore, goal.id, kind = "execution", expected = 1)
         state.issues.filter { it.goalId == goal.id && it.kind == "execution" } shouldHaveSize 1
         state.issues.single { it.id == planningIssue.id }.status shouldBe IssueStatus.DONE
         state.goalDecisions.last { it.goalId == goal.id }.title shouldBe "CEO planned execution graph"
@@ -13632,6 +13632,26 @@ private suspend fun awaitIssueTasksSettled(stateStore: DesktopStateStore, issueI
             delay(25)
         }
     }
+}
+
+private suspend fun awaitIssueCount(
+    stateStore: DesktopStateStore,
+    goalId: String,
+    kind: String,
+    expected: Int
+): DesktopAppState {
+    var latest = stateStore.load()
+    withTimeout(5_000) {
+        while (true) {
+            val snapshot = stateStore.load()
+            latest = snapshot
+            if (snapshot.issues.count { it.goalId == goalId && it.kind == kind } == expected) {
+                return@withTimeout
+            }
+            delay(25)
+        }
+    }
+    return latest
 }
 
 private const val REPOSITORY_ID = "repo-1"

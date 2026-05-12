@@ -38,8 +38,9 @@ class StageConflictDetector(
             .filter { it.length > 2 }
             .map { "path:$it" }
             .toSet()
+        val stageKey = "stage:${stage.id}"
         val dependencyKeys = stage.dependencies.map { "stage:$it" }.toSet()
-        return (pathKeys + dependencyKeys).ifEmpty { setOf("stage:${stage.id}") }
+        return pathKeys + dependencyKeys + stageKey
     }
 
     private companion object {

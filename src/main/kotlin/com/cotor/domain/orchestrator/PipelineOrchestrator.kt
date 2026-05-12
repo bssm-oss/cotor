@@ -370,7 +370,9 @@ class DefaultPipelineOrchestrator(
         pipeline.stages.firstOrNull { it.type != StageType.EXECUTION }?.let {
             throw PipelineException("Stage ${it.id} uses ${it.type} which is not supported in PARALLEL mode")
         }
-        val results = stageConflictDetector.conflictSafeBatches(pipeline.stages, pipelineContext)
+        validateDagDependencies(pipeline.stages)
+        val orderedStages = topologicalSort(pipeline.stages)
+        val results = stageConflictDetector.conflictSafeBatches(orderedStages, pipelineContext)
             .flatMap { batch ->
                 batch.map { stage ->
                     async(Dispatchers.Default) {

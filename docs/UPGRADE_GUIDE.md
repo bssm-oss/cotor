@@ -279,7 +279,7 @@ New test suite for validation:
 
 ### 📞 Support
 
-- **Issues**: https://github.com/yourorg/cotor/issues
+- **Issues**: https://github.com/bssm-oss/cotor/issues
 - **Documentation**: https://docs.cotor.dev
 - **Community**: https://discord.gg/cotor
 
