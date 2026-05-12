@@ -95,6 +95,13 @@ struct DesktopAPI {
 
     let baseURL: URL
     let token: String?
+    let session: URLSession
+
+    internal init(baseURL: URL, token: String?, session: URLSession = .shared) {
+        self.baseURL = baseURL
+        self.token = token
+        self.session = session
+    }
 
     init() {
         // The desktop shell defaults to the standard localhost port but allows
@@ -103,13 +110,7 @@ struct DesktopAPI {
         guard let fallbackURL = URL(string: "http://127.0.0.1:8787") else {
             preconditionFailure("Default app server URL must be valid")
         }
-        self.baseURL = URL(string: rawURL) ?? fallbackURL
-        self.token = Self.ensureAppToken()
-    }
-
-    internal init(baseURL: URL, token: String?) {
-        self.baseURL = baseURL
-        self.token = token
+        self.init(baseURL: URL(string: rawURL) ?? fallbackURL, token: Self.ensureAppToken())
     }
 
     /// Fetch the full dashboard payload used to bootstrap most of the app state.
@@ -798,7 +799,7 @@ struct DesktopAPI {
                     var request = URLRequest(url: try makeURL(pathSegments: ["api", "app", "companies", companyId, "events"]))
                     request.httpMethod = "GET"
                     addHeaders(to: &request)
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
                         throw URLError(.badServerResponse)
                     }
@@ -892,10 +893,14 @@ struct DesktopAPI {
 
     internal static func makeURL(baseURL: URL, pathSegments: [String], query: [URLQueryItem] = []) throws -> URL {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        let encodedPath = try pathSegments
+        let basePath = components?.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
+        let routePath = try pathSegments
             .map(Self.percentEncodePathSegment)
             .joined(separator: "/")
-        components?.percentEncodedPath = "/" + encodedPath
+        let joinedPath = [basePath, routePath]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/")
+        components?.percentEncodedPath = joinedPath.isEmpty ? "/" : "/\(joinedPath)"
         components?.queryItems = query.isEmpty ? nil : query
         guard let url = components?.url else {
             throw URLError(.badURL)
@@ -917,7 +922,7 @@ struct DesktopAPI {
     }()
 
     private func decode<T: Decodable>(_ request: URLRequest) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }

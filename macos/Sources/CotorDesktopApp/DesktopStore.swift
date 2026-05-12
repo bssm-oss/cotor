@@ -462,7 +462,7 @@ final class DesktopStore: ObservableObject {
     @Published var selectedCompanyReport: CompanyDailyReportRecord?
     @Published var isGeneratingCompanyReport = false
 
-    let api = DesktopAPI()
+    let api: DesktopAPI
     private var statusState: StatusState = .connecting
     private var tuiPollingTask: Task<Void, Never>?
     private var companyEventTask: Task<Void, Never>?
@@ -474,7 +474,8 @@ final class DesktopStore: ObservableObject {
     private var polledTuiSessionID: String?
     private var didInitializeShellMode = false
 
-    init() {
+    init(api: DesktopAPI = DesktopAPI()) {
+        self.api = api
         let storedLanguage = UserDefaults.standard.string(forKey: Self.languageDefaultsKey)
         language = AppLanguage(rawValue: storedLanguage ?? "") ?? .english
         let storedTheme = UserDefaults.standard.string(forKey: Self.themeDefaultsKey)
@@ -714,6 +715,10 @@ final class DesktopStore: ObservableObject {
 
     var selectedCompany: CompanyRecord? {
         companies.first { $0.id == selectedCompanyID }
+    }
+
+    private func isCurrentCompany(_ companyId: String) -> Bool {
+        (selectedCompanyID ?? selectedCompany?.id) == companyId
     }
 
     var selectedIssue: IssueRecord? {
@@ -1373,6 +1378,7 @@ final class DesktopStore: ObservableObject {
             let summaries = try await runWithEmbeddedBackendRecovery {
                 try await api.companyReports(companyId: scopedCompanyId)
             }
+            guard isCurrentCompany(scopedCompanyId) else { return }
             companyReports = companyReports.filter { $0.companyId != scopedCompanyId } + summaries
             let sortedSummaries = summaries.sorted {
                 if $0.date == $1.date {
@@ -1397,12 +1403,16 @@ final class DesktopStore: ObservableObject {
     func selectCompanyReport(date: String) async {
         guard let companyID = selectedCompanyID else { return }
         do {
-            selectedCompanyReportDate = date
-            selectedCompanyReport = try await runWithEmbeddedBackendRecovery {
+            let report = try await runWithEmbeddedBackendRecovery {
                 try await api.companyReport(companyId: companyID, date: date)
             }
+            guard isCurrentCompany(companyID) else { return }
+            selectedCompanyReportDate = date
+            selectedCompanyReport = report
         } catch {
-            errorMessage = error.localizedDescription
+            if isCurrentCompany(companyID) {
+                errorMessage = error.localizedDescription
+            }
             AppLogger.error("Company report load failed: \(error.localizedDescription)")
         }
     }
@@ -1415,6 +1425,7 @@ final class DesktopStore: ObservableObject {
             let report = try await runWithEmbeddedBackendRecovery {
                 try await api.generateCompanyReport(companyId: companyID)
             }
+            guard isCurrentCompany(companyID) else { return }
             selectedCompanyReportDate = report.date
             selectedCompanyReport = report
             await refreshCompanyReports(companyId: companyID)
@@ -2631,7 +2642,7 @@ final class DesktopStore: ObservableObject {
             let signals = try await runWithEmbeddedBackendRecovery {
                 try await api.companyProblemSignals(companyId: companyId)
             }
-            guard (explicitCompanyId != nil) || (selectedCompanyID ?? selectedCompany?.id) == companyId else { return }
+            guard isCurrentCompany(companyId) else { return }
             companyProblemSignals = signals
         } catch is CancellationError {
             return
@@ -2824,14 +2835,18 @@ final class DesktopStore: ObservableObject {
             return
         }
         do {
-            let status = try await api.companyGitHubStatus(companyId: company.id)
+            let companyId = company.id
+            let status = try await api.companyGitHubStatus(companyId: companyId)
+            guard isCurrentCompany(companyId) else { return }
             selectedCompanyGitHubStatus = status
             syncGitHubOriginInput(with: status)
             companyGitHubStatusMessage = githubRequirementMessage(for: status) ?? status.message
             errorMessage = nil
         } catch {
-            companyGitHubStatusMessage = error.localizedDescription
-            errorMessage = error.localizedDescription
+            if selectedCompany?.id == company.id {
+                companyGitHubStatusMessage = error.localizedDescription
+                errorMessage = error.localizedDescription
+            }
         }
     }
 

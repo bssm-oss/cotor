@@ -1126,6 +1126,115 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func staleCompanyAsyncResponsesDoNotOverwriteSelectedCompanyState() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            if path.contains("/github/status") {
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            let body: String
+            switch path {
+            case "/api/app/companies/company-a/github/status":
+                body = """
+                {
+                  "policy": "REQUIRE_GITHUB_PR",
+                  "ghInstalled": true,
+                  "ghAuthenticated": true,
+                  "originConfigured": true,
+                  "originUrl": "https://github.com/example/a.git",
+                  "bootstrapAvailable": true,
+                  "repositoryPath": "/tmp/a",
+                  "companyId": "company-a",
+                  "companyName": "Company A",
+                  "message": "ready"
+                }
+                """
+            case "/api/app/companies/company-a/reports":
+                body = """
+                [{
+                  "id": "report-a",
+                  "companyId": "company-a",
+                  "date": "2026-05-12",
+                  "generatedAt": 1,
+                  "periodStart": 0,
+                  "periodEnd": 1,
+                  "summary": "Company A report",
+                  "completedCount": 0,
+                  "blockedCount": 0,
+                  "qaPassedCount": 0,
+                  "changesRequestedCount": 0,
+                  "pullRequestCount": 0,
+                  "estimatedRunCostCents": 0,
+                  "activityCount": 0
+                }]
+                """
+            case "/api/app/companies/company-a/problem-signals":
+                body = """
+                [{
+                  "id": "signal-a",
+                  "companyId": "company-a",
+                  "kind": "risk",
+                  "title": "Company A signal",
+                  "detail": "stale response",
+                  "severity": "warning",
+                  "confidence": 0.9,
+                  "source": "test",
+                  "dedupeKey": "signal-a",
+                  "status": "OPEN",
+                  "goalId": null,
+                  "issueId": null,
+                  "reviewQueueItemId": null,
+                  "runId": null,
+                  "triageGoalId": null,
+                  "cooldownUntil": null,
+                  "firstSeenAt": 1,
+                  "lastSeenAt": 1,
+                  "updatedAt": 1
+                }]
+                """
+            default:
+                body = "{}"
+            }
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(body.utf8))
+        }
+        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+        let store = DesktopStore(
+            api: DesktopAPI(
+                baseURL: try #require(URL(string: "http://127.0.0.1:8787")),
+                token: nil,
+                session: session
+            )
+        )
+        store.dashboard = scopedSelectionDashboard()
+        store.selectedCompanyID = "company-a"
+
+        let githubStatusTask = Task { await store.refreshSelectedCompanyGitHubStatus() }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        store.selectedCompanyID = "company-b"
+        await githubStatusTask.value
+
+        #expect(store.selectedCompanyGitHubStatus == nil)
+        #expect(store.companyGitHubStatusMessage == nil)
+
+        await store.refreshCompanyReports(companyId: "company-a")
+        #expect(store.companyReports.isEmpty)
+        #expect(store.selectedCompanyReportDate == nil)
+        #expect(store.selectedCompanyReport == nil)
+
+        await store.refreshCompanyProblemSignals(companyId: "company-a")
+        #expect(store.companyProblemSignals.isEmpty)
+    }
+
+    @Test
     func selectedIssueTaskAndMetricsStayScopedToSelectedCompany() {
         let store = DesktopStore()
         store.dashboard = scopedSelectionDashboard()
@@ -1275,4 +1384,32 @@ struct DesktopStoreTests {
             dangerous: false
         )
     }
+}
+
+final class DesktopStoreCapturingURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        do {
+            let (response, data) = try Self.requestHandler?(request) ?? {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!
+                return (response, Data())
+            }()
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
