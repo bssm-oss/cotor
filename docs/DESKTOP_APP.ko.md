@@ -50,18 +50,25 @@ cotor delete
 cotor app-server --port 8787
 ```
 
-로컬 인증 토큰을 붙이려면:
+app-server는 `/api/app/**`와 A2A route를 항상 bearer auth로 보호합니다. 토큰을 주지 않으면 로컬 토큰을 생성해 사용자 runtime token file에 저장합니다.
+
+```bash
+cotor app-server --port 8787
+cat "$HOME/Library/Application Support/CotorDesktop/runtime/backend/app-server.token"
+```
+
+특정 토큰을 직접 쓰려면:
 
 ```bash
 export COTOR_APP_TOKEN='your-local-token'
-cotor app-server --port 8787 --token your-local-token
+cotor app-server --port 8787 --token "$COTOR_APP_TOKEN"
 ```
 
 MCP 제어 도구를 별도 토큰으로 열려면:
 
 ```bash
 export COTOR_APP_CONTROL_TOKEN='your-local-control-token'
-cotor app-server --port 8787 --token your-local-token --control-token your-local-control-token
+cotor app-server --port 8787 --token your-local-token --control-token "$COTOR_APP_CONTROL_TOKEN"
 ```
 
 `/api/app/mcp`는 읽기 전용입니다. 상태를 바꾸는 MCP 도구는 `/api/app/mcp/control`에 있으며 control token이 필요합니다.
@@ -80,7 +87,7 @@ export COTOR_APP_TOKEN='your-local-token'
 swift run --package-path macos CotorDesktopApp
 ```
 
-번들 backend를 launcher가 관리할 때 launcher와 `DesktopAPI`는 같은 `COTOR_APP_TOKEN` 값을 읽습니다. 환경 변수가 없으면 양쪽 모두 embedded session용 desktop-local token으로 폴백합니다. 패키지 launcher는 이 token을 backend process argument에 넣지 않고 backend 환경 변수와 `0600` runtime token file로 전달합니다.
+번들 backend를 launcher가 관리할 때 launcher와 `DesktopAPI`는 `COTOR_APP_TOKEN`이 있으면 같은 값을 사용합니다. 환경 변수가 없으면 static fallback token이 아니라 사용자별 runtime token file을 사용합니다. 패키지 launcher는 이 token을 backend process argument에 넣지 않고 backend 환경 변수와 `0600` runtime token file로 전달합니다.
 embedded backend에는 부모 shell 환경 전체가 아니라 최소한으로 정리된 환경만 전달됩니다. 따라서 우연히 설정된 API key, GitHub/Linear token, password 계열 변수는 로컬 app-server로 상속되지 않습니다. 특정 workflow가 환경 변수 기반 credential을 꼭 필요로 한다면 외부 `cotor app-server`를 명시적으로 실행해서 연결하세요.
 
 ## 로컬 앱 번들 설치

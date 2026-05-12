@@ -45,18 +45,25 @@ cotor delete     # Remove app
 cotor app-server --port 8787
 ```
 
-Optional local auth:
+The app-server always protects `/api/app/**` and A2A routes with bearer auth. If no token is provided, it generates a local token and stores it in the user-owned runtime token file:
+
+```bash
+cotor app-server --port 8787
+cat "$HOME/Library/Application Support/CotorDesktop/runtime/backend/app-server.token"
+```
+
+To provide a specific token instead:
 
 ```bash
 export COTOR_APP_TOKEN='your-local-token'
-cotor app-server --port 8787 --token your-local-token
+cotor app-server --port 8787 --token "$COTOR_APP_TOKEN"
 ```
 
 Optional MCP control auth:
 
 ```bash
 export COTOR_APP_CONTROL_TOKEN='your-local-control-token'
-cotor app-server --port 8787 --token your-local-token --control-token your-local-control-token
+cotor app-server --port 8787 --token your-local-token --control-token "$COTOR_APP_CONTROL_TOKEN"
 ```
 
 `/api/app/mcp` is read-only. Mutating MCP tools live under `/api/app/mcp/control` and require the control token.
@@ -75,7 +82,7 @@ export COTOR_APP_TOKEN='your-local-token'
 swift run --package-path macos CotorDesktopApp
 ```
 
-When the bundled backend is launcher-managed, the launcher and `DesktopAPI` both read the same `COTOR_APP_TOKEN` value. If the variable is unset, both sides fall back to the desktop-local token used for embedded sessions. The packaged launcher passes this token through the backend environment and a `0600` runtime token file rather than placing it in the backend process arguments.
+When the bundled backend is launcher-managed, the launcher and `DesktopAPI` both use the same `COTOR_APP_TOKEN` value when one is provided. If the variable is unset, they use the per-user runtime token file instead of a static fallback token. The packaged launcher passes this token through the backend environment and a `0600` runtime token file rather than placing it in the backend process arguments.
 The embedded backend receives a minimal sanitized environment instead of the full parent shell environment, so incidental API keys, GitHub/Linear tokens, and password-like variables are not inherited by the local app-server. Run an external `cotor app-server` explicitly if a workflow must provide additional environment-scoped credentials.
 
 ## Install A Local App Bundle
