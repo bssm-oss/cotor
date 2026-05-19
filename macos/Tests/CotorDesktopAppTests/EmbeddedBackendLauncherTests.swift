@@ -11,17 +11,18 @@ struct EmbeddedBackendLauncherTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let staleJar = tmpDir.appendingPathComponent("cotor-backend-runtime-999.jar")
+        let staleAppServerJar = tmpDir.appendingPathComponent("cotor-app-server-999.jar")
         let liveJar = tmpDir.appendingPathComponent("cotor-backend-runtime-1234.jar")
         let unrelated = tmpDir.appendingPathComponent("something-else.jar")
         FileManager.default.createFile(atPath: staleJar.path, contents: nil)
+        FileManager.default.createFile(atPath: staleAppServerJar.path, contents: nil)
         FileManager.default.createFile(atPath: liveJar.path, contents: nil)
         FileManager.default.createFile(atPath: unrelated.path, contents: nil)
 
         let liveCommandLines: Set<String> = ["/usr/bin/java -jar \(liveJar.path) app-server --port 8787"]
         let toClean = staleRuntimeJarsToClean(in: tmpDir, liveCommandLines: liveCommandLines)
 
-        #expect(toClean.count == 1)
-        #expect(toClean.first?.lastPathComponent == "cotor-backend-runtime-999.jar")
+        #expect(toClean.map(\.lastPathComponent) == ["cotor-app-server-999.jar", "cotor-backend-runtime-999.jar"])
     }
 
     @Test
@@ -32,6 +33,22 @@ struct EmbeddedBackendLauncherTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let liveJar = tmpDir.appendingPathComponent("cotor-backend-runtime-42.jar")
+        FileManager.default.createFile(atPath: liveJar.path, contents: nil)
+
+        let liveCommandLines: Set<String> = ["/usr/bin/java -jar \(liveJar.path) app-server --port 8787"]
+        let toClean = staleRuntimeJarsToClean(in: tmpDir, liveCommandLines: liveCommandLines)
+
+        #expect(toClean.isEmpty)
+    }
+
+    @Test
+    func liveAppServerJarIsNotMarkedStale() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cotor-app-server-live-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let liveJar = tmpDir.appendingPathComponent("cotor-app-server-42.jar")
         FileManager.default.createFile(atPath: liveJar.path, contents: nil)
 
         let liveCommandLines: Set<String> = ["/usr/bin/java -jar \(liveJar.path) app-server --port 8787"]
