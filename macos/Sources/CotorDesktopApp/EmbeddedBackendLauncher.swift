@@ -484,10 +484,33 @@ internal func staleRuntimeJarsToClean(in runtimeDir: URL, liveCommandLines: Set<
         at: runtimeDir, includingPropertiesForKeys: nil
     ) else { return [] }
     return files.filter { file in
-        file.lastPathComponent.hasPrefix("cotor-backend-runtime-") &&
+        let pathAliases = runtimeJarPathAliases(for: file)
+        return isBackendRuntimeJar(file.lastPathComponent) &&
         file.pathExtension == "jar" &&
-        !liveCommandLines.contains(where: { $0.contains(file.path) })
+        !liveCommandLines.contains(where: { line in
+            pathAliases.contains(where: { line.contains($0) })
+        })
     }
+    .sorted { $0.lastPathComponent < $1.lastPathComponent }
+}
+
+private func isBackendRuntimeJar(_ fileName: String) -> Bool {
+    fileName.hasPrefix("cotor-backend-runtime-") || fileName.hasPrefix("cotor-app-server-")
+}
+
+private func runtimeJarPathAliases(for file: URL) -> Set<String> {
+    let raw = file.path
+    let standardized = file.standardizedFileURL.path
+    let resolved = file.resolvingSymlinksInPath().path
+    var aliases = Set([raw, standardized, resolved])
+    for path in Array(aliases) {
+        if path.hasPrefix("/private/var/") || path.hasPrefix("/private/tmp/") {
+            aliases.insert(String(path.dropFirst("/private".count)))
+        } else if path.hasPrefix("/var/") || path.hasPrefix("/tmp/") {
+            aliases.insert("/private\(path)")
+        }
+    }
+    return aliases
 }
 
 internal func sanitizedEmbeddedBackendEnvironment(
