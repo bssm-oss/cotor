@@ -50,10 +50,22 @@ class DesktopEndpointPolicyTest : FunSpec({
         DesktopEndpointPolicy.isLoopback("https://api.cotor.io") shouldBe false
         DesktopEndpointPolicy.isLoopback("http://10.0.0.1:8787") shouldBe false
         DesktopEndpointPolicy.isLoopback("http://192.168.1.100:8787") shouldBe false
+        DesktopEndpointPolicy.isLoopback("http://localhost.evil.test:8787") shouldBe false
+        DesktopEndpointPolicy.isLoopback("http://127.0.0.1.evil.test:8787") shouldBe false
+        DesktopEndpointPolicy.isLoopback("ftp://localhost:8787") shouldBe false
     }
 
     test("trailing slash is stripped before appending api/a2a") {
         val endpoint = DesktopEndpointPolicy.resolveA2aEndpoint("http://127.0.0.1:8787/")
         endpoint shouldBe "http://127.0.0.1:8787/api/a2a"
+    }
+
+    test("remote URL is allowed only with explicit flag and token") {
+        val endpoint = DesktopEndpointPolicy.resolveA2aEndpoint(
+            envUrl = "https://remote.example.com:8787",
+            envAllowRemote = "1",
+            envToken = "token"
+        )
+        endpoint shouldBe "https://remote.example.com:8787/api/a2a"
     }
 })
