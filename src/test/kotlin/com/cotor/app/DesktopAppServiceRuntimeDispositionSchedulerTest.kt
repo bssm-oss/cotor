@@ -633,11 +633,11 @@ private suspend fun seedRuntimeDispositionWorkspace(
     companyId: String = "company-1"
 ) {
     stateStore.save(
-            DesktopAppState(
-                companies = listOf(runtimeDispositionCompany(companyId, repoRoot)),
-                repositories = listOf(
-                    ManagedRepository(
-                        id = "repo-1",
+        DesktopAppState(
+            companies = listOf(runtimeDispositionCompany(companyId, repoRoot)),
+            repositories = listOf(
+                ManagedRepository(
+                    id = "repo-1",
                     name = "repo",
                     localPath = repoRoot.toString(),
                     sourceKind = RepositorySourceKind.LOCAL,

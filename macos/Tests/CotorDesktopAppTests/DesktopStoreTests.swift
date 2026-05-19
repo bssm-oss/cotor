@@ -711,10 +711,11 @@ struct DesktopStoreTests {
 
     @Test
     func listPrefixedSlashGoalCommandRoutesThroughChatGoalCreation() async throws {
+        let host = "desktop-goal.test"
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
         let api = DesktopAPI(
-            baseURL: URL(string: "http://desktop.test")!,
+            baseURL: URL(string: "http://\(host)")!,
             token: "test-token",
             session: URLSession(configuration: configuration)
         )
@@ -777,7 +778,7 @@ struct DesktopStoreTests {
             agentMessages: [],
             agentPerformance: []
         )
-        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+        DesktopStoreCapturingURLProtocol.setRequestHandler(forHost: host) { request in
             let encoder = JSONEncoder()
             let path = request.url?.path ?? ""
             let data: Data
@@ -801,7 +802,7 @@ struct DesktopStoreTests {
             )!
             return (response, data)
         }
-        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+        defer { DesktopStoreCapturingURLProtocol.removeRequestHandler(forHost: host) }
 
         await store.submitOperatorChatMessage("- /goal Stabilize the company runtime")
 
@@ -1262,10 +1263,11 @@ struct DesktopStoreTests {
 
     @Test
     func staleCompanyAsyncResponsesDoNotOverwriteSelectedCompanyState() async throws {
+        let host = "desktop-stale-company.test"
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+        DesktopStoreCapturingURLProtocol.setRequestHandler(forHost: host) { request in
             let path = request.url?.path ?? ""
             if path.contains("/github/status") {
                 Thread.sleep(forTimeInterval: 0.1)
@@ -1341,10 +1343,10 @@ struct DesktopStoreTests {
             )!
             return (response, Data(body.utf8))
         }
-        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+        defer { DesktopStoreCapturingURLProtocol.removeRequestHandler(forHost: host) }
         let store = DesktopStore(
             api: DesktopAPI(
-                baseURL: try #require(URL(string: "http://127.0.0.1:8787")),
+                baseURL: try #require(URL(string: "http://\(host)")),
                 token: nil,
                 session: session
             )
@@ -1504,10 +1506,11 @@ struct DesktopStoreTests {
 
     @Test
     func refreshTuiSessionListDoesNotOverwriteSelectedWorkspaceWithFirstSession() async throws {
+        let host = "desktop-tui-first.test"
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+        DesktopStoreCapturingURLProtocol.setRequestHandler(forHost: host) { request in
             let path = request.url?.path ?? ""
             let body: String
             if path.contains("/tui/sessions") {
@@ -1524,10 +1527,10 @@ struct DesktopStoreTests {
             let response = HTTPURLResponse(url: try #require(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
             return (response, Data(body.utf8))
         }
-        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+        defer { DesktopStoreCapturingURLProtocol.removeRequestHandler(forHost: host) }
         let store = DesktopStore(
             api: DesktopAPI(
-                baseURL: try #require(URL(string: "http://127.0.0.1:8787")),
+                baseURL: try #require(URL(string: "http://\(host)")),
                 token: nil,
                 session: session
             )
@@ -1544,10 +1547,11 @@ struct DesktopStoreTests {
 
     @Test
     func refreshTuiSessionListSetsNilWhenNoSessionMatchesSelectedWorkspace() async throws {
+        let host = "desktop-tui-none.test"
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+        DesktopStoreCapturingURLProtocol.setRequestHandler(forHost: host) { request in
             let path = request.url?.path ?? ""
             let body: String
             if path.contains("/tui/sessions") {
@@ -1562,10 +1566,10 @@ struct DesktopStoreTests {
             let response = HTTPURLResponse(url: try #require(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
             return (response, Data(body.utf8))
         }
-        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+        defer { DesktopStoreCapturingURLProtocol.removeRequestHandler(forHost: host) }
         let store = DesktopStore(
             api: DesktopAPI(
-                baseURL: try #require(URL(string: "http://127.0.0.1:8787")),
+                baseURL: try #require(URL(string: "http://\(host)")),
                 token: nil,
                 session: session
             )
@@ -1760,7 +1764,22 @@ struct DesktopStoreTests {
 }
 
 final class DesktopStoreCapturingURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    typealias RequestHandler = (URLRequest) throws -> (HTTPURLResponse, Data)
+
+    private static let handlerLock = NSLock()
+    nonisolated(unsafe) private static var requestHandlersByHost: [String: RequestHandler] = [:]
+
+    static func setRequestHandler(forHost host: String, handler: @escaping RequestHandler) {
+        handlerLock.lock()
+        requestHandlersByHost[host] = handler
+        handlerLock.unlock()
+    }
+
+    static func removeRequestHandler(forHost host: String) {
+        handlerLock.lock()
+        requestHandlersByHost.removeValue(forKey: host)
+        handlerLock.unlock()
+    }
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -1772,7 +1791,7 @@ final class DesktopStoreCapturingURLProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         do {
-            let (response, data) = try Self.requestHandler?(request) ?? {
+            let (response, data) = try Self.requestHandler(for: request)?(request) ?? {
                 let response = HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!
                 return (response, Data())
             }()
@@ -1785,6 +1804,14 @@ final class DesktopStoreCapturingURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+
+    private static func requestHandler(for request: URLRequest) -> RequestHandler? {
+        let host = request.url?.host ?? ""
+        handlerLock.lock()
+        let handler = requestHandlersByHost[host]
+        handlerLock.unlock()
+        return handler
+    }
 }
 
 final class Locked<Value>: @unchecked Sendable {

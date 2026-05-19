@@ -65,9 +65,13 @@ class DesktopTuiSessionServiceTest : FunSpec({
             DesktopAppState(
                 repositories = listOf(
                     ManagedRepository(
-                        id = "repo-1", name = "repo", localPath = repoRoot.toString(),
-                        sourceKind = RepositorySourceKind.LOCAL, defaultBranch = "master",
-                        createdAt = 1, updatedAt = 1
+                        id = "repo-1",
+                        name = "repo",
+                        localPath = repoRoot.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "master",
+                        createdAt = 1,
+                        updatedAt = 1
                     )
                 ),
                 workspaces = listOf(
@@ -99,9 +103,13 @@ class DesktopTuiSessionServiceTest : FunSpec({
             DesktopAppState(
                 repositories = listOf(
                     ManagedRepository(
-                        id = "repo-1", name = "repo", localPath = repoRoot.toString(),
-                        sourceKind = RepositorySourceKind.LOCAL, defaultBranch = "master",
-                        createdAt = 1, updatedAt = 1
+                        id = "repo-1",
+                        name = "repo",
+                        localPath = repoRoot.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "master",
+                        createdAt = 1,
+                        updatedAt = 1
                     )
                 ),
                 workspaces = listOf(
@@ -134,9 +142,13 @@ class DesktopTuiSessionServiceTest : FunSpec({
             DesktopAppState(
                 repositories = listOf(
                     ManagedRepository(
-                        id = "repo-1", name = "repo", localPath = repoRoot.toString(),
-                        sourceKind = RepositorySourceKind.LOCAL, defaultBranch = "master",
-                        createdAt = 1, updatedAt = 1
+                        id = "repo-1",
+                        name = "repo",
+                        localPath = repoRoot.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "master",
+                        createdAt = 1,
+                        updatedAt = 1
                     )
                 ),
                 workspaces = listOf(

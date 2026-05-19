@@ -14206,7 +14206,8 @@ class DesktopAppServiceTest : FunSpec({
             rootPath = repoRoot.toString(),
             repositoryId = REPOSITORY_ID,
             defaultBaseBranch = "master",
-            createdAt = 1L, updatedAt = 1L
+            createdAt = 1L,
+            updatedAt = 1L
         )
         val goal = CompanyGoal(
             id = "goal-qa-interrupted",
@@ -14273,18 +14274,23 @@ class DesktopAppServiceTest : FunSpec({
                 companies = listOf(company),
                 repositories = listOf(
                     ManagedRepository(
-                        id = REPOSITORY_ID, name = "repo",
+                        id = REPOSITORY_ID,
+                        name = "repo",
                         localPath = repoRoot.toString(),
                         sourceKind = RepositorySourceKind.LOCAL,
                         defaultBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 workspaces = listOf(
                     Workspace(
-                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
-                        name = "repo · master", baseBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        id = WORKSPACE_ID,
+                        repositoryId = REPOSITORY_ID,
+                        name = "repo · master",
+                        baseBranch = "master",
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 projectContexts = listOf(
@@ -14328,7 +14334,8 @@ class DesktopAppServiceTest : FunSpec({
             rootPath = repoRoot.toString(),
             repositoryId = REPOSITORY_ID,
             defaultBaseBranch = "master",
-            createdAt = 1L, updatedAt = 1L
+            createdAt = 1L,
+            updatedAt = 1L
         )
         val goal = CompanyGoal(
             id = "goal-qa-requeue-int",
@@ -14395,18 +14402,23 @@ class DesktopAppServiceTest : FunSpec({
                 companies = listOf(company),
                 repositories = listOf(
                     ManagedRepository(
-                        id = REPOSITORY_ID, name = "repo",
+                        id = REPOSITORY_ID,
+                        name = "repo",
                         localPath = repoRoot.toString(),
                         sourceKind = RepositorySourceKind.LOCAL,
                         defaultBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 workspaces = listOf(
                     Workspace(
-                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
-                        name = "repo · master", baseBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        id = WORKSPACE_ID,
+                        repositoryId = REPOSITORY_ID,
+                        name = "repo · master",
+                        baseBranch = "master",
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 projectContexts = listOf(
@@ -14459,7 +14471,8 @@ class DesktopAppServiceTest : FunSpec({
             rootPath = repoRoot.toString(),
             repositoryId = REPOSITORY_ID,
             defaultBaseBranch = "master",
-            createdAt = 1L, updatedAt = 1L
+            createdAt = 1L,
+            updatedAt = 1L
         )
         val goal = CompanyGoal(
             id = "goal-qa-src-done",
@@ -14504,18 +14517,23 @@ class DesktopAppServiceTest : FunSpec({
                 companies = listOf(company),
                 repositories = listOf(
                     ManagedRepository(
-                        id = REPOSITORY_ID, name = "repo",
+                        id = REPOSITORY_ID,
+                        name = "repo",
                         localPath = repoRoot.toString(),
                         sourceKind = RepositorySourceKind.LOCAL,
                         defaultBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 workspaces = listOf(
                     Workspace(
-                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
-                        name = "repo · master", baseBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        id = WORKSPACE_ID,
+                        repositoryId = REPOSITORY_ID,
+                        name = "repo · master",
+                        baseBranch = "master",
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 projectContexts = listOf(
@@ -14558,7 +14576,8 @@ class DesktopAppServiceTest : FunSpec({
             rootPath = repoRoot.toString(),
             repositoryId = REPOSITORY_ID,
             defaultBaseBranch = "master",
-            createdAt = 1L, updatedAt = 1L
+            createdAt = 1L,
+            updatedAt = 1L
         )
         val goal = CompanyGoal(
             id = "goal-qa-rq-await",
@@ -14605,25 +14624,31 @@ class DesktopAppServiceTest : FunSpec({
             runId = "run-exec-done",
             status = ReviewQueueStatus.AWAITING_QA,
             qaIssueId = qaIssue.id,
-            createdAt = 5L, updatedAt = 5L
+            createdAt = 5L,
+            updatedAt = 5L
         )
         stateStore.save(
             DesktopAppState(
                 companies = listOf(company),
                 repositories = listOf(
                     ManagedRepository(
-                        id = REPOSITORY_ID, name = "repo",
+                        id = REPOSITORY_ID,
+                        name = "repo",
                         localPath = repoRoot.toString(),
                         sourceKind = RepositorySourceKind.LOCAL,
                         defaultBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 workspaces = listOf(
                     Workspace(
-                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
-                        name = "repo · master", baseBranch = "master",
-                        createdAt = 1L, updatedAt = 1L
+                        id = WORKSPACE_ID,
+                        repositoryId = REPOSITORY_ID,
+                        name = "repo · master",
+                        baseBranch = "master",
+                        createdAt = 1L,
+                        updatedAt = 1L
                     )
                 ),
                 projectContexts = listOf(

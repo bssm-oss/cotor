@@ -3451,10 +3451,6 @@ final class DesktopStore: ObservableObject {
             return await runOperatorCommandAsChatReply(message: message)
         }
 
-        if let response = await runCompanyOperatorChat(message: message) {
-            return operatorAssistantText(for: response)
-        }
-
         if selectedOperatorAutomationMode.uppercased() == "ASK_ME",
            looksLikeHrStaffingChatRequest(normalized) {
             appendOperatorChatMessage(
