@@ -12,6 +12,7 @@ actor EmbeddedBackendLauncher {
 
     private let port = 8787
     private var process: Process?
+    private var stagedJarPath: String?
     private var shutdownRequested = false
     private let shutdownPollIntervalMs = 200
 
@@ -23,6 +24,7 @@ actor EmbeddedBackendLauncher {
             return
         }
         await terminateStaleBundledBackendProcesses()
+        cleanupStaleRuntimeJars()
         if await healthCheck() {
             return
         }
@@ -44,6 +46,7 @@ actor EmbeddedBackendLauncher {
             AppLogger.error("Embedded backend launch failed: could not stage backend jar.")
             return
         }
+        stagedJarPath = runtimeJarPath
 
         let runtimeDir = defaultDesktopAppHome()
             .appendingPathComponent("runtime", isDirectory: true)
@@ -408,7 +411,52 @@ actor EmbeddedBackendLauncher {
             AppLogger.error("Embedded backend child process \(process.processIdentifier) did not exit after termination attempts.")
         }
         self.process = nil
+        deleteStagedJar()
         return terminated
+    }
+
+    private func deleteStagedJar() {
+        guard let path = stagedJarPath else { return }
+        stagedJarPath = nil
+        do {
+            try FileManager.default.removeItem(atPath: path)
+            AppLogger.info("Removed staged backend runtime jar.")
+        } catch {
+            AppLogger.error("Failed to remove staged backend runtime jar: \(error.localizedDescription)")
+        }
+    }
+
+    private func cleanupStaleRuntimeJars() {
+        let runtimeDir = defaultDesktopAppHome()
+            .appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("backend", isDirectory: true)
+        let liveLines = liveJavaCommandLines()
+        let toRemove = staleRuntimeJarsToClean(in: runtimeDir, liveCommandLines: liveLines)
+        for jar in toRemove {
+            do {
+                try FileManager.default.removeItem(at: jar)
+                AppLogger.info("Removed stale backend runtime jar: \(jar.lastPathComponent).")
+            } catch {
+                AppLogger.error("Failed to remove stale backend runtime jar \(jar.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func liveJavaCommandLines() -> Set<String> {
+        let inspector = Process()
+        inspector.executableURL = URL(fileURLWithPath: "/bin/ps")
+        inspector.arguments = ["-axo", "args="]
+        let pipe = Pipe()
+        inspector.standardOutput = pipe
+        inspector.standardError = Pipe()
+        do {
+            try inspector.run()
+            inspector.waitUntilExit()
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return Set(output.split(separator: "\n").map(String.init))
+        } catch {
+            return []
+        }
     }
 }
 
@@ -429,6 +477,17 @@ internal func isOwnedEmbeddedBackendHealthData(_ data: Data) -> Bool {
         payload.owner == "cotor-desktop" &&
         !payload.version.isEmpty &&
         !payload.build.isEmpty
+}
+
+internal func staleRuntimeJarsToClean(in runtimeDir: URL, liveCommandLines: Set<String>) -> [URL] {
+    guard let files = try? FileManager.default.contentsOfDirectory(
+        at: runtimeDir, includingPropertiesForKeys: nil
+    ) else { return [] }
+    return files.filter { file in
+        file.lastPathComponent.hasPrefix("cotor-backend-runtime-") &&
+        file.pathExtension == "jar" &&
+        !liveCommandLines.contains(where: { $0.contains(file.path) })
+    }
 }
 
 internal func sanitizedEmbeddedBackendEnvironment(

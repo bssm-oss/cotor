@@ -1,7 +1,60 @@
+import Foundation
 import Testing
 @testable import CotorDesktopApp
 
 struct EmbeddedBackendLauncherTests {
+    @Test
+    func staleRuntimeJarsAreIdentifiedWhenNotReferencedByLiveProcess() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cotor-jar-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let staleJar = tmpDir.appendingPathComponent("cotor-backend-runtime-999.jar")
+        let liveJar = tmpDir.appendingPathComponent("cotor-backend-runtime-1234.jar")
+        let unrelated = tmpDir.appendingPathComponent("something-else.jar")
+        FileManager.default.createFile(atPath: staleJar.path, contents: nil)
+        FileManager.default.createFile(atPath: liveJar.path, contents: nil)
+        FileManager.default.createFile(atPath: unrelated.path, contents: nil)
+
+        let liveCommandLines: Set<String> = ["/usr/bin/java -jar \(liveJar.path) app-server --port 8787"]
+        let toClean = staleRuntimeJarsToClean(in: tmpDir, liveCommandLines: liveCommandLines)
+
+        #expect(toClean.count == 1)
+        #expect(toClean.first?.lastPathComponent == "cotor-backend-runtime-999.jar")
+    }
+
+    @Test
+    func liveRuntimeJarIsNotMarkedStale() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cotor-jar-live-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let liveJar = tmpDir.appendingPathComponent("cotor-backend-runtime-42.jar")
+        FileManager.default.createFile(atPath: liveJar.path, contents: nil)
+
+        let liveCommandLines: Set<String> = ["/usr/bin/java -jar \(liveJar.path) app-server --port 8787"]
+        let toClean = staleRuntimeJarsToClean(in: tmpDir, liveCommandLines: liveCommandLines)
+
+        #expect(toClean.isEmpty)
+    }
+
+    @Test
+    func nonRuntimeJarsAreNotMarkedStale() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cotor-jar-other-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let otherJar = tmpDir.appendingPathComponent("some-other.jar")
+        FileManager.default.createFile(atPath: otherJar.path, contents: nil)
+
+        let toClean = staleRuntimeJarsToClean(in: tmpDir, liveCommandLines: [])
+
+        #expect(toClean.isEmpty)
+    }
+
     @Test
     func backendHealthRequiresOwnedVersionedCotorServer() {
         let owned = #"{"ok":true,"service":"cotor-app-server","owner":"cotor-desktop","version":"1.0.6","build":"1.0.6"}"#

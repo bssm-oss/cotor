@@ -585,6 +585,85 @@ struct ModelsTests {
         #expect(decoded.specialties == ["qa", "review"])
         #expect(decoded.enabled == false)
     }
+
+    @Test
+    func appServerConfigLoopbackURLIsAllowed() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, _) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: "http://127.0.0.1:9000",
+            envAllowRemote: nil,
+            envToken: nil,
+            fallbackURL: fallback,
+            appToken: "token"
+        )
+        #expect(url.absoluteString == "http://127.0.0.1:9000")
+    }
+
+    @Test
+    func appServerConfigLocalhostURLIsAllowed() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, _) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: "http://localhost:8787",
+            envAllowRemote: nil,
+            envToken: nil,
+            fallbackURL: fallback,
+            appToken: "token"
+        )
+        #expect(url.host == "localhost")
+    }
+
+    @Test
+    func appServerConfigRemoteURLWithoutFlagFallsBackToLoopback() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, _) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: "https://remote.cotor.io:8787",
+            envAllowRemote: nil,
+            envToken: "some-token",
+            fallbackURL: fallback,
+            appToken: "app-token"
+        )
+        #expect(url.absoluteString == fallback.absoluteString)
+    }
+
+    @Test
+    func appServerConfigRemoteURLWithFlagAndTokenIsAllowed() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, token) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: "https://remote.cotor.io:8787",
+            envAllowRemote: "1",
+            envToken: "explicit-token",
+            fallbackURL: fallback,
+            appToken: "app-token"
+        )
+        #expect(url.absoluteString == "https://remote.cotor.io:8787")
+        #expect(token == "explicit-token")
+    }
+
+    @Test
+    func appServerConfigRemoteURLWithFlagButNoTokenFallsBackToLoopback() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, _) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: "https://remote.cotor.io:8787",
+            envAllowRemote: "1",
+            envToken: nil,
+            fallbackURL: fallback,
+            appToken: "app-token"
+        )
+        #expect(url.absoluteString == fallback.absoluteString)
+    }
+
+    @Test
+    func appServerConfigNilEnvURLFallsBackToLoopback() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, _) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: nil,
+            envAllowRemote: nil,
+            envToken: nil,
+            fallbackURL: fallback,
+            appToken: "token"
+        )
+        #expect(url.absoluteString == fallback.absoluteString)
+    }
 }
 
 final class DesktopAPICapturingURLProtocol: URLProtocol, @unchecked Sendable {

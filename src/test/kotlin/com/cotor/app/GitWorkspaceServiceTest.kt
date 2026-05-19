@@ -1526,6 +1526,61 @@ class GitWorkspaceServiceTest : FunSpec({
         )
         processManager.remainingSteps() shouldBe 0
     }
+
+    test("cloneRepository rejects file:// URL") {
+        val service = GitWorkspaceService(
+            FakeProcessManager(emptyList()),
+            mockk(relaxed = true),
+            mockk<Logger>(relaxed = true)
+        )
+        shouldThrow<IllegalArgumentException> {
+            service.cloneRepository("file:///home/user/local-repo")
+        }
+    }
+
+    test("cloneRepository rejects local path without scheme") {
+        val service = GitWorkspaceService(
+            FakeProcessManager(emptyList()),
+            mockk(relaxed = true),
+            mockk<Logger>(relaxed = true)
+        )
+        shouldThrow<IllegalArgumentException> {
+            service.cloneRepository("/Users/user/projects/my-repo")
+        }
+    }
+
+    test("cloneRepository rejects non-GitHub HTTPS URL") {
+        val service = GitWorkspaceService(
+            FakeProcessManager(emptyList()),
+            mockk(relaxed = true),
+            mockk<Logger>(relaxed = true)
+        )
+        shouldThrow<IllegalArgumentException> {
+            service.cloneRepository("https://gitlab.com/owner/repo.git")
+        }
+    }
+
+    test("cloneRepository rejects GitHub URL with embedded credentials") {
+        val service = GitWorkspaceService(
+            FakeProcessManager(emptyList()),
+            mockk(relaxed = true),
+            mockk<Logger>(relaxed = true)
+        )
+        shouldThrow<IllegalArgumentException> {
+            service.cloneRepository("https://token:x-oauth-basic@github.com/owner/repo.git")
+        }
+    }
+
+    test("cloneRepository rejects blank URL") {
+        val service = GitWorkspaceService(
+            FakeProcessManager(emptyList()),
+            mockk(relaxed = true),
+            mockk<Logger>(relaxed = true)
+        )
+        shouldThrow<IllegalArgumentException> {
+            service.cloneRepository("   ")
+        }
+    }
 })
 
 private fun expectedPullRequestBody(

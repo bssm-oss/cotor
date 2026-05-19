@@ -82,11 +82,25 @@ if [ "${1:-}" = "app-server" ]; then
     RUNTIME_JAR="$RUNTIME_BACKEND_DIR/cotor-app-server-$$.jar"
     /bin/mkdir -p "$RUNTIME_BACKEND_DIR" || exit 1
     /bin/cp "$JAR_PATH" "$RUNTIME_JAR" || exit 1
-    cleanup_runtime_jar() {
+    JAVA_CHILD_PID=""
+    cleanup_app_server() {
+        if [ -n "$JAVA_CHILD_PID" ]; then
+            kill -TERM "$JAVA_CHILD_PID" 2>/dev/null || true
+            local waited=0
+            while kill -0 "$JAVA_CHILD_PID" 2>/dev/null && [ "$waited" -lt 10 ]; do
+                sleep 1
+                waited=$((waited + 1))
+            done
+            kill -KILL "$JAVA_CHILD_PID" 2>/dev/null || true
+        fi
         /bin/rm -f "$RUNTIME_JAR" >/dev/null 2>&1 || true
     }
-    trap cleanup_runtime_jar EXIT
-    JAR_PATH="$RUNTIME_JAR"
+    trap cleanup_app_server TERM INT HUP EXIT
+    export COTOR_PROJECT_ROOT="$PROJECT_ROOT"
+    "$JAVA_CMD" -jar "$RUNTIME_JAR" "$@" &
+    JAVA_CHILD_PID=$!
+    wait "$JAVA_CHILD_PID"
+    exit $?
 fi
 
 # Run the JAR with all arguments passed to this script

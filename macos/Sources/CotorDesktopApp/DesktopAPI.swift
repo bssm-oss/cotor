@@ -104,13 +104,44 @@ struct DesktopAPI {
     }
 
     init() {
-        // The desktop shell defaults to the standard localhost port but allows
-        // overrides so developers can point it at a custom backend process.
-        let rawURL = ProcessInfo.processInfo.environment["COTOR_APP_SERVER_URL"] ?? "http://127.0.0.1:8787"
-        guard let fallbackURL = URL(string: "http://127.0.0.1:8787") else {
-            preconditionFailure("Default app server URL must be valid")
+        let fallbackURL = URL(string: "http://127.0.0.1:8787")!
+        let env = ProcessInfo.processInfo.environment
+        let (validatedURL, resolvedToken) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: env["COTOR_APP_SERVER_URL"],
+            envAllowRemote: env["COTOR_ALLOW_REMOTE_APP_SERVER"],
+            envToken: env["COTOR_APP_TOKEN"],
+            fallbackURL: fallbackURL,
+            appToken: Self.ensureAppToken()
+        )
+        self.init(baseURL: validatedURL, token: resolvedToken)
+    }
+
+    internal static func validatedAppServerConfiguration(
+        envURL: String?,
+        envAllowRemote: String?,
+        envToken: String?,
+        fallbackURL: URL,
+        appToken: String
+    ) -> (URL, String) {
+        let raw = envURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty, let url = URL(string: raw) else {
+            return (fallbackURL, appToken)
         }
-        self.init(baseURL: URL(string: rawURL) ?? fallbackURL, token: Self.ensureAppToken())
+        if isLoopbackAppServerURL(url) {
+            return (url, appToken)
+        }
+        let allowRemote = envAllowRemote?.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+        let explicitToken = envToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if allowRemote && !explicitToken.isEmpty {
+            return (url, explicitToken)
+        }
+        AppLogger.warning("Remote app-server URL '\(raw)' blocked: COTOR_ALLOW_REMOTE_APP_SERVER=1 and COTOR_APP_TOKEN are both required. Falling back to loopback.")
+        return (fallbackURL, appToken)
+    }
+
+    private static func isLoopbackAppServerURL(_ url: URL) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        return host == "127.0.0.1" || host == "localhost" || host == "::1"
     }
 
     /// Fetch the full dashboard payload used to bootstrap most of the app state.
