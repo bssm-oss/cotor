@@ -1257,6 +1257,134 @@ struct DesktopStoreTests {
         #expect(metrics.readyToMergeCount == 0)
     }
 
+    @Test
+    func refreshTuiSessionListDoesNotOverwriteSelectedWorkspaceWithFirstSession() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            let body: String
+            if path.contains("/tui/sessions") {
+                // session-b has higher updatedAt and sorts first, but ws-a is the selected workspace.
+                body = """
+                [
+                  {"id":"session-a","workspaceId":"ws-a","repositoryId":"repo-a","repositoryPath":"/tmp/a","agentName":null,"baseBranch":"main","status":"IDLE","transcript":"","transcriptStartOffset":0,"transcriptEndOffset":0,"processId":null,"exitCode":null,"createdAt":1,"updatedAt":1},
+                  {"id":"session-b","workspaceId":"ws-b","repositoryId":"repo-b","repositoryPath":"/tmp/b","agentName":null,"baseBranch":"main","status":"IDLE","transcript":"","transcriptStartOffset":0,"transcriptEndOffset":0,"processId":null,"exitCode":null,"createdAt":2,"updatedAt":2}
+                ]
+                """
+            } else {
+                body = "[]"
+            }
+            let response = HTTPURLResponse(url: try #require(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            return (response, Data(body.utf8))
+        }
+        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+        let store = DesktopStore(
+            api: DesktopAPI(
+                baseURL: try #require(URL(string: "http://127.0.0.1:8787")),
+                token: nil,
+                session: session
+            )
+        )
+        store.selectedWorkspaceID = "ws-a"
+
+        await store.refreshTuiSessionList()
+
+        // session-b sorts first (updatedAt=2) but must NOT be auto-selected because workspace differs.
+        #expect(store.tuiSession?.id == "session-a")
+        #expect(store.tuiSession?.workspaceId == "ws-a")
+        #expect(store.selectedWorkspaceID == "ws-a")
+    }
+
+    @Test
+    func refreshTuiSessionListSetsNilWhenNoSessionMatchesSelectedWorkspace() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            let body: String
+            if path.contains("/tui/sessions") {
+                body = """
+                [
+                  {"id":"session-b","workspaceId":"ws-b","repositoryId":"repo-b","repositoryPath":"/tmp/b","agentName":null,"baseBranch":"main","status":"IDLE","transcript":"","transcriptStartOffset":0,"transcriptEndOffset":0,"processId":null,"exitCode":null,"createdAt":1,"updatedAt":1}
+                ]
+                """
+            } else {
+                body = "[]"
+            }
+            let response = HTTPURLResponse(url: try #require(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            return (response, Data(body.utf8))
+        }
+        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+        let store = DesktopStore(
+            api: DesktopAPI(
+                baseURL: try #require(URL(string: "http://127.0.0.1:8787")),
+                token: nil,
+                session: session
+            )
+        )
+        store.selectedWorkspaceID = "ws-a"
+
+        await store.refreshTuiSessionList()
+
+        // No session matches ws-a — tuiSession must remain nil, not fall back to ws-b's session.
+        #expect(store.tuiSession == nil)
+        #expect(store.selectedTuiSessionID == nil)
+        #expect(store.selectedWorkspaceID == "ws-a")
+    }
+
+    @Test
+    func selectingExplicitTuiSessionMovesWorkspaceAndRepositorySelection() async {
+        let store = DesktopStore()
+        store.selectedWorkspaceID = "ws-a"
+        store.selectedRepositoryID = "repo-a"
+
+        let other = TuiSessionRecord(
+            id: "session-b",
+            workspaceId: "ws-b",
+            repositoryId: "repo-b",
+            repositoryPath: "/tmp/b",
+            agentName: nil,
+            baseBranch: "main",
+            status: "IDLE",
+            transcript: "",
+            transcriptStartOffset: 0,
+            transcriptEndOffset: 0,
+            processId: nil,
+            exitCode: nil,
+            createdAt: 1,
+            updatedAt: 1
+        )
+
+        await store.selectTuiSession(other)
+
+        #expect(store.selectedWorkspaceID == "ws-b")
+        #expect(store.selectedRepositoryID == "repo-b")
+        #expect(store.tuiSession?.id == "session-b")
+        #expect(store.selectedTuiSessionID == "session-b")
+    }
+
+    @Test
+    func issueBlockedReasonCodeDecodesRuntimeInterruptedVariant() throws {
+        let json = """
+        {
+          "id":"issue-qa","companyId":"c1","goalId":"g1","workspaceId":"ws1",
+          "title":"QA review","description":"","status":"BLOCKED",
+          "priority":0,"kind":"review","codeProducing":false,"riskLevel":"LOW",
+          "blockedBy":[],"dependsOn":[],"acceptanceCriteria":[],
+          "sourceSignal":"qa-review:issue-exec",
+          "blockedReasonCode":"RUNTIME_INTERRUPTED",
+          "createdAt":0,"updatedAt":0
+        }
+        """
+        let issue = try JSONDecoder().decode(IssueRecord.self, from: Data(json.utf8))
+
+        #expect(issue.blockedReasonCode == "RUNTIME_INTERRUPTED")
+        #expect(issue.status == "BLOCKED")
+    }
+
     private func scopedSelectionDashboard() -> DashboardPayload {
         DashboardPayload(
             repositories: [
@@ -1326,7 +1454,7 @@ struct DesktopStoreTests {
     }
 
     private func issue(id: String, companyId: String, goalId: String, workspaceId: String, status: String) -> IssueRecord {
-        IssueRecord(id: id, companyId: companyId, projectContextId: nil, goalId: goalId, workspaceId: workspaceId, title: id, description: id, status: status, priority: 0, kind: "execution", assigneeProfileId: nil, linearIssueId: nil, linearIssueIdentifier: nil, linearIssueUrl: nil, lastLinearSyncAt: nil, blockedBy: [], dependsOn: [], acceptanceCriteria: [], riskLevel: "LOW", codeProducing: true, executionIntent: nil, branchName: nil, worktreePath: nil, pullRequestNumber: nil, pullRequestUrl: nil, pullRequestState: nil, qaVerdict: nil, qaFeedback: nil, ceoVerdict: nil, ceoFeedback: nil, mergeResult: nil, transitionReason: nil, sourceSignal: "test", createdAt: 0, updatedAt: 0)
+        IssueRecord(id: id, companyId: companyId, projectContextId: nil, goalId: goalId, workspaceId: workspaceId, title: id, description: id, status: status, priority: 0, kind: "execution", assigneeProfileId: nil, linearIssueId: nil, linearIssueIdentifier: nil, linearIssueUrl: nil, lastLinearSyncAt: nil, blockedBy: [], dependsOn: [], acceptanceCriteria: [], riskLevel: "LOW", codeProducing: true, executionIntent: nil, branchName: nil, worktreePath: nil, pullRequestNumber: nil, pullRequestUrl: nil, pullRequestState: nil, qaVerdict: nil, qaFeedback: nil, ceoVerdict: nil, ceoFeedback: nil, mergeResult: nil, transitionReason: nil, sourceSignal: "test", blockedReasonCode: nil, blockedRetryable: nil, createdAt: 0, updatedAt: 0)
     }
 
     private func task(id: String, workspaceId: String, issueId: String) -> TaskRecord {

@@ -57,6 +57,12 @@ apiKeyEnv: OPENAI_API_KEY
     }
 }
 
+internal fun safeLocalStarterAgentSpec(): StarterAgentSpec = StarterAgentSpec(
+    name = "example-agent",
+    pluginClass = "com.cotor.data.plugin.EchoPlugin",
+    executable = "echo"
+)
+
 internal fun canUseRealAiStarter(
     hasCommand: (String) -> Boolean = ::hasStarterCommand,
     codexReady: () -> Boolean = ::isCodexReadyForStarter,

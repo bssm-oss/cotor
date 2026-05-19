@@ -12,9 +12,12 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.mordant.rendering.TextColors.*
 import com.github.ajalt.mordant.rendering.TextStyles.*
 import com.github.ajalt.mordant.terminal.Terminal
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.Path
 import kotlin.io.path.exists
+import kotlin.io.path.isRegularFile
+import kotlin.streams.asSequence
 
 /**
  * Doctor command: checks environment readiness and gives quick tips
@@ -67,10 +70,29 @@ class DoctorCommand(
     }
 
     private fun checkJar(): Triple<String, Boolean, String?> {
-        val jarPath = projectRootProvider().resolve("build/libs/cotor-1.0.0-all.jar")
-        val ok = jarPath.exists()
-        val hint = if (ok) "빌드 결과 발견: ${jarPath.fileName}" else "shadowJar 실행 필요: ./gradlew shadowJar"
+        val jarPath = findCliJar(projectRootProvider())
+        val ok = jarPath != null
+        val hint = jarPath?.let { "빌드 결과 발견: ${it.fileName}" } ?: "shadowJar 실행 필요: ./gradlew shadowJar"
         return Triple("CLI JAR 존재 여부", ok, hint)
+    }
+
+    private fun findCliJar(projectRoot: Path): Path? {
+        val libsDir = projectRoot.resolve("build/libs")
+        if (!libsDir.exists()) {
+            return null
+        }
+        return runCatching {
+            Files.list(libsDir).use { stream ->
+                stream.asSequence()
+                    .filter { it.isRegularFile() }
+                    .filter { path ->
+                        val name = path.fileName.toString()
+                        name.startsWith("cotor-") && name.endsWith("-all.jar")
+                    }
+                    .sortedByDescending { it.toFile().lastModified() }
+                    .firstOrNull()
+            }
+        }.getOrNull()
     }
 
     private fun checkConfig(): Triple<String, Boolean, String?> {

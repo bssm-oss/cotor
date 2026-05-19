@@ -751,26 +751,24 @@ class DesktopAppServiceTest : FunSpec({
         stateStore.load().agentMessages.any { it.kind == "operator-answer" && it.body.contains("Builder") } shouldBe true
     }
 
-    test("operator chat uses LLM planner for vague status requests instead of canned status fallback") {
-        val appHome = Files.createTempDirectory("operator-chat-llm-status-home")
+    test("status operator chat routes through deterministic command without llm") {
+        val appHome = Files.createTempDirectory("operator-chat-status-det-home")
         val stateStore = DesktopStateStore { appHome }
         val service = DesktopAppService(
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = operatorChatLlmExecutor(
-                """{"reply":"제가 상태를 직접 확인해볼게요.","toolCalls":[{"tool":"inspect_runtime","reason":"The user asked whether agents are running.","args":{}}],"answerSourceHints":["company-summary"]}""",
-                "지금 회사 런타임은 멈춰 있고 실행 중인 에이전트는 없습니다. 막힌 이슈나 승인 대기는 없어 바로 목표를 넣고 시작할 수 있습니다."
-            )
+            agentExecutor = mockk(relaxed = true)
         )
-        val company = service.createCompany(name = "Operator Chat LLM", rootPath = appHome.toString())
+        val company = service.createCompany(name = "Operator Chat Status", rootPath = appHome.toString())
 
         val response = service.runOperatorChat(company.id, "에이전트들 잘 돌아가?")
 
+        response.message shouldContain "확인했습니다"
+        response.message shouldContain "런타임"
         response.message shouldContain "실행 중인 에이전트"
         response.message shouldNotContain "Runtime"
-        response.answerSources.any { it.type == "company-summary" } shouldBe true
-        response.actions.shouldBeEmpty()
+        response.actions.any { it.type == "status-check" } shouldBe true
         response.blockedActions.shouldBeEmpty()
     }
 
@@ -806,7 +804,7 @@ class DesktopAppServiceTest : FunSpec({
         )
         val company = service.createCompany(name = "Operator Chat Non JSON", rootPath = appHome.toString())
 
-        val response = service.runOperatorChat(company.id, "에이전트들 잘 돌아가?")
+        val response = service.runOperatorChat(company.id, "지금 에이전트 몇 개 실행 중이야?")
 
         response.message shouldContain "현재 런타임"
         response.message shouldContain "실행 중인 에이전트"
@@ -13931,6 +13929,471 @@ class DesktopAppServiceTest : FunSpec({
         summary.baseBranch shouldBe "master"
         summary.patch shouldBe ""
         summary.changedFiles.shouldBeEmpty()
+    }
+
+    test("manual runtime stop marks active qa issue as recoverable interrupted") {
+        val appHome = Files.createTempDirectory("qa-interrupted-home")
+        val repoRoot = Files.createTempDirectory("qa-interrupted-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val company = Company(
+            id = "co-qa-interrupted",
+            name = "QA Interrupted Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = 1L, updatedAt = 1L
+        )
+        val goal = CompanyGoal(
+            id = "goal-qa-interrupted",
+            companyId = company.id,
+            projectContextId = "proj-qa-int",
+            title = "QA interrupted",
+            description = "QA issue was running when runtime stopped",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = 2L, updatedAt = 2L
+        )
+        val execIssue = CompanyIssue(
+            id = "issue-exec-qa-int",
+            companyId = company.id,
+            projectContextId = "proj-qa-int",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Implement feature",
+            description = "Write the code",
+            status = IssueStatus.DONE,
+            kind = "execution",
+            createdAt = 3L, updatedAt = 3L
+        )
+        val qaIssue = CompanyIssue(
+            id = "issue-qa-int",
+            companyId = company.id,
+            projectContextId = "proj-qa-int",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Review feature branch",
+            description = "QA checks the implementation.",
+            status = IssueStatus.BLOCKED,
+            kind = "review",
+            dependsOn = listOf(execIssue.id),
+            sourceSignal = "qa-review:${execIssue.id}",
+            providerBlockReason = "Execution was interrupted because the app-server stopped before the run finished.",
+            transitionReason = "Runtime stopped while execution was in progress; the issue was returned to the queue.",
+            createdAt = 4L, updatedAt = 4L
+        )
+        val qaTask = AgentTask(
+            id = "task-qa-int",
+            workspaceId = WORKSPACE_ID,
+            issueId = qaIssue.id,
+            title = qaIssue.title,
+            prompt = qaIssue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.FAILED,
+            createdAt = 5L, updatedAt = 5L
+        )
+        val qaRun = AgentRun(
+            id = "run-qa-int",
+            taskId = qaTask.id,
+            workspaceId = WORKSPACE_ID,
+            repositoryId = REPOSITORY_ID,
+            agentName = "opencode",
+            branchName = "codex/cotor/qa-int/opencode",
+            worktreePath = repoRoot.toString(),
+            status = AgentRunStatus.FAILED,
+            error = "Execution was interrupted because the app-server stopped before the run finished.",
+            createdAt = 6L, updatedAt = 6L
+        )
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company),
+                repositories = listOf(
+                    ManagedRepository(
+                        id = REPOSITORY_ID, name = "repo",
+                        localPath = repoRoot.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
+                        name = "repo · master", baseBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                projectContexts = listOf(
+                    CompanyProjectContext(
+                        id = "proj-qa-int",
+                        companyId = company.id,
+                        name = "QA Interrupted Co",
+                        slug = "qa-int-co",
+                        contextDocPath = appHome.resolve("project.md").toString(),
+                        lastUpdatedAt = 1L
+                    )
+                ),
+                goals = listOf(goal),
+                issues = listOf(execIssue, qaIssue),
+                tasks = listOf(qaTask),
+                runs = listOf(qaRun)
+            )
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+
+        val log = service.executionLog(company.id)
+        val qaEntry = log.first { it["issueId"] == qaIssue.id }
+
+        qaEntry["blockedReasonCode"] shouldBe BlockedReasonCode.RUNTIME_INTERRUPTED.name
+        qaEntry["blockedRetryable"] shouldBe true
+    }
+
+    test("runtime start requeues recoverable runtime interrupted review issue") {
+        val appHome = Files.createTempDirectory("qa-requeue-int-home")
+        val repoRoot = Files.createTempDirectory("qa-requeue-int-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val company = Company(
+            id = "co-qa-requeue-int",
+            name = "QA Requeue Interrupted Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = 1L, updatedAt = 1L
+        )
+        val goal = CompanyGoal(
+            id = "goal-qa-requeue-int",
+            companyId = company.id,
+            projectContextId = "proj-qa-req",
+            title = "QA requeue interrupted",
+            description = "Interrupted QA review should be retried on restart",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = 2L, updatedAt = 2L
+        )
+        val execIssue = CompanyIssue(
+            id = "issue-exec-qa-req",
+            companyId = company.id,
+            projectContextId = "proj-qa-req",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Implement feature",
+            description = "Write the code",
+            status = IssueStatus.DONE,
+            kind = "execution",
+            createdAt = 3L, updatedAt = 3L
+        )
+        val qaIssue = CompanyIssue(
+            id = "issue-qa-req",
+            companyId = company.id,
+            projectContextId = "proj-qa-req",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Review feature branch",
+            description = "QA checks the implementation.",
+            status = IssueStatus.BLOCKED,
+            kind = "review",
+            dependsOn = listOf(execIssue.id),
+            sourceSignal = "qa-review:${execIssue.id}",
+            providerBlockReason = "Execution was interrupted because the app-server stopped before the run finished.",
+            transitionReason = "Runtime stopped while execution was in progress; the issue was returned to the queue.",
+            createdAt = 4L, updatedAt = 4L
+        )
+        val qaTask = AgentTask(
+            id = "task-qa-req",
+            workspaceId = WORKSPACE_ID,
+            issueId = qaIssue.id,
+            title = qaIssue.title,
+            prompt = qaIssue.description,
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.FAILED,
+            createdAt = 5L, updatedAt = 5L
+        )
+        val qaRun = AgentRun(
+            id = "run-qa-req",
+            taskId = qaTask.id,
+            workspaceId = WORKSPACE_ID,
+            repositoryId = REPOSITORY_ID,
+            agentName = "opencode",
+            branchName = "codex/cotor/qa-req/opencode",
+            worktreePath = repoRoot.toString(),
+            status = AgentRunStatus.FAILED,
+            error = "Execution was interrupted because the app-server stopped before the run finished.",
+            createdAt = 6L, updatedAt = 6L
+        )
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company),
+                repositories = listOf(
+                    ManagedRepository(
+                        id = REPOSITORY_ID, name = "repo",
+                        localPath = repoRoot.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
+                        name = "repo · master", baseBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                projectContexts = listOf(
+                    CompanyProjectContext(
+                        id = "proj-qa-req",
+                        companyId = company.id,
+                        name = "QA Requeue Interrupted Co",
+                        slug = "qa-req-co",
+                        contextDocPath = appHome.resolve("project.md").toString(),
+                        lastUpdatedAt = 1L
+                    )
+                ),
+                goals = listOf(goal),
+                issues = listOf(execIssue, qaIssue),
+                tasks = listOf(qaTask),
+                runs = listOf(qaRun)
+            )
+        )
+        val service = testService(
+            processManager = FakeGitProcessManager(
+                repoRoot = repoRoot,
+                remoteUrl = null,
+                defaultBranch = "master"
+            ),
+            stateStore = stateStore
+        )
+
+        service.companyDashboard(company.id)
+
+        withTimeout(5_000) {
+            while (true) {
+                service.companyDashboard(company.id)
+                val latestIssue = stateStore.load().issues.first { it.id == qaIssue.id }
+                if (latestIssue.status == IssueStatus.PLANNED || latestIssue.status == IssueStatus.IN_PROGRESS) {
+                    latestIssue.blockedBy.shouldBeEmpty()
+                    return@withTimeout
+                }
+                delay(25)
+            }
+        }
+    }
+
+    test("completed source issue stays done when qa review is interrupted") {
+        val appHome = Files.createTempDirectory("qa-src-done-home")
+        val repoRoot = Files.createTempDirectory("qa-src-done-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val company = Company(
+            id = "co-qa-src-done",
+            name = "QA Src Done Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = 1L, updatedAt = 1L
+        )
+        val goal = CompanyGoal(
+            id = "goal-qa-src-done",
+            companyId = company.id,
+            projectContextId = "proj-qa-src",
+            title = "Source stays done",
+            description = "Source issue should stay DONE when QA is interrupted",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = 2L, updatedAt = 2L
+        )
+        val execIssue = CompanyIssue(
+            id = "issue-exec-src-done",
+            companyId = company.id,
+            projectContextId = "proj-qa-src",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Implement feature",
+            description = "Write the code",
+            status = IssueStatus.DONE,
+            kind = "execution",
+            createdAt = 3L, updatedAt = 3L
+        )
+        val qaIssue = CompanyIssue(
+            id = "issue-qa-src-done",
+            companyId = company.id,
+            projectContextId = "proj-qa-src",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Review feature branch",
+            description = "QA checks the implementation.",
+            status = IssueStatus.BLOCKED,
+            kind = "review",
+            dependsOn = listOf(execIssue.id),
+            sourceSignal = "qa-review:${execIssue.id}",
+            providerBlockReason = "Execution was interrupted because the app-server stopped before the run finished.",
+            transitionReason = "Runtime stopped while execution was in progress; the issue was returned to the queue.",
+            createdAt = 4L, updatedAt = 4L
+        )
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company),
+                repositories = listOf(
+                    ManagedRepository(
+                        id = REPOSITORY_ID, name = "repo",
+                        localPath = repoRoot.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
+                        name = "repo · master", baseBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                projectContexts = listOf(
+                    CompanyProjectContext(
+                        id = "proj-qa-src",
+                        companyId = company.id,
+                        name = "QA Src Done Co",
+                        slug = "qa-src-done-co",
+                        contextDocPath = appHome.resolve("project.md").toString(),
+                        lastUpdatedAt = 1L
+                    )
+                ),
+                goals = listOf(goal),
+                issues = listOf(execIssue, qaIssue)
+            )
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+
+        val log = service.executionLog(company.id)
+        val execEntry = log.first { it["issueId"] == execIssue.id }
+        val qaEntry = log.first { it["issueId"] == qaIssue.id }
+
+        execEntry["issueStatus"] shouldBe IssueStatus.DONE.name
+        qaEntry["blockedReasonCode"] shouldBe BlockedReasonCode.RUNTIME_INTERRUPTED.name
+    }
+
+    test("review queue remains awaiting qa when qa review is interrupted by stop") {
+        val appHome = Files.createTempDirectory("qa-rq-awaiting-home")
+        val repoRoot = Files.createTempDirectory("qa-rq-awaiting-repo")
+        val stateStore = DesktopStateStore { appHome }
+        val company = Company(
+            id = "co-qa-rq-await",
+            name = "QA RQ Awaiting Co",
+            rootPath = repoRoot.toString(),
+            repositoryId = REPOSITORY_ID,
+            defaultBaseBranch = "master",
+            createdAt = 1L, updatedAt = 1L
+        )
+        val goal = CompanyGoal(
+            id = "goal-qa-rq-await",
+            companyId = company.id,
+            projectContextId = "proj-qa-rq",
+            title = "RQ stays awaiting qa",
+            description = "ReviewQueue entry should remain AWAITING_QA after QA issue is interrupted",
+            status = GoalStatus.ACTIVE,
+            autonomyEnabled = false,
+            createdAt = 2L, updatedAt = 2L
+        )
+        val execIssue = CompanyIssue(
+            id = "issue-exec-rq-await",
+            companyId = company.id,
+            projectContextId = "proj-qa-rq",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Implement feature",
+            description = "Write the code",
+            status = IssueStatus.DONE,
+            kind = "execution",
+            createdAt = 3L, updatedAt = 3L
+        )
+        val qaIssue = CompanyIssue(
+            id = "issue-qa-rq-await",
+            companyId = company.id,
+            projectContextId = "proj-qa-rq",
+            goalId = goal.id,
+            workspaceId = WORKSPACE_ID,
+            title = "Review feature branch",
+            description = "QA checks the implementation.",
+            status = IssueStatus.BLOCKED,
+            kind = "review",
+            dependsOn = listOf(execIssue.id),
+            sourceSignal = "qa-review:${execIssue.id}",
+            providerBlockReason = "Execution was interrupted because the app-server stopped before the run finished.",
+            transitionReason = "Runtime stopped while execution was in progress; the issue was returned to the queue.",
+            createdAt = 4L, updatedAt = 4L
+        )
+        val rqItem = ReviewQueueItem(
+            id = "rq-qa-await",
+            companyId = company.id,
+            issueId = execIssue.id,
+            runId = "run-exec-done",
+            status = ReviewQueueStatus.AWAITING_QA,
+            qaIssueId = qaIssue.id,
+            createdAt = 5L, updatedAt = 5L
+        )
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company),
+                repositories = listOf(
+                    ManagedRepository(
+                        id = REPOSITORY_ID, name = "repo",
+                        localPath = repoRoot.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = WORKSPACE_ID, repositoryId = REPOSITORY_ID,
+                        name = "repo · master", baseBranch = "master",
+                        createdAt = 1L, updatedAt = 1L
+                    )
+                ),
+                projectContexts = listOf(
+                    CompanyProjectContext(
+                        id = "proj-qa-rq",
+                        companyId = company.id,
+                        name = "QA RQ Awaiting Co",
+                        slug = "qa-rq-await-co",
+                        contextDocPath = appHome.resolve("project.md").toString(),
+                        lastUpdatedAt = 1L
+                    )
+                ),
+                goals = listOf(goal),
+                issues = listOf(execIssue, qaIssue),
+                reviewQueue = listOf(rqItem)
+            )
+        )
+        val service = testService(
+            processManager = FakeGitProcessManager(
+                repoRoot = repoRoot,
+                remoteUrl = null,
+                defaultBranch = "master"
+            ),
+            stateStore = stateStore
+        )
+
+        service.companyDashboard(company.id)
+
+        val state = stateStore.load()
+        val rqState = state.reviewQueue.first { it.id == rqItem.id }
+        val execState = state.issues.first { it.id == execIssue.id }
+
+        execState.status shouldBe IssueStatus.DONE
+        rqState.status shouldBe ReviewQueueStatus.AWAITING_QA
+        rqState.qaIssueId shouldBe qaIssue.id
     }
 })
 

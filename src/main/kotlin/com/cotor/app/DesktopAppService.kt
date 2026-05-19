@@ -584,7 +584,7 @@ class DesktopAppService(
     ): CompanyDailyReport? {
         val state = stateStore.load()
         if (state.companies.none { it.id == companyId }) {
-            throw IllegalArgumentException("Company not found: $companyId")
+            return null
         }
         val reportDate = previousMorningReportDate(nowMillis)
         val path = companyReportPath(companyId, reportDate)
@@ -5895,6 +5895,14 @@ class DesktopAppService(
         userMessage: String,
         commandResponse: OperatorCommandResponse
     ): OperatorChatResponse {
+        // Status-check actions carry a fully deterministic detail string — skip the
+        // LLM call so the reply arrives within milliseconds instead of seconds.
+        if (commandResponse.actions.isNotEmpty() && commandResponse.actions.all { it.type == "status-check" }) {
+            val summary = commandResponse.summary ?: buildOperatorCompanySummary(companyId)
+            val message = buildDeterministicKoreanStatusMessage(summary)
+            return commandResponse.toOperatorChatResponse().copy(message = message)
+        }
+
         val execution = OperatorChatToolExecution(
             actions = commandResponse.actions,
             pendingApprovals = commandResponse.pendingApprovals,
@@ -5915,6 +5923,15 @@ class DesktopAppService(
             summary = commandResponse.summary ?: buildOperatorCompanySummary(companyId)
         ) ?: commandResponse.message
         return commandResponse.toOperatorChatResponse().copy(message = message)
+    }
+
+    private fun buildDeterministicKoreanStatusMessage(summary: OperatorCompanySummary): String {
+        val runtimeLabel = summary.runtimeStatus.uppercase()
+        return "확인했습니다. 현재 런타임은 ${runtimeLabel}이고 " +
+            "실행 중인 에이전트는 ${summary.activeAgentCount}개입니다. " +
+            "막힌 이슈는 ${summary.blockedIssueCount}개, " +
+            "리뷰 항목은 ${summary.reviewQueueCount}개, " +
+            "승인 대기는 ${summary.pendingApprovalCount}개입니다."
     }
 
     private suspend fun operatorChatPlannerFailureResponse(companyId: String, reason: String): OperatorChatResponse =
@@ -7839,7 +7856,8 @@ class DesktopAppService(
         )
 
     private fun shouldRouteOperatorChatThroughCommand(text: String): Boolean =
-        looksLikeCompanyWorkIntakeRequest(text) ||
+        looksLikeStatusRequest(text) ||
+            looksLikeCompanyWorkIntakeRequest(text) ||
             looksLikeRuntimeStart(text) ||
             looksLikeRuntimeStop(text) ||
             looksLikeBlockedIssueRetry(text) ||
@@ -8880,7 +8898,15 @@ class DesktopAppService(
     }
 
     suspend fun runIssueAndAwaitSettlement(issueId: String, timeoutMs: Long = ISSUE_RUN_AWAIT_TIMEOUT_MS): CompanyIssue {
-        val started = runIssue(issueId)
+        val delegated = delegateIssue(issueId)
+        val started = withTimeoutOrNull(timeoutMs) {
+            startDelegatedIssue(delegated, detachTask = false)
+        } ?: run {
+            val companyId = getIssue(issueId)?.companyId ?: delegated.companyId
+            interruptActiveCompanyTasksForRuntimeStop(companyId)
+            terminateActiveCompanyRunProcesses(companyId)
+            getIssue(issueId) ?: delegated
+        }
         return awaitIssueSettlement(issueId = issueId, timeoutMs = timeoutMs) ?: getIssue(issueId) ?: started
     }
 
@@ -8930,7 +8956,7 @@ class DesktopAppService(
         }
     }
 
-    private suspend fun startDelegatedIssue(issue: CompanyIssue): CompanyIssue {
+    private suspend fun startDelegatedIssue(issue: CompanyIssue, detachTask: Boolean = true): CompanyIssue {
         val executableIssue = ensureIssueWorkspace(issue)
         reconcileStaleTaskBeforeIssueStart(executableIssue.id)
         val state = stateStore.load()
@@ -9045,7 +9071,14 @@ class DesktopAppService(
             comment = "Cotor started work on \"${runningIssue.title}\" with agent ${profile.executionAgentName}."
         )
         if (task.status == DesktopTaskStatus.QUEUED) {
-            runCatching { runTaskIfPresent(task.id) }
+            runCatching {
+                if (detachTask) {
+                    runTaskIfPresent(task.id)
+                } else {
+                    executeTaskInline(task.id)
+                    getTask(task.id)
+                }
+            }
                 .onFailure { cause ->
                     markCompanyRuntimeError(executableIssue.companyId, cause)
                 }
@@ -17270,7 +17303,7 @@ class DesktopAppService(
         val recentDecisions = state.goalDecisions
             .filter { it.companyId == issue.companyId }
             .sortedByDescending { it.createdAt }
-            .take(5)
+            .take(2)
         val memoryBundle = company?.let {
             buildExecutionMemoryBundle(
                 state = state,
@@ -17282,8 +17315,7 @@ class DesktopAppService(
             )
         }
         return buildString {
-            appendLine("You are the CEO planning the next work graph for the company.")
-            appendLine()
+            appendLine("You are Cotor's CEO planner. Return only one ```json fenced block.")
             company?.let {
                 appendLine("Company: ${it.name}")
                 val workspaceName = runCatching { Path.of(it.rootPath).fileName?.toString() }
@@ -17295,64 +17327,47 @@ class DesktopAppService(
             }
             goal?.let {
                 appendLine("Goal: ${it.title}")
-                appendLine("Goal description:")
-                appendLine(it.description.ifBlank { it.title })
+                appendLine("Description: ${it.description.ifBlank { it.title }.singleLineLimit(220)}")
                 it.followUpContext?.let { context ->
-                    appendLine()
-                    appendLine("Follow-up context:")
-                    appendLine("- Root goal id: ${context.rootGoalId}")
-                    context.triggerIssueId?.let { triggerIssueId -> appendLine("- Trigger issue id: $triggerIssueId") }
-                    context.reviewQueueItemId?.let { reviewQueueItemId -> appendLine("- Review queue item id: $reviewQueueItemId") }
-                    context.pullRequestNumber?.let { pullRequestNumber -> appendLine("- Pull request number: #$pullRequestNumber") }
-                    appendLine("- Failure class: ${context.failureClass.name}")
+                    appendLine("Follow-up: failureClass=${context.failureClass.name}, rootGoal=${context.rootGoalId}")
                 }
             }
-            appendLine()
-            appendLine("Available roster:")
-            definitions.forEach { definition ->
-                appendLine("- ${definition.title}: ${definition.roleSummary}")
-                if (definition.specialties.isNotEmpty()) {
-                    appendLine("  specialties: ${definition.specialties.joinToString(", ")}")
-                }
-            }
+            appendLine("Roster roles: ${definitions.map { it.title }.distinct().take(10).joinToString(", ").ifBlank { profile.roleName }}")
             if (recentDecisions.isNotEmpty()) {
-                appendLine()
-                appendLine("Recent CEO decisions:")
-                recentDecisions.forEach { decision ->
-                    appendLine("- ${decision.summary}")
-                }
+                appendLine("Recent decisions: ${recentDecisions.joinToString("; ") { it.summary.singleLineLimit(120) }}")
             }
-            appendLine()
-            appendLine("Planning rules:")
-            appendLine("- Create only the concrete execution or research issues the company should do next.")
-            appendLine("- Do not create QA review or CEO approval issues; Cotor creates PR gates separately.")
-            appendLine("- Use one issue per branchable slice of work.")
-            appendLine("- Prefer a multi-issue execution graph over one giant issue.")
-            appendLine("- When the roster supports it, create 3 to 6 downstream issues and keep at least 2 implementation slices runnable in parallel.")
-            appendLine("- Generic work should route to Builder-first unless the goal clearly needs a specialist.")
-            appendLine("- Set codeProducing=true when the issue should end with a branch and GitHub PR.")
-            appendLine("- For validation-only or residual-risk follow-up work, set codeProducing=false and do not manufacture placeholder repository artifacts just to force a diff.")
-            appendLine("- For handoff, reporting, CEO decision, validation, or residual-risk tasks, default to codeProducing=false.")
+            appendLine("Rules: create 3 to 5 concrete branchable next issues; do not create QA review or CEO approval issues; route generic work to Builder; use dependsOn only when ordering matters.")
+            appendLine("Set codeProducing=true only when repository code must change and a PR is expected; validation, research, handoff, reporting, and residual-risk work should use codeProducing=false.")
             if (goal?.followUpContext?.failureClass == FollowUpFailureClass.MERGE_CONFLICT) {
-                appendLine("- This goal exists to remediate an existing merge conflict on the current PR lineage.")
-                appendLine("- Reuse the existing PR branch/worktree instead of inventing a new handoff PR or a new review lineage.")
+                appendLine("Merge-conflict follow-up: reuse the existing PR lineage instead of inventing a new handoff PR.")
             }
-            appendLine("- Use dependsOn with refIds from earlier issues when ordering matters.")
-            appendLine()
-            appendLine("Return JSON only inside one ```json fenced block using this schema:")
+            appendLine("Schema:")
             appendLine("```json")
-            appendLine("""{"goalSummary":"...","issues":[{"refId":"exec-1","title":"...","description":"...","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":true,"dependsOn":[],"acceptanceCriteria":["..."],"reviewRequired":true,"approvalRequired":true}]}""")
+            appendLine("""{"goalSummary":"...","issues":[{"refId":"exec-1","title":"...","description":"...","kind":"execution","assigneeRole":"Builder","priority":2,"codeProducing":false,"dependsOn":[],"acceptanceCriteria":["..."]}]}""")
             appendLine("```")
-            appendLine("Do not use tools, inspect files, or create files for this planning task.")
-            appendLine("Return the planning JSON only as assistant text inside the fenced JSON block.")
+            appendLine("Do not use tools, inspect files, or create files; include no prose outside the JSON block.")
             memoryBundle?.let { memory ->
-                appendLine()
-                appendLine(renderPlanningMemorySections(memory))
+                appendLine(compactPlanningMemoryLine(memory))
             }
-            appendLine()
-            appendLine("Do not include prose outside the JSON block.")
             appendLine("Current role: ${profile.roleName}")
         }.trim()
+    }
+
+    private fun compactPlanningMemoryLine(memory: CompanyMemorySnapshot): String {
+        return listOf(
+            "Company memory: ${memory.companyMemory.firstLineLimit(90)}",
+            "Project memory: ${memory.projectMemory.firstLineLimit(90)}",
+            "Team memory: ${memory.teamMemory.firstLineLimit(90)}",
+            "Agent memory: ${memory.agentMemory.firstLineLimit(90)}"
+        ).joinToString("\n")
+    }
+
+    private fun String.firstLineLimit(maxLength: Int): String =
+        lineSequence().firstOrNull { it.isNotBlank() }?.singleLineLimit(maxLength).orEmpty()
+
+    private fun String.singleLineLimit(maxLength: Int): String {
+        val normalized = replace(Regex("\\s+"), " ").trim()
+        return if (normalized.length <= maxLength) normalized else normalized.take(maxLength - 1).trimEnd() + "…"
     }
 
     private fun parseCeoPlanningPayload(output: String?): CeoPlanningPayload? {

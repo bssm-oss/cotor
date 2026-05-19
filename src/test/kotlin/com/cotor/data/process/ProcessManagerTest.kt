@@ -162,6 +162,24 @@ class ProcessManagerTest : FunSpec({
         result.stdout shouldContain "line-19999"
     }
 
+    test("executeProcessWithInputFile redirects stdin from a real file") {
+        val processManager = CoroutineProcessManager(mockk<Logger>(relaxed = true))
+        val inputFile = Files.createTempFile("process-manager-input-", ".txt")
+        Files.writeString(inputFile, "file-backed-stdin")
+
+        val result = processManager.executeProcessWithInputFile(
+            command = listOf("/bin/sh", "-c", "cat"),
+            inputFile = inputFile,
+            environment = emptyMap(),
+            timeout = 5_000,
+            onStdoutChunk = null,
+            onStderrChunk = null
+        )
+
+        result.isSuccess shouldBe true
+        result.stdout shouldBe "file-backed-stdin"
+    }
+
     test("effectiveUserHome prefers HOME from the environment over user.home") {
         effectiveUserHome(
             environment = mapOf("HOME" to "/tmp/cotor-home"),

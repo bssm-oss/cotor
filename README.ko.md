@@ -27,6 +27,7 @@ Cotor는 로컬 우선 AI 워크플로우 실행기에서 출발해, CEO AI가 �
 - `cotor help ai`는 줄글 형태의 사용 가이드를 출력합니다.
 - `cotor help web`은 명령어 모음집과 빠른 시작 안내를 웹 도움말 표면으로 엽니다.
 - interactive transcript는 `.cotor/interactive/...` 아래에 저장되며, 각 세션은 transcript 옆에 `interactive.log`도 기록합니다.
+- `cotor init --starter-template`는 AI CLI 인증 전에도 검증/실행이 되는 안전한 로컬 `example-agent` Echo scaffold를 생성합니다.
 - packaged install에서 로컬 config가 없으면 interactive starter config는 현재 디렉터리 대신 `~/.cotor/interactive/default/cotor.yaml` 아래에 생성됩니다.
 - packaged first-run interactive는 즉시 응답 가능한 AI starter만 자동 선택하고, 인증되지 않은 CLI 때문에 깨지는 대신 안전한 `example-agent` Echo starter로 내려갑니다.
 - 첫 인자가 알 수 없는 명령이면 직접 파이프라인 실행으로 폴백합니다.

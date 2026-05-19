@@ -58,6 +58,8 @@ class InitCommandTest : FunSpec({
             pipelineDocPath.exists() shouldBe true
 
             configText shouldContain "imports:\n  - \"pipelines/default.yaml\""
+            configText shouldContain "pluginClass: com.cotor.data.plugin.EchoPlugin"
+            configText shouldContain "allowedExecutables:\n    - echo"
             pipelinePath.readText() shouldContain "description: \"Starter workflow for ${root.fileName}\""
             readmePath.readText() shouldContain "Project: `${root.fileName}`"
             readmePath.readText() shouldContain "Default agent: `$agentName`"

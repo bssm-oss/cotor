@@ -76,6 +76,26 @@ interface ProcessManager {
         onStart = onStart,
         onStdoutChunk = onStdoutChunk
     )
+
+    suspend fun executeProcessWithInputFile(
+        command: List<String>,
+        inputFile: Path,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path? = null,
+        onStart: ((Long) -> Unit)? = null,
+        onStdoutChunk: ((String) -> Unit)?,
+        onStderrChunk: ((String) -> Unit)?
+    ): ProcessResult = executeProcess(
+        command = command,
+        input = Files.readString(inputFile),
+        environment = environment,
+        timeout = timeout,
+        workingDirectory = workingDirectory,
+        onStart = onStart,
+        onStdoutChunk = onStdoutChunk,
+        onStderrChunk = onStderrChunk
+    )
 }
 
 /**
@@ -130,10 +150,55 @@ class CoroutineProcessManager(
         onStart: ((Long) -> Unit)?,
         onStdoutChunk: ((String) -> Unit)?,
         onStderrChunk: ((String) -> Unit)?
+    ): ProcessResult = executeProcessInternal(
+        command = command,
+        input = input,
+        inputFile = null,
+        environment = environment,
+        timeout = timeout,
+        workingDirectory = workingDirectory,
+        onStart = onStart,
+        onStdoutChunk = onStdoutChunk,
+        onStderrChunk = onStderrChunk
+    )
+
+    override suspend fun executeProcessWithInputFile(
+        command: List<String>,
+        inputFile: Path,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?,
+        onStdoutChunk: ((String) -> Unit)?,
+        onStderrChunk: ((String) -> Unit)?
+    ): ProcessResult = executeProcessInternal(
+        command = command,
+        input = null,
+        inputFile = inputFile,
+        environment = environment,
+        timeout = timeout,
+        workingDirectory = workingDirectory,
+        onStart = onStart,
+        onStdoutChunk = onStdoutChunk,
+        onStderrChunk = onStderrChunk
+    )
+
+    private suspend fun executeProcessInternal(
+        command: List<String>,
+        input: String?,
+        inputFile: Path?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?,
+        onStdoutChunk: ((String) -> Unit)?,
+        onStderrChunk: ((String) -> Unit)?
     ): ProcessResult = withContext(Dispatchers.IO) {
         val resolvedCommand = resolveProcessCommand(command)
         val processBuilder = ProcessBuilder(resolvedCommand)
             .redirectErrorStream(false)
+
+        inputFile?.let { processBuilder.redirectInput(it.toFile()) }
 
         workingDirectory?.let {
             // Every desktop agent run points this at its isolated worktree so file writes
@@ -197,7 +262,12 @@ class CoroutineProcessManager(
         }
 
         try {
-            if (input != null) {
+            if (inputFile != null) {
+                // Some CLIs, including OpenCode's non-interactive runner, behave
+                // differently when stdin is a JVM pipe. A real file-backed stdin
+                // preserves shell-style `< prompt.md` behavior without exposing
+                // prompt text in process arguments.
+            } else if (input != null) {
                 process.outputStream.bufferedWriter().use { writer ->
                     writer.write(input)
                     writer.flush()
@@ -214,6 +284,7 @@ class CoroutineProcessManager(
                     yield()
                 }
             }
+            cleanupSurvivingDescendants(process, logger)
             joinReader(stdoutThread)
             joinReader(stderrThread)
             val exitCode = process.exitValue()
@@ -255,6 +326,20 @@ private fun destroyProcessTree(process: Process, logger: Logger) {
         .asReversed()
     descendants.forEach { handle ->
         if (handle.isAlive) {
+            runCatching { handle.destroy() }
+                .onFailure { logger.debug("Failed to request descendant process ${handle.pid()} termination", it) }
+        }
+    }
+    if (process.isAlive) {
+        runCatching { process.destroy() }
+            .onFailure { logger.debug("Failed to request process ${process.pid()} termination", it) }
+    }
+    waitForProcessHandles(descendants, PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS)
+    if (process.isAlive) {
+        runCatching { process.waitFor(PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
+    }
+    descendants.forEach { handle ->
+        if (handle.isAlive) {
             runCatching { handle.destroyForcibly() }
                 .onFailure { logger.debug("Failed to destroy descendant process ${handle.pid()}", it) }
         }
@@ -263,10 +348,31 @@ private fun destroyProcessTree(process: Process, logger: Logger) {
         runCatching { process.destroyForcibly() }
             .onFailure { logger.debug("Failed to destroy process ${process.pid()}", it) }
     }
-    descendants.forEach { handle ->
-        runCatching { handle.onExit().get(PROCESS_TREE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
-    }
+    waitForProcessHandles(descendants, PROCESS_TREE_JOIN_TIMEOUT_MS)
     runCatching { process.waitFor(PROCESS_TREE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
+}
+
+private fun cleanupSurvivingDescendants(process: Process, logger: Logger) {
+    val descendants = process.toHandle()
+        .descendants()
+        .toArray()
+        .filterIsInstance<ProcessHandle>()
+        .asReversed()
+        .filter { it.isAlive }
+    if (descendants.isEmpty()) {
+        return
+    }
+    descendants.forEach { handle ->
+        runCatching { handle.destroyForcibly() }
+            .onFailure { logger.debug("Failed to clean up surviving descendant process ${handle.pid()}", it) }
+    }
+    waitForProcessHandles(descendants, PROCESS_TREE_JOIN_TIMEOUT_MS)
+}
+
+private fun waitForProcessHandles(handles: List<ProcessHandle>, timeoutMs: Long) {
+    handles.forEach { handle ->
+        runCatching { handle.onExit().get(timeoutMs, TimeUnit.MILLISECONDS) }
+    }
 }
 
 private fun redactedCommandForLogs(command: List<String>): String {
@@ -286,6 +392,7 @@ private fun joinReader(thread: Thread) {
 }
 
 private const val READER_JOIN_TIMEOUT_MS = 250L
+private const val PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS = 250L
 private const val PROCESS_TREE_JOIN_TIMEOUT_MS = 500L
 
 private fun buildEffectivePath(

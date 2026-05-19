@@ -766,12 +766,14 @@ class OpenCodePluginTest : FunSpec({
         }
     }
 
-    test("writes planning-only opencode agent config and passes agent flag") {
+    test("planning-only opencode uses isolated stdin prompt and config content") {
         val workDir = Files.createTempDirectory("cotor-test-opencode-config-")
         val plugin = OpenCodePlugin()
         var sawAgentFlag = false
-        var configExistedDuringRun = false
-        var configTextDuringRun = ""
+        var sawPureFlag = false
+        var capturedInputPath: Path? = null
+        var capturedInputText: String? = null
+        var capturedEnvironment: Map<String, String> = emptyMap()
         val processManager = object : ProcessManager {
             override suspend fun executeProcess(
                 command: List<String>,
@@ -789,9 +791,8 @@ class OpenCodePluginTest : FunSpec({
                 )
                 else -> {
                     sawAgentFlag = command.windowed(2).any { it == listOf("--agent", "cotor-plan") }
-                    val configPath = workDir.resolve(".opencode").resolve("opencode.json")
-                    configExistedDuringRun = Files.exists(configPath)
-                    configTextDuringRun = if (configExistedDuringRun) Files.readString(configPath) else ""
+                    sawPureFlag = "--pure" in command
+                    capturedEnvironment = environment
                     ProcessResult(
                         exitCode = 0,
                         stdout = """{"type":"text","text":"done"}""",
@@ -799,6 +800,30 @@ class OpenCodePluginTest : FunSpec({
                         isSuccess = true
                     )
                 }
+            }
+
+            override suspend fun executeProcessWithInputFile(
+                command: List<String>,
+                inputFile: Path,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?,
+                onStdoutChunk: ((String) -> Unit)?,
+                onStderrChunk: ((String) -> Unit)?
+            ): ProcessResult {
+                capturedInputPath = inputFile
+                capturedInputText = Files.readString(inputFile)
+                return executeProcess(
+                    command = command,
+                    input = Files.readString(inputFile),
+                    environment = environment,
+                    timeout = timeout,
+                    workingDirectory = workingDirectory,
+                    onStart = onStart,
+                    onStdoutChunk = onStdoutChunk,
+                    onStderrChunk = onStderrChunk
+                )
             }
         }
 
@@ -820,13 +845,14 @@ class OpenCodePluginTest : FunSpec({
             )
 
             sawAgentFlag shouldBe true
-            configExistedDuringRun shouldBe true
-            configTextDuringRun.contains("cotor-plan") shouldBe true
-            configTextDuringRun.contains("\"external_directory\": \"deny\"") shouldBe true
-            configTextDuringRun.contains("\"question\": \"deny\"") shouldBe true
-            configTextDuringRun.contains("\"task\": false") shouldBe true
-            configTextDuringRun.contains("\"task\": \"deny\"") shouldBe true
-            configTextDuringRun.contains("\"read\": false") shouldBe true
+            sawPureFlag shouldBe true
+            capturedInputPath?.startsWith(workDir.resolve(".cotor/runtime/opencode-prompts")) shouldBe true
+            capturedInputText shouldBe "hello"
+            capturedEnvironment["OPENCODE_DISABLE_PROJECT_CONFIG"] shouldBe "true"
+            capturedEnvironment["OPENCODE_DISABLE_DEFAULT_PLUGINS"] shouldBe "true"
+            capturedEnvironment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("cotor-plan") shouldBe true
+            capturedEnvironment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"external_directory\": \"deny\"") shouldBe true
+            capturedEnvironment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"read\": false") shouldBe true
             Files.exists(workDir.resolve(".opencode").resolve("opencode.json")) shouldBe false
         } finally {
             workDir.toFile().deleteRecursively()

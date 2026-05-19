@@ -29,6 +29,7 @@ Important entry behavior:
 - `cotor help ai` prints a prose usage guide for operators
 - `cotor help web` launches a web help page with the command collection and quick-start guidance
 - interactive transcripts live under `.cotor/interactive/...`, and each session now writes `interactive.log` beside the transcript files
+- `cotor init --starter-template` generates a safe local `example-agent` Echo scaffold so validate/run succeeds before any AI CLI is authenticated
 - packaged first-run interactive writes its auto-generated starter config under `~/.cotor/interactive/default/cotor.yaml` when no local config exists
 - packaged first-run interactive only auto-selects AI starters that are actually ready to answer immediately; otherwise it falls back to the safe `example-agent` echo starter instead of failing on an unauthenticated CLI
 - unknown first args fall back to direct pipeline execution
