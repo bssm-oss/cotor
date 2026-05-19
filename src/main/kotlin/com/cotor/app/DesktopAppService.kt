@@ -112,6 +112,12 @@ import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.exists
 
+private val TERMINAL_TASK_STATUSES = setOf(
+    DesktopTaskStatus.COMPLETED,
+    DesktopTaskStatus.PARTIAL,
+    DesktopTaskStatus.FAILED
+)
+
 @kotlinx.serialization.Serializable
 private data class CompanyAutomationTraceEvent(
     val timestamp: Long,
@@ -19961,12 +19967,17 @@ class DesktopAppService(
         val latestRuns = snapshot.runs.filter { it.taskId == taskId }
         val primaryRun = latestRuns.firstOrNull { it.publish?.pullRequestUrl != null } ?: latestRuns.firstOrNull()
         val issue = snapshot.issues.firstOrNull { it.id == issueId } ?: return
+        val effectiveFinalStatus = if (task.status in TERMINAL_TASK_STATUSES && task.status != finalStatus) {
+            task.status
+        } else {
+            finalStatus
+        }
         runCatching { ingestLegacyStdoutCommunicationFallback(issue, primaryRun) }
         when (issue.kind.lowercase()) {
-            "planning" -> syncPlanningIssueFromTask(task, issue, primaryRun, finalStatus)
-            "review" -> syncReviewIssueFromTask(task, issue, primaryRun, finalStatus)
-            "approval" -> syncApprovalIssueFromTask(task, issue, primaryRun, finalStatus)
-            else -> syncExecutionIssueFromTask(task, issue, primaryRun, finalStatus)
+            "planning" -> syncPlanningIssueFromTask(task, issue, primaryRun, effectiveFinalStatus)
+            "review" -> syncReviewIssueFromTask(task, issue, primaryRun, effectiveFinalStatus)
+            "approval" -> syncApprovalIssueFromTask(task, issue, primaryRun, effectiveFinalStatus)
+            else -> syncExecutionIssueFromTask(task, issue, primaryRun, effectiveFinalStatus)
         }
         stimulateAutonomousCompanyProgress(issue.companyId)
     }
