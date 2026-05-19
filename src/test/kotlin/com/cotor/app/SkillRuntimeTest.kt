@@ -17,6 +17,13 @@ class SkillRuntimeTest : FunSpec({
         DesktopAppService.shutdownAllForTesting()
     }
 
+    test("graphify catalog advertises write capability because missing reports are refreshed") {
+        val graphify = skillCatalog().single { it.name == "graphify" }
+
+        graphify.requiredCapabilities.contains(CapabilityKey.KNOWLEDGE_GRAPH_READ) shouldBe true
+        graphify.requiredCapabilities.contains(CapabilityKey.KNOWLEDGE_GRAPH_WRITE) shouldBe true
+    }
+
     test("runSkill dispatches graphify to graph report evidence instead of READY") {
         val appHome = Files.createTempDirectory("skill-graphify-home")
         val service = skillRuntimeService(appHome)

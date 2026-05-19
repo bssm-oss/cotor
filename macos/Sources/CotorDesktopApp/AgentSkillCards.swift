@@ -66,7 +66,7 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
     let roleSummary: String
     let enabled: Bool
     let selectedSkills: [AgentSkillChipRecord]
-    /// Skills that can be launched immediately (SKILL_RUN=AUTO, all required capabilities also AUTO).
+    /// Skills that can be launched immediately (SKILL_RUN=AUTO, with required capabilities delegated for the skill's policy).
     let runnableSkills: [AgentSkillChipRecord]
     /// First skill that can be launched without approval; nil when no skill is immediately runnable.
     let primaryRunnableSkill: AgentSkillChipRecord?
@@ -108,7 +108,7 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
             )
         }
 
-        // Derive runnable skills: SKILL_RUN must be AUTO and all required capabilities must also be AUTO.
+        // Derive runnable skills: SKILL_RUN must be AUTO and every required capability must be delegated enough for that skill.
         let skillRunPolicy = settings["SKILL_RUN"].map { Self.policy(for: $0) }
         var runnableIDs: [String] = []
         var blockedReasons: [String: String] = [:]
@@ -118,10 +118,10 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
                 let blockedCap = reqs.first { cap in
                     let norm = Self.normalizedCapability(cap)
                     guard let s = settings[norm] else { return true }
-                    return Self.policy(for: s) != .auto
+                    return !Self.requiredCapabilityIsRunnable(s, capability: norm)
                 }
                 if let cap = blockedCap {
-                    blockedReasons[skillID] = "capability_\(Self.normalizedCapability(cap))_not_auto"
+                    blockedReasons[skillID] = "capability_\(Self.normalizedCapability(cap))_not_runnable"
                 } else {
                     runnableIDs.append(skillID)
                 }
@@ -214,13 +214,39 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
         }
     }
 
+    private static func requiredCapabilityIsRunnable(
+        _ setting: AgentCapabilitySettingRecord,
+        capability: String
+    ) -> Bool {
+        switch policy(for: setting) {
+        case .auto:
+            return true
+        case .readOnly:
+            return readOnlyRunnableCapabilities.contains(normalizedCapability(capability))
+        case .approvalRequired, .disabled:
+            return false
+        }
+    }
+
+    private static let readOnlyRunnableCapabilities: Set<String> = [
+        "FILE_READ",
+        "SHELL_READ",
+        "GIT_READ",
+        "GITHUB_READ",
+        "BROWSER_READ",
+        "MARKETING_ANALYTICS_READ",
+        "MEMORY_READ",
+        "KNOWLEDGE_GRAPH_READ",
+        "MCP_READ",
+    ]
+
     private static func scopes(forSkillID skillID: String) -> [AgentSkillScope] {
         switch normalizedSkillID(skillID) {
         case "graphify":
             return [.repositoryMap]
         case "browser-smoke":
             return [.browserQA]
-        case "marketing-operator":
+        case "marketing-operator", "audience-scout", "analytics-reporter", "content-publisher", "social-publisher":
             return [.marketing]
         case "video-plan":
             return [.video]
@@ -235,7 +261,7 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
             return [.repositoryMap]
         case "BROWSER_READ", "BROWSER_SCREENSHOT":
             return [.browserQA]
-        case "WEB_PUBLISH", "SOCIAL_POST_CREATE":
+        case "WEB_PUBLISH", "SOCIAL_POST_CREATE", "MARKETING_ANALYTICS_READ":
             return [.marketing]
         case "VIDEO_SCRIPT_WRITE":
             return [.video]

@@ -58,6 +58,55 @@ class DesktopAppServiceMarketingTest : FunSpec({
         service.marketingRun(run.id)?.id shouldBe run.id
     }
 
+    test("analytics reporter uses marketing policy scope when checking delegated analytics access") {
+        val appHome = Files.createTempDirectory("desktop-marketing-policy-analytics-home")
+        val runner = RecordingMarketingBrowserRunner()
+        val service = marketingService(appHome, runner)
+        val company = service.createCompany(name = "Marketing Analytics Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        service.upsertMarketingDelegationPolicy(
+            UpsertMarketingDelegationPolicyRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                allowedDomains = listOf("cms.example.com"),
+                channelAccounts = listOf(
+                    MarketingChannelAccount(channel = "web", accountRef = "cms", allowedDomains = listOf("cms.example.com"))
+                ),
+                dailyPostLimit = 2
+            )
+        )
+        service.createMarketingRun(
+            MarketingRunRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                objective = "Publish an owned web update",
+                channels = listOf("web")
+            )
+        )
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = agent.id,
+            settings = mapOf(
+                CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                    enabled = true,
+                    mode = CapabilityMode.AUTO,
+                    skillAllowlist = listOf("analytics-reporter")
+                )
+            )
+        )
+
+        val result = service.runSkill(
+            name = "analytics-reporter",
+            companyId = company.id,
+            agentId = agent.id,
+            input = "Summarize recent marketing runs"
+        )
+
+        result.status shouldBe "COMPLETED"
+        result.actions.single() shouldBe "summarized 1 marketing run(s)"
+        result.output shouldContain "Succeeded actions: 1"
+    }
+
     test("marketing delegation policy denies forbidden terms, outside channels, and daily limit overflow") {
         val appHome = Files.createTempDirectory("desktop-marketing-deny-home")
         val runner = RecordingMarketingBrowserRunner()

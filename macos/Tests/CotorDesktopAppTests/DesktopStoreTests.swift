@@ -63,7 +63,7 @@ struct DesktopStoreTests {
                     agentName: "Builder",
                     roleName: "Builder",
                     agentCli: "opencode",
-                    model: "opencode/nemotron-3-super-free",
+                    model: "opencode/deepseek-v4-flash-free",
                     score: 91,
                     completedIssues: 3,
                     activeIssues: 1,
@@ -318,14 +318,14 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode", "codex"],
                 availableCliAgents: ["opencode", "codex", "gemma4", "ollama", "lmstudio"],
                 availableAgentModels: [
-                    "opencode": ["opencode/big-pickle", "opencode/nemotron-3-super-free"],
+                    "opencode": ["opencode/big-pickle", "opencode/deepseek-v4-flash-free"],
                     "codex": ["openai/gpt-5.5"],
                     "gemma4": ["gemma4:e2b"],
                     "ollama": ["gemma4:e2b"],
                     "lmstudio": ["gemma4:e2b"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "opencode/nemotron-3-super-free",
+                    "opencode": "opencode/deepseek-v4-flash-free",
                     "codex": "openai/gpt-5.5",
                     "gemma4": "gemma4:e2b",
                     "ollama": "gemma4:e2b",
@@ -360,7 +360,7 @@ struct DesktopStoreTests {
         )
 
         store.selectNewCompanyAgentCli("opencode")
-        #expect(store.newCompanyAgentModel == "opencode/nemotron-3-super-free")
+        #expect(store.newCompanyAgentModel == "opencode/deepseek-v4-flash-free")
 
         store.selectNewCompanyAgentCli("codex")
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
@@ -386,10 +386,10 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode"],
                 availableCliAgents: ["opencode"],
                 availableAgentModels: [
-                    "opencode": ["opencode/nemotron-3-super-free"]
+                    "opencode": ["opencode/deepseek-v4-flash-free"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "opencode/nemotron-3-super-free"
+                    "opencode": "opencode/deepseek-v4-flash-free"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -422,7 +422,7 @@ struct DesktopStoreTests {
         store.newCompanyAgentCli = ""
 
         #expect(store.resolvedNewCompanyAgentCli == "opencode")
-        #expect(store.newCompanyAgentModelOptions == ["opencode/nemotron-3-super-free"])
+        #expect(store.newCompanyAgentModelOptions == ["opencode/deepseek-v4-flash-free"])
     }
 
     @Test
@@ -626,13 +626,13 @@ struct DesktopStoreTests {
     func batchEditPayloadKeepsExplicitModelAndCapabilities() {
         let payload = OrgProfileBatchEditPayloadDraft.build(
             batchAgent: "opencode",
-            batchModel: " opencode/nemotron-3-super-free ",
+            batchModel: " opencode/deepseek-v4-flash-free ",
             batchCapabilities: "qa, review, , deploy",
             batchEnabled: false
         )
 
         #expect(payload.agentCli == "opencode")
-        #expect(payload.model == "opencode/nemotron-3-super-free")
+        #expect(payload.model == "opencode/deepseek-v4-flash-free")
         #expect(payload.specialties == ["qa", "review", "deploy"])
         #expect(payload.enabled == false)
     }
@@ -981,7 +981,7 @@ struct DesktopStoreTests {
             companyId: "company",
             title: "Marketing Operator",
             agentCli: "opencode",
-            model: "opencode/nemotron-3-super-free",
+            model: "opencode/deepseek-v4-flash-free",
             roleSummary: "owned and social publishing",
             specialties: ["marketing"],
             collaborationInstructions: nil,
@@ -1408,7 +1408,7 @@ struct DesktopStoreTests {
             agent: agent,
             profile: profile,
             skillCatalog: [
-                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"])
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ", "KNOWLEDGE_GRAPH_WRITE"])
             ]
         )
 
@@ -1426,19 +1426,70 @@ struct DesktopStoreTests {
                 mode: "AUTO",
                 skillAllowlist: ["graphify"]
             ),
-            "KNOWLEDGE_GRAPH_READ": AgentCapabilitySettingRecord(enabled: true, mode: "AUTO")
+            "KNOWLEDGE_GRAPH_READ": AgentCapabilitySettingRecord(enabled: true, mode: "AUTO"),
+            "KNOWLEDGE_GRAPH_WRITE": AgentCapabilitySettingRecord(enabled: true, mode: "AUTO")
         ])
         let card = AgentSkillCardRecord(
             agent: agent,
             profile: profile,
             skillCatalog: [
-                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"])
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ", "KNOWLEDGE_GRAPH_WRITE"])
             ]
         )
 
         #expect(card.runnableSkills.map(\.id) == ["graphify"])
         #expect(card.primaryRunnableSkill?.id == "graphify")
         #expect(card.blockedSkillReasons.isEmpty)
+    }
+
+    @Test
+    func delegatedAutoReadOnlySkillWithReadCapabilityIsRunnable() {
+        let agent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "implementation")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "AUTO",
+                skillAllowlist: ["analytics-reporter"]
+            ),
+            "MARKETING_ANALYTICS_READ": AgentCapabilitySettingRecord(enabled: true, mode: "READ_ONLY")
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "analytics-reporter", displayName: "Analytics Reporter", requiredCapabilities: ["MARKETING_ANALYTICS_READ"])
+            ]
+        )
+
+        #expect(card.runnableSkills.map(\.id) == ["analytics-reporter"])
+        #expect(card.primaryRunnableSkill?.id == "analytics-reporter")
+        #expect(card.blockedSkillReasons.isEmpty)
+        #expect(card.policyChips.contains(.readOnly))
+    }
+
+    @Test
+    func graphifyWithoutWriteCapabilityIsNotRunnable() {
+        let agent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "implementation")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "AUTO",
+                skillAllowlist: ["graphify"]
+            ),
+            "KNOWLEDGE_GRAPH_READ": AgentCapabilitySettingRecord(enabled: true, mode: "READ_ONLY"),
+            "KNOWLEDGE_GRAPH_WRITE": AgentCapabilitySettingRecord(enabled: true, mode: "APPROVAL_REQUIRED")
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ", "KNOWLEDGE_GRAPH_WRITE"])
+            ]
+        )
+
+        #expect(card.runnableSkills.isEmpty)
+        #expect(card.primaryRunnableSkill == nil)
+        #expect(card.blockedSkillReasons["graphify"] == "capability_KNOWLEDGE_GRAPH_WRITE_not_runnable")
     }
 
     @Test
@@ -1726,7 +1777,7 @@ struct DesktopStoreTests {
             companyId: "company",
             title: title,
             agentCli: "opencode",
-            model: "opencode/nemotron-3-super-free",
+            model: "opencode/deepseek-v4-flash-free",
             roleSummary: roleSummary,
             specialties: specialties,
             collaborationInstructions: nil,
