@@ -208,7 +208,23 @@ struct ModelsTests {
               "channels": ["web"],
               "delegationPolicyId": "policy-1",
               "status": "COMPLETED",
-              "actions": [],
+              "actions": [
+                {
+                  "id": "action-1",
+                  "runId": "run-1",
+                  "channel": "web",
+                  "targetUrl": "http://127.0.0.1:8787/health",
+                  "inputSummary": "web: no editable field; no publish button",
+                  "postedUrl": "http://127.0.0.1:8787/health?utm_source=cotor",
+                  "screenshotPath": "/tmp/cotor-marketing.png",
+                  "utm": "utm_source=cotor",
+                  "status": "SUCCEEDED",
+                  "idempotencyKey": "key-1",
+                  "error": null,
+                  "createdAt": 1,
+                  "updatedAt": 2
+                }
+              ],
               "message": "done",
               "error": null,
               "createdAt": 1,
@@ -222,6 +238,8 @@ struct ModelsTests {
 
         #expect(dashboard.marketingDelegationPolicies.map(\.id) == ["policy-1"])
         #expect(dashboard.marketingRuns.map(\.id) == ["run-1"])
+        #expect(dashboard.marketingRuns.first?.actions.first?.runId == "run-1")
+        #expect(dashboard.marketingRuns.first?.actions.first?.action == "web")
     }
 
     @Test
@@ -617,6 +635,32 @@ struct ModelsTests {
         let fallback = URL(string: "http://127.0.0.1:8787")!
         let (url, _) = DesktopAPI.validatedAppServerConfiguration(
             envURL: "https://remote.cotor.io:8787",
+            envAllowRemote: nil,
+            envToken: "some-token",
+            fallbackURL: fallback,
+            appToken: "app-token"
+        )
+        #expect(url.absoluteString == fallback.absoluteString)
+    }
+
+    @Test
+    func appServerConfigDeceptiveLoopbackHostFallsBackToLoopback() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, _) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: "http://localhost.evil.test:8787",
+            envAllowRemote: nil,
+            envToken: "some-token",
+            fallbackURL: fallback,
+            appToken: "app-token"
+        )
+        #expect(url.absoluteString == fallback.absoluteString)
+    }
+
+    @Test
+    func appServerConfigNonHttpLoopbackURLFallsBackToLoopback() {
+        let fallback = URL(string: "http://127.0.0.1:8787")!
+        let (url, _) = DesktopAPI.validatedAppServerConfiguration(
+            envURL: "ftp://localhost:8787",
             envAllowRemote: nil,
             envToken: "some-token",
             fallbackURL: fallback,

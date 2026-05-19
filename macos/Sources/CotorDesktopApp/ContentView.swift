@@ -1081,6 +1081,7 @@ private struct SidebarView: View {
                             company: company,
                             runtime: store.companyRuntimes.first(where: { $0.companyId == company.id }),
                             language: l,
+                            isOffline: store.isOffline,
                             isSelected: store.selectedCompanyID == company.id
                         ) {
                             Task { await store.selectCompany(company) }
@@ -1297,10 +1298,27 @@ private struct SidebarView: View {
                 ShellTag(text: status.policy == "REQUIRE_GITHUB_PR" ? l("PR mode", "PR 모드") : l("local git", "로컬 git"), tint: ShellPalette.accent)
             }
 
-            TextField(l("https://github.com/owner/repo.git", "https://github.com/owner/repo.git"), text: $store.companyGitHubOriginInput)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1)
-                .accessibilityIdentifier("github-origin-quick-input")
+            HStack(spacing: 6) {
+                TextField(l("https://github.com/owner/repo.git", "https://github.com/owner/repo.git"), text: $store.companyGitHubOriginInput)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("github-origin-quick-input")
+
+                Button {
+                    Task { await store.saveSelectedCompanyGitHubOrigin() }
+                } label: {
+                    Image(systemName: "link")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(ShellPalette.text)
+                        .frame(width: 28, height: 24)
+                }
+                .buttonStyle(.plain)
+                .background(store.companyGitHubOriginInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? ShellPalette.panelRaised.opacity(0.5) : ShellPalette.accent)
+                .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                .disabled(store.companyGitHubOriginInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel(l("Connect origin", "origin 연결"))
+                .help(l("Connect origin", "origin 연결"))
+            }
 
             if let message = store.companyGitHubStatusMessage, !message.isEmpty {
                 Text(message)
@@ -1334,15 +1352,6 @@ private struct SidebarView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(ShellTopBarButtonStyle(prominent: false))
-
-                Button {
-                    Task { await store.saveSelectedCompanyGitHubOrigin() }
-                } label: {
-                    Label(l("Connect", "연결"), systemImage: "link")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(ShellTopBarButtonStyle(prominent: true))
-                .disabled(store.companyGitHubOriginInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .accessibilityElement(children: .contain)
@@ -3788,9 +3797,17 @@ private struct OrgChartNode: View {
 private struct AgentSkillCardView: View {
     let card: AgentSkillCardRecord
     let language: AppLanguage
-    let isRunning: Bool
-    let onRun: () -> Void
+    let runningSkillID: String?
+    let onRun: (AgentSkillChipRecord) -> Void
     let onEdit: () -> Void
+
+    private var canRunSkill: Bool {
+        card.enabled && card.primaryRunnableSkill != nil
+    }
+
+    private var isRunning: Bool {
+        runningSkillID != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -3865,29 +3882,31 @@ private struct AgentSkillCardView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 6)
-                Button(action: onRun) {
-                    HStack(spacing: 5) {
-                        if isRunning {
-                            ProgressView()
-                                .controlSize(.small)
-                                .scaleEffect(0.55)
-                                .frame(width: 12, height: 12)
-                        } else {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 8, weight: .bold))
+                if card.runnableSkills.count > 1 {
+                    Menu {
+                        ForEach(card.runnableSkills) { skill in
+                            Button(skill.displayName) {
+                                onRun(skill)
+                            }
                         }
-                        Text(isRunning ? language("Running", "실행 중") : language("Skill Test", "스킬 테스트"))
-                            .font(.system(size: 10, weight: .semibold))
+                    } label: {
+                        runButtonLabel
                     }
-                    .foregroundStyle(ShellPalette.text)
-                    .padding(.horizontal, 8)
-                    .frame(height: 24)
-                    .background(ShellPalette.panelRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .disabled(isRunning || !canRunSkill)
+                    .opacity(canRunSkill ? 1 : 0.45)
+                } else {
+                    Button {
+                        guard let skill = card.primaryRunnableSkill else { return }
+                        onRun(skill)
+                    } label: {
+                        runButtonLabel
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRunning || !canRunSkill)
+                    .opacity(canRunSkill ? 1 : 0.45)
                 }
-                .buttonStyle(.plain)
-                .disabled(isRunning || card.selectedSkills.isEmpty)
-                .opacity(card.selectedSkills.isEmpty ? 0.45 : 1)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
@@ -3923,6 +3942,41 @@ private struct AgentSkillCardView: View {
     private var recentRunTitle: String {
         guard let run = card.recentRun else { return language("No skill run yet", "아직 실행 없음") }
         return "\(run.skill) · \(run.status)"
+    }
+
+    private var runButtonTitle: String {
+        if isRunning {
+            return language("Running", "실행 중")
+        }
+        if card.runnableSkills.count > 1 {
+            return language("Run Skill", "스킬 실행")
+        }
+        if let skill = card.primaryRunnableSkill {
+            return language("Run \(skill.displayName)", "\(skill.displayName) 실행")
+        }
+        return language("Blocked", "실행 불가")
+    }
+
+    private var runButtonLabel: some View {
+        HStack(spacing: 5) {
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.55)
+                    .frame(width: 12, height: 12)
+            } else {
+                Image(systemName: card.runnableSkills.count > 1 ? "chevron.down.circle.fill" : "play.fill")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            Text(runButtonTitle)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(ShellPalette.text)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(ShellPalette.panelRaised)
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
     }
 
     private var recentRunDetail: String {
@@ -5021,6 +5075,9 @@ private struct CenterPaneView: View {
         if runtime.lastError?.isEmpty == false {
             return l("Needs attention", "확인 필요")
         }
+        if (store.isOffline && runtime.status.uppercased() == "RUNNING") || runtime.isDetachedLocalBackend {
+            return l("Backend offline", "백엔드 오프라인")
+        }
         if runtime.isManuallyStopped {
             return l("Paused", "멈춤")
         }
@@ -5035,6 +5092,9 @@ private struct CenterPaneView: View {
 
     private func companyRuntimeHeadlineTint(_ runtime: CompanyRuntimeSnapshotRecord) -> Color {
         if runtime.lastError?.isEmpty == false {
+            return ShellPalette.danger
+        }
+        if (store.isOffline && runtime.status.uppercased() == "RUNNING") || runtime.isDetachedLocalBackend {
             return ShellPalette.danger
         }
         if runtime.isBudgetPaused || runtime.isManuallyStopped {
@@ -6342,9 +6402,10 @@ private struct CenterPaneView: View {
                     AgentSkillCardView(
                         card: card,
                         language: l,
-                        isRunning: store.runningSkillRunKeys.contains("\(card.id):\(card.selectedSkills.first?.id ?? "")"),
-                        onRun: {
-                            guard let skill = card.selectedSkills.first else { return }
+                        runningSkillID: card.runnableSkills.first {
+                            store.runningSkillRunKeys.contains("\(card.id):\($0.id)")
+                        }?.id,
+                        onRun: { skill in
                             Task {
                                 await store.runSkill(
                                     skillName: skill.id,
@@ -7232,6 +7293,7 @@ private struct CompanyCard: View {
     let company: CompanyRecord
     let runtime: CompanyRuntimeSnapshotRecord?
     let language: AppLanguage
+    let isOffline: Bool
     let isSelected: Bool
     let action: () -> Void
 
@@ -7252,8 +7314,8 @@ private struct CompanyCard: View {
                 HStack(spacing: 8) {
                     if let runtime {
                         ShellTag(
-                            text: companyCardRuntimeLabel(runtime, language: language),
-                            tint: companyCardRuntimeTint(runtime)
+                            text: companyCardRuntimeLabel(runtime, language: language, isOffline: isOffline),
+                            tint: companyCardRuntimeTint(runtime, isOffline: isOffline)
                         )
                     } else {
                         ShellTag(text: language("Not started", "시작 전"), tint: ShellPalette.panelRaised)
@@ -7286,9 +7348,12 @@ private struct CompanyCard: View {
     }
 }
 
-private func companyCardRuntimeLabel(_ runtime: CompanyRuntimeSnapshotRecord, language: AppLanguage) -> String {
+private func companyCardRuntimeLabel(_ runtime: CompanyRuntimeSnapshotRecord, language: AppLanguage, isOffline: Bool) -> String {
     if runtime.lastError?.isEmpty == false {
         return language("Needs attention", "확인 필요")
+    }
+    if (isOffline && runtime.status.uppercased() == "RUNNING") || runtime.isDetachedLocalBackend {
+        return language("Backend offline", "백엔드 오프라인")
     }
     if runtime.isManuallyStopped {
         return language("Paused", "멈춤")
@@ -7302,8 +7367,11 @@ private func companyCardRuntimeLabel(_ runtime: CompanyRuntimeSnapshotRecord, la
     return language.status(runtime.status)
 }
 
-private func companyCardRuntimeTint(_ runtime: CompanyRuntimeSnapshotRecord) -> Color {
+private func companyCardRuntimeTint(_ runtime: CompanyRuntimeSnapshotRecord, isOffline: Bool) -> Color {
     if runtime.lastError?.isEmpty == false {
+        return ShellPalette.danger
+    }
+    if (isOffline && runtime.status.uppercased() == "RUNNING") || runtime.isDetachedLocalBackend {
         return ShellPalette.danger
     }
     if runtime.isBudgetPaused || runtime.isManuallyStopped {

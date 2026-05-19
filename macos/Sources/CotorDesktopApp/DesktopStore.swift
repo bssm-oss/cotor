@@ -1965,12 +1965,16 @@ final class DesktopStore: ObservableObject {
     func chatGoalProposal(from draft: String) -> ChatGoalProposal? {
         let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedDraft.isEmpty else { return nil }
-        let firstLine = trimmedDraft
+        let normalizedDraft = strippedLeadingSlashCommand(
+            from: strippedLeadingListPrefix(from: trimmedDraft),
+            commands: ["goal", "objective", "목표"]
+        )
+        let firstLine = normalizedDraft
             .split(whereSeparator: \.isNewline)
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
 
-        let rawTitle = firstLine ?? String(trimmedDraft.prefix(80))
+        let rawTitle = firstLine ?? String(normalizedDraft.prefix(80))
         let normalizedTitle = rawTitle
             .replacingOccurrences(
                 of: #"^([\-*•]\s+|\d+[.)]\s+)"#,
@@ -1983,13 +1987,13 @@ final class DesktopStore: ObservableObject {
                 options: [.regularExpression, .caseInsensitive]
             )
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallbackTitle = trimmedDraft
+        let fallbackTitle = normalizedDraft
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let title = normalizedTitle.isEmpty ? String(fallbackTitle.prefix(80)) : normalizedTitle
         guard !title.isEmpty else { return nil }
 
-        return ChatGoalProposal(title: title, description: trimmedDraft)
+        return ChatGoalProposal(title: title, description: normalizedDraft)
     }
 
     func chatCompanyRequestProposal(from draft: String) -> ChatCompanyRequestProposal? {
@@ -3694,9 +3698,48 @@ final class DesktopStore: ObservableObject {
     }
 
     private func cleanedCreationPrompt(_ message: String) -> String {
+        var cleaned = strippedLeadingSlashCommand(
+            from: strippedLeadingListPrefix(from: message),
+            commands: ["goal", "objective", "issue", "task", "ticket", "목표", "이슈", "태스크", "작업"]
+        )
+        cleaned = cleaned
+            .replacingOccurrences(
+                of: #"(?i)^\s*(create|make|add)\s+(a\s+|an\s+)?(goal|objective|issue|task|ticket)\s*[:：\-]?\s*"#,
+                with: "",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"^\s*(목표|이슈|태스크|작업)\s*(생성|만들기|만들어|추가)?\s*[:：\-]?\s*"#,
+                with: "",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"\s*(만들어|만들어줘|만들어 줘|생성|생성해줘|생성해 줘|추가|추가해줘|추가해 줘|해줘|해 줘|해주세요)\s*$"#,
+                with: "",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned
+    }
+
+    private func strippedLeadingListPrefix(from message: String) -> String {
         message
-            .replacingOccurrences(of: #"(?i)\b(create|make|add)\b"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"(목표|이슈|태스크|만들어|생성|추가|해줘)"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(
+                of: #"^([\-*•]\s+|\d+[.)]\s+)"#,
+                with: "",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func strippedLeadingSlashCommand(from message: String, commands: [String]) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return trimmed }
+        let escapedCommands = commands.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+        let pattern = #"(?i)^\s*/("# + escapedCommands + #")(?=$|[:：\-\s])\s*[:：\-]?\s*"#
+        return trimmed
+            .replacingOccurrences(of: pattern, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -3763,11 +3806,23 @@ final class DesktopStore: ObservableObject {
     }
 
     private func looksLikeGoalCreationChatRequest(_ text: String) -> Bool {
-        (text.contains("목표") || text.contains("goal")) && containsAny(text, ["생성", "만들", "추가", "create", "add"])
+        isSlashCommand(text, commands: ["goal", "objective", "목표"]) ||
+            ((text.contains("목표") || text.contains("goal")) && containsAny(text, ["생성", "만들", "추가", "create", "add"]))
     }
 
     private func looksLikeIssueCreationChatRequest(_ text: String) -> Bool {
-        (text.contains("이슈") || text.contains("issue") || text.contains("task")) && containsAny(text, ["생성", "만들", "추가", "create", "add"])
+        isSlashCommand(text, commands: ["issue", "task", "ticket", "이슈", "태스크", "작업"]) ||
+            ((text.contains("이슈") || text.contains("issue") || text.contains("task")) && containsAny(text, ["생성", "만들", "추가", "create", "add"]))
+    }
+
+    private func isSlashCommand(_ text: String, commands: [String]) -> Bool {
+        let trimmed = strippedLeadingListPrefix(from: text)
+        guard trimmed.hasPrefix("/") else { return false }
+        let escapedCommands = commands.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+        return trimmed.range(
+            of: #"(?i)^/("# + escapedCommands + #")(?=$|[:：\-\s])"#,
+            options: .regularExpression
+        ) != nil
     }
 
     private func looksLikeGoalDecompositionChatRequest(_ text: String) -> Bool {

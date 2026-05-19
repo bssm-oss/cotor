@@ -426,6 +426,7 @@ struct UpsertMarketingDelegationPolicyPayload: Codable {
 
 struct MarketingActionRecord: Codable, Identifiable, Hashable {
     let id: String
+    let runId: String?
     let channel: String
     let action: String
     let targetUrl: String
@@ -438,6 +439,41 @@ struct MarketingActionRecord: Codable, Identifiable, Hashable {
     let createdAt: Int64
     let updatedAt: Int64
     let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case runId
+        case channel
+        case action
+        case targetUrl
+        case inputSummary
+        case postedUrl
+        case screenshotPath
+        case utm
+        case status
+        case idempotencyKey
+        case createdAt
+        case updatedAt
+        case error
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        runId = try container.decodeIfPresent(String.self, forKey: .runId)
+        channel = try container.decode(String.self, forKey: .channel)
+        action = try container.decodeValue(String.self, forKey: .action, default: channel)
+        targetUrl = try container.decode(String.self, forKey: .targetUrl)
+        inputSummary = try container.decode(String.self, forKey: .inputSummary)
+        postedUrl = try container.decodeIfPresent(String.self, forKey: .postedUrl)
+        screenshotPath = try container.decodeIfPresent(String.self, forKey: .screenshotPath)
+        utm = try container.decodeIfPresent(String.self, forKey: .utm)
+        status = try container.decode(String.self, forKey: .status)
+        idempotencyKey = try container.decode(String.self, forKey: .idempotencyKey)
+        createdAt = try container.decode(Int64.self, forKey: .createdAt)
+        updatedAt = try container.decode(Int64.self, forKey: .updatedAt)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
 }
 
 struct MarketingRunRecord: Codable, Identifiable, Hashable {
@@ -1071,6 +1107,15 @@ struct CompanyRuntimeSnapshotRecord: Codable, Hashable {
 
     var isBudgetPaused: Bool {
         budgetPausedAt != nil
+    }
+
+    var isDetachedLocalBackend: Bool {
+        guard backendKind.uppercased() == "LOCAL_COTOR", status.uppercased() == "RUNNING" else {
+            return false
+        }
+        let health = backendHealth.lowercased()
+        let lifecycle = backendLifecycleState.uppercased()
+        return health == "offline" || lifecycle == "STOPPED"
     }
 }
 

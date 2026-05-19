@@ -686,6 +686,141 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func chatGoalProposalStripsSlashGoalCommand() {
+        let store = DesktopStore()
+
+        let proposal = store.chatGoalProposal(from: "/goal Stabilize the company runtime\nKeep the work scoped to app-server startup.")
+
+        #expect(proposal == ChatGoalProposal(
+            title: "Stabilize the company runtime",
+            description: "Stabilize the company runtime\nKeep the work scoped to app-server startup."
+        ))
+    }
+
+    @Test
+    func chatGoalProposalStripsListPrefixedSlashGoalCommand() {
+        let store = DesktopStore()
+
+        let proposal = store.chatGoalProposal(from: "- /goal Stabilize the company runtime")
+
+        #expect(proposal == ChatGoalProposal(
+            title: "Stabilize the company runtime",
+            description: "Stabilize the company runtime"
+        ))
+    }
+
+    @Test
+    func listPrefixedSlashGoalCommandRoutesThroughChatGoalCreation() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
+        let api = DesktopAPI(
+            baseURL: URL(string: "http://desktop.test")!,
+            token: "test-token",
+            session: URLSession(configuration: configuration)
+        )
+        let store = DesktopStore(api: api)
+        let company = company(id: "company", repositoryId: "repo", name: "Company")
+        store.selectedCompanyID = company.id
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DashboardPayload.empty.settings,
+            companies: [company],
+            companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: [],
+            agentPerformance: []
+        )
+
+        let capturedPayloads = Locked<[CreateGoalPayload]>([])
+        let createdGoal = goal(
+            id: "goal",
+            companyId: company.id,
+            title: "Stabilize the company runtime",
+            status: "ACTIVE"
+        )
+        let dashboardAfterCreate = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DashboardPayload.empty.settings,
+            companies: [company],
+            companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
+            projectContexts: [],
+            goals: [createdGoal],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: [],
+            agentPerformance: []
+        )
+        DesktopStoreCapturingURLProtocol.requestHandler = { request in
+            let encoder = JSONEncoder()
+            let path = request.url?.path ?? ""
+            let data: Data
+            if path == "/api/app/companies/company/goals", request.httpMethod == "POST" {
+                let body = try #require(requestBodyData(from: request))
+                let payload = try JSONDecoder().decode(CreateGoalPayload.self, from: body)
+                capturedPayloads.withLock { $0.append(payload) }
+                data = try encoder.encode(createdGoal)
+            } else if path == "/api/app/dashboard" {
+                data = try encoder.encode(dashboardAfterCreate)
+            } else if path == "/api/app/skills" {
+                data = try encoder.encode([SkillCatalogEntryRecord]())
+            } else {
+                data = Data("{}".utf8)
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        defer { DesktopStoreCapturingURLProtocol.requestHandler = nil }
+
+        await store.submitOperatorChatMessage("- /goal Stabilize the company runtime")
+
+        #expect(capturedPayloads.withLock { $0.map(\.title) } == ["Stabilize the company runtime"])
+        #expect(store.operatorChatMessages.last?.text == "Created goal: Stabilize the company runtime")
+        #expect(store.selectedGoalID == "goal")
+    }
+
+    @Test
+    func chatGoalProposalStripsKoreanSlashGoalCommand() {
+        let store = DesktopStore()
+
+        let proposal = store.chatGoalProposal(from: "/목표 마케팅 스킬 첫 실행 안정화")
+
+        #expect(proposal?.title == "마케팅 스킬 첫 실행 안정화")
+        #expect(proposal?.description == "마케팅 스킬 첫 실행 안정화")
+    }
+
+    @Test
     func chatCompanyRequestProposalTurnsVagueDraftIntoCeoIntake() {
         let store = DesktopStore()
 
@@ -1349,6 +1484,25 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func skillBlockedByMissingRequiredCapabilityIsNotRunnable() {
+        let agent = agentDefinition(id: "agent-op", title: "Operator", roleSummary: "marketing")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(enabled: true, mode: "AUTO", skillAllowlist: ["browser-smoke"])
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "browser-smoke", displayName: "Browser Tester", requiredCapabilities: ["BROWSER_READ"])
+            ]
+        )
+
+        #expect(card.runnableSkills.isEmpty)
+        #expect(card.primaryRunnableSkill == nil)
+        #expect(card.blockedSkillReasons["browser-smoke"]?.contains("BROWSER_READ") == true)
+    }
+
+    @Test
     func refreshTuiSessionListDoesNotOverwriteSelectedWorkspaceWithFirstSession() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
@@ -1631,4 +1785,43 @@ final class DesktopStoreCapturingURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+}
+
+final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<Result>(_ body: (inout Value) throws -> Result) rethrows -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body(&value)
+    }
+}
+
+private func requestBodyData(from request: URLRequest) -> Data? {
+    if let body = request.httpBody {
+        return body
+    }
+    guard let stream = request.httpBodyStream else {
+        return nil
+    }
+    stream.open()
+    defer { stream.close() }
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    while stream.hasBytesAvailable {
+        let read = stream.read(&buffer, maxLength: buffer.count)
+        if read < 0 {
+            return nil
+        }
+        if read == 0 {
+            break
+        }
+        data.append(buffer, count: read)
+    }
+    return data
 }
