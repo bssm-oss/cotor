@@ -2382,7 +2382,7 @@ class DesktopAppServiceTest : FunSpec({
                         candidate.qaVerdict == null &&
                         candidate.qaFeedback == null &&
                         candidate.ceoVerdict == null &&
-                    candidate.ceoFeedback == null
+                        candidate.ceoFeedback == null
                 if (candidate.status == IssueStatus.DONE && metadataCleared) {
                     return@withTimeout
                 }

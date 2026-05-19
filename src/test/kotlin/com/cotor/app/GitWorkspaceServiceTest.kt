@@ -1028,12 +1028,12 @@ class GitWorkspaceServiceTest : FunSpec({
             listOf(
                 FakeProcessManager.Step(
                     listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"),
-	                    ProcessResult(
-	                        0,
-	                        " M src/App.kt\u0000?? .cotor/runtime/state.json\u0000?? .opencode/package.json\u0000?? .opencode/node_modules/zod/index.js\u0000?? AUTO_FLOW_132223.md\u0000?? graphify-out/report.md\u0000?? Path(child of #1#2)/graphify-out/report.md\u0000?? cotor.log\u0000",
-	                        "",
-	                        true
-	                    )
+                    ProcessResult(
+                        0,
+                        " M src/App.kt\u0000?? .cotor/runtime/state.json\u0000?? .opencode/package.json\u0000?? .opencode/node_modules/zod/index.js\u0000?? AUTO_FLOW_132223.md\u0000?? graphify-out/report.md\u0000?? Path(child of #1#2)/graphify-out/report.md\u0000?? cotor.log\u0000",
+                        "",
+                        true
+                    )
                 ),
                 FakeProcessManager.Step(listOf("git", "add", "-A", "--", "src/App.kt"), ProcessResult(0, "", "", true)),
                 FakeProcessManager.Step(listOf("git", "commit", "-m", "Ship desktop publish flow (codex)"), ProcessResult(0, "[branch abc1234] Ship desktop publish flow\n", "", true)),
@@ -1078,8 +1078,8 @@ class GitWorkspaceServiceTest : FunSpec({
         publish.pullRequestUrl shouldBe "https://github.com/heodongun/cotor/pull/123"
         publish.error.shouldBeNull()
         processManager.remainingSteps() shouldBe 0
-	        processManager.workingDirectories().distinct() shouldBe listOf(worktree)
-	    }
+        processManager.workingDirectories().distinct() shouldBe listOf(worktree)
+    }
 
     test("hasPublishableChanges ignores opencode and local generated artifacts") {
         val worktree = Files.createTempDirectory("git-workspace-service-generated-only")
@@ -1103,7 +1103,7 @@ class GitWorkspaceServiceTest : FunSpec({
         processManager.remainingSteps() shouldBe 0
     }
 
-	    test("publishRun returns a clear error when there is nothing to publish") {
+    test("publishRun returns a clear error when there is nothing to publish") {
         val worktree = Files.createTempDirectory("git-workspace-service-empty")
         val processManager = FakeProcessManager(
             listOf(

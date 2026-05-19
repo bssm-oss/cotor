@@ -16868,9 +16868,10 @@ class DesktopAppService(
             item.issueId == executionIssueId &&
                 when (issueKind) {
                     "review" -> item.qaIssueId == issue.id && item.status == ReviewQueueStatus.AWAITING_QA
-                    "approval" -> item.approvalIssueId == issue.id &&
-                        item.status in setOf(ReviewQueueStatus.READY_FOR_CEO, ReviewQueueStatus.READY_TO_MERGE) &&
-                        item.qaVerdict.equals("PASS", ignoreCase = true)
+                    "approval" ->
+                        item.approvalIssueId == issue.id &&
+                            item.status in setOf(ReviewQueueStatus.READY_FOR_CEO, ReviewQueueStatus.READY_TO_MERGE) &&
+                            item.qaVerdict.equals("PASS", ignoreCase = true)
                     else -> false
                 }
         } ?: return null
