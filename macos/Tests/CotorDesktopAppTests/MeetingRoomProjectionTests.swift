@@ -476,10 +476,10 @@ struct MeetingRoomProjectionTests {
             isSceneActive: true
         )
 
-        #expect(!idlePlan.shouldAnimate)
-        #expect(idlePlan.frameInterval == 1.0)
-        #expect(!blockedPlan.shouldAnimate)
-        #expect(blockedPlan.frameInterval == 1.0)
+        #expect(idlePlan.shouldAnimate)
+        #expect(idlePlan.frameInterval == 1.0 / 15.0)
+        #expect(blockedPlan.shouldAnimate)
+        #expect(blockedPlan.frameInterval == 1.0 / 15.0)
         #expect(activePlan.shouldAnimate)
         #expect(activePlan.frameInterval == 1.0 / 15.0)
     }
