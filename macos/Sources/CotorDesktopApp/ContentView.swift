@@ -2932,7 +2932,7 @@ private struct IssueSummaryRow: View {
                         .foregroundStyle(ShellPalette.text)
                         .lineLimit(1)
                     Spacer()
-                    StatusSummaryPill(text: language.status(issue.status), tint: statusTint(for: issue.status))
+                    StatusSummaryPill(text: effectiveIssueStatusLabel(issue, language: language), tint: statusTint(for: issue.status))
                 }
                 if let assignee {
                     Text(assignee.roleName)
@@ -2972,7 +2972,7 @@ private struct IssueFocusRow: View {
                         .foregroundStyle(ShellPalette.text)
                         .lineLimit(1)
                     HStack(spacing: 8) {
-                        Text(language.status(issue.status))
+                        Text(effectiveIssueStatusLabel(issue, language: language))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(ShellPalette.muted)
                         if let assignee {
@@ -3876,7 +3876,7 @@ private struct AgentSkillCardView: View {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 8, weight: .bold))
                         }
-                        Text(isRunning ? language("Running", "실행 중") : language("Run", "실행"))
+                        Text(isRunning ? language("Running", "실행 중") : language("Skill Test", "스킬 테스트"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(ShellPalette.text)
@@ -9161,6 +9161,18 @@ private func matches(query: String, values: [String?]) -> Bool {
         guard let value else { return false }
         return value.lowercased().contains(needle)
     }
+}
+
+/// Returns the status label for an issue, substituting a user-friendly
+/// "Paused · Resumable" string when a BLOCKED issue was interrupted by a
+/// manual runtime stop and can be retried automatically.
+private func effectiveIssueStatusLabel(_ issue: IssueRecord, language: AppLanguage) -> String {
+    if issue.status.uppercased() == "BLOCKED",
+       issue.blockedReasonCode == "RUNTIME_INTERRUPTED",
+       issue.blockedRetryable == true {
+        return language("Paused · Resumable", "중지됨 · 재개 가능")
+    }
+    return language.status(issue.status)
 }
 
 private func statusTint(for status: String) -> Color {

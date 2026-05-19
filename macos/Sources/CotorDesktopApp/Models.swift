@@ -764,6 +764,8 @@ struct IssueRecord: Codable, Identifiable, Hashable {
     let mergeResult: String?
     let transitionReason: String?
     let sourceSignal: String
+    let blockedReasonCode: String?
+    let blockedRetryable: Bool?
     let createdAt: Int64
     let updatedAt: Int64
 }
@@ -2031,6 +2033,8 @@ struct MockSeed {
                 mergeResult: nil,
                 transitionReason: nil,
                 sourceSignal: "goal-decomposition",
+                blockedReasonCode: nil,
+                blockedRetryable: nil,
                 createdAt: 0,
                 updatedAt: 0
             ),
@@ -2068,6 +2072,8 @@ struct MockSeed {
                 mergeResult: nil,
                 transitionReason: "Execution branch is active.",
                 sourceSignal: "goal-decomposition",
+                blockedReasonCode: nil,
+                blockedRetryable: nil,
                 createdAt: 0,
                 updatedAt: 0
             ),
@@ -2105,6 +2111,8 @@ struct MockSeed {
                 mergeResult: nil,
                 transitionReason: "QA is reviewing the execution PR.",
                 sourceSignal: "goal-decomposition",
+                blockedReasonCode: nil,
+                blockedRetryable: nil,
                 createdAt: 0,
                 updatedAt: 0
             )

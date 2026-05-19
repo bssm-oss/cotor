@@ -151,7 +151,7 @@ class CliGoldenSnapshotTest : FunSpec({
 
 private fun createDoctorFixture(projectRoot: Path) {
     projectRoot.resolve("build/libs").createDirectories()
-    projectRoot.resolve("build/libs/cotor-1.0.0-all.jar").writeText("jar")
+    projectRoot.resolve("build/libs/cotor-1.0.6-all.jar").writeText("jar")
     projectRoot.resolve("cotor.yaml").writeText("version: \"1.0\"")
 
     projectRoot.resolve("examples").createDirectories()

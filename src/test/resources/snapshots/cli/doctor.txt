@@ -4,7 +4,7 @@
 [32m✓[39m Java 버전 확인
 [2m   Java 21.0.2[22m
 [32m✓[39m CLI JAR 존재 여부
-[2m   빌드 결과 발견: cotor-1.0.0-all.jar[22m
+[2m   빌드 결과 발견: cotor-1.0.6-all.jar[22m
 [32m✓[39m cotor.yaml 확인
 [2m   구성 파일 발견: cotor.yaml[22m
 [32m✓[39m 예제 번들 확인

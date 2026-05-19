@@ -827,6 +827,7 @@ class OpenCodePlugin : AgentPlugin {
         context: ExecutionContext,
         processManager: ProcessManager
     ): ProcessResult {
+        val planningOnly = isPlanningOnlyOpenCodeRun(context)
         // OpenCode run with --format json produces a structured JSON event stream
         // instead of launching an interactive TUI. Events include step_start, text,
         // step_finish, etc. We parse text events to extract the response content.
@@ -848,17 +849,24 @@ class OpenCodePlugin : AgentPlugin {
                 Files.writeString(path, prompt)
             }
         }
-        val ephemeralConfig = withContext(Dispatchers.IO) {
-            createEphemeralOpenCodeConfig(context)
-        }
+        val ephemeralConfig = if (planningOnly) null else withContext(Dispatchers.IO) { createEphemeralOpenCodeConfig(context) }
         val fatalRuntimeError = AtomicReference<String?>(null)
         val childProcessId = AtomicLong(-1L)
         val command = buildList {
             add("opencode")
             add("run")
+            if (planningOnly) {
+                add("--pure")
+            }
             add("--print-logs")
             add("--log-level")
             add("ERROR")
+            if (planningOnly) {
+                context.workingDirectory?.let {
+                    add("--dir")
+                    add(it.toString())
+                }
+            }
             context.parameters["agent"]
                 ?.trim()
                 ?.takeIf { it.isNotBlank() }
@@ -872,8 +880,15 @@ class OpenCodePlugin : AgentPlugin {
             }
             add("--format")
             add("json")
-            add("Execute the instructions in the attached prompt file.")
-            add("--file=$promptFile")
+            if (!planningOnly) {
+                add("Execute the instructions in the attached prompt file.")
+                add("--file=$promptFile")
+            }
+        }
+        val executionEnvironment = if (planningOnly) {
+            context.environment + planningOnlyOpenCodeEnvironment(context)
+        } else {
+            context.environment
         }
 
         return try {
@@ -896,23 +911,43 @@ class OpenCodePlugin : AgentPlugin {
                     }
                 }
                 try {
-                    processManager.executeProcess(
-                        command = command,
-                        input = null,
-                        environment = context.environment,
-                        timeout = context.timeout,
-                        workingDirectory = context.workingDirectory,
-                        onStart = { pid ->
-                            childProcessId.set(pid)
-                            context.onProcessStarted?.invoke(pid)
-                        },
-                        onStdoutChunk = context.onStdoutChunk,
-                        onStderrChunk = { chunk ->
-                            classifyFatalOpenCodeRuntimeLog(chunk)?.let { reason ->
-                                fatalRuntimeError.compareAndSet(null, reason)
+                    if (planningOnly) {
+                        processManager.executeProcessWithInputFile(
+                            command = command,
+                            inputFile = promptFile,
+                            environment = executionEnvironment,
+                            timeout = context.timeout,
+                            workingDirectory = context.workingDirectory,
+                            onStart = { pid ->
+                                childProcessId.set(pid)
+                                context.onProcessStarted?.invoke(pid)
+                            },
+                            onStdoutChunk = context.onStdoutChunk,
+                            onStderrChunk = { chunk ->
+                                classifyFatalOpenCodeRuntimeLog(chunk)?.let { reason ->
+                                    fatalRuntimeError.compareAndSet(null, reason)
+                                }
                             }
-                        }
-                    )
+                        )
+                    } else {
+                        processManager.executeProcess(
+                            command = command,
+                            input = null,
+                            environment = executionEnvironment,
+                            timeout = context.timeout,
+                            workingDirectory = context.workingDirectory,
+                            onStart = { pid ->
+                                childProcessId.set(pid)
+                                context.onProcessStarted?.invoke(pid)
+                            },
+                            onStdoutChunk = context.onStdoutChunk,
+                            onStderrChunk = { chunk ->
+                                classifyFatalOpenCodeRuntimeLog(chunk)?.let { reason ->
+                                    fatalRuntimeError.compareAndSet(null, reason)
+                                }
+                            }
+                        )
+                    }
                 } finally {
                     killer.cancel()
                 }
@@ -932,6 +967,18 @@ class OpenCodePlugin : AgentPlugin {
             }
         }
     }
+
+    private fun isPlanningOnlyOpenCodeRun(context: ExecutionContext): Boolean =
+        context.parameters["ephemeralOpencodeProfile"]?.trim() == "planning-only"
+
+    private fun planningOnlyOpenCodeEnvironment(context: ExecutionContext): Map<String, String> = mapOf(
+        "OPENCODE_CONFIG_CONTENT" to planningOnlyOpenCodeConfigJson(context),
+        "OPENCODE_DISABLE_PROJECT_CONFIG" to "true",
+        "OPENCODE_DISABLE_DEFAULT_PLUGINS" to "true",
+        "OPENCODE_DISABLE_AUTOUPDATE" to "true",
+        "OPENCODE_DISABLE_MODELS_FETCH" to "true",
+        "OPENCODE_PURE" to "true"
+    )
 
     private data class EphemeralOpenCodeConfig(
         val configPath: Path,

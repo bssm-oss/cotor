@@ -1746,6 +1746,16 @@ final class DesktopStore: ObservableObject {
             return
         }
 
+        // Eagerly clear stale detail state so the panel never momentarily shows
+        // data from the previously selected issue while the new one is loading.
+        let requestedIssueID = selectedIssueID
+        issueExecutionDetails = []
+        runs = []
+        changes = emptyChangeSummary()
+        files = []
+        ports = []
+        browserURL = nil
+
         if let issueId = selectedIssue?.id {
             do {
                 let fetchedIssueExecutionDetails = try await api.issueExecutionDetails(issueId: issueId)
@@ -1771,8 +1781,13 @@ final class DesktopStore: ObservableObject {
         let agent = selectedAgentName ?? task.agents.first
         selectedAgentName = agent
         guard let agent else { return }
-        let requestedIssueID = selectedIssueID
         let requestedTaskID = task.id
+
+        // Determine which task IDs belong to the selected issue so effectiveRun
+        // never crosses the issue boundary when falling back.
+        let issueTaskIDs: Set<String> = requestedIssueID.map { iid in
+            Set(tasks.filter { $0.issueId == iid }.map { $0.id })
+        } ?? []
 
         do {
             let fetchedRuns: [RunRecord]
@@ -1789,11 +1804,13 @@ final class DesktopStore: ObservableObject {
             runs = fetchedRuns
 
             let latestForTask = fetchedRuns.filter { $0.taskId == task.id }
+            // Only fall back to other runs when they belong to the same issue's tasks.
+            let issueRuns = issueTaskIDs.isEmpty ? fetchedRuns : fetchedRuns.filter { issueTaskIDs.contains($0.taskId) }
             let effectiveRun = latestForTask.first { $0.agentName.caseInsensitiveCompare(agent) == .orderedSame }
                 ?? latestForTask.first
-                ?? fetchedRuns.first { $0.agentName.caseInsensitiveCompare(agent) == .orderedSame }
-                ?? fetchedRuns.first
-            if let effectiveRun {
+                ?? issueRuns.first { $0.agentName.caseInsensitiveCompare(agent) == .orderedSame }
+                ?? issueRuns.first
+            if let effectiveRun, issueTaskIDs.isEmpty || issueTaskIDs.contains(effectiveRun.taskId) {
                 selectedTaskID = effectiveRun.taskId
             }
             let effectiveAgent = effectiveRun?.agentName ?? agent
@@ -3412,12 +3429,22 @@ final class DesktopStore: ObservableObject {
         )
     }
 
+    private func looksLikeStatusChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["상태 확인", "잘 돌아", "잘돌", "에이전트 잘", "health check", "status check", "점검해", "상태 보고"])
+    }
+
     private func executeOperatorChatMessage(_ message: String, normalized: String) async -> String {
         if looksLikeCompanyCreateChatRequest(normalized) {
             return await createCompanyFromOperatorChat(message)
         }
         guard selectedCompany != nil else {
             return language("Select or create a company first.", "먼저 회사를 선택하거나 만들어주세요.")
+        }
+
+        // Status requests bypass the LLM planner entirely and return a
+        // deterministic reply from the operator-command status path.
+        if looksLikeStatusChatRequest(normalized) {
+            return await runOperatorCommandAsChatReply(message: message)
         }
 
         if let response = await runCompanyOperatorChat(message: message) {
@@ -4537,10 +4564,20 @@ final class DesktopStore: ObservableObject {
 
     private func selectWorkspaceForTuiIfNeeded() {
         if let session = activeTuiSession {
-            selectedTuiSessionID = session.id
-            selectedRepositoryID = session.repositoryId
-            selectedWorkspaceID = session.workspaceId
-            pendingWorkspaceBaseBranch = session.baseBranch
+            if session.workspaceId == selectedWorkspaceID {
+                // Session already matches the selected workspace — sync the session
+                // chip without touching the repository or workspace selection.
+                selectedTuiSessionID = session.id
+                pendingWorkspaceBaseBranch = session.baseBranch
+            } else if selectedWorkspaceID == nil {
+                // No workspace was selected yet — let the active session drive it.
+                selectedTuiSessionID = session.id
+                selectedRepositoryID = session.repositoryId
+                selectedWorkspaceID = session.workspaceId
+                pendingWorkspaceBaseBranch = session.baseBranch
+            }
+            // When the session's workspace differs from the user's current selection,
+            // preserve the user's selection and let ensureTuiSession open a new one.
             return
         }
 
@@ -4576,9 +4613,12 @@ final class DesktopStore: ObservableObject {
                       let refreshed = sessions.first(where: { $0.id == current.id }) {
                 selectedTuiSessionID = refreshed.id
                 tuiSession = refreshed
-            } else if let first = sessions.first {
-                selectedTuiSessionID = first.id
-                tuiSession = first
+            } else if let match = sessions.first(where: { $0.workspaceId == selectedWorkspaceID }) {
+                // Only adopt an unrelated session when it matches the current workspace.
+                // Falling back to sessions.first would silently override the user's
+                // folder selection with whatever session was opened last.
+                selectedTuiSessionID = match.id
+                tuiSession = match
             } else {
                 selectedTuiSessionID = nil
                 tuiSession = nil

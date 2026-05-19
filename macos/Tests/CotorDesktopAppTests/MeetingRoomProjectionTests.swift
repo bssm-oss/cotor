@@ -902,6 +902,8 @@ private func issue(
         mergeResult: mergeResult,
         transitionReason: nil,
         sourceSignal: "test",
+        blockedReasonCode: nil,
+        blockedRetryable: nil,
         createdAt: 0,
         updatedAt: 1
     )

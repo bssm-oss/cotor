@@ -488,7 +488,7 @@ pipelines:
         }
     }
 
-    private fun resolveStarterAgent(): StarterAgentSpec = resolveStarterAgentSpec()
+    private fun resolveStarterAgent(): StarterAgentSpec = safeLocalStarterAgentSpec()
 }
 
 /**
