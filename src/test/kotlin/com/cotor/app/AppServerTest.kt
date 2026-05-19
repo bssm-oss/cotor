@@ -192,7 +192,7 @@ class AppServerTest : FunSpec({
                 agentName = "Builder",
                 roleName = "Builder",
                 agentCli = "opencode",
-                model = "opencode/nemotron-3-super-free",
+                model = "opencode/deepseek-v4-flash-free",
                 score = 88,
                 completedIssues = 4,
                 activeIssues = 1,

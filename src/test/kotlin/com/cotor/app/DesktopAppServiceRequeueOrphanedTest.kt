@@ -233,7 +233,17 @@ class DesktopAppServiceRequeueOrphanedTest : FunSpec({
             createdAt = 1L,
             updatedAt = 1L
         )
-        stateStore.save(requeueState(appHome, repoRoot, company, goal, issue, listOf(task), listOf(run)))
+        stateStore.save(
+            requeueState(appHome, repoRoot, company, goal, issue, listOf(task), listOf(run)).copy(
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(
+                        companyId = company.id,
+                        status = CompanyRuntimeStatus.RUNNING,
+                        lastTickAt = 1L
+                    )
+                )
+            )
+        )
         val service = requeueTestService(
             processManager = RequeueGitProcessManager(repoRoot, null, "master"),
             stateStore = stateStore

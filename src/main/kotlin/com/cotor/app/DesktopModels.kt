@@ -1076,11 +1076,15 @@ internal fun CompanyRuntimeSnapshot.withNormalizedStopIntent(): CompanyRuntimeSn
     } else {
         backendLifecycleState
     }
+    val normalizedBackendPid = if (status == CompanyRuntimeStatus.STOPPED) null else backendPid
+    val normalizedBackendPort = if (status == CompanyRuntimeStatus.STOPPED) null else backendPort
     return if (
         inferredManualStopAt == manuallyStoppedAt &&
         normalizedBackendHealth == backendHealth &&
         normalizedBackendMessage == backendMessage &&
-        normalizedBackendLifecycleState == backendLifecycleState
+        normalizedBackendLifecycleState == backendLifecycleState &&
+        normalizedBackendPid == backendPid &&
+        normalizedBackendPort == backendPort
     ) {
         this
     } else {
@@ -1088,7 +1092,9 @@ internal fun CompanyRuntimeSnapshot.withNormalizedStopIntent(): CompanyRuntimeSn
             manuallyStoppedAt = inferredManualStopAt,
             backendHealth = normalizedBackendHealth,
             backendMessage = normalizedBackendMessage,
-            backendLifecycleState = normalizedBackendLifecycleState
+            backendLifecycleState = normalizedBackendLifecycleState,
+            backendPid = normalizedBackendPid,
+            backendPort = normalizedBackendPort
         )
     }
 }
