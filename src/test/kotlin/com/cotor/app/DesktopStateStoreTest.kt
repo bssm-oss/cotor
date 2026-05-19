@@ -14,6 +14,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
+import java.nio.file.attribute.FileTime
 import kotlin.io.path.readText
 
 class DesktopStateStoreTest : FunSpec({
@@ -46,6 +47,135 @@ class DesktopStateStoreTest : FunSpec({
 
         recovered.companies.map { it.name } shouldBe listOf("Recovered Company")
         Files.readString(appHome.resolve("state.json")).trimEnd().endsWith("}}") shouldBe false
+    }
+
+    test("save removes stale state temp files") {
+        val appHome = Files.createTempDirectory("desktop-state-store-temp-cleanup-home")
+        val store = DesktopStateStore { appHome }
+        Files.writeString(appHome.resolve("state.json.111.tmp"), "{}")
+        Files.writeString(appHome.resolve("state.json.bak.222.tmp"), "{}")
+        Files.writeString(appHome.resolve("state.json.bak"), "{}")
+        val staleTime = FileTime.fromMillis(System.currentTimeMillis() - 120_000L)
+        Files.setLastModifiedTime(appHome.resolve("state.json.111.tmp"), staleTime)
+        Files.setLastModifiedTime(appHome.resolve("state.json.bak.222.tmp"), staleTime)
+
+        store.save(DesktopAppState())
+
+        stateTempFilesToClean(appHome) shouldBe emptyList()
+        appHome.resolve("state.json").toFile().exists() shouldBe true
+        appHome.resolve("state.json.bak").toFile().exists() shouldBe true
+    }
+
+    test("fresh state temp files are not cleaned while another save may still be moving them") {
+        val appHome = Files.createTempDirectory("desktop-state-store-fresh-temp-home")
+        val freshTemp = appHome.resolve("state.json.bak.fresh.tmp")
+        Files.writeString(freshTemp, "{}")
+
+        stateTempFilesToClean(
+            directory = appHome,
+            nowMillis = Files.getLastModifiedTime(freshTemp).toMillis() + 1_000L
+        ) shouldBe emptyList()
+    }
+
+    test("load prunes dangling company goal and runtime records") {
+        val appHome = Files.createTempDirectory("desktop-state-store-dangling-company-home")
+        val store = DesktopStateStore { appHome }
+        val now = 1L
+        val validCompany = Company(
+            id = "company-1",
+            name = "Valid Company",
+            rootPath = "/tmp/valid-company",
+            repositoryId = "repo-1",
+            defaultBaseBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val validGoal = CompanyGoal(
+            id = "goal-1",
+            companyId = validCompany.id,
+            title = "Keep valid work",
+            description = "Keep valid goal records.",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val validIssue = CompanyIssue(
+            id = "issue-1",
+            companyId = validCompany.id,
+            goalId = validGoal.id,
+            workspaceId = "workspace-1",
+            title = "Keep valid issue",
+            description = "Keep valid issue records.",
+            status = IssueStatus.PLANNED,
+            createdAt = now,
+            updatedAt = now
+        )
+        val danglingDecision = GoalOrchestrationDecision(
+            id = "decision-stale",
+            companyId = "deleted-company",
+            goalId = "deleted-goal",
+            issueId = "deleted-issue",
+            title = "Delete stale decision",
+            summary = "This belongs to a deleted company.",
+            createdAt = now
+        )
+        val validDecision = GoalOrchestrationDecision(
+            id = "decision-valid",
+            companyId = validCompany.id,
+            goalId = validGoal.id,
+            issueId = validIssue.id,
+            title = "Keep valid decision",
+            summary = "This belongs to the live company.",
+            createdIssues = listOf(validIssue.id, "deleted-issue"),
+            createdAt = now
+        )
+        val danglingWorkItem = CompanyRuntimeWorkItem(
+            id = "work-stale",
+            companyId = "deleted-company",
+            goalId = "deleted-goal",
+            issueId = "deleted-issue",
+            status = CompanyRuntimeWorkItemStatus.READY,
+            createdAt = now,
+            updatedAt = now
+        )
+        val validWorkItem = CompanyRuntimeWorkItem(
+            id = "work-valid",
+            companyId = validCompany.id,
+            goalId = validGoal.id,
+            issueId = validIssue.id,
+            status = CompanyRuntimeWorkItemStatus.READY,
+            createdAt = now,
+            updatedAt = now
+        )
+
+        store.save(
+            DesktopAppState(
+                companies = listOf(validCompany),
+                goals = listOf(
+                    validGoal,
+                    validGoal.copy(id = "deleted-goal", companyId = "deleted-company")
+                ),
+                issues = listOf(
+                    validIssue,
+                    validIssue.copy(id = "deleted-issue", companyId = "deleted-company", goalId = "deleted-goal")
+                ),
+                goalDecisions = listOf(validDecision, danglingDecision),
+                companyRuntimeWorkItems = listOf(validWorkItem, danglingWorkItem),
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(companyId = validCompany.id, status = CompanyRuntimeStatus.RUNNING),
+                    CompanyRuntimeSnapshot(companyId = "deleted-company", status = CompanyRuntimeStatus.RUNNING)
+                )
+            )
+        )
+
+        val recovered = store.load()
+
+        recovered.goals.map { it.id } shouldBe listOf(validGoal.id)
+        recovered.issues.map { it.id } shouldBe listOf(validIssue.id)
+        recovered.goalDecisions.map { it.id } shouldBe listOf(validDecision.id)
+        recovered.goalDecisions.single().createdIssues shouldBe listOf(validIssue.id)
+        recovered.companyRuntimeWorkItems.map { it.id } shouldBe listOf(validWorkItem.id)
+        recovered.companyRuntimes.map { it.companyId } shouldBe listOf(validCompany.id)
     }
 
     test("load restores the last good backup when the primary state file is corrupted") {
@@ -123,6 +253,16 @@ class DesktopStateStoreTest : FunSpec({
                     defaultBaseBranch = "master",
                     createdAt = 1L,
                     updatedAt = 1L
+                )
+            ),
+            projectContexts = listOf(
+                CompanyProjectContext(
+                    id = "project-1",
+                    companyId = "company-1",
+                    name = "Lenient Company",
+                    slug = "lenient-company",
+                    contextDocPath = appHome.resolve("project.md").toString(),
+                    lastUpdatedAt = 1L
                 )
             ),
             goals = listOf(
@@ -307,6 +447,39 @@ class DesktopStateStoreTest : FunSpec({
         val store = DesktopStateStore { appHome }
         val longPrompt = "prompt-".repeat(800)
         val state = DesktopAppState(
+            companies = listOf(
+                Company(
+                    id = "company-1",
+                    name = "Unresolved Prompt Company",
+                    rootPath = "/tmp/unresolved-prompt-company",
+                    repositoryId = "repo-1",
+                    defaultBaseBranch = "master",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            projectContexts = listOf(
+                CompanyProjectContext(
+                    id = "project-1",
+                    companyId = "company-1",
+                    name = "Unresolved Prompt Company",
+                    slug = "unresolved-prompt-company",
+                    contextDocPath = appHome.resolve("project.md").toString(),
+                    lastUpdatedAt = 1L
+                )
+            ),
+            goals = listOf(
+                CompanyGoal(
+                    id = "goal-1",
+                    companyId = "company-1",
+                    projectContextId = "project-1",
+                    title = "Keep prompt",
+                    description = "Keep unresolved prompt context.",
+                    status = GoalStatus.ACTIVE,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
             issues = listOf(
                 CompanyIssue(
                     id = "issue-1",
@@ -348,6 +521,39 @@ class DesktopStateStoreTest : FunSpec({
         val store = DesktopStateStore { appHome }
         val longOutput = "```json\n{\"goalSummary\":\"" + "plan-".repeat(900) + "\",\"issues\":[{\"refId\":\"exec-1\",\"title\":\"Work\",\"description\":\"Do work\",\"assigneeRole\":\"Builder\"}]}\n```"
         val state = DesktopAppState(
+            companies = listOf(
+                Company(
+                    id = "company-1",
+                    name = "Unresolved Output Company",
+                    rootPath = "/tmp/unresolved-output-company",
+                    repositoryId = "repo-1",
+                    defaultBaseBranch = "master",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            projectContexts = listOf(
+                CompanyProjectContext(
+                    id = "project-1",
+                    companyId = "company-1",
+                    name = "Unresolved Output Company",
+                    slug = "unresolved-output-company",
+                    contextDocPath = appHome.resolve("project.md").toString(),
+                    lastUpdatedAt = 1L
+                )
+            ),
+            goals = listOf(
+                CompanyGoal(
+                    id = "goal-1",
+                    companyId = "company-1",
+                    projectContextId = "project-1",
+                    title = "Keep output",
+                    description = "Keep unresolved run output.",
+                    status = GoalStatus.ACTIVE,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
             issues = listOf(
                 CompanyIssue(
                     id = "issue-1",

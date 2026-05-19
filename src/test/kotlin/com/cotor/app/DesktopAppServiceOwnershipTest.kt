@@ -31,7 +31,12 @@ class DesktopAppServiceOwnershipTest : FunSpec({
             createdAt = 1L,
             updatedAt = 1L
         )
-        stateStore.save(DesktopAppState(workflowPipelines = listOf(pipeline)))
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company("company-a")),
+                workflowPipelines = listOf(pipeline)
+            )
+        )
         val service = ownershipService(stateStore)
 
         shouldThrow<IllegalArgumentException> {
@@ -56,7 +61,12 @@ class DesktopAppServiceOwnershipTest : FunSpec({
             createdAt = 1L,
             updatedAt = 1L
         )
-        stateStore.save(DesktopAppState(workflowPipelines = listOf(pipeline)))
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company("company-a")),
+                workflowPipelines = listOf(pipeline)
+            )
+        )
         val service = ownershipService(stateStore)
 
         shouldThrow<IllegalArgumentException> {
@@ -78,7 +88,12 @@ class DesktopAppServiceOwnershipTest : FunSpec({
             content = "Keep this scoped to company A.",
             createdAt = 1L
         )
-        stateStore.save(DesktopAppState(agentContextEntries = listOf(entry)))
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(company("company-a")),
+                agentContextEntries = listOf(entry)
+            )
+        )
         val service = ownershipService(stateStore)
 
         shouldThrow<IllegalArgumentException> {
@@ -94,5 +109,17 @@ private fun ownershipService(stateStore: DesktopStateStore): DesktopAppService =
         stateStore = stateStore,
         gitWorkspaceService = mockk(relaxed = true),
         configRepository = mockk<ConfigRepository>(relaxed = true),
-        agentExecutor = mockk<AgentExecutor>(relaxed = true)
+        agentExecutor = mockk<AgentExecutor>(relaxed = true),
+        autoStartAutomationRefresh = false
+    )
+
+private fun company(id: String): Company =
+    Company(
+        id = id,
+        name = id,
+        rootPath = ".",
+        repositoryId = "repo-$id",
+        defaultBaseBranch = "main",
+        createdAt = 1L,
+        updatedAt = 1L
     )

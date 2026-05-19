@@ -143,7 +143,7 @@ private fun worktree(repo: Path, taskId: String, agent: String, modifiedAt: Long
     val path = repo.resolve(".cotor").resolve("worktrees").resolve(taskId).resolve(agent).toAbsolutePath().normalize()
     Files.createDirectories(path)
     Files.setLastModifiedTime(path, FileTime.fromMillis(modifiedAt))
-    return path
+    return path.toRealPath()
 }
 
 private fun baseState(companyId: String, repo: Path): DesktopAppState =
@@ -166,6 +166,18 @@ private fun baseState(companyId: String, repo: Path): DesktopAppState =
                 repositoryId = "repo-$companyId",
                 name = "Main",
                 baseBranch = "main",
+                createdAt = 1,
+                updatedAt = 1
+            )
+        ),
+        goals = listOf(
+            CompanyGoal(
+                id = "goal",
+                companyId = companyId,
+                title = "Goal",
+                description = "Runtime retention goal",
+                status = GoalStatus.ACTIVE,
+                autonomyEnabled = false,
                 createdAt = 1,
                 updatedAt = 1
             )

@@ -41,7 +41,8 @@ class DesktopAppServiceGitHubSyncTest : FunSpec({
                 provenanceService = ProvenanceService(provenanceStore),
                 knowledgeService = KnowledgeService(knowledgeStore)
             ),
-            knowledgeService = KnowledgeService(knowledgeStore)
+            knowledgeService = KnowledgeService(knowledgeStore),
+            autoStartAutomationRefresh = false
         )
 
         val company = Company(
@@ -83,7 +84,40 @@ class DesktopAppServiceGitHubSyncTest : FunSpec({
         )
         stateStore.save(
             DesktopAppState(
+                repositories = listOf(
+                    ManagedRepository(
+                        id = "repo-1",
+                        name = "repo",
+                        localPath = appHome.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = "workspace-1",
+                        repositoryId = "repo-1",
+                        name = "repo",
+                        baseBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
                 companies = listOf(company),
+                goals = listOf(
+                    CompanyGoal(
+                        id = "goal-1",
+                        companyId = company.id,
+                        title = "GitHub sync",
+                        description = "Sync PR metadata.",
+                        status = GoalStatus.ACTIVE,
+                        autonomyEnabled = false,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
                 issues = listOf(issue),
                 reviewQueue = listOf(queueItem),
                 companyRuntimes = listOf(
@@ -156,7 +190,8 @@ class DesktopAppServiceGitHubSyncTest : FunSpec({
                 provenanceService = ProvenanceService(provenanceStore),
                 knowledgeService = KnowledgeService(knowledgeStore)
             ),
-            knowledgeService = KnowledgeService(knowledgeStore)
+            knowledgeService = KnowledgeService(knowledgeStore),
+            autoStartAutomationRefresh = false
         )
 
         val company = Company(
@@ -237,7 +272,50 @@ class DesktopAppServiceGitHubSyncTest : FunSpec({
         )
         stateStore.save(
             DesktopAppState(
+                repositories = listOf(
+                    ManagedRepository(
+                        id = "repo-2",
+                        name = "repo",
+                        localPath = appHome.toString(),
+                        sourceKind = RepositorySourceKind.LOCAL,
+                        defaultBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                workspaces = listOf(
+                    Workspace(
+                        id = "workspace-1",
+                        repositoryId = "repo-2",
+                        name = "repo",
+                        baseBranch = "main",
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
                 companies = listOf(company),
+                goals = listOf(
+                    CompanyGoal(
+                        id = "goal-1",
+                        companyId = company.id,
+                        title = "GitHub terminal sync",
+                        description = "Sync terminal PR states.",
+                        status = GoalStatus.ACTIVE,
+                        autonomyEnabled = false,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    ),
+                    CompanyGoal(
+                        id = "goal-2",
+                        companyId = company.id,
+                        title = "GitHub terminal closed sync",
+                        description = "Sync closed PR states.",
+                        status = GoalStatus.ACTIVE,
+                        autonomyEnabled = false,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
                 issues = listOf(mergedIssue, approvalIssue, closedIssue),
                 reviewQueue = listOf(mergedQueue, closedQueue),
                 companyRuntimes = listOf(
@@ -265,7 +343,7 @@ class DesktopAppServiceGitHubSyncTest : FunSpec({
 
         service.syncGitHubProvider(company.id)
         val settled = stateStore.load()
-        settled.reviewQueue.any { it.id == "review-merged" } shouldBe false
+        settled.reviewQueue.first { it.id == "review-merged" }.status shouldBe ReviewQueueStatus.MERGED
         settled.issues.first { it.id == "issue-merged" }.status shouldBe IssueStatus.DONE
         settled.issues.first { it.id == "approval-merged" }.status shouldBe IssueStatus.DONE
         settled.reviewQueue.first { it.id == "review-closed" }.status shouldBe ReviewQueueStatus.CHANGES_REQUESTED

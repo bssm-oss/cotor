@@ -71,7 +71,7 @@ class CompanyRuntimeRetention(
         terminalRetentionDays: Int,
         orphanRetentionDays: Int
     ): RuntimeCleanupCandidate? {
-        val normalized = path.toAbsolutePath().normalize().toString()
+        val normalized = canonicalPath(path).toString()
         val refs = referencesForPath(state, normalized, scope)
         if (!scope.includes(refs.companyId)) {
             return null
@@ -189,7 +189,7 @@ class CompanyRuntimeRetention(
         state.reviewQueue
             .filter { scope.includes(it.companyId) }
             .mapNotNullTo(roots) { repositoryWorktreeRootFor(it.worktreePath) }
-        return roots.map { it.toAbsolutePath().normalize() }.distinct()
+        return roots.map(::canonicalPath).distinct()
     }
 
     private fun candidateWorktrees(root: Path): List<Path> {
@@ -263,10 +263,19 @@ class CompanyRuntimeRetention(
     }
 
     private fun safePath(raw: String?): Path? =
-        raw?.takeIf { it.isNotBlank() }?.let { runCatching { Path.of(it).toAbsolutePath().normalize() }.getOrNull() }
+        raw?.takeIf { it.isNotBlank() }?.let { runCatching { canonicalPath(Path.of(it)) }.getOrNull() }
 
     private fun String?.normalizedPath(): String? =
         safePath(this)?.toString()
+
+    private fun canonicalPath(path: Path): Path {
+        val absolute = path.toAbsolutePath().normalize()
+        return if (Files.exists(absolute)) {
+            runCatching { absolute.toRealPath() }.getOrDefault(absolute)
+        } else {
+            absolute
+        }
+    }
 
     private fun candidate(
         kind: String,

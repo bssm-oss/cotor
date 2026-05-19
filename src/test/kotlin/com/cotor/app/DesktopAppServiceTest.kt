@@ -527,6 +527,73 @@ class DesktopAppServiceTest : FunSpec({
             .forEach { reason -> reason shouldContain "CEO planning run assigned" }
     }
 
+    test("chat intake treats slash goal command as goal title not literal prefix") {
+        val appHome = Files.createTempDirectory("chat-intake-slash-goal-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "Slash Goal QA",
+            rootPath = appHome.toString()
+        )
+
+        val response = service.createChatIntake(
+            companyId = company.id,
+            message = "/goal Stabilize marketing skill startup"
+        )
+
+        response.goal.companyId shouldBe company.id
+        response.goal.title shouldBe "Stabilize marketing skill startup"
+        response.goal.description shouldContain "Original user request:"
+        response.goal.description shouldContain "/goal Stabilize marketing skill startup"
+    }
+
+    test("direct goal create and update strip leading slash command markers") {
+        val appHome = Files.createTempDirectory("direct-goal-slash-command-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "Direct Goal QA",
+            rootPath = appHome.toString()
+        )
+
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "- /goal Stabilize company runtime",
+            description = "/목표 회사 런타임 안정화",
+            autonomyEnabled = false
+        )
+
+        goal.title shouldBe "Stabilize company runtime"
+        goal.description shouldBe "회사 런타임 안정화"
+        goal.title shouldNotContain "/goal"
+        goal.description shouldNotContain "/목표"
+
+        val updated = service.updateGoal(
+            goalId = goal.id,
+            title = "/goal Keep startup healthy",
+            description = "/objective Verify app-server health",
+            autonomyEnabled = false,
+            startRuntimeIfNeeded = false
+        )
+
+        updated.title shouldBe "Keep startup healthy"
+        updated.description shouldBe "Verify app-server health"
+        updated.title shouldNotContain "/goal"
+        updated.description shouldNotContain "/objective"
+    }
+
     test("operator command summarizes selected company status") {
         val appHome = Files.createTempDirectory("operator-status-home")
         val stateStore = DesktopStateStore { appHome }
@@ -9554,6 +9621,19 @@ class DesktopAppServiceTest : FunSpec({
                         createdAt = now,
                         updatedAt = now
                     )
+                ),
+                companyRuntimeWorkItems = listOf(
+                    CompanyRuntimeWorkItem(
+                        id = "work-item-shutdown",
+                        companyId = "company-shutdown",
+                        goalId = "goal-shutdown",
+                        issueId = "issue-shutdown",
+                        status = CompanyRuntimeWorkItemStatus.RUNNING,
+                        activeTaskId = "task-shutdown",
+                        durableRunId = "run-shutdown",
+                        createdAt = now,
+                        updatedAt = now
+                    )
                 )
             )
         )
@@ -9565,6 +9645,10 @@ class DesktopAppServiceTest : FunSpec({
         repaired.issues.first { it.id == "issue-shutdown" }.transitionReason shouldContain "Runtime stopped while execution was in progress"
         repaired.tasks.first { it.id == "task-shutdown" }.status shouldBe DesktopTaskStatus.FAILED
         repaired.runs.first { it.id == "run-shutdown" }.error shouldContain "Execution was interrupted because the app-server stopped"
+        val repairedWorkItem = repaired.companyRuntimeWorkItems.first { it.id == "work-item-shutdown" }
+        repairedWorkItem.status shouldBe CompanyRuntimeWorkItemStatus.READY
+        repairedWorkItem.activeTaskId shouldBe null
+        repairedWorkItem.durableRunId shouldBe null
         repaired.companyActivity.any { activity ->
             activity.issueId == "issue-shutdown" &&
                 activity.title == "Interrupted by app-server shutdown"
@@ -10083,6 +10167,42 @@ class DesktopAppServiceTest : FunSpec({
                         message = "Needs attention",
                         createdAt = now
                     )
+                ),
+                goalDecisions = listOf(
+                    GoalOrchestrationDecision(
+                        id = "decision-delete",
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = issue.id,
+                        title = "Delete decision",
+                        summary = "Stale goal decision should be removed with the company.",
+                        createdIssues = listOf(issue.id),
+                        createdAt = now
+                    )
+                ),
+                agentMessages = listOf(
+                    AgentMessage(
+                        id = "message-delete",
+                        companyId = company.id,
+                        fromAgentName = "CEO",
+                        goalId = goal.id,
+                        issueId = issue.id,
+                        kind = "ceo-plan",
+                        subject = "Delete message",
+                        body = "Remove with company.",
+                        createdAt = now
+                    )
+                ),
+                companyRuntimeWorkItems = listOf(
+                    CompanyRuntimeWorkItem(
+                        id = "work-item-delete",
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = issue.id,
+                        status = CompanyRuntimeWorkItemStatus.READY,
+                        createdAt = now,
+                        updatedAt = now
+                    )
                 )
             )
         )
@@ -10097,6 +10217,9 @@ class DesktopAppServiceTest : FunSpec({
         state.issues.filter { it.companyId == company.id }.shouldBeEmpty()
         state.reviewQueue.filter { it.companyId == company.id }.shouldBeEmpty()
         state.signals.filter { it.companyId == company.id }.shouldBeEmpty()
+        state.goalDecisions.filter { it.companyId == company.id }.shouldBeEmpty()
+        state.agentMessages.filter { it.companyId == company.id }.shouldBeEmpty()
+        state.companyRuntimeWorkItems.filter { it.companyId == company.id }.shouldBeEmpty()
         state.companyRuntimes.filter { it.companyId == company.id }.shouldBeEmpty()
         state.runtime.companyId shouldBe null
         contextRoot.exists() shouldBe false
@@ -10184,6 +10307,42 @@ class DesktopAppServiceTest : FunSpec({
                         message = "Delete me",
                         createdAt = now
                     )
+                ),
+                goalDecisions = listOf(
+                    GoalOrchestrationDecision(
+                        id = "goal-delete-decision",
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = issue.id,
+                        title = "Goal delete decision",
+                        summary = "Stale goal decision should be removed with the goal.",
+                        createdIssues = listOf(issue.id),
+                        createdAt = now
+                    )
+                ),
+                agentMessages = listOf(
+                    AgentMessage(
+                        id = "goal-delete-message",
+                        companyId = company.id,
+                        fromAgentName = "CEO",
+                        goalId = goal.id,
+                        issueId = issue.id,
+                        kind = "ceo-plan",
+                        subject = "Goal delete message",
+                        body = "Remove with goal.",
+                        createdAt = now
+                    )
+                ),
+                companyRuntimeWorkItems = listOf(
+                    CompanyRuntimeWorkItem(
+                        id = "goal-delete-work-item",
+                        companyId = company.id,
+                        goalId = goal.id,
+                        issueId = issue.id,
+                        status = CompanyRuntimeWorkItemStatus.READY,
+                        createdAt = now,
+                        updatedAt = now
+                    )
                 )
             )
         )
@@ -10197,6 +10356,9 @@ class DesktopAppServiceTest : FunSpec({
         state.runs.firstOrNull { it.taskId == "goal-delete-task" } shouldBe null
         state.reviewQueue.firstOrNull { it.issueId == issue.id } shouldBe null
         state.signals.firstOrNull { it.goalId == goal.id } shouldBe null
+        state.goalDecisions.firstOrNull { it.goalId == goal.id } shouldBe null
+        state.agentMessages.firstOrNull { it.goalId == goal.id } shouldBe null
+        state.companyRuntimeWorkItems.firstOrNull { it.goalId == goal.id } shouldBe null
         goalFile.exists() shouldBe false
         issueFile.exists() shouldBe false
     }
@@ -11401,6 +11563,109 @@ class DesktopAppServiceTest : FunSpec({
             refreshedQueue.approvalIssueId.shouldBeNull()
             refreshedQueue.ceoVerdict.shouldBeNull()
         }
+    }
+
+    test("workflow lineage repair settles review queue items that already carry merged GitHub state") {
+        val appHome = Files.createTempDirectory("desktop-app-service-merged-queue-settle")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-app-service-merged-queue-settle-repo").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+
+        val company = service.createCompany(
+            name = "Merged Queue Settle Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Settle merged PR state",
+            description = "A merged PR must not be rebuilt as awaiting QA.",
+            autonomyEnabled = false
+        )
+        val issue = service.createIssue(
+            companyId = company.id,
+            goalId = goal.id,
+            title = "Ship merged PR",
+            description = "The GitHub PR already merged.",
+            kind = "execution"
+        )
+        val baseState = stateStore.load()
+        val now = System.currentTimeMillis()
+        val qaIssue = CompanyIssue(
+            id = "issue-qa-merged-settle",
+            companyId = company.id,
+            projectContextId = issue.projectContextId,
+            goalId = goal.id,
+            workspaceId = issue.workspaceId,
+            title = "QA review Ship merged PR",
+            description = "Stale QA issue for a PR that already merged.",
+            status = IssueStatus.PLANNED,
+            priority = 2,
+            kind = "review",
+            dependsOn = listOf(issue.id),
+            sourceSignal = "qa-review:${issue.id}",
+            createdAt = now - 1_000,
+            updatedAt = now - 1_000
+        )
+        val queueItem = ReviewQueueItem(
+            id = "rq-merged-settle",
+            companyId = company.id,
+            projectContextId = issue.projectContextId,
+            issueId = issue.id,
+            runId = "run-merged-settle",
+            pullRequestNumber = 20,
+            pullRequestUrl = "https://github.com/bssm-oss/cotor-testv2/pull/20",
+            pullRequestState = "MERGED",
+            status = ReviewQueueStatus.AWAITING_QA,
+            qaIssueId = qaIssue.id,
+            providerBlockReason = "PR no longer merges cleanly",
+            mergeCommitSha = "a5bc2ad",
+            mergedAt = now - 500,
+            createdAt = now - 2_000,
+            updatedAt = now - 500
+        )
+        stateStore.save(
+            baseState.copy(
+                issues = baseState.issues.map { existing ->
+                    if (existing.id == issue.id) {
+                        existing.copy(
+                            status = IssueStatus.IN_REVIEW,
+                            pullRequestNumber = 20,
+                            pullRequestUrl = "https://github.com/bssm-oss/cotor-testv2/pull/20",
+                            pullRequestState = "MERGED",
+                            providerBlockReason = "PR no longer merges cleanly",
+                            transitionReason = "PR no longer merges cleanly",
+                            updatedAt = now
+                        )
+                    } else {
+                        existing
+                    }
+                } + qaIssue,
+                reviewQueue = baseState.reviewQueue + queueItem
+            )
+        )
+
+        service.companyDashboard(company.id)
+
+        val settled = stateStore.load()
+        val settledIssue = settled.issues.first { it.id == issue.id }
+        val settledQueue = settled.reviewQueue.first { it.id == queueItem.id }
+        settledIssue.status shouldBe IssueStatus.DONE
+        settledIssue.mergeResult shouldBe "MERGED"
+        settledIssue.providerBlockReason shouldBe null
+        settledIssue.transitionReason?.contains("does not merge cleanly", ignoreCase = true) shouldBe false
+        settledIssue.ceoVerdict shouldBe "APPROVE"
+        settledQueue.status shouldBe ReviewQueueStatus.MERGED
+        settledQueue.providerBlockReason shouldBe null
+        settledQueue.qaIssueId shouldBe null
+        settled.issues.any { it.id == qaIssue.id } shouldBe false
     }
 
     test("company dashboard heals a stale QA lineage while the runtime is stopped") {
