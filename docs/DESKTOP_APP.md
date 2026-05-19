@@ -150,6 +150,7 @@ The current macOS shell has two top-level modes.
 - when one wave of goal work finishes, the CEO planning lane can reopen for the next wave instead of freezing the goal after the first decomposition
 - continuous improvement goals now ask for multi-issue portfolios and parallel branchable work when the team can support it
 - short high-level goal descriptions are enriched into a broader execution portfolio so larger teams do not collapse into only one or two issues
+- concrete user-entered file/PR goals are kept as one execution issue instead of being expanded into a multi-issue CEO portfolio
 - runtime dispatch is no longer forced to wait for a stale polling tick before reacting to new runnable work, and multiple runnable issues can start in parallel even when several company roles share the same execution CLI
 - local merge completion is only recorded after GitHub confirms the refreshed pull request state is actually `MERGED`
 - `TUI`

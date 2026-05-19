@@ -217,7 +217,7 @@ The current build includes a working local operations layer:
 - inspect per-agent performance derived from existing company issues, runs, reviews, org profiles, and agent definitions, with insufficient-data agents shown separately
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page as a `Live Office` runtime projection with event-driven agent sprites, issue movement, review flow, runtime/backend/review/session summaries, and click-through agent/issue/zone detail sheets
-- use the Operator Chat surface to ask for status, change all selected-company agents to the free OpenCode default (`opencode/nemotron-3-super-free`), explicitly choose DeepSeek only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
+- use the Operator Chat surface to ask for status, change all selected-company agents to the free OpenCode default (`opencode/deepseek-v4-flash-free`), explicitly choose a non-default DeepSeek alias only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
 - ask the HR Manager through Operator Chat to hire missing specialists or assign mentors; HR hires inherit the company execution model policy, avoid duplicate roles, and cap automatic hiring so teams do not grow without bounds
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel
@@ -229,6 +229,7 @@ The current build includes a working local operations layer:
 - let the CEO reopen planning after one wave finishes so active goals can generate the next wave instead of freezing after the first batch of issues
 - bias autonomous continuous-improvement goals toward multi-issue portfolios and parallel branchable slices instead of a single narrow follow-up
 - enrich short high-level goal descriptions into a broader execution portfolio so larger teams do not collapse into only one or two issues
+- keep concrete user-entered file/PR goals as one execution issue, so direct installed-app requests do not wait for CEO provider planning or split into unrelated issue fragments
 - keep an explicit company stop sticky across app restarts, dashboard reads, and live reconnects until the user presses Start again
 - keep the company runtime in a fast monitoring cadence while active tasks/runs still exist, so dead or stale `RUNNING` runs reconcile sooner instead of looking idle for a long backoff window
 - when the app-server shuts down during active company work, current builds re-queue interrupted issues instead of leaving them permanently blocked by a generic process-exit failure

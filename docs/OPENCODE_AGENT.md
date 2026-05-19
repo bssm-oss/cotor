@@ -60,11 +60,11 @@ This runs OpenCode in non-interactive mode while keeping the full task prompt ou
 
 ### Agent Parameters
 
-OpenCode accepts an optional `model` parameter. If omitted, Cotor uses the built-in free default `opencode/nemotron-3-super-free`.
+OpenCode accepts an optional `model` parameter. If omitted, Cotor uses the built-in free default `opencode/deepseek-v4-flash-free`.
 
 Company-seeded agents now prefer OpenCode by default when the executable is available so autonomous company workflows can run on the lower-cost default model unless the user explicitly switches agents.
 
-Operator Chat treats `nemotron`, `free`, and `opencode/nemotron-3-super-free` requests as this free default. The legacy DeepSeek alias is still available, but only when the user explicitly asks for DeepSeek.
+Operator Chat treats `free`, `deepseek-flash`, and `opencode/deepseek-v4-flash-free` requests as this free default. The legacy raw DeepSeek alias is still available, but only when the user explicitly asks for non-default DeepSeek.
 
 The desktop app-server exposes the discovered OpenCode model list through `GET /api/app/agents/models?agent=opencode`. The endpoint calls `opencode models`, shows only `opencode/` provider IDs, caches successful lookups briefly, and falls back to manual model entry if discovery returns no models.
 
