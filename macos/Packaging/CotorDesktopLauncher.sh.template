@@ -94,6 +94,12 @@ is_port_listening() {
     [[ -n "$port" ]] && lsof -iTCP:"$port" -sTCP:LISTEN -n -P >/dev/null 2>&1
 }
 
+is_backend_healthy() {
+    local url="$1"
+    [[ -n "$url" ]] || return 1
+    curl -fsS --connect-timeout 1 --max-time 2 "$url/health" >/dev/null 2>&1
+}
+
 find_free_port() {
     /usr/bin/python3 - <<'PY'
 import socket
@@ -109,7 +115,7 @@ wait_for_backend() {
     local url="$1"
     local attempts=0
     while (( attempts < 40 )); do
-        if curl -fsS "$url/health" >/dev/null 2>&1; then
+        if is_backend_healthy "$url"; then
             return 0
         fi
         attempts=$((attempts + 1))
@@ -137,12 +143,28 @@ clear_backend_runtime_files() {
     if [[ -n "$BACKEND_RUNTIME_JAR" ]]; then
         rm -f "$BACKEND_RUNTIME_JAR" >/dev/null 2>&1 || true
     fi
+    cleanup_stale_backend_runtime_jars
 }
 
 stage_backend_runtime_jar() {
+    cleanup_stale_backend_runtime_jars
     BACKEND_RUNTIME_JAR="$BACKEND_RUNTIME_DIR/cotor-backend-runtime-$$.jar"
     mkdir -p "$BACKEND_RUNTIME_DIR"
     cp "$BACKEND_JAR" "$BACKEND_RUNTIME_JAR"
+}
+
+cleanup_stale_backend_runtime_jars() {
+    [[ -d "$BACKEND_RUNTIME_DIR" ]] || return 0
+
+    local runtime_jar
+    for runtime_jar in "$BACKEND_RUNTIME_DIR"/cotor-backend-runtime-*.jar "$BACKEND_RUNTIME_DIR"/cotor-app-server-*.jar; do
+        [[ -e "$runtime_jar" ]] || continue
+        [[ -n "$BACKEND_RUNTIME_JAR" && "$runtime_jar" == "$BACKEND_RUNTIME_JAR" ]] && continue
+        if ps -axo args= | grep -F -- "$runtime_jar" | grep -F -- " app-server" >/dev/null 2>&1; then
+            continue
+        fi
+        rm -f "$runtime_jar" >/dev/null 2>&1 || true
+    done
 }
 
 read_existing_instance_pid() {
@@ -230,26 +252,74 @@ terminate_stale_bundled_backends() {
     fi
 }
 
+terminate_existing_desktop_instances() {
+    local existing_pids=()
+    local pid args
+
+    while read -r pid args; do
+        [[ -n "$pid" ]] || continue
+        [[ "$pid" == "$$" ]] && continue
+        [[ "$args" == *"$BINARY_PATH"* || "$args" == *"$SCRIPT_DIR/CotorDesktopLauncher"* ]] || continue
+        existing_pids+=("$pid")
+    done < <(ps -axo pid=,args=)
+
+    if (( ${#existing_pids[@]} == 0 )); then
+        return 0
+    fi
+
+    log_launcher "Terminating existing desktop app instances: ${existing_pids[*]}"
+    for pid in "${existing_pids[@]}"; do
+        kill "$pid" >/dev/null 2>&1 || true
+    done
+    sleep 1
+
+    local survivors=()
+    for pid in "${existing_pids[@]}"; do
+        if is_pid_alive "$pid"; then
+            survivors+=("$pid")
+        fi
+    done
+
+    if (( ${#survivors[@]} > 0 )); then
+        log_launcher "Escalating desktop app instance termination to SIGKILL: ${survivors[*]}"
+        for pid in "${survivors[@]}"; do
+            kill -9 "$pid" >/dev/null 2>&1 || true
+        done
+        sleep 0.3
+    fi
+}
+
 start_managed_backend() {
+    local show_failure_alert="${1:-1}"
     local java_bin
     java_bin="$(find_java)"
 
     if [[ -z "$java_bin" ]]; then
-        show_alert "Java 17 or newer is required to run the bundled Cotor app server."
+        if [[ "$show_failure_alert" == "1" ]]; then
+            show_alert "Java 17 or newer is required to run the bundled Cotor app server."
+        fi
         return 1
     fi
 
     if [[ ! -f "$BACKEND_JAR" ]]; then
-        show_alert "The bundled Cotor backend could not be found inside the app."
+        if [[ "$show_failure_alert" == "1" ]]; then
+            show_alert "The bundled Cotor backend could not be found inside the app."
+        fi
         return 1
     fi
     if ! stage_backend_runtime_jar; then
-        show_alert "Cotor Desktop could not stage its bundled backend for execution."
+        if [[ "$show_failure_alert" == "1" ]]; then
+            show_alert "Cotor Desktop could not stage its bundled backend for execution."
+        fi
         return 1
     fi
 
-    SERVER_PORT="$(find_free_port)"
-    SERVER_TOKEN="$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')"
+    if [[ -z "$SERVER_PORT" ]]; then
+        SERVER_PORT="$(find_free_port)"
+    fi
+    if [[ -z "$SERVER_TOKEN" ]]; then
+        SERVER_TOKEN="$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')"
+    fi
     SERVER_URL="http://127.0.0.1:$SERVER_PORT"
     local java_home
     java_home="$(cd "$(dirname "$java_bin")/.." && pwd)"
@@ -289,9 +359,29 @@ start_managed_backend() {
 
     if ! wait_for_backend "$SERVER_URL"; then
         stop_managed_backend || true
-        show_alert "Cotor Desktop could not start its bundled app server."
+        if [[ "$show_failure_alert" == "1" ]]; then
+            show_alert "Cotor Desktop could not start its bundled app server."
+        fi
         return 1
     fi
+}
+
+restart_managed_backend() {
+    if [[ -z "$SERVER_PORT" || -z "$SERVER_TOKEN" ]]; then
+        log_launcher "Cannot restart managed backend because port or token state is missing."
+        return 1
+    fi
+
+    MANAGED_BACKEND_STARTED=0
+    MANAGED_BACKEND_PID=""
+    rm -f "$PID_FILE" >/dev/null 2>&1 || true
+    if [[ -n "$BACKEND_RUNTIME_JAR" ]]; then
+        rm -f "$BACKEND_RUNTIME_JAR" >/dev/null 2>&1 || true
+        BACKEND_RUNTIME_JAR=""
+    fi
+
+    log_launcher "Managed backend is not running. Restarting on preserved port $SERVER_PORT."
+    start_managed_backend 0
 }
 
 stop_managed_backend() {
@@ -300,7 +390,7 @@ stop_managed_backend() {
     fi
 
     local backend_pid="$MANAGED_BACKEND_PID"
-    if [[ -z "$backend_pid" && -f "$PID_FILE" ]]; then
+    if [[ -f "$PID_FILE" ]] && { [[ -z "$backend_pid" ]] || ! is_pid_alive "$backend_pid"; }; then
         backend_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
     fi
 
@@ -345,6 +435,19 @@ launcher_cleanup() {
     stop_managed_backend || true
 }
 
+monitor_managed_backend() {
+    local app_pid="$1"
+
+    while is_pid_alive "$app_pid"; do
+        if (( MANAGED_BACKEND_STARTED != 0 )); then
+            if [[ -z "$MANAGED_BACKEND_PID" ]] || ! is_pid_alive "$MANAGED_BACKEND_PID" || ! is_port_listening "$SERVER_PORT" || ! is_backend_healthy "$SERVER_URL"; then
+                restart_managed_backend || log_launcher "Managed backend restart failed on preserved port $SERVER_PORT."
+            fi
+        fi
+        sleep 2
+    done
+}
+
 ensure_backend() {
     if [[ -n "$SERVER_URL" ]]; then
         SERVER_PORT="$(printf '%s' "$SERVER_URL" | sed -E 's#^https?://[^:/]+:([0-9]+).*$#\1#')"
@@ -374,16 +477,25 @@ ensure_backend() {
     start_managed_backend
 }
 
-ensure_backend
+if [[ "${COTOR_DESKTOP_LAUNCHER_SOURCE_ONLY:-0}" == "1" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 trap launcher_cleanup EXIT INT TERM HUP
+terminate_existing_desktop_instances
+ensure_backend
 
 export COTOR_APP_SERVER_URL="$SERVER_URL"
 export COTOR_APP_TOKEN="$SERVER_TOKEN"
 
 "$BINARY_PATH" "$@" &
 APP_BINARY_PID=$!
+monitor_managed_backend "$APP_BINARY_PID" &
+BACKEND_MONITOR_PID=$!
 set +e
 wait "$APP_BINARY_PID"
 APP_EXIT_CODE=$?
 set -e
+kill "$BACKEND_MONITOR_PID" >/dev/null 2>&1 || true
+wait "$BACKEND_MONITOR_PID" >/dev/null 2>&1 || true
 exit "$APP_EXIT_CODE"

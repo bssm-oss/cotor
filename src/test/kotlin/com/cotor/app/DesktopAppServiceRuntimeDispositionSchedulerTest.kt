@@ -32,9 +32,9 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         val appHome = Files.createTempDirectory("desktop-runtime-disposition-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-disposition-repo").resolve("repo"))
         val stateStore = DesktopStateStore { appHome }
-        seedRuntimeDispositionWorkspace(stateStore, repoRoot)
         val githubStore = GitHubControlPlaneStore { appHome }
         val companyId = "company-1"
+        seedRuntimeDispositionWorkspace(stateStore, repoRoot, companyId)
         val issueId = "issue-waiting-ci"
         GitHubControlPlaneService(store = githubStore).recordSnapshot(
             PullRequestSnapshot(
@@ -65,7 +65,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
                 policyEngine = PolicyEngine(PolicyStore { appHome }),
                 gitHubControlPlaneService = GitHubControlPlaneService(store = githubStore)
             ),
-            gitHubControlPlaneService = GitHubControlPlaneService(store = githubStore)
+            gitHubControlPlaneService = GitHubControlPlaneService(store = githubStore),
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -154,7 +155,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = agentExecutor
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -246,7 +248,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = agentExecutor
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -310,7 +313,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = agentExecutor
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -356,7 +360,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = agentExecutor
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -449,7 +454,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = agentExecutor
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -498,8 +504,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         val appHome = Files.createTempDirectory("desktop-runtime-dependency-wait-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-dependency-wait-repo").resolve("repo"))
         val stateStore = DesktopStateStore { appHome }
-        seedRuntimeDispositionWorkspace(stateStore, repoRoot)
         val companyId = "company-dependency-wait"
+        seedRuntimeDispositionWorkspace(stateStore, repoRoot, companyId)
         val upstreamId = "issue-upstream"
         val downstreamId = "issue-downstream"
 
@@ -507,7 +513,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true),
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+            agentExecutor = mockk<AgentExecutor>(relaxed = true),
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -550,8 +557,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         val appHome = Files.createTempDirectory("desktop-runtime-dependency-ready-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-dependency-ready-repo").resolve("repo"))
         val stateStore = DesktopStateStore { appHome }
-        seedRuntimeDispositionWorkspace(stateStore, repoRoot)
         val companyId = "company-dependency-ready"
+        seedRuntimeDispositionWorkspace(stateStore, repoRoot, companyId)
         val upstreamId = "issue-upstream-done"
         val downstreamId = "issue-downstream-ready"
 
@@ -579,7 +586,8 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = agentExecutor
+            agentExecutor = agentExecutor,
+            autoStartAutomationRefresh = false
         )
 
         val state = stateStore.load()
@@ -626,6 +634,7 @@ private suspend fun seedRuntimeDispositionWorkspace(
 ) {
     stateStore.save(
         DesktopAppState(
+            companies = listOf(runtimeDispositionCompany(companyId, repoRoot)),
             repositories = listOf(
                 ManagedRepository(
                     id = "repo-1",

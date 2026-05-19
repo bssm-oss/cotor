@@ -164,6 +164,85 @@ class DesktopAppServiceMarketingTest : FunSpec({
         runner.commands.shouldHaveSize(1)
     }
 
+    test("marketing browser screenshot-only no-op is recorded as failed instead of completed") {
+        val appHome = Files.createTempDirectory("desktop-marketing-noop-home")
+        val runner = NoOpMarketingBrowserRunner()
+        val service = marketingService(appHome, runner)
+        val company = service.createCompany(name = "Marketing Noop Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        service.upsertMarketingDelegationPolicy(
+            UpsertMarketingDelegationPolicyRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                allowedDomains = listOf("cms.example.com"),
+                channelAccounts = listOf(
+                    MarketingChannelAccount(channel = "web", accountRef = "cms", allowedDomains = listOf("cms.example.com"))
+                ),
+                dailyPostLimit = 2
+            )
+        )
+
+        val run = service.createMarketingRun(
+            MarketingRunRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                objective = "Publish an owned web update",
+                channels = listOf("web")
+            )
+        )
+        val skillRun = service.runSkill(
+            name = "content-publisher",
+            companyId = company.id,
+            agentId = agent.id,
+            input = "Publish a delegated product update",
+            parameters = mapOf("channels" to "web")
+        )
+
+        run.status shouldBe MarketingRunStatus.FAILED
+        run.actions.single().status shouldBe MarketingActionStatus.FAILED
+        run.error shouldContain "did not expose an editable field"
+        skillRun.status shouldBe "FAILED"
+        skillRun.error shouldContain "did not expose an editable field"
+    }
+
+    test("analytics reporter without marketing runs is not marked completed") {
+        val appHome = Files.createTempDirectory("desktop-marketing-empty-analytics-home")
+        val service = marketingService(appHome, RecordingMarketingBrowserRunner())
+        val company = service.createCompany(name = "Marketing Empty Analytics Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        service.upsertMarketingDelegationPolicy(
+            UpsertMarketingDelegationPolicyRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                allowedDomains = listOf("cms.example.com"),
+                channelAccounts = listOf(
+                    MarketingChannelAccount(channel = "web", accountRef = "cms", allowedDomains = listOf("cms.example.com"))
+                ),
+                dailyPostLimit = 2
+            )
+        )
+        val auto = AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO)
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = agent.id,
+            settings = mapOf(
+                CapabilityKey.SKILL_RUN to auto,
+                CapabilityKey.MARKETING_ANALYTICS_READ to auto
+            )
+        )
+
+        val result = service.runSkill(
+            name = "analytics-reporter",
+            companyId = company.id,
+            agentId = agent.id,
+            input = "Summarize recent marketing runs"
+        )
+
+        result.status shouldBe "FAILED_SETUP"
+        result.error shouldContain "No MarketingRun evidence"
+        result.actions.single() shouldBe "summarized 0 marketing run(s)"
+    }
+
     test("browserSessionRef raw file path is rejected at policy save time") {
         val appHome = Files.createTempDirectory("desktop-marketing-session-ref-home")
         val service = marketingService(appHome, RecordingMarketingBrowserRunner())
@@ -359,4 +438,14 @@ private class RecordingMarketingBrowserRunner : MarketingBrowserRunner {
             inputSummary = command.inputSummary
         )
     }
+}
+
+private class NoOpMarketingBrowserRunner : MarketingBrowserRunner {
+    override suspend fun execute(command: MarketingBrowserCommand): MarketingBrowserResult =
+        MarketingBrowserResult(
+            targetUrl = command.targetUrl,
+            postedUrl = command.targetUrl,
+            screenshotPath = command.screenshotPath,
+            inputSummary = "${command.channel}: no editable field; no publish button"
+        )
 }

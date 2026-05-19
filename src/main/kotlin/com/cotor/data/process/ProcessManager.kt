@@ -324,6 +324,7 @@ private fun destroyProcessTree(process: Process, logger: Logger) {
         .toArray()
         .filterIsInstance<ProcessHandle>()
         .asReversed()
+    terminateUnixChildren(process.pid(), force = false, logger = logger)
     descendants.forEach { handle ->
         if (handle.isAlive) {
             runCatching { handle.destroy() }
@@ -338,6 +339,7 @@ private fun destroyProcessTree(process: Process, logger: Logger) {
     if (process.isAlive) {
         runCatching { process.waitFor(PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
     }
+    terminateUnixChildren(process.pid(), force = true, logger = logger)
     descendants.forEach { handle ->
         if (handle.isAlive) {
             runCatching { handle.destroyForcibly() }
@@ -350,6 +352,20 @@ private fun destroyProcessTree(process: Process, logger: Logger) {
     }
     waitForProcessHandles(descendants, PROCESS_TREE_JOIN_TIMEOUT_MS)
     runCatching { process.waitFor(PROCESS_TREE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
+}
+
+private fun terminateUnixChildren(parentPid: Long, force: Boolean, logger: Logger) {
+    val signal = if (force) "-KILL" else "-TERM"
+    val pkill = ProcessBuilder("pkill", signal, "-P", parentPid.toString())
+    runCatching {
+        val process = pkill.start()
+        process.waitFor(PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        if (process.isAlive) {
+            process.destroyForcibly()
+        }
+    }.onFailure {
+        logger.debug("Failed to request child process termination with pkill for parent pid=$parentPid", it)
+    }
 }
 
 private fun cleanupSurvivingDescendants(process: Process, logger: Logger) {

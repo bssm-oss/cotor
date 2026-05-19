@@ -62,6 +62,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
@@ -263,7 +265,13 @@ internal class DesktopAppServerInstanceGuard(
 
 internal val desktopAppServerInstanceGuard = DesktopAppServerInstanceGuard()
 
-internal fun readDesktopAppServerInstanceStatus(appHome: Path): DesktopAppServerInstanceStatus {
+internal fun readDesktopAppServerInstanceStatus(
+    appHome: Path,
+    processAliveChecker: (Long) -> Boolean = { pid ->
+        ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)
+    },
+    endpointReachableChecker: (String, Int) -> Boolean = ::isDesktopAppServerEndpointReachable
+): DesktopAppServerInstanceStatus {
     val metadataPath = appHome.resolve("runtime").resolve("backend").resolve("app-server.instance.json")
     if (!Files.exists(metadataPath)) {
         return DesktopAppServerInstanceStatus(active = false)
@@ -272,8 +280,23 @@ internal fun readDesktopAppServerInstanceStatus(appHome: Path): DesktopAppServer
     val metadata = runCatching {
         json.decodeFromString(DesktopAppServerInstanceMetadata.serializer(), Files.readString(metadataPath))
     }.getOrNull() ?: return DesktopAppServerInstanceStatus(active = false)
-    val active = ProcessHandle.of(metadata.pid).map(ProcessHandle::isAlive).orElse(false)
+    val active = processAliveChecker(metadata.pid) && endpointReachableChecker(metadata.host, metadata.port)
     return DesktopAppServerInstanceStatus(active = active, metadata = metadata.takeIf { active })
+}
+
+private fun isDesktopAppServerEndpointReachable(host: String, port: Int): Boolean {
+    if (port <= 0) {
+        return false
+    }
+    val probeHost = when (host.trim()) {
+        "", "0.0.0.0", "::" -> "127.0.0.1"
+        else -> host.trim()
+    }
+    return runCatching {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress(probeHost, port), 250)
+        }
+    }.isSuccess
 }
 
 internal fun appServerTokenPath(appHome: Path = defaultDesktopAppHome()): Path {
@@ -342,6 +365,7 @@ internal fun Application.cotorAppModule(
     install(CORS) {
         allowHost("127.0.0.1", schemes = listOf("http"))
         allowHost("localhost", schemes = listOf("http"))
+        allowOrigins { origin -> origin == "null" }
         allowHeader(HttpHeaders.Authorization)
         allowHeader(HttpHeaders.ContentType)
     }
@@ -653,7 +677,9 @@ internal fun Application.cotorAppModule(
                 post("/clone") {
                     if (!requireToken(token)) return@post
                     val request = call.receive<CloneRepositoryRequest>()
-                    call.respond(desktopService.cloneRepository(request.url))
+                    respondDesktopRequest {
+                        desktopService.cloneRepository(request.url)
+                    }
                 }
             }
 

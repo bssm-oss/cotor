@@ -1,6 +1,7 @@
 package com.cotor.app
 
 import org.slf4j.LoggerFactory
+import java.net.URI
 
 /**
  * Centralizes loopback-vs-remote validation for app-server URLs.
@@ -13,21 +14,22 @@ import org.slf4j.LoggerFactory
 object DesktopEndpointPolicy {
     private val logger = LoggerFactory.getLogger(DesktopEndpointPolicy::class.java)
 
-    private val LOOPBACK_PREFIXES = listOf(
-        "http://127.0.0.1",
-        "http://localhost",
-        "http://[::1]",
-        "https://127.0.0.1",
-        "https://localhost",
-        "https://[::1]",
-    )
+    private val LOOPBACK_HOSTS = setOf("127.0.0.1", "localhost", "::1", "[::1]")
+    private val ALLOWED_SCHEMES = setOf("http", "https")
 
-    fun isLoopback(url: String): Boolean =
-        LOOPBACK_PREFIXES.any { url.startsWith(it) }
+    fun isLoopback(url: String): Boolean {
+        val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase() ?: return false
+        val host = uri.host?.lowercase() ?: return false
+        return scheme in ALLOWED_SCHEMES && host in LOOPBACK_HOSTS && uri.rawUserInfo == null
+    }
 
-    fun remoteAllowed(): Boolean {
-        val flag = System.getenv("COTOR_ALLOW_REMOTE_APP_SERVER") == "1"
-        val token = !System.getenv("COTOR_APP_TOKEN").isNullOrBlank()
+    fun remoteAllowed(
+        envAllowRemote: String? = System.getenv("COTOR_ALLOW_REMOTE_APP_SERVER"),
+        envToken: String? = System.getenv("COTOR_APP_TOKEN")
+    ): Boolean {
+        val flag = envAllowRemote == "1"
+        val token = !envToken.isNullOrBlank()
         return flag && token
     }
 
@@ -37,11 +39,13 @@ object DesktopEndpointPolicy {
      * remote and the remote-allow flag+token are not both set.
      */
     fun resolveA2aEndpoint(
-        envUrl: String? = System.getenv("COTOR_APP_SERVER_URL")
+        envUrl: String? = System.getenv("COTOR_APP_SERVER_URL"),
+        envAllowRemote: String? = System.getenv("COTOR_ALLOW_REMOTE_APP_SERVER"),
+        envToken: String? = System.getenv("COTOR_APP_TOKEN")
     ): String {
         val base = envUrl?.takeIf { it.isNotBlank() }?.trim()?.removeSuffix("/")
             ?: return DEFAULT_LOOPBACK_A2A
-        return if (isLoopback(base) || remoteAllowed()) {
+        return if (isLoopback(base) || remoteAllowed(envAllowRemote, envToken)) {
             "$base/api/a2a"
         } else {
             logger.warn(
