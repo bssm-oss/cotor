@@ -11,6 +11,8 @@ enum MeetingRoomSpriteAction: String, Hashable {
     case approving
     case blocked
     case celebrating
+    case thinking
+    case stretching
 }
 
 enum MeetingRoomSceneKeyframeKind: String, Hashable {
@@ -135,15 +137,14 @@ struct MeetingRoomRenderPlan: Hashable {
                 .filter { $0.kind != .a2aMessage && $0.kind != .agentToReview }
                 .prefix(maxFlows)
         )
-        let hasFreshInteraction = filteredInteractions.contains { event in
+        let _ = filteredInteractions.contains { event in
             event.drivesSceneScheduler && !seenEventIds.contains(event.id)
         }
         let shouldAnimate = isSceneActive &&
             !reduceMotion &&
             !lowResourceMode &&
             mode == .full &&
-            agentCount < 20 &&
-            hasFreshInteraction
+            agentCount < 20
 
         return MeetingRoomRenderPlan(
             mode: mode,
@@ -398,7 +399,7 @@ enum MeetingRoomSceneMemoryStore {
     }
 
     private static let defaultMaxEntries = 32
-    private static let defaultTTLSeconds: TimeInterval = 30 * 60
+    private static let defaultTTLSeconds: TimeInterval = 5 * 60
     private static var ledgers: [String: Entry] = [:]
 
     static func ledger(for key: String, now: TimeInterval = Date().timeIntervalSince1970) -> MeetingRoomSceneLedger {
@@ -505,8 +506,8 @@ enum MeetingRoomSceneReducer {
             let existing = previousAgentsById[agent.id]
             let from = existing?.targetPoint ?? ledger.settledAgentPositions[agent.id] ?? baseTarget
             let isFresh = focusEvent.map { freshInteractionIds.contains($0.id) } ?? false
-            let shouldMove = isFresh && !reduceMotion && !lowResourceMode && distance(from, target) > 4
-            let action = spriteAction(for: agent, focusEvent: focusEvent, isFresh: isFresh, moved: shouldMove)
+            let shouldMove = !reduceMotion && !lowResourceMode && distance(from, target) > 4
+            let action = spriteAction(for: agent, focusEvent: focusEvent, isFresh: isFresh, moved: shouldMove, time: now)
             return MeetingRoomSceneAgent(
                 id: agent.id,
                 projection: agent,
@@ -665,13 +666,14 @@ enum MeetingRoomSceneReducer {
         for agent: MeetingRoomProjectionAgent,
         focusEvent: MeetingRoomInteractionEvent?,
         isFresh: Bool,
-        moved: Bool
+        moved: Bool,
+        time: TimeInterval
     ) -> MeetingRoomSpriteAction {
         if moved {
             return .walking
         }
         guard let focusEvent else {
-            return baseSpriteAction(for: agent)
+            return baseSpriteAction(for: agent, time: time)
         }
         switch focusEvent.kind {
         case .workStarted:
@@ -695,13 +697,21 @@ enum MeetingRoomSceneReducer {
         }
     }
 
-    private static func baseSpriteAction(for agent: MeetingRoomProjectionAgent) -> MeetingRoomSpriteAction {
+    private static func baseSpriteAction(
+        for agent: MeetingRoomProjectionAgent,
+        time: TimeInterval
+    ) -> MeetingRoomSpriteAction {
         if agent.messageCount > 0 {
             return .talking
         }
         switch agent.visualState {
-        case .idle, .done:
+        case .idle:
+            let cycle = Int(time) % 30
+            if cycle < 3 { return .thinking }
+            if cycle < 5 { return .stretching }
             return .sitting
+        case .done:
+            return .celebrating
         case .running:
             return .typing
         case .review:
