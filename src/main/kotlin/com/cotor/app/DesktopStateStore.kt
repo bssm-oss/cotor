@@ -84,7 +84,10 @@ class DesktopStateStore(
     override suspend fun load(): DesktopAppState = withContext(Dispatchers.IO) {
         val stateFile = stateFile()
         if (!stateFile.exists()) {
-            return@withContext DesktopAppState()
+            return@withContext withStateFileLock {
+                cleanupStateTempFiles(stateFile.parent)
+                DesktopAppState()
+            }
         }
         val backupFile = backupStateFile()
         currentFingerprint(stateFile)?.let { fingerprint ->
@@ -97,6 +100,7 @@ class DesktopStateStore(
         }
 
         withStateFileLock {
+            cleanupStateTempFiles(stateFile.parent)
             currentFingerprint(stateFile)?.let { fingerprint ->
                 cachedState
                     ?.takeIf {
@@ -107,7 +111,7 @@ class DesktopStateStore(
             }
             val raw = runCatching { stateFile.readText() }.getOrElse { return@withStateFileLock DesktopAppState() }
             decodeState(raw)?.also { decoded ->
-                val compacted = compactStateForPersistence(normalizeLegacyCompanyRuntimeState(decoded))
+                val compacted = normalizeStateForPersistence(decoded)
                 if (raw != json.encodeToString(DesktopAppState.serializer(), compacted)) {
                     saveLocked(compacted)
                 } else {
@@ -118,7 +122,7 @@ class DesktopStateStore(
             if (backupFile.exists()) {
                 val backupRaw = runCatching { backupFile.readText() }.getOrNull()
                 decodeState(backupRaw.orEmpty())?.also { recovered ->
-                    val compacted = compactStateForPersistence(normalizeLegacyCompanyRuntimeState(recovered))
+                    val compacted = normalizeStateForPersistence(recovered)
                     saveLocked(compacted)
                     return@withStateFileLock compacted
                 }
@@ -152,8 +156,9 @@ class DesktopStateStore(
         // app can start from a completely clean machine state.
         file.parent?.createDirectories()
         managedReposRoot().createDirectories()
-        val compactedState = compactStateForPersistence(normalizeLegacyCompanyRuntimeState(state))
+        val compactedState = normalizeStateForPersistence(state)
         val payload = json.encodeToString(DesktopAppState.serializer(), compactedState)
+        cleanupStateTempFiles(file.parent)
         val tempFile = Files.createTempFile(file.parent, "${file.fileName}.", ".tmp")
         tempFile.writeText(payload)
         enforceOwnerOnlyPermissions(tempFile)
@@ -165,6 +170,15 @@ class DesktopStateStore(
         moveWithAtomicFallback(backupTempFile, backupFile)
         enforceOwnerOnlyPermissions(backupFile)
         updateCache(file, compactedState)
+    }
+
+    private fun cleanupStateTempFiles(directory: Path?) {
+        if (directory == null) {
+            return
+        }
+        stateTempFilesToClean(directory).forEach { tempFile ->
+            runCatching { Files.deleteIfExists(tempFile) }
+        }
     }
 
     private fun decodeStateOrNull(raw: String): DesktopAppState? {
@@ -410,6 +424,143 @@ class DesktopStateStore(
         }
     }
 
+    private fun normalizeStateForPersistence(state: DesktopAppState): DesktopAppState =
+        compactStateForPersistence(pruneDanglingCompanyReferences(normalizeLegacyCompanyRuntimeState(state)))
+
+    private fun pruneDanglingCompanyReferences(state: DesktopAppState): DesktopAppState {
+        val companyIds = state.companies.mapTo(linkedSetOf()) { it.id }
+        val projectContextIds = state.projectContexts
+            .filter { it.companyId in companyIds }
+            .mapTo(linkedSetOf()) { it.id }
+        val goals = state.goals
+            .filter { goal -> goal.companyId in companyIds }
+            .map { goal ->
+                if (goal.projectContextId != null && goal.projectContextId !in projectContextIds) {
+                    goal.copy(projectContextId = null)
+                } else {
+                    goal
+                }
+            }
+        val goalIds = goals.mapTo(linkedSetOf()) { it.id }
+        val issues = state.issues
+            .filter { issue ->
+                issue.companyId in companyIds &&
+                    issue.goalId in goalIds
+            }
+            .map { issue ->
+                if (issue.projectContextId != null && issue.projectContextId !in projectContextIds) {
+                    issue.copy(projectContextId = null)
+                } else {
+                    issue
+                }
+            }
+        val issueIds = issues.mapTo(linkedSetOf()) { it.id }
+        val issuesById = issues.associateBy { it.id }
+        val normalizedReviewQueue = state.reviewQueue.map { item ->
+            val issue = issuesById[item.issueId]
+            if (issue != null && item.companyId.isBlank()) {
+                item.copy(
+                    companyId = issue.companyId,
+                    projectContextId = item.projectContextId ?: issue.projectContextId
+                )
+            } else {
+                item
+            }
+        }
+        val reviewQueueIds = normalizedReviewQueue
+            .filter { it.companyId in companyIds && it.issueId in issueIds }
+            .mapTo(linkedSetOf()) { it.id }
+        val runIds = state.runs.mapTo(linkedSetOf()) { it.id }
+        val taskIds = state.tasks.mapTo(linkedSetOf()) { it.id }
+        val agentIds = state.companyAgentDefinitions
+            .filter { it.companyId in companyIds }
+            .mapTo(linkedSetOf()) { it.id }
+
+        fun validGoalRef(goalId: String?): Boolean = goalId == null || goalId in goalIds
+        fun validIssueRef(issueId: String?): Boolean = issueId == null || issueId in issueIds
+        fun validProjectRef(projectContextId: String?): Boolean =
+            projectContextId == null || projectContextId in projectContextIds
+
+        val runtime = state.runtime.takeIf { it.companyId == null || it.companyId in companyIds }
+            ?: CompanyRuntimeSnapshot()
+
+        return state.copy(
+            projectContexts = state.projectContexts.filter { it.companyId in companyIds },
+            companyAgentDefinitions = state.companyAgentDefinitions.filter { it.companyId in companyIds },
+            agentCapabilityProfiles = state.agentCapabilityProfiles.filter { it.companyId in companyIds },
+            goals = goals,
+            issues = issues,
+            issueDependencies = state.issueDependencies.filter {
+                it.issueId in issueIds && it.dependsOnIssueId in issueIds
+            },
+            orgProfiles = state.orgProfiles.filter { it.companyId in companyIds },
+            workflowTopologies = state.workflowTopologies.filter { it.companyId in companyIds },
+            goalDecisions = state.goalDecisions.mapNotNull { decision ->
+                if (
+                    decision.companyId !in companyIds ||
+                    !validGoalRef(decision.goalId) ||
+                    !validIssueRef(decision.issueId)
+                ) {
+                    null
+                } else {
+                    decision.copy(createdIssues = decision.createdIssues.filter { it in issueIds })
+                }
+            },
+            reviewQueue = normalizedReviewQueue.filter {
+                it.companyId in companyIds && it.issueId in issueIds
+            },
+            companyActivity = state.companyActivity.filter {
+                it.companyId in companyIds &&
+                    validProjectRef(it.projectContextId) &&
+                    validGoalRef(it.goalId) &&
+                    validIssueRef(it.issueId)
+            },
+            signals = state.signals.filter {
+                (it.companyId == null || it.companyId in companyIds) &&
+                    validProjectRef(it.projectContextId) &&
+                    validGoalRef(it.goalId) &&
+                    validIssueRef(it.issueId)
+            },
+            runtime = runtime,
+            companyRuntimes = state.companyRuntimes.filter { it.companyId in companyIds },
+            workflowPipelines = state.workflowPipelines.filter { it.companyId in companyIds },
+            agentContextEntries = state.agentContextEntries.filter {
+                it.companyId in companyIds &&
+                    validGoalRef(it.goalId) &&
+                    validIssueRef(it.issueId)
+            },
+            agentMessages = state.agentMessages.filter {
+                it.companyId in companyIds &&
+                    validGoalRef(it.goalId) &&
+                    validIssueRef(it.issueId)
+            },
+            marketingDelegationPolicies = state.marketingDelegationPolicies.filter {
+                it.companyId in companyIds && it.agentId in agentIds
+            },
+            marketingRuns = state.marketingRuns.filter {
+                it.companyId in companyIds && it.agentId in agentIds
+            },
+            skillRuns = state.skillRuns.filter {
+                it.companyId in companyIds && it.agentId in agentIds
+            },
+            companyRuntimeWorkItems = state.companyRuntimeWorkItems.filter {
+                it.companyId in companyIds &&
+                    validGoalRef(it.goalId) &&
+                    it.issueId in issueIds &&
+                    (it.activeTaskId == null || it.activeTaskId in taskIds)
+            },
+            problemSignals = state.problemSignals.filter {
+                it.companyId in companyIds &&
+                    validProjectRef(it.projectContextId) &&
+                    validGoalRef(it.goalId) &&
+                    validIssueRef(it.issueId) &&
+                    validGoalRef(it.triageGoalId) &&
+                    (it.reviewQueueItemId == null || it.reviewQueueItemId in reviewQueueIds) &&
+                    (it.runId == null || it.runId in runIds)
+            }
+        )
+    }
+
     private fun compactStateForPersistence(state: DesktopAppState): DesktopAppState =
         state.run {
             val unresolvedIssueIds = issues
@@ -522,6 +673,32 @@ class DesktopStateStore(
     private fun compactRequiredText(value: String, maxChars: Int): String =
         compactText(value, maxChars) ?: value
 }
+
+internal fun stateTempFilesToClean(
+    directory: Path,
+    nowMillis: Long = System.currentTimeMillis(),
+    minAgeMillis: Long = 60_000L
+): List<Path> {
+    if (!directory.exists()) {
+        return emptyList()
+    }
+    val stream = Files.list(directory)
+    return try {
+        stream
+            .filter { Files.isRegularFile(it) }
+            .filter { STATE_TEMP_FILE_REGEX.matches(it.fileName.toString()) }
+            .filter { tempFile ->
+                val modifiedAt = runCatching { Files.getLastModifiedTime(tempFile).toMillis() }.getOrDefault(nowMillis)
+                nowMillis - modifiedAt >= minAgeMillis
+            }
+            .toList()
+            .sortedBy { it.fileName.toString() }
+    } finally {
+        stream.close()
+    }
+}
+
+private val STATE_TEMP_FILE_REGEX = Regex("""state\.json(?:\.bak)?\.[^.]+\.tmp""")
 
 /**
  * Desktop data lives under the conventional macOS Application Support location
