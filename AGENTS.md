@@ -385,7 +385,7 @@ Do not optimize for a hypothetical future product at the cost of breaking:
 
 - When a task changes company workflows, company UI, agent defaults, Codex auth flows, packaging, or release behavior, validate both automated tests and hands-on manual flows before calling it done.
 - Manual validation should include the company sandbox workspace at `/Users/Projects/bssm-oss/cotor-organization/cotor-test` whenever company creation, goal/issue/review/runtime flows, or packaging behavior are involved.
-- Company defaults should bias toward cost control: new company-seeded execution agents should prefer OpenCode with the default model `opencode/nemotron-3-super-free` unless the repo intentionally changes that product policy.
+- Company defaults should bias toward cost control: new company-seeded execution agents should prefer OpenCode with the default model `opencode/deepseek-v4-flash-free` unless the repo intentionally changes that product policy.
 - If Codex support changes, keep `codex-exec` and `codex-oauth` behavior explicit in code, docs, and validation notes; authentication flows exposed in CLI or app must remain testable and documented.
 - Before shipping packaging changes, verify the Homebrew/release path that end users follow, not only source-checkout installs. Do not assume repo-local build files exist at runtime in packaged installs.
 - If the user requests a full ship flow, keep commits intentional and descriptive, open a PR with validation notes, and only merge after the documented checks and manual validation pass.
@@ -792,7 +792,7 @@ Cotor를 저장소가 오늘 실제로 구현한 모습에 맞춰 유지하세�
 
 - 회사 워크플로, 회사 UI, 에이전트 기본값, Codex 인증 흐름, 패키징, 릴리스 동작을 바꾸는 작업은 완료 처리 전에 자동 테스트와 수동 조작 테스트를 둘 다 통과해야 합니다.
 - 회사 생성, goal/issue/review/runtime 흐름, 패키징 동작을 검증할 때는 가능하면 `/Users/Projects/bssm-oss/cotor-organization/cotor-test` 샌드박스를 사용합니다.
-- 회사 기본 에이전트 정책은 비용 통제를 우선합니다. 저장소가 의도적으로 바꾸지 않는 한 새 회사에 시드되는 실행 에이전트는 기본 모델 `opencode/nemotron-3-super-free`를 사용하는 OpenCode를 우선합니다.
+- 회사 기본 에이전트 정책은 비용 통제를 우선합니다. 저장소가 의도적으로 바꾸지 않는 한 새 회사에 시드되는 실행 에이전트는 기본 모델 `opencode/deepseek-v4-flash-free`를 사용하는 OpenCode를 우선합니다.
 - Codex 지원을 바꿀 때는 `codex-exec`, `codex-oauth` 구분을 코드, 문서, 검증 기록에 모두 명시하고, CLI나 앱에 노출된 인증 흐름이 실제로 테스트 가능해야 합니다.
 - 패키징을 바꾸면 source-checkout 설치만 보지 말고 실제 사용자가 따르는 Homebrew/릴리스 경로를 검증합니다. packaged install에서 repo-local build file이 있다고 가정하지 않습니다.
 - 사용자가 전체 ship 흐름을 요청했다면 커밋은 의도를 드러내게 잘게 나누고, 검증 메모를 포함한 PR을 연 뒤, 문서화된 체크와 수동 검증이 끝난 다음에만 머지합니다.

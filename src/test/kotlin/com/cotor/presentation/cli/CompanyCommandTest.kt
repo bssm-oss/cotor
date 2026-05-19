@@ -146,7 +146,7 @@ class CompanyCommandTest : FunSpec({
                 companyId = "company-1",
                 agentIds = listOf("agent-1", "agent-2"),
                 agentCli = "opencode",
-                model = "opencode/nemotron-3-super-free"
+                model = "opencode/deepseek-v4-flash-free"
             )
         } returns listOf(
             CompanyAgentDefinition(
@@ -154,7 +154,7 @@ class CompanyCommandTest : FunSpec({
                 companyId = "company-1",
                 title = "Builder",
                 agentCli = "opencode",
-                model = "opencode/nemotron-3-super-free",
+                model = "opencode/deepseek-v4-flash-free",
                 roleSummary = "build",
                 displayOrder = 0,
                 createdAt = 1L,
@@ -163,11 +163,11 @@ class CompanyCommandTest : FunSpec({
         )
 
         val result = CompanyCommand().test(
-            "agent batch-update --company-id company-1 --agent-cli opencode --model opencode/nemotron-3-super-free"
+            "agent batch-update --company-id company-1 --agent-cli opencode --model opencode/deepseek-v4-flash-free"
         )
 
         result.statusCode shouldBe 0
-        result.output shouldContain "\"model\": \"opencode/nemotron-3-super-free\""
+        result.output shouldContain "\"model\": \"opencode/deepseek-v4-flash-free\""
     }
 
     test("company agent capabilities prints backend profile") {

@@ -326,7 +326,7 @@ class GitWorkspaceService(
     }
 
     suspend fun hasPublishableChanges(worktreePath: Path, baseBranch: String): Boolean {
-        if (hasUncommittedChanges(worktreePath)) {
+        if (publishableChangedPaths(worktreePath).isNotEmpty()) {
             return true
         }
         val aheadCount = gitOutput(worktreePath, "rev-list", "--count", "$baseBranch..HEAD")
@@ -1683,9 +1683,11 @@ class GitWorkspaceService(
             path == "firebase-debug.log" ||
             path == "local.properties" ||
             path == "cotor.yaml" ||
+            path.matches(Regex("""AUTO_FLOW_\d+\.md""")) ||
             path.matches(Regex("""cotor\.\d{4}-\d{2}-\d{2}\.\d+\.log""")) ||
             firstSegment in setOf(
                 ".cotor",
+                ".opencode",
                 ".omx",
                 ".claude",
                 ".codex",

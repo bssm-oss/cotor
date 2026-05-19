@@ -263,17 +263,19 @@ class CodexPlugin : AgentPlugin {
         resolveCodexHome(environment)?.resolve("config.toml")
 
     private fun resolveCodexHome(environment: Map<String, String>): Path? {
-        val explicitCodexHome = environment["CODEX_HOME"]
-            ?.takeIf { it.isNotBlank() }
-            ?: System.getenv("CODEX_HOME")?.takeIf { it.isNotBlank() }
-        if (explicitCodexHome != null) {
-            return Path.of(explicitCodexHome)
+        environment["CODEX_HOME"]?.takeIf { it.isNotBlank() }?.let { explicit ->
+            return Path.of(explicit)
         }
-        val home = environment["HOME"]
-            ?.takeIf { it.isNotBlank() }
-            ?: System.getenv("HOME")?.takeIf { it.isNotBlank() }
-            ?: System.getProperty("user.home")?.takeIf { it.isNotBlank() }
-        return home?.let { Path.of(it).resolve(".codex") }
+        environment["HOME"]?.takeIf { it.isNotBlank() }?.let { home ->
+            return Path.of(home).resolve(".codex")
+        }
+        System.getenv("CODEX_HOME")?.takeIf { it.isNotBlank() }?.let { explicit ->
+            return Path.of(explicit)
+        }
+        return (
+            System.getenv("HOME")?.takeIf { it.isNotBlank() }
+                ?: System.getProperty("user.home")?.takeIf { it.isNotBlank() }
+            )?.let { home -> Path.of(home).resolve(".codex") }
     }
 
     private fun managedCodexOAuthHome(environment: Map<String, String>): Path {
@@ -1017,10 +1019,40 @@ class OpenCodePlugin : AgentPlugin {
     private fun ephemeralOpenCodeConfigJson(context: ExecutionContext): String? {
         return when (context.parameters["ephemeralOpencodeProfile"]?.trim()) {
             "planning-only" -> planningOnlyOpenCodeConfigJson(context)
-            null, "" -> null
+            null, "" -> executionOpenCodeConfigJson()
             else -> null
         }
     }
+
+    private fun executionOpenCodeConfigJson(): String = """
+        {
+          "${'$'}schema": "https://opencode.ai/config.json",
+          "tools": {
+            "read": true,
+            "write": true,
+            "edit": true,
+            "bash": true,
+            "grep": true,
+            "glob": true,
+            "list": true,
+            "task": false,
+            "task_*": false
+          },
+          "permission": {
+            "question": "deny",
+            "task": "deny",
+            "read": "allow",
+            "write": "allow",
+            "edit": "allow",
+            "bash": "allow",
+            "grep": "allow",
+            "glob": "allow",
+            "list": "allow",
+            "webfetch": "deny",
+            "external_directory": "deny"
+          }
+        }
+    """.trimIndent()
 
     private fun planningOnlyOpenCodeConfigJson(context: ExecutionContext): String {
         val agentName = context.parameters["agent"]
@@ -1101,6 +1133,8 @@ class OpenCodePlugin : AgentPlugin {
         val models = discoverAvailableOpenCodeModels(processManager, context)
         if (models.isEmpty()) return null
         listOf(
+            OpenCodeDefaults.DEFAULT_MODEL,
+            "opencode/deepseek-v4-flash-free",
             "deepseek/deepseek-v4-flash",
             OpenCodeDefaults.DEEPSEEK_FLASH_MODEL,
             "deepseek/deepseek-chat"
@@ -1257,9 +1291,13 @@ class OpenCodePlugin : AgentPlugin {
 
     private fun isOpenCodeInteractivePermissionRequest(chunk: String): Boolean {
         val lower = chunk.lowercase()
-        return lower.contains("permission.asked") ||
-            (lower.contains("external_directory") && lower.contains("permission") && lower.contains("ask")) ||
-            (lower.contains("service=permission") && lower.contains("ask"))
+        if (!lower.contains("permission")) return false
+        return lower.contains("action\":\"ask\"") ||
+            lower.contains("action\\\":\\\"ask\\\"") ||
+            lower.contains("action=ask") ||
+            lower.contains("action:ask") ||
+            lower.contains("action = ask") ||
+            (lower.contains("external_directory") && lower.contains("\"action\":\"ask\""))
     }
 
     private fun containsStructuredOpenCodeEvents(rawOutput: String): Boolean =

@@ -155,6 +155,7 @@ cotor delete
 - 한 wave의 goal work가 끝나면 CEO planning lane을 다시 열어서 첫 decomposition 이후 goal이 얼어붙지 않게 함
 - continuous improvement goal은 팀 구성이 허용하면 여러 branchable issue와 병렬 slice를 만들도록 유도
 - 짧은 고수준 goal 설명도 더 넓은 execution portfolio로 보강해서, 큰 팀이 한두 개 이슈로만 줄어들지 않게 함
+- 사용자가 파일/PR 같은 구체적인 실행 goal을 직접 입력하면 CEO portfolio로 여러 이슈를 만들지 않고 하나의 실행 이슈로 유지
 - 새 runnable work가 생기면 stale polling tick을 기다리지 않고 런타임이 즉시 깨어나며, 여러 회사 역할이 같은 execution CLI를 써도 runnable issue를 병렬로 시작할 수 있음
 - 로컬 merge 완료 표시는 GitHub 새로고침 결과가 실제 `MERGED`일 때만 기록됨
 

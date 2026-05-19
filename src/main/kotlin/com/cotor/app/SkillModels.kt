@@ -78,7 +78,11 @@ fun skillCatalog(): List<SkillCatalogEntry> = listOf(
         name = "graphify",
         displayName = "Repository Mapper",
         description = "Read the repository map and explain how important parts of the codebase connect.",
-        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.KNOWLEDGE_GRAPH_READ),
+        requiredCapabilities = listOf(
+            CapabilityKey.SKILL_RUN,
+            CapabilityKey.KNOWLEDGE_GRAPH_READ,
+            CapabilityKey.KNOWLEDGE_GRAPH_WRITE
+        ),
         dangerous = false
     ),
     SkillCatalogEntry(

@@ -5,6 +5,7 @@ import com.cotor.domain.executor.AgentExecutor
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -573,6 +574,32 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
             coVerify(exactly = 0) {
                 fixture.gitWorkspaceService.mergePullRequest(any(), pullRequestNumber, any(), any(), any())
             }
+        }
+    }
+
+    test("mergeReviewQueueItem waits on unstable mergeability instead of reopening remediation") {
+        val fixture = mergeGuardFixture(
+            pullRequestNumber = 120,
+            pullRequestState = "OPEN",
+            mergeability = "UNSTABLE",
+            checksSummary = "ci=COMPLETED/SUCCESS"
+        )
+
+        val updated = fixture.service.mergeReviewQueueItem(fixture.queueItem.id)
+        val refreshedState = fixture.stateStore.load()
+        val refreshedIssue = refreshedState.issues.first { it.id == fixture.executionIssue.id }
+        val approvalIssue = refreshedState.issues.first {
+            it.kind.equals("approval", ignoreCase = true) &&
+                it.pullRequestNumber == 120
+        }
+
+        updated.status shouldBe ReviewQueueStatus.READY_FOR_CEO
+        updated.mergeability shouldBe "UNSTABLE"
+        refreshedIssue.status shouldBe IssueStatus.READY_FOR_CEO
+        refreshedIssue.executionIntent shouldNotBe ExecutionIntent.MERGE_CONFLICT_REMEDIATION
+        approvalIssue.status shouldBe IssueStatus.PLANNED
+        coVerify(exactly = 0) {
+            fixture.gitWorkspaceService.mergePullRequest(any(), 120, any(), any(), any())
         }
     }
 
