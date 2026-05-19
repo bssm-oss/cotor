@@ -343,7 +343,7 @@ struct ModelsTests {
           "companyId": "company",
           "title": "Builder",
           "agentCli": "opencode",
-          "model": "opencode/nemotron-3-super-free",
+          "model": "opencode/deepseek-v4-flash-free",
           "roleSummary": "implementation",
           "specialties": ["implementation"],
           "collaborationInstructions": null,

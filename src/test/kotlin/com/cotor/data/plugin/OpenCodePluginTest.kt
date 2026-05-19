@@ -79,6 +79,63 @@ class OpenCodePluginTest : FunSpec({
         sawModelsLookup shouldBe true
     }
 
+    test("writes task-scoped execution config with explicit tool permissions") {
+        val plugin = OpenCodePlugin()
+        val workdir = Files.createTempDirectory("opencode-execution-config")
+        val configPath = workdir.resolve(".opencode").resolve("opencode.json")
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult {
+                return when (command) {
+                    listOf("opencode", "models") -> ProcessResult(
+                        exitCode = 1,
+                        stdout = "",
+                        stderr = "models lookup unavailable",
+                        isSuccess = false
+                    )
+                    else -> {
+                        workingDirectory shouldBe workdir
+                        Files.exists(configPath) shouldBe true
+                        val config = Files.readString(configPath)
+                        config.contains("\"read\": \"allow\"") shouldBe true
+                        config.contains("\"write\": \"allow\"") shouldBe true
+                        config.contains("\"edit\": \"allow\"") shouldBe true
+                        config.contains("\"bash\": \"allow\"") shouldBe true
+                        config.contains("\"external_directory\": \"deny\"") shouldBe true
+                        assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                        ProcessResult(
+                            exitCode = 0,
+                            stdout = """{"type":"text","text":"configured"}""",
+                            stderr = "",
+                            isSuccess = true
+                        )
+                    }
+                }
+            }
+        }
+
+        val result = plugin.execute(
+            ExecutionContext(
+                agentName = "opencode",
+                input = "hello",
+                timeout = 1_000,
+                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                environment = emptyMap(),
+                workingDirectory = workdir
+            ),
+            processManager
+        )
+
+        result.output shouldBe "configured"
+        Files.exists(configPath) shouldBe false
+    }
+
     test("throws ProcessExecutionException with exit code and streams on failure") {
         val plugin = OpenCodePlugin()
         val processManager = object : ProcessManager {
@@ -111,7 +168,7 @@ class OpenCodePluginTest : FunSpec({
         }
 
         val error = shouldThrow<ProcessExecutionException> {
-            plugin.execute(
+            val result = plugin.execute(
                 ExecutionContext(
                     // The rest of the execution context is intentionally minimal because
                     // this test only cares about error propagation from the CLI wrapper.
@@ -747,7 +804,7 @@ class OpenCodePluginTest : FunSpec({
         }
 
         try {
-            plugin.execute(
+            val result = plugin.execute(
                 ExecutionContext(
                     agentName = "opencode",
                     input = "hello",
@@ -828,7 +885,7 @@ class OpenCodePluginTest : FunSpec({
         }
 
         try {
-            plugin.execute(
+            val result = plugin.execute(
                 ExecutionContext(
                     agentName = "opencode",
                     input = "hello",
@@ -854,6 +911,72 @@ class OpenCodePluginTest : FunSpec({
             capturedEnvironment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"external_directory\": \"deny\"") shouldBe true
             capturedEnvironment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"read\": false") shouldBe true
             Files.exists(workDir.resolve(".opencode").resolve("opencode.json")) shouldBe false
+        } finally {
+            workDir.toFile().deleteRecursively()
+        }
+    }
+
+    test("opencode permission audit logs with allowed action do not fail execution") {
+        val workDir = Files.createTempDirectory("cotor-test-opencode-allowed-permission-")
+        val plugin = OpenCodePlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult = ProcessResult(
+                exitCode = 0,
+                stdout = "",
+                stderr = "",
+                isSuccess = true
+            )
+
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?,
+                onStdoutChunk: ((String) -> Unit)?,
+                onStderrChunk: ((String) -> Unit)?
+            ): ProcessResult {
+                if (command == listOf("opencode", "models")) {
+                    return ProcessResult(
+                        exitCode = 1,
+                        stdout = "",
+                        stderr = "models lookup unavailable",
+                        isSuccess = false
+                    )
+                }
+                onStderrChunk?.invoke(
+                    """service=permission permission=write action={"permission":"write","path":"docs/check.md","action":"allow"} permission.asked"""
+                )
+                return ProcessResult(
+                    exitCode = 0,
+                    stdout = """{"type":"text","text":"completed"}""",
+                    stderr = "",
+                    isSuccess = true
+                )
+            }
+        }
+
+        try {
+            val result = plugin.execute(
+                ExecutionContext(
+                    agentName = "opencode",
+                    input = "hello",
+                    timeout = 1_000,
+                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    environment = emptyMap(),
+                    workingDirectory = workDir
+                ),
+                processManager
+            )
+            result.output shouldBe "completed"
         } finally {
             workDir.toFile().deleteRecursively()
         }

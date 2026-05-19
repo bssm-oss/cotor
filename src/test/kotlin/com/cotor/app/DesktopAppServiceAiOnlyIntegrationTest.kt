@@ -383,18 +383,27 @@ class DesktopAppServiceAiOnlyIntegrationTest : FunSpec({
                         } else {
                             existing
                         }
-                    },
-                    companyRuntimes = seeded.companyRuntimes.map { runtime ->
+                    }
+                )
+            )
+            initialService!!.shutdown()
+            initialService = null
+            val postShutdown = initialHarness.stateStore.load()
+            initialHarness.stateStore.save(
+                postShutdown.copy(
+                    companyRuntimes = postShutdown.companyRuntimes.map { runtime ->
                         if (runtime.companyId == company.id) {
-                            runtime.copy(status = CompanyRuntimeStatus.RUNNING)
+                            runtime.copy(
+                                status = CompanyRuntimeStatus.RUNNING,
+                                manuallyStoppedAt = null,
+                                lastAction = "persisted-running"
+                            )
                         } else {
                             runtime
                         }
                     }
                 )
             )
-            initialService!!.shutdown()
-            initialService = null
 
             val recreatedHarness = createDesktopAppServiceIntegrationHarness(
                 agentResultFactory = {
