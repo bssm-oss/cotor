@@ -20828,6 +20828,35 @@ class DesktopAppService(
                 )
                 return@withLock
             }
+            val newerBlockingTask = state.tasks
+                .filter {
+                    it.issueId == currentIssue.id &&
+                        it.id != task.id &&
+                        it.status in setOf(DesktopTaskStatus.FAILED, DesktopTaskStatus.PARTIAL) &&
+                        it.updatedAt >= currentIssue.updatedAt &&
+                        it.createdAt >= task.createdAt
+                }
+                .maxByOrNull { it.updatedAt }
+            val newerBlockingRun = newerBlockingTask?.let { latestRunForTask(state, it.id) }
+            val staleCompletionAfterIssueBlocked =
+                finalStatus == DesktopTaskStatus.COMPLETED &&
+                    currentIssue.status == IssueStatus.BLOCKED &&
+                    task.createdAt <= currentIssue.updatedAt &&
+                    newerBlockingTask != null &&
+                    !isRecoverableInfrastructureFailure(newerBlockingTask, newerBlockingRun)
+            if (staleCompletionAfterIssueBlocked) {
+                informationalTraceEvents += buildCompanyAutomationTraceEvent(
+                    issue = currentIssue,
+                    goal = state.goals.firstOrNull { it.id == currentIssue.goalId },
+                    oldStatus = currentIssue.status,
+                    newStatus = currentIssue.status,
+                    source = "syncExecutionIssueFromTask",
+                    reason = "Skipped stale task completion because the issue was blocked after that task started.",
+                    latestTask = task,
+                    latestRun = primaryRun
+                )
+                return@withLock
+            }
             val hasPublishMetadata = primaryRun?.publish?.pullRequestUrl != null || primaryRun?.publish?.pullRequestNumber != null
             val mergedReviewQueueItem = state.reviewQueue.firstOrNull {
                 it.issueId == currentIssue.id && it.status == ReviewQueueStatus.MERGED

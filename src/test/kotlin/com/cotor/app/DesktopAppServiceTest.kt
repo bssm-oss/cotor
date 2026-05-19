@@ -8463,6 +8463,31 @@ class DesktopAppServiceTest : FunSpec({
             .map { it.id }
             .toSet()
         val retryAt = System.currentTimeMillis()
+        val staleCompletedTask = AgentTask(
+            id = "stale-completed-remediation-task",
+            workspaceId = remediationIssue.workspaceId,
+            issueId = remediationIssue.id,
+            title = remediationIssue.title,
+            prompt = remediationIssue.description,
+            agents = listOf("codex"),
+            status = DesktopTaskStatus.COMPLETED,
+            createdAt = retryAt - 1_000,
+            updatedAt = retryAt + 1
+        )
+        val staleCompletedRun = AgentRun(
+            id = "stale-completed-remediation-run",
+            taskId = staleCompletedTask.id,
+            workspaceId = remediationIssue.workspaceId,
+            repositoryId = nonRecoverSnapshot.repositories.first().id,
+            agentName = "codex",
+            branchName = "codex/cotor/nonrecoverable-remediation/stale",
+            worktreePath = repoRoot.resolve(".cotor/worktrees/nonrecoverable-remediation/stale").toString(),
+            status = AgentRunStatus.COMPLETED,
+            output = "late stale completion after the remediation issue was blocked",
+            error = null,
+            createdAt = retryAt - 1_000,
+            updatedAt = retryAt + 1
+        )
         stateStore.save(
             nonRecoverSnapshot.copy(
                 issues = nonRecoverSnapshot.issues.map {
@@ -8478,14 +8503,14 @@ class DesktopAppServiceTest : FunSpec({
                         it.issueId in siblingFollowUpIssueIds -> it.copy(status = DesktopTaskStatus.COMPLETED, updatedAt = retryAt)
                         else -> it
                     }
-                },
+                } + staleCompletedTask,
                 runs = nonRecoverSnapshot.runs.map {
                     if (it.taskId in siblingFollowUpTaskIds) {
                         it.copy(status = AgentRunStatus.COMPLETED, updatedAt = retryAt)
                     } else {
                         it
                     }
-                } + failedRun
+                } + failedRun + staleCompletedRun
             )
         )
 
