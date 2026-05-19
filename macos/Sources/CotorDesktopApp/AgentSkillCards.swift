@@ -66,6 +66,12 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
     let roleSummary: String
     let enabled: Bool
     let selectedSkills: [AgentSkillChipRecord]
+    /// Skills that can be launched immediately (SKILL_RUN=AUTO, all required capabilities also AUTO).
+    let runnableSkills: [AgentSkillChipRecord]
+    /// First skill that can be launched without approval; nil when no skill is immediately runnable.
+    let primaryRunnableSkill: AgentSkillChipRecord?
+    /// Per-skill reason why a selected skill is not immediately runnable.
+    let blockedSkillReasons: [String: String]
     let capabilityScopes: [AgentSkillScope]
     let policyChips: [AgentSkillPolicy]
     let hasDisabledCapabilities: Bool
@@ -101,6 +107,39 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
                 displayName: catalogByID[skillID]?.displayName ?? Self.fallbackSkillDisplayName(skillID)
             )
         }
+
+        // Derive runnable skills: SKILL_RUN must be AUTO and all required capabilities must also be AUTO.
+        let skillRunPolicy = settings["SKILL_RUN"].map { Self.policy(for: $0) }
+        var runnableIDs: [String] = []
+        var blockedReasons: [String: String] = [:]
+        for skillID in selectedSkillIDs {
+            let reqs = catalogByID[skillID]?.requiredCapabilities ?? []
+            if skillRunPolicy == .auto {
+                let blockedCap = reqs.first { cap in
+                    let norm = Self.normalizedCapability(cap)
+                    guard let s = settings[norm] else { return false }
+                    return Self.policy(for: s) != .auto
+                }
+                if let cap = blockedCap {
+                    blockedReasons[skillID] = "capability_\(Self.normalizedCapability(cap))_not_auto"
+                } else {
+                    runnableIDs.append(skillID)
+                }
+            } else if skillRunPolicy == .approvalRequired {
+                blockedReasons[skillID] = "approval_required"
+            } else {
+                blockedReasons[skillID] = "not_configured"
+            }
+        }
+        let runnableChips = runnableIDs.map { skillID in
+            AgentSkillChipRecord(
+                id: skillID,
+                displayName: catalogByID[skillID]?.displayName ?? Self.fallbackSkillDisplayName(skillID)
+            )
+        }
+        runnableSkills = runnableChips
+        primaryRunnableSkill = runnableChips.first
+        blockedSkillReasons = blockedReasons
 
         var activeCapabilityKeys = Set<String>()
         for skillID in selectedSkillIDs {
@@ -151,9 +190,9 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
         defaultSkillIDs: Set<String>
     ) -> [String] {
         guard let setting = skillRunSetting, isActive(setting) else { return [] }
-        if setting.skillAllowlist.isEmpty {
-            return defaultSkillIDs.sorted()
-        }
+        // Empty allowlist means "no explicit delegation" — not "all default skills".
+        // An operator must name the skills they want to delegate.
+        guard !setting.skillAllowlist.isEmpty else { return [] }
         return Array(Set(setting.skillAllowlist)).sorted()
     }
 

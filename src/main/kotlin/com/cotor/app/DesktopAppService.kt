@@ -3178,7 +3178,7 @@ class DesktopAppService(
                 objective = run.objective,
                 targetUrl = withMarketingUtm(targetUrl, run.id, channel),
                 inputSummary = marketingInputSummary(run.objective, policy),
-                browserSessionRef = policy.browserSessionRef,
+                browserSessionRef = resolveMarketingSessionRef(policy.browserSessionRef),
                 screenshotPath = marketingScreenshotPath(run.id, channel).toString(),
                 maxRuntimeSeconds = policy.maxRuntimeSeconds
             )
@@ -3414,11 +3414,36 @@ class DesktopAppService(
                 .filter { it.isNotBlank() }
                 .distinct(),
             secretRefs = request.secretRefs.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
-            browserSessionRef = request.browserSessionRef?.trim()?.takeIf { it.isNotBlank() },
+            browserSessionRef = sanitizeBrowserSessionRef(request.browserSessionRef),
             maxRuntimeSeconds = request.maxRuntimeSeconds.coerceAtLeast(15),
             createdAt = existing?.createdAt ?: now,
             updatedAt = now
         )
+    }
+
+    private fun sanitizeBrowserSessionRef(raw: String?): String? {
+        val ref = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        require(ref.startsWith("session://")) {
+            "browserSessionRef must use session:// scheme; raw file paths, file://, profile://, and path traversal are not permitted."
+        }
+        val id = ref.removePrefix("session://")
+        require(id.isNotBlank() && !id.contains("..") && !id.contains('/') && !id.contains('\\')) {
+            "session:// id must not be empty or contain path separators."
+        }
+        return ref
+    }
+
+    private fun resolveMarketingSessionRef(ref: String?): String? {
+        val sessionRef = ref ?: return null
+        if (!sessionRef.startsWith("session://")) return null
+        val id = sessionRef.removePrefix("session://")
+        val sessionsDir = stateStore.appHome()
+            .resolve("runtime")
+            .resolve("marketing-browser")
+            .resolve("sessions")
+        val canonical = sessionsDir.resolve("$id.json").normalize()
+        if (!canonical.startsWith(sessionsDir)) return null
+        return if (canonical.toFile().exists()) canonical.toString() else null
     }
 
     private fun marketingPolicyCapabilitySettings(policy: MarketingDelegationPolicy): Map<CapabilityKey, AgentCapabilitySetting> {
@@ -15332,10 +15357,7 @@ class DesktopAppService(
     private fun sameRepositoryRoot(savedPath: String, repositoryRoot: Path): Boolean =
         Path.of(savedPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
 
-    private fun a2aEndpoint(): String =
-        System.getenv("COTOR_APP_SERVER_URL")?.takeIf { it.isNotBlank() }?.trim()?.removeSuffix("/")
-            ?.let { "$it/api/a2a" }
-            ?: "http://127.0.0.1:8787/api/a2a"
+    private fun a2aEndpoint(): String = DesktopEndpointPolicy.resolveA2aEndpoint()
 
     private fun buildA2aRunEnvironment(
         company: Company?,

@@ -2,9 +2,11 @@ package com.cotor.app
 
 import com.cotor.data.config.ConfigRepository
 import com.cotor.domain.executor.AgentExecutor
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.mockk
 import java.nio.file.Files
@@ -160,6 +162,136 @@ class DesktopAppServiceMarketingTest : FunSpec({
         denied.status shouldBe "DENIED"
         denied.error shouldContain "Requested channels"
         runner.commands.shouldHaveSize(1)
+    }
+
+    test("browserSessionRef raw file path is rejected at policy save time") {
+        val appHome = Files.createTempDirectory("desktop-marketing-session-ref-home")
+        val service = marketingService(appHome, RecordingMarketingBrowserRunner())
+        val company = service.createCompany(name = "Session Ref Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        val request = UpsertMarketingDelegationPolicyRequest(
+            companyId = company.id,
+            agentId = agent.id,
+            allowedDomains = listOf("cms.example.com"),
+            channelAccounts = listOf(MarketingChannelAccount(channel = "web", accountRef = "cms")),
+            browserSessionRef = "/home/user/.config/browser/Default/Cookies"
+        )
+        shouldThrow<IllegalArgumentException> { service.upsertMarketingDelegationPolicy(request) }
+            .message shouldContain "session://"
+    }
+
+    test("browserSessionRef file:// scheme is rejected at policy save time") {
+        val appHome = Files.createTempDirectory("desktop-marketing-session-ref-file-home")
+        val service = marketingService(appHome, RecordingMarketingBrowserRunner())
+        val company = service.createCompany(name = "Session File Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        shouldThrow<IllegalArgumentException> {
+            service.upsertMarketingDelegationPolicy(
+                UpsertMarketingDelegationPolicyRequest(
+                    companyId = company.id,
+                    agentId = agent.id,
+                    allowedDomains = listOf("cms.example.com"),
+                    channelAccounts = listOf(MarketingChannelAccount(channel = "web", accountRef = "cms")),
+                    browserSessionRef = "file:///var/secret/session.json"
+                )
+            )
+        }
+    }
+
+    test("browserSessionRef path traversal in session id is rejected at policy save time") {
+        val appHome = Files.createTempDirectory("desktop-marketing-session-ref-traversal-home")
+        val service = marketingService(appHome, RecordingMarketingBrowserRunner())
+        val company = service.createCompany(name = "Traversal Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        shouldThrow<IllegalArgumentException> {
+            service.upsertMarketingDelegationPolicy(
+                UpsertMarketingDelegationPolicyRequest(
+                    companyId = company.id,
+                    agentId = agent.id,
+                    allowedDomains = listOf("cms.example.com"),
+                    channelAccounts = listOf(MarketingChannelAccount(channel = "web", accountRef = "cms")),
+                    browserSessionRef = "session://../../etc/passwd"
+                )
+            )
+        }
+    }
+
+    test("browserSessionRef session:// scheme with safe id is accepted at policy save time") {
+        val appHome = Files.createTempDirectory("desktop-marketing-session-ref-ok-home")
+        val service = marketingService(appHome, RecordingMarketingBrowserRunner())
+        val company = service.createCompany(name = "Session OK Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        val policy = service.upsertMarketingDelegationPolicy(
+            UpsertMarketingDelegationPolicyRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                allowedDomains = listOf("cms.example.com"),
+                channelAccounts = listOf(MarketingChannelAccount(channel = "web", accountRef = "cms")),
+                browserSessionRef = "session://abc123"
+            )
+        )
+        policy.browserSessionRef shouldBe "session://abc123"
+    }
+
+    test("resolveMarketingSessionRef does not pass path to runner when session file does not exist") {
+        val appHome = Files.createTempDirectory("desktop-marketing-resolve-home")
+        val runner = RecordingMarketingBrowserRunner()
+        val service = marketingService(appHome, runner)
+        val company = service.createCompany(name = "Resolve Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        service.upsertMarketingDelegationPolicy(
+            UpsertMarketingDelegationPolicyRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                allowedDomains = listOf("cms.example.com"),
+                channelAccounts = listOf(MarketingChannelAccount(channel = "web", accountRef = "cms")),
+                dailyPostLimit = 2,
+                browserSessionRef = "session://nonexistent-session-id"
+            )
+        )
+        service.createMarketingRun(
+            MarketingRunRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                objective = "Publish a product update",
+                channels = listOf("web")
+            )
+        )
+        runner.commands.shouldHaveSize(1)
+        runner.commands.single().browserSessionRef shouldBe null
+    }
+
+    test("resolveMarketingSessionRef passes canonical path when session file exists within sessions dir") {
+        val appHome = Files.createTempDirectory("desktop-marketing-resolve-exists-home")
+        val runner = RecordingMarketingBrowserRunner()
+        val service = marketingService(appHome, runner)
+        val sessionsDir = appHome.resolve("runtime/marketing-browser/sessions")
+        Files.createDirectories(sessionsDir)
+        val sessionFile = sessionsDir.resolve("my-session.json")
+        sessionFile.toFile().writeText("{}")
+        val company = service.createCompany(name = "Resolve Exists Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        service.upsertMarketingDelegationPolicy(
+            UpsertMarketingDelegationPolicyRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                allowedDomains = listOf("cms.example.com"),
+                channelAccounts = listOf(MarketingChannelAccount(channel = "web", accountRef = "cms")),
+                dailyPostLimit = 2,
+                browserSessionRef = "session://my-session"
+            )
+        )
+        service.createMarketingRun(
+            MarketingRunRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                objective = "Publish a product update",
+                channels = listOf("web")
+            )
+        )
+        runner.commands.shouldHaveSize(1)
+        runner.commands.single().browserSessionRef shouldNotBe null
+        runner.commands.single().browserSessionRef shouldContain "my-session.json"
     }
 
     test("content and social skill runners default to only their delegated channel class") {

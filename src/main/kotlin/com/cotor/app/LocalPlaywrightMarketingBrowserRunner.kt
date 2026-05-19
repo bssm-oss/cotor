@@ -24,16 +24,17 @@ class LocalPlaywrightMarketingBrowserRunner(
         require(commandAvailability("node") && commandAvailability("npm")) {
             "Marketing browser execution requires node and npm so Playwright can run without storing browser credentials in Cotor."
         }
+        val runtimeDir = appHomeProvider()
+            .resolve("runtime")
+            .resolve("marketing-browser")
+        val inputDir = runtimeDir.resolve("inputs")
+        val scriptPath = runtimeDir.resolve("marketing-runner.js")
+        runtimeDir.createDirectories()
+        inputDir.createDirectories()
+        // Install phase runs with its own 120s minimum and must not be capped by the run-phase timeout.
+        ensurePlaywrightDependency(runtimeDir, command.maxRuntimeSeconds.coerceAtLeast(15))
+        scriptPath.writeText(playwrightRunnerScript)
         withTimeout(command.maxRuntimeSeconds.coerceAtLeast(15) * 1_000L) {
-            val runtimeDir = appHomeProvider()
-                .resolve("runtime")
-                .resolve("marketing-browser")
-            val inputDir = runtimeDir.resolve("inputs")
-            val scriptPath = runtimeDir.resolve("marketing-runner.js")
-            runtimeDir.createDirectories()
-            inputDir.createDirectories()
-            ensurePlaywrightDependency(runtimeDir, command.maxRuntimeSeconds.coerceAtLeast(15))
-            scriptPath.writeText(playwrightRunnerScript)
             val inputPath = Files.createTempFile(inputDir, "marketing-command-", ".json")
             inputPath.writeText(json.encodeToString(MarketingBrowserCommand.serializer(), command))
             val process = ProcessBuilder(

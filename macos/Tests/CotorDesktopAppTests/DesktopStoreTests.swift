@@ -1258,6 +1258,97 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func emptySkillAllowlistProducesNoRunnableSkills() {
+        let agent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "implementation")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "AUTO",
+                skillAllowlist: []
+            )
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"])
+            ]
+        )
+
+        #expect(card.selectedSkills.isEmpty)
+        #expect(card.runnableSkills.isEmpty)
+        #expect(card.primaryRunnableSkill == nil)
+    }
+
+    @Test
+    func delegatedAutoSkillWithSatisfiedCapabilitiesIsRunnable() {
+        let agent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "implementation")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "AUTO",
+                skillAllowlist: ["graphify"]
+            ),
+            "KNOWLEDGE_GRAPH_READ": AgentCapabilitySettingRecord(enabled: true, mode: "AUTO")
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "graphify", displayName: "Repository Mapper", requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"])
+            ]
+        )
+
+        #expect(card.runnableSkills.map(\.id) == ["graphify"])
+        #expect(card.primaryRunnableSkill?.id == "graphify")
+        #expect(card.blockedSkillReasons.isEmpty)
+    }
+
+    @Test
+    func approvalRequiredSkillRunBlocksAllSelectedSkillsFromRunnable() {
+        let agent = agentDefinition(id: "agent-operator", title: "Operator", roleSummary: "marketing")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(
+                enabled: true,
+                mode: "APPROVAL_REQUIRED",
+                skillAllowlist: ["marketing-operator"]
+            )
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "marketing-operator", displayName: "Marketing Operator", requiredCapabilities: ["WEB_PUBLISH"])
+            ]
+        )
+
+        #expect(card.selectedSkills.map(\.id) == ["marketing-operator"])
+        #expect(card.runnableSkills.isEmpty)
+        #expect(card.primaryRunnableSkill == nil)
+        #expect(card.blockedSkillReasons["marketing-operator"] == "approval_required")
+    }
+
+    @Test
+    func skillBlockedByCapabilityNotAutoShowsCapabilityReason() {
+        let agent = agentDefinition(id: "agent-op", title: "Operator", roleSummary: "marketing")
+        let profile = capabilityProfile(agentId: agent.id, settings: [
+            "SKILL_RUN": AgentCapabilitySettingRecord(enabled: true, mode: "AUTO", skillAllowlist: ["browser-smoke"]),
+            "BROWSER_READ": AgentCapabilitySettingRecord(enabled: true, mode: "APPROVAL_REQUIRED")
+        ])
+        let card = AgentSkillCardRecord(
+            agent: agent,
+            profile: profile,
+            skillCatalog: [
+                skillEntry(name: "browser-smoke", displayName: "Browser Tester", requiredCapabilities: ["BROWSER_READ"])
+            ]
+        )
+
+        #expect(card.runnableSkills.isEmpty)
+        #expect(card.primaryRunnableSkill == nil)
+        #expect(card.blockedSkillReasons["browser-smoke"]?.contains("BROWSER_READ") == true)
+    }
+
+    @Test
     func refreshTuiSessionListDoesNotOverwriteSelectedWorkspaceWithFirstSession() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]

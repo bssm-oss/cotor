@@ -207,12 +207,13 @@ class GitWorkspaceService(
      * user's current shell directory. That gives the app a stable location to reopen later.
      */
     suspend fun cloneRepository(url: String): Path {
-        val target = nextCloneTarget(url)
+        val validatedUrl = normalizeGitHubRemoteUrl(url)
+        val target = nextCloneTarget(validatedUrl)
         target.parent?.createDirectories()
         runGit(
             workingDirectory = null,
             "clone",
-            url,
+            validatedUrl,
             target.toString()
         )
         return resolveRepositoryRoot(target)

@@ -49,18 +49,19 @@ class LocalPlaywrightBrowserSkillRunner(
         require(commandAvailability("node") && commandAvailability("npm")) {
             "Browser skill execution requires node and npm so Playwright can run locally."
         }
+        val runtimeDir = appHomeProvider()
+            .resolve("runtime")
+            .resolve("browser-skills")
+        val inputDir = runtimeDir.resolve("inputs")
+        val scriptPath = runtimeDir.resolve("browser-skill-runner.js")
+        runtimeDir.createDirectories()
+        inputDir.createDirectories()
+        // Install phase runs with its own 120s minimum and must not be capped by the run-phase timeout.
+        ensurePlaywrightDependency(runtimeDir, command.maxRuntimeSeconds.coerceAtLeast(15))
+        scriptPath.writeText(browserSkillRunnerScript)
+        val inputPath = Files.createTempFile(inputDir, "browser-skill-command-", ".json")
+        inputPath.writeText(json.encodeToString(BrowserSkillCommand.serializer(), command))
         withTimeout(command.maxRuntimeSeconds.coerceAtLeast(15) * 1_000L) {
-            val runtimeDir = appHomeProvider()
-                .resolve("runtime")
-                .resolve("browser-skills")
-            val inputDir = runtimeDir.resolve("inputs")
-            val scriptPath = runtimeDir.resolve("browser-skill-runner.js")
-            runtimeDir.createDirectories()
-            inputDir.createDirectories()
-            ensurePlaywrightDependency(runtimeDir, command.maxRuntimeSeconds.coerceAtLeast(15))
-            scriptPath.writeText(browserSkillRunnerScript)
-            val inputPath = Files.createTempFile(inputDir, "browser-skill-command-", ".json")
-            inputPath.writeText(json.encodeToString(BrowserSkillCommand.serializer(), command))
             val process = ProcessBuilder("node", scriptPath.toString(), inputPath.toString())
                 .directory(runtimeDir.toFile())
                 .redirectErrorStream(true)

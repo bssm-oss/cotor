@@ -160,7 +160,11 @@
       };
 
       function setStatus(message, tone = 'muted') {
-        statusLeft.innerHTML = `<strong class="${tone}">${message}</strong>`;
+        const el = document.createElement('strong');
+        el.className = tone;
+        el.textContent = message;
+        statusLeft.textContent = '';
+        statusLeft.appendChild(el);
       }
 
       function setMeta(message) {
