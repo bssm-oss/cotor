@@ -161,7 +161,8 @@
 
       function setStatus(message, tone = 'muted') {
         const el = document.createElement('strong');
-        el.className = tone;
+        const allowedTones = new Set(['muted', 'good', 'warn', 'bad']);
+        el.className = allowedTones.has(tone) ? tone : 'muted';
         el.textContent = message;
         statusLeft.textContent = '';
         statusLeft.appendChild(el);

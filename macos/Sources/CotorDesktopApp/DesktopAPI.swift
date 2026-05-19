@@ -140,6 +140,9 @@ struct DesktopAPI {
     }
 
     private static func isLoopbackAppServerURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+            return false
+        }
         let host = url.host?.lowercased() ?? ""
         return host == "127.0.0.1" || host == "localhost" || host == "::1"
     }

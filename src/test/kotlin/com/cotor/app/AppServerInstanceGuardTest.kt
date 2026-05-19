@@ -77,6 +77,30 @@ class AppServerInstanceGuardTest : FunSpec({
         Files.exists(record.metadataPath) shouldBe true
         guard.release()
     }
+
+    test("desktop app-server status requires both live process and reachable endpoint") {
+        val appHome = Files.createTempDirectory("desktop-app-server-status-home")
+        val guard = DesktopAppServerInstanceGuard(appHomeProvider = { appHome })
+        guard.acquire(host = "127.0.0.1", port = 61234)
+
+        val processOnlyStatus = readDesktopAppServerInstanceStatus(
+            appHome = appHome,
+            processAliveChecker = { true },
+            endpointReachableChecker = { _, _ -> false }
+        )
+        processOnlyStatus.active shouldBe false
+        processOnlyStatus.metadata shouldBe null
+
+        val reachableStatus = readDesktopAppServerInstanceStatus(
+            appHome = appHome,
+            processAliveChecker = { true },
+            endpointReachableChecker = { host, port -> host == "127.0.0.1" && port == 61234 }
+        )
+        reachableStatus.active shouldBe true
+        reachableStatus.metadata?.port shouldBe 61234
+
+        guard.release()
+    }
 })
 
 private class IOExceptionFileChannel(private val lockPath: Path) : FileChannel() {

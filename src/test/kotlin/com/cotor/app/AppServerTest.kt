@@ -15,10 +15,12 @@ import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.options
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import io.mockk.clearMocks
@@ -78,6 +80,27 @@ class AppServerTest : FunSpec({
             val response = client.get("/api/app/dashboard")
             response.status shouldBe HttpStatusCode.Unauthorized
             response.bodyAsText() shouldContain "Unauthorized"
+        }
+    }
+
+    test("file origin terminal preflight is allowed for bearer-protected TUI routes") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.options("/api/app/tui/sessions/session-1") {
+                header(HttpHeaders.Origin, "null")
+                header(HttpHeaders.AccessControlRequestMethod, "GET")
+                header(HttpHeaders.AccessControlRequestHeaders, "Authorization")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.headers[HttpHeaders.AccessControlAllowOrigin] shouldBe "null"
         }
     }
 
@@ -302,6 +325,30 @@ class AppServerTest : FunSpec({
 
             response.status shouldBe HttpStatusCode.OK
             response.bodyAsText() shouldContain "\"repositories\":[]"
+        }
+    }
+
+    test("clone repository route returns bad request for invalid remote URL") {
+        coEvery { desktopService.cloneRepository("file:///tmp/local-repo") } throws
+            IllegalArgumentException("Use an existing GitHub repository URL without credentials, for example https://github.com/owner/repo.git")
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/app/repositories/clone") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"url":"file:///tmp/local-repo"}""")
+            }
+
+            response.status shouldBe HttpStatusCode.BadRequest
+            response.bodyAsText() shouldContain "GitHub repository URL"
         }
     }
 
