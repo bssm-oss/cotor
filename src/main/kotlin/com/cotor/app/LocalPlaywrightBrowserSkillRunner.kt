@@ -62,29 +62,34 @@ class LocalPlaywrightBrowserSkillRunner(
         val inputPath = Files.createTempFile(inputDir, "browser-skill-command-", ".json")
         inputPath.writeText(json.encodeToString(BrowserSkillCommand.serializer(), command))
         withTimeout(command.maxRuntimeSeconds.coerceAtLeast(15) * 1_000L) {
-            val process = ProcessBuilder("node", scriptPath.toString(), inputPath.toString())
-                .directory(runtimeDir.toFile())
-                .redirectErrorStream(true)
-                .also { builder ->
-                    builder.environment()["NODE_PATH"] = runtimeDir.resolve("node_modules").toString()
+            var process: Process? = null
+            try {
+                process = ProcessBuilder("node", scriptPath.toString(), inputPath.toString())
+                    .directory(runtimeDir.toFile())
+                    .redirectErrorStream(true)
+                    .also { builder ->
+                        builder.environment()["NODE_PATH"] = runtimeDir.resolve("node_modules").toString()
+                    }
+                    .start()
+                val timeoutSeconds = command.maxRuntimeSeconds.coerceAtLeast(15).toLong()
+                val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+                val output = process.inputStream.bufferedReader().readText().trim()
+                if (!finished) {
+                    destroyProcessTree(process)
+                    error("Browser skill execution timed out after ${timeoutSeconds}s.")
                 }
-                .start()
-            val timeoutSeconds = command.maxRuntimeSeconds.coerceAtLeast(15).toLong()
-            val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-            val output = process.inputStream.bufferedReader().readText().trim()
-            if (!finished) {
-                process.destroyForcibly()
-                error("Browser skill execution timed out after ${timeoutSeconds}s.")
-            }
-            if (process.exitValue() != 0) {
-                error(output.ifBlank { "Browser skill execution failed with exit ${process.exitValue()}." })
-            }
-            runCatching {
-                json.decodeFromString(BrowserSkillResult.serializer(), output.lines().last())
-            }.getOrElse { error ->
-                throw IllegalStateException(
-                    "Browser skill execution did not return a valid result: ${error.message}. Output: $output"
-                )
+                if (process.exitValue() != 0) {
+                    error(output.ifBlank { "Browser skill execution failed with exit ${process.exitValue()}." })
+                }
+                runCatching {
+                    json.decodeFromString(BrowserSkillResult.serializer(), output.lines().last())
+                }.getOrElse { error ->
+                    throw IllegalStateException(
+                        "Browser skill execution did not return a valid result: ${error.message}. Output: $output"
+                    )
+                }
+            } finally {
+                process?.takeIf { it.isAlive }?.let(::destroyProcessTree)
             }
         }
     }
@@ -107,14 +112,18 @@ class LocalPlaywrightBrowserSkillRunner(
             .redirectErrorStream(true)
             .start()
         val installTimeoutSeconds = timeoutSeconds.coerceAtLeast(120).toLong()
-        val finished = process.waitFor(installTimeoutSeconds, TimeUnit.SECONDS)
-        val output = process.inputStream.bufferedReader().readText().trim()
-        if (!finished) {
-            process.destroyForcibly()
-            error("Playwright dependency install timed out after ${installTimeoutSeconds}s.")
-        }
-        if (process.exitValue() != 0) {
-            error(output.ifBlank { "Playwright dependency install failed with exit ${process.exitValue()}." })
+        try {
+            val finished = process.waitFor(installTimeoutSeconds, TimeUnit.SECONDS)
+            val output = process.inputStream.bufferedReader().readText().trim()
+            if (!finished) {
+                destroyProcessTree(process)
+                error("Playwright dependency install timed out after ${installTimeoutSeconds}s.")
+            }
+            if (process.exitValue() != 0) {
+                error(output.ifBlank { "Playwright dependency install failed with exit ${process.exitValue()}." })
+            }
+        } finally {
+            process.takeIf { it.isAlive }?.let(::destroyProcessTree)
         }
     }
 
@@ -222,5 +231,9 @@ private fun browserSkillCommandAvailable(command: String): Boolean =
         val process = ProcessBuilder(command, "--version")
             .redirectErrorStream(true)
             .start()
-        process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0
+        try {
+            process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0
+        } finally {
+            process.takeIf { it.isAlive }?.let(::destroyProcessTree)
+        }
     }.getOrDefault(false)
