@@ -117,7 +117,7 @@ struct AgentSkillCardRecord: Identifiable, Hashable {
             if skillRunPolicy == .auto {
                 let blockedCap = reqs.first { cap in
                     let norm = Self.normalizedCapability(cap)
-                    guard let s = settings[norm] else { return false }
+                    guard let s = settings[norm] else { return true }
                     return Self.policy(for: s) != .auto
                 }
                 if let cap = blockedCap {
