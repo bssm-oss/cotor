@@ -328,16 +328,16 @@ private struct PixelOfficeCanvas: View {
     }
 
     private func drawRoom(context: inout GraphicsContext, size: CGSize) {
-        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.08, green: 0.08, blue: 0.09)))
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(red: 0.10, green: 0.10, blue: 0.12)))
 
         let wall = CGRect(x: 0, y: 0, width: size.width, height: size.height * 0.22)
-        context.fill(Path(wall), with: .color(Color(red: 0.13, green: 0.12, blue: 0.12)))
+        context.fill(Path(wall), with: .color(Color(red: 0.15, green: 0.14, blue: 0.14)))
 
         let backBand = CGRect(x: 0, y: wall.maxY - 16, width: size.width, height: 16)
-        context.fill(Path(backBand), with: .color(Color(red: 0.19, green: 0.17, blue: 0.15).opacity(0.9)))
+        context.fill(Path(backBand), with: .color(Color(red: 0.21, green: 0.19, blue: 0.17).opacity(0.9)))
 
         let floor = CGRect(x: 0, y: wall.maxY, width: size.width, height: size.height - wall.maxY)
-        context.fill(Path(floor), with: .color(Color(red: 0.20, green: 0.18, blue: 0.15)))
+        context.fill(Path(floor), with: .color(Color(red: 0.22, green: 0.20, blue: 0.17)))
 
         let tile: CGFloat = 24
         var y = layout.snapped(floor.minY)
@@ -402,7 +402,7 @@ private struct PixelOfficeCanvas: View {
     private func zonePlate(_ zone: MeetingRoomOfficeZone, size: CGSize, tint: Color, context: inout GraphicsContext) {
         let point = layout.zonePoint(zone)
         let rect = CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height)
-        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.055)))
+        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.10)))
         context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(tint.opacity(0.28)), style: StrokeStyle(lineWidth: 1, dash: [4, 8]))
     }
 
@@ -768,10 +768,14 @@ private struct PixelAgentSprite: View {
                 }
 
                 ZStack(alignment: .topTrailing) {
+                    glowEffect
+                        .zIndex(-1)
                     bodyPixels
                     stateBadge
                         .offset(x: 8, y: -4)
                 }
+
+                miniProgressBar
 
                 VStack(spacing: 1) {
                     Text(shortRole)
@@ -808,6 +812,28 @@ private struct PixelAgentSprite: View {
                 .frame(width: 6, height: 4)
                 .offset(x: -8)
         }
+    }
+
+    private var glowEffect: some View {
+        Circle()
+            .fill(stateTint.opacity(0.15))
+            .frame(width: block * 24, height: block * 24)
+            .blur(radius: block * 2)
+            .opacity(animate ? 0.6 + 0.4 * sin(phase * 3) : 0.3)
+    }
+
+    private var miniProgressBar: some View {
+        GeometryReader { _ in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(ShellPalette.line.opacity(0.3))
+                    .frame(width: block * 10, height: 2)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(stateTint)
+                    .frame(width: CGFloat(agent.progress) * block * 10, height: 2)
+            }
+        }
+        .frame(width: block * 10, height: 2)
     }
 
     private var bodyPixels: some View {
@@ -1075,10 +1101,13 @@ private struct PixelAgentSprite: View {
         if sceneAgent.speechText != nil {
             return true
         }
+        if agent.liveActivity != nil || agent.lastLogLine != nil {
+            return true
+        }
         switch sceneAgent.action {
         case .blocked, .reviewing, .talking, .listening, .approving, .celebrating:
             return true
-        case .typing, .walking, .sitting:
+        case .typing, .walking, .sitting, .thinking, .stretching:
             return agent.visualState == .failed || agent.visualState == .costBlocked
         }
     }
@@ -1144,6 +1173,10 @@ private struct PixelAgentSprite: View {
             return Int(phase * 6).isMultiple(of: 2) ? 1 : -1
         case .talking, .listening, .approving, .reviewing:
             return Int(phase * 3).isMultiple(of: 2) ? 0.5 : 0
+        case .thinking:
+            return Int(phase * 2).isMultiple(of: 2) ? 0.3 : 0
+        case .stretching:
+            return Int(phase * 1.5).isMultiple(of: 2) ? 0.5 : 0
         case .sitting, .blocked, .celebrating:
             return 0
         }
@@ -1224,10 +1257,10 @@ private struct PixelAgentSprite: View {
 
     private var robotBodyTint: Color {
         if lowerRole.contains("ceo") || lowerRole.contains("lead") {
-            return Color(red: 0.58, green: 0.37, blue: 0.22)
+            return Color(red: 0.68, green: 0.37, blue: 0.22)
         }
         if lowerRole.contains("qa") || lowerRole.contains("review") {
-            return Color(red: 0.34, green: 0.48, blue: 0.58)
+            return Color(red: 0.34, green: 0.58, blue: 0.68)
         }
         if lowerRole.contains("ux") || lowerRole.contains("design") || lowerRole.contains("ui") || lowerRole.contains("product") {
             return Color(red: 0.36, green: 0.55, blue: 0.44)

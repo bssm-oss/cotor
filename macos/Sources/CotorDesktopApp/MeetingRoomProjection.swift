@@ -60,6 +60,7 @@ struct MeetingRoomProjectionAgent: Identifiable, Hashable {
     let pullRequestState: String?
     let liveActivity: String?
     let lastLogLine: String?
+    let updatedAt: Int64
 }
 
 struct MeetingRoomFlowItem: Identifiable, Hashable {
@@ -262,7 +263,8 @@ struct MeetingRoomProjection: Hashable {
                 messageCount: messageCount,
                 pullRequestState: issue?.pullRequestState,
                 liveActivity: session?.currentActivity,
-                lastLogLine: session?.lastLogLine
+                lastLogLine: session?.lastLogLine,
+                updatedAt: session?.updatedAt ?? agent.updatedAt
             )
         }
 
@@ -695,6 +697,25 @@ struct MeetingRoomProjection: Hashable {
                     priority: 760
                 )
             )
+            if let activity = session.currentActivity, !activity.isEmpty {
+                events.append(
+                    MeetingRoomInteractionEvent(
+                        id: "activity-\(session.runId)-\(session.updatedAt)",
+                        kind: .workStarted,
+                        title: activity,
+                        detail: session.outputSnippet ?? session.status,
+                        speechText: activity,
+                        fromAgentId: agentId,
+                        toAgentId: nil,
+                        participantAgentIds: [agentId].compactMap { $0 },
+                        issueId: session.issueId,
+                        reviewId: nil,
+                        messageId: nil,
+                        occurredAt: session.updatedAt,
+                        priority: 755
+                    )
+                )
+            }
         }
 
         for review in reviewQueue.sorted(by: { $0.updatedAt > $1.updatedAt }).prefix(8) {
