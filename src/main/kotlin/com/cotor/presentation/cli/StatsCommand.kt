@@ -61,23 +61,25 @@ class StatsCommand :
     private val json = Json { prettyPrint = true }
 
     override fun run() {
+        val targetPipeline = pipelineName
+
         if (clear) {
-            if (pipelineName == null) {
+            if (targetPipeline == null) {
                 echo(red("Please specify the pipeline name to clear stats for."))
                 echo(dim("Usage: cotor stats <pipeline> --clear"))
                 return
             }
 
-            val removed = statsManager.clearStats(pipelineName!!)
+            val removed = statsManager.clearStats(targetPipeline)
             if (removed) {
-                echo(green("✅ Cleared stored statistics for $pipelineName"))
+                echo(green("✅ Cleared stored statistics for $targetPipeline"))
             } else {
-                echo(yellow("No statistics file found for $pipelineName"))
+                echo(yellow("No statistics file found for $targetPipeline"))
             }
             return
         }
 
-        if (pipelineName == null) {
+        if (targetPipeline == null) {
             val allStats = statsManager.listAllStats()
             when (outputFormat) {
                 "json" -> echo(json.encodeToString(allStats))
@@ -88,14 +90,14 @@ class StatsCommand :
         }
 
         history?.let {
-            showHistory(pipelineName!!, it)
+            showHistory(targetPipeline, it)
             return
         }
 
         if (details) {
-            val stageDetails = statsManager.getStatsDetails(pipelineName!!)
+            val stageDetails = statsManager.getStatsDetails(targetPipeline)
             if (stageDetails == null) {
-                echo(yellow("No statistics found for pipeline: $pipelineName"))
+                echo(yellow("No statistics found for pipeline: $targetPipeline"))
                 echo()
                 echo(dim("Run the pipeline first to collect statistics"))
                 return
@@ -107,9 +109,9 @@ class StatsCommand :
                 else -> showStageDetails(stageDetails)
             }
         } else {
-            val summary = statsManager.getStatsSummary(pipelineName!!)
+            val summary = statsManager.getStatsSummary(targetPipeline)
             if (summary == null) {
-                echo(yellow("No statistics found for pipeline: $pipelineName"))
+                echo(yellow("No statistics found for pipeline: $targetPipeline"))
                 echo()
                 echo(dim("Run the pipeline first to collect statistics"))
                 return

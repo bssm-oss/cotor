@@ -99,7 +99,7 @@
 - [ ] `./shell/cotor init --starter-template`를 임시 디렉터리에서 실행한다.
 - [ ] 생성된 `cotor.yaml`과 `pipelines/default.yaml`이 존재한다.
 - [ ] `./shell/cotor validate cotor-project-starter -c cotor.yaml`
-- [ ] `./shell/cotor lint cotor-project-starter -c cotor.yaml`
+- [ ] `./shell/cotor lint -c cotor.yaml`
 - [ ] `./shell/cotor test --help`
 - [ ] `./shell/cotor run cotor-project-starter -c cotor.yaml --output-format text`
 - [ ] invalid config path를 넘겼을 때 user-friendly error가 나온다.
