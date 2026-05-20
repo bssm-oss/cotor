@@ -86,8 +86,8 @@ cotor list -c cotor.yaml
 cotor status
 cotor stats
 cotor checkpoint gc --help
-cotor lint cotor.yaml
-cotor explain cotor.yaml <pipeline>
+cotor lint -c cotor.yaml
+cotor explain <pipeline> -c cotor.yaml
 cotor web --open
 cotor app-server --port 8787
 ```

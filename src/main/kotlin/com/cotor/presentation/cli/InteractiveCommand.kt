@@ -188,18 +188,19 @@ class InteractiveCommand :
         try {
             when {
                 prompt != null -> {
+                    val currentPrompt = prompt ?: error("Prompt option unexpectedly cleared")
                     val outcome = executeLoggedTurn(
                         session = session,
                         chatMode = chatMode,
                         activeAgent = activeAgent,
                         selectedAgents = selectedAgents,
-                        userInput = prompt!!,
+                        userInput = currentPrompt,
                         verbose = false,
                         bootstrapContext = bootstrapContext,
-                        memoryContext = transcript.searchMemory(prompt!!, memorySearchLimit),
+                        memoryContext = transcript.searchMemory(currentPrompt, memorySearchLimit),
                         sessionLogger = sessionLogger
                     )
-                    session.addUser(prompt!!)
+                    session.addUser(currentPrompt)
                     session.addAssistant(outcome.response)
                     transcript.writeMarkdown(session, headerLines)
                     transcript.writeRawText(session)
@@ -210,10 +211,11 @@ class InteractiveCommand :
                 }
 
                 promptFile != null -> {
-                    if (!promptFile!!.exists()) {
-                        throw IllegalArgumentException("Prompt file not found: $promptFile")
+                    val currentPromptFile = promptFile ?: error("Prompt file option unexpectedly cleared")
+                    if (!currentPromptFile.exists()) {
+                        throw IllegalArgumentException("Prompt file not found: $currentPromptFile")
                     }
-                    val prompts = promptFile!!.readLines().map { it.trimEnd() }.filter { it.isNotBlank() }
+                    val prompts = currentPromptFile.readLines().map { it.trimEnd() }.filter { it.isNotBlank() }
                     val outputs = mutableListOf<String>()
                     for (line in prompts) {
                         val outcome = executeLoggedTurn(

@@ -175,9 +175,7 @@ actor EmbeddedBackendLauncher {
         inspector.standardOutput = pipe
         inspector.standardError = Pipe()
         do {
-            try inspector.run()
-            inspector.waitUntilExit()
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let output = try runProcessAndDrainOutput(inspector, outputPipe: pipe)
             return output
                 .split(separator: "\n")
                 .compactMap { line -> Int32? in
@@ -450,14 +448,19 @@ actor EmbeddedBackendLauncher {
         inspector.standardOutput = pipe
         inspector.standardError = Pipe()
         do {
-            try inspector.run()
-            inspector.waitUntilExit()
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let output = try runProcessAndDrainOutput(inspector, outputPipe: pipe)
             return Set(output.split(separator: "\n").map(String.init))
         } catch {
             return []
         }
     }
+}
+
+private func runProcessAndDrainOutput(_ process: Process, outputPipe: Pipe) throws -> String {
+    try process.run()
+    let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return String(data: output, encoding: .utf8) ?? ""
 }
 
 private struct EmbeddedBackendHealthPayload: Decodable {

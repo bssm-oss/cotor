@@ -21,6 +21,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import io.mockk.clearMocks
@@ -1011,6 +1012,28 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"id\":\"tui-1\""
             response.bodyAsText() shouldContain "\"repositoryPath\":\"/tmp/repo\""
             response.bodyAsText() shouldContain "\"status\":\"RUNNING\""
+        }
+    }
+
+    test("tui terminal accepts desktop file origin preflight") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.options("/api/app/tui/sessions/tui-1") {
+                header(HttpHeaders.Origin, "null")
+                header(HttpHeaders.AccessControlRequestMethod, HttpMethod.Get.value)
+                header(HttpHeaders.AccessControlRequestHeaders, HttpHeaders.Authorization)
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.headers[HttpHeaders.AccessControlAllowOrigin] shouldBe "null"
+            response.headers[HttpHeaders.AccessControlAllowHeaders] shouldContain HttpHeaders.Authorization
         }
     }
 

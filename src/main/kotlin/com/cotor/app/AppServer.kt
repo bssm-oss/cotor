@@ -83,6 +83,7 @@ import kotlin.io.path.writeText
  * can stay headless and reusable while the SwiftUI layer focuses on presentation.
  */
 class AppServer : KoinComponent {
+    private val logger = org.slf4j.LoggerFactory.getLogger(AppServer::class.java)
     private val desktopService: DesktopAppService by inject()
     private val tuiSessionService: DesktopTuiSessionService by inject()
     private val durableRuntimeService: DurableRuntimeService by inject()
@@ -103,9 +104,10 @@ class AppServer : KoinComponent {
         token?.takeIf { it.isNotBlank() }?.let {
             persistAppServerToken(it, lockRecord.appHome)
         }
-        println(
-            "[cotor-app-server] acquired desktop app-server instance lock at " +
-                "${lockRecord.lockPath} for app home ${lockRecord.appHome}"
+        logger.info(
+            "[cotor-app-server] acquired desktop app-server instance lock at {} for app home {}",
+            lockRecord.lockPath,
+            lockRecord.appHome
         )
         lateinit var server: io.ktor.server.engine.EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>
         val cleanedUp = AtomicBoolean(false)
@@ -215,13 +217,13 @@ internal class DesktopAppServerInstanceGuard(
                 sleepFn(lockRetryDelayMs)
             }
         } catch (_: OverlappingFileLockException) {
-            openedChannel.close()
+            runCatching { openedChannel.close() }
             throw IllegalStateException(
                 "Desktop app-server lock is already held in this process for $appHome. " +
                     "Lock=$lockPath"
             )
         } catch (error: IOException) {
-            openedChannel.close()
+            runCatching { openedChannel.close() }
             throw IllegalStateException(
                 "Failed to acquire desktop app-server lock at $lockPath for $appHome.",
                 error
@@ -229,29 +231,38 @@ internal class DesktopAppServerInstanceGuard(
         }
         if (openedLock == null) {
             val existing = runCatching { Files.readString(metadataPath) }.getOrDefault("unavailable")
-            openedChannel.close()
+            runCatching { openedChannel.close() }
             throw IllegalStateException(
                 "Another desktop app-server is already active for $appHome. " +
                     "Lock=$lockPath metadata=$existing"
             )
         }
-        val currentRecord = DesktopAppServerLockRecord(
-            appHome = appHome,
-            lockPath = lockPath,
-            metadataPath = metadataPath
-        )
-        val metadata = DesktopAppServerInstanceMetadata(
-            pid = ProcessHandle.current().pid(),
-            host = host,
-            port = port,
-            appHome = appHome.toString(),
-            startedAt = System.currentTimeMillis()
-        )
-        metadataPath.writeText(json.encodeToString(DesktopAppServerInstanceMetadata.serializer(), metadata))
-        channel = openedChannel
-        lock = openedLock
-        record = currentRecord
-        return currentRecord
+        try {
+            val currentRecord = DesktopAppServerLockRecord(
+                appHome = appHome,
+                lockPath = lockPath,
+                metadataPath = metadataPath
+            )
+            val metadata = DesktopAppServerInstanceMetadata(
+                pid = ProcessHandle.current().pid(),
+                host = host,
+                port = port,
+                appHome = appHome.toString(),
+                startedAt = System.currentTimeMillis()
+            )
+            metadataPath.writeText(json.encodeToString(DesktopAppServerInstanceMetadata.serializer(), metadata))
+            channel = openedChannel
+            lock = openedLock
+            record = currentRecord
+            return currentRecord
+        } catch (error: Exception) {
+            runCatching { openedLock.release() }
+            runCatching { openedChannel.close() }
+            throw IllegalStateException(
+                "Failed to write app-server instance metadata at $metadataPath for $appHome.",
+                error
+            )
+        }
     }
 
     fun release() {

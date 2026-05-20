@@ -52,12 +52,13 @@ class ResumeCommand :
             listAvailableRuns()
             return
         }
-        val durableRun = durableRuntimeService.inspectRun(runId!!)
+        val currentRunId = runId ?: return
+        val durableRun = durableRuntimeService.inspectRun(currentRunId)
         if (durableRun != null) {
             renderDurableRun(terminal, durableRun)
             return
         }
-        val checkpoint = checkpointManager.loadCheckpoint(runId!!)
+        val checkpoint = checkpointManager.loadCheckpoint(currentRunId)
         if (checkpoint == null) {
             terminal.println(red("❌ No durable run or legacy checkpoint found for: $runId"))
             terminal.println()
@@ -66,7 +67,7 @@ class ResumeCommand :
         }
         terminal.println(yellow("⚠️  Imported legacy checkpoint; use `cotor resume inspect $runId` for durable view after the next run."))
         terminal.println()
-        printLegacyCheckpoint(runId!!)
+        printLegacyCheckpoint(currentRunId)
     }
 
     private fun listAvailableRuns() {
