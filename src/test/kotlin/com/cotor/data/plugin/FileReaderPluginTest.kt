@@ -16,6 +16,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
+import java.util.UUID
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createSymbolicLinkPointingTo
 import kotlin.io.path.exists
@@ -70,7 +71,7 @@ class FileReaderPluginTest : FunSpec({
     }
 
     test("rejects symlinks that resolve outside the execution root") {
-        val root = Path.of("build/tmp/file-reader-symlink-${System.currentTimeMillis()}")
+        val root = Path.of("build/tmp/file-reader-symlink-${UUID.randomUUID()}")
         root.createDirectories()
         val outside = root.parent.resolve("outside-secret-${System.currentTimeMillis()}.txt")
         outside.writeText("secret")
