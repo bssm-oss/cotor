@@ -85,6 +85,8 @@ fi
 APP_BINARY="${APP_BINARY:-$(find_built_app_binary)}"
 BACKEND_JAR="$(find "$PROJECT_ROOT/build/libs" -name 'cotor-*-all.jar' -type f | head -n 1)"
 RESOURCE_BUNDLES="$(find "$PACKAGE_ROOT/.build" -path '*/release/*.bundle' -type d)"
+DESKTOP_RESOURCE_BUNDLE="CotorDesktop_CotorDesktopApp.bundle"
+DESKTOP_RESOURCE_BUNDLE_PATH="$(find "$PACKAGE_ROOT/.build" -path "*/release/$DESKTOP_RESOURCE_BUNDLE" -type d | head -n 1)"
 
 if [[ -z "$APP_BINARY" || ! -f "$APP_BINARY" ]]; then
     echo "❌ Could not locate the built CotorDesktopApp binary."
@@ -93,6 +95,16 @@ fi
 
 if [[ -z "$BACKEND_JAR" || ! -f "$BACKEND_JAR" ]]; then
     echo "❌ Could not locate the bundled backend jar."
+    exit 1
+fi
+
+if [[ -z "$DESKTOP_RESOURCE_BUNDLE_PATH" || ! -d "$DESKTOP_RESOURCE_BUNDLE_PATH" ]]; then
+    echo "❌ Could not locate the built desktop resource bundle: $DESKTOP_RESOURCE_BUNDLE"
+    exit 1
+fi
+
+if [[ ! -f "$DESKTOP_RESOURCE_BUNDLE_PATH/Brand/CotorHeaderMark.png" || ! -f "$DESKTOP_RESOURCE_BUNDLE_PATH/Terminal/terminal.html" ]]; then
+    echo "❌ Desktop resource bundle is missing required Brand or Terminal assets."
     exit 1
 fi
 
@@ -152,6 +164,8 @@ cp "$BACKEND_JAR" "$APP_BACKEND/cotor-backend.jar"
 if [[ -n "$RESOURCE_BUNDLES" ]]; then
     while IFS= read -r bundle_path; do
         [[ -z "$bundle_path" ]] && continue
+        bundle_name="$(basename "$bundle_path")"
+        rm -rf "$APP_RESOURCES/$bundle_name"
         cp -R "$bundle_path" "$APP_RESOURCES/"
     done <<< "$RESOURCE_BUNDLES"
 fi
