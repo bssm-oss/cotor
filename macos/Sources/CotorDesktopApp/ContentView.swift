@@ -614,7 +614,7 @@ private struct CotorBrandLogo: View {
     }
 
     private static let logoImage: NSImage? = {
-        guard let url = Bundle.module.url(
+        guard let url = DesktopResources.url(
             forResource: "CotorHeaderMark",
             withExtension: "png",
             subdirectory: "Brand"
