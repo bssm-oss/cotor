@@ -35,4 +35,4 @@ pipelines:
 security:
   useWhitelist: true
   allowedExecutables: [claude, codex, gemini]
-  allowedDirectories: [/usr/local/bin, /opt/homebrew/bin,/Users/heodongun/Desktop/cotor/test]
+  allowedDirectories: [/usr/local/bin, /opt/homebrew/bin, /usr/bin, /bin]

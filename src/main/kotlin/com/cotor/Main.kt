@@ -13,11 +13,13 @@ import com.cotor.error.UserFriendlyError
 import com.cotor.presentation.cli.*
 import com.github.ajalt.clikt.core.subcommands
 import org.koin.core.context.stopKoin
+import org.slf4j.LoggerFactory
 
 /**
  * Main entry point for Cotor CLI
  */
 fun main(args: Array<String>) {
+    val logger = LoggerFactory.getLogger("com.cotor.Main")
     // Initialize Koin dependency injection
     initializeCotor()
 
@@ -115,7 +117,7 @@ fun main(args: Array<String>) {
 
         if (args.contains("--debug") || args.contains("-d")) {
             System.err.println("\n🔍 Debug Stack Trace:")
-            e.printStackTrace()
+            logger.error("Debug stack trace", e)
         } else {
             System.err.println("\nℹ️  Run with --debug for detailed stack trace")
         }

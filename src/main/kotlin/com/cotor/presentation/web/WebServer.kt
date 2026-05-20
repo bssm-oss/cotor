@@ -1052,44 +1052,240 @@ private fun companyHtml(): String = """
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cotor Company Console</title>
   <style>
-    body { font-family: ui-sans-serif, system-ui, sans-serif; background: #f3f6fb; color: #172033; margin: 0; padding: 24px; }
-    .card { background: #fff; border: 1px solid #dbe3ef; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
-    button { background: #2563eb; color: white; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; }
-    pre { background: #0f172a; color: #dbeafe; padding: 12px; border-radius: 12px; overflow: auto; }
-    code { background: #e7eef8; padding: 2px 6px; border-radius: 6px; }
+    :root {
+      color-scheme: dark;
+      --bg: #08090a;
+      --panel: #0f1011;
+      --panel-alt: #17191c;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --text: #f7f8f8;
+      --muted: #8a8f98;
+      --soft: #d0d6e0;
+      --accent: #5e6ad2;
+      --success: #27a644;
+      --warning: #ff9f0a;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Inter Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-feature-settings: "cv01", "ss03";
+    }
+    main { width: min(1180px, calc(100vw - 32px)); margin: 0 auto; padding: 28px 0 40px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 40px); line-height: 1.08; font-weight: 510; letter-spacing: 0; }
+    p { margin: 0; color: var(--muted); line-height: 1.55; }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 9px 14px;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 510;
+    }
+    button:hover { background: #7170ff; }
+    button:focus-visible { outline: 2px solid #828fff; outline-offset: 2px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .status { color: var(--soft); font-size: 13px; margin-top: 8px; min-height: 20px; }
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+    .metric { background: var(--panel-alt); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-height: 86px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+    .metric strong { display: block; font-size: 28px; line-height: 1; font-weight: 510; letter-spacing: 0; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr); gap: 16px; align-items: start; }
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .section-title h2 { margin: 0; font-size: 16px; line-height: 1.3; font-weight: 590; letter-spacing: 0; }
+    .count { color: var(--muted); font-size: 12px; }
+    .list { display: grid; gap: 8px; }
+    .row { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.02); }
+    .row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .row-title { min-width: 0; color: var(--text); font-weight: 510; overflow-wrap: anywhere; }
+    .meta { color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 3px 8px; color: var(--soft); font-size: 12px; white-space: nowrap; }
+    .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--success); }
+    .dot.warn { background: var(--warning); }
+    .dot.danger { background: var(--danger); }
+    .empty { color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 8px; padding: 16px; text-align: center; }
+    .endpoints code { display: block; color: var(--soft); background: rgba(255,255,255,0.03); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0; overflow-wrap: anywhere; }
+    @media (max-width: 820px) {
+      header { display: block; }
+      header button { margin-top: 14px; width: 100%; }
+      .metric-grid, .layout { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <h1>Cotor Company Console</h1>
-  <div class="card">
-    <p>Use this console to inspect company state and runtime activity.</p>
-    <button onclick="loadDashboard()">Load Dashboard</button>
-  </div>
-  <div class="card">
-    <strong>Available endpoints</strong>
-    <pre>/api/company/dashboard
-/api/company/companies
-/api/company/companies/{companyId}
-/api/company/companies/{companyId}/dashboard
-/api/company/companies/{companyId}/agents
-/api/company/companies/{companyId}/agents/batch
-/api/company/companies/{companyId}/goals
-/api/company/companies/{companyId}/issues
-/api/company/companies/{companyId}/review-queue
-/api/company/companies/{companyId}/runtime
-/api/company/issues/{issueId}/delegate
-/api/company/issues/{issueId}/run
-/api/company/review/{itemId}/merge</pre>
-  </div>
-  <div class="card">
-    <pre id="output">Press "Load Dashboard" to fetch /api/company/dashboard</pre>
-  </div>
+  <main>
+    <header>
+      <div>
+        <h1>Cotor Company Console</h1>
+        <p>Inspect the local company runtime without dumping the full API payload or exposing local machine paths.</p>
+        <div id="status" class="status">Load the dashboard to inspect current company state.</div>
+      </div>
+      <button onclick="loadDashboard()">Load Dashboard</button>
+    </header>
+
+    <section class="metric-grid" aria-label="Dashboard summary">
+      <div class="metric"><span>Companies</span><strong id="metricCompanies">0</strong></div>
+      <div class="metric"><span>Goals</span><strong id="metricGoals">0</strong></div>
+      <div class="metric"><span>Issues</span><strong id="metricIssues">0</strong></div>
+      <div class="metric"><span>Reviews</span><strong id="metricReviews">0</strong></div>
+    </section>
+
+    <section class="layout">
+      <div class="card">
+        <div class="section-title">
+          <h2>Companies</h2>
+          <span id="companyCount" class="count">0 total</span>
+        </div>
+        <div id="companiesList" class="list"><div class="empty">No dashboard data loaded.</div></div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">
+          <h2>Open Issues</h2>
+          <span id="issueCount" class="count">0 total</span>
+        </div>
+        <div id="issuesList" class="list"><div class="empty">No dashboard data loaded.</div></div>
+      </div>
+    </section>
+
+    <section class="card endpoints" style="margin-top:16px;">
+      <div class="section-title"><h2>Available Endpoints</h2></div>
+      <code>/api/company/dashboard</code>
+      <code>/api/company/companies</code>
+      <code>/api/company/companies/{companyId}/dashboard</code>
+      <code>/api/company/companies/{companyId}/issues</code>
+      <code>/api/company/companies/{companyId}/runtime</code>
+      <code>/api/company/issues/{issueId}/run</code>
+      <code>/api/company/review/{itemId}/merge</code>
+    </section>
+  </main>
   <script>
     ${webFetchHeaders()}
+    function setText(id, text) {
+      document.getElementById(id).textContent = String(text);
+    }
+    function asList(value) {
+      return Array.isArray(value) ? value : [];
+    }
+    function leaf(path) {
+      if (!path) return "No folder";
+      const parts = String(path).split("/").filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : "/";
+    }
+    function clearAndRender(id, items, emptyText, renderer) {
+      const node = document.getElementById(id);
+      node.textContent = "";
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = emptyText;
+        node.appendChild(empty);
+        return;
+      }
+      items.forEach(item => node.appendChild(renderer(item)));
+    }
+    function pill(text, tone) {
+      const badge = document.createElement("span");
+      badge.className = "pill";
+      const dot = document.createElement("span");
+      dot.className = tone === "danger" ? "dot danger" : tone === "warn" ? "dot warn" : "dot";
+      badge.appendChild(dot);
+      badge.appendChild(document.createTextNode(text || "UNKNOWN"));
+      return badge;
+    }
+    function isOpenStatus(status) {
+      return !["DONE", "CANCELED", "COMPLETED"].includes(String(status || "").toUpperCase());
+    }
+    function toneForStatus(status) {
+      const normalized = String(status || "").toUpperCase();
+      if (["BLOCKED", "FAILED", "CANCELED"].includes(normalized)) return "danger";
+      if (["WAITING_FOR_APPROVAL", "WAITING_CI", "IN_REVIEW", "READY_FOR_CEO"].includes(normalized)) return "warn";
+      return "ok";
+    }
+    function row(title, badgeText, badgeTone, metaLines) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "row";
+      const head = document.createElement("div");
+      head.className = "row-head";
+      const titleNode = document.createElement("div");
+      titleNode.className = "row-title";
+      titleNode.textContent = title || "Untitled";
+      head.appendChild(titleNode);
+      head.appendChild(pill(badgeText, badgeTone));
+      wrapper.appendChild(head);
+      metaLines.filter(Boolean).forEach(line => {
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = line;
+        wrapper.appendChild(meta);
+      });
+      return wrapper;
+    }
+    function renderDashboard(data) {
+      const companies = asList(data.companies);
+      const goals = asList(data.goals);
+      const issues = asList(data.issues);
+      const openGoals = goals.filter(goal => isOpenStatus(goal.status));
+      const openIssues = issues.filter(issue => isOpenStatus(issue.status));
+      const reviewQueue = asList(data.reviewQueue);
+      setText("metricCompanies", companies.length);
+      setText("metricGoals", openGoals.length);
+      setText("metricIssues", openIssues.length);
+      setText("metricReviews", reviewQueue.length);
+      setText("companyCount", companies.length + " total");
+      setText("issueCount", openIssues.length + " open");
+      clearAndRender("companiesList", companies.slice(0, 8), "No companies found.", company => {
+        const runtime = data.runtime && data.runtime.companyId === company.id ? data.runtime : {};
+        const status = runtime.status || runtime.lifecycleState || runtime.statusMessage || (company.autonomyEnabled ? "AUTONOMY_ON" : "MANUAL");
+        return row(
+          company.name,
+          status,
+          toneForStatus(status),
+          [
+            "branch: " + (company.defaultBaseBranch || "master") + " · backend: " + (company.backendKind || "LOCAL_COTOR"),
+            runtime.lastAction ? "runtime: " + runtime.lastAction : null,
+            "folder: " + leaf(company.rootPath)
+          ]
+        );
+      });
+      clearAndRender("issuesList", openIssues.slice(0, 10), "No open issues found.", issue => {
+        return row(
+          issue.title,
+          issue.status,
+          toneForStatus(issue.status),
+          [
+            "kind: " + (issue.kind || "execution") + " · priority: " + (issue.priority ?? 0),
+            issue.transitionReason || issue.providerBlockReason || issue.runtimeDisposition,
+            issue.pullRequestUrl ? "PR: " + issue.pullRequestUrl : null
+          ]
+        );
+      });
+    }
     async function loadDashboard() {
-      const response = await fetch('/api/company/dashboard', { headers: webHeaders() });
-      const data = await response.json();
-      document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+      setText("status", "Loading dashboard...");
+      try {
+        const response = await fetch('/api/company/dashboard', { headers: webHeaders() });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+        renderDashboard(data);
+        setText("status", "Dashboard loaded from /api/company/dashboard.");
+      } catch (error) {
+        setText("status", "Dashboard load failed: " + error.message);
+      }
     }
   </script>
 </body>

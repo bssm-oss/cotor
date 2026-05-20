@@ -243,6 +243,31 @@ struct ModelsTests {
     }
 
     @Test
+    func marketingActionDecodesLegacyRecordsWithoutActionField() throws {
+        let data = Data("""
+        {
+          "id": "action-1",
+          "channel": "web",
+          "targetUrl": "http://127.0.0.1:58973",
+          "inputSummary": "web form",
+          "postedUrl": "http://127.0.0.1:58973/published",
+          "screenshotPath": null,
+          "utm": null,
+          "status": "SUCCEEDED",
+          "idempotencyKey": "key",
+          "createdAt": 1,
+          "updatedAt": 2,
+          "error": null
+        }
+        """.utf8)
+
+        let action = try JSONDecoder().decode(MarketingActionRecord.self, from: data)
+
+        #expect(action.action == "web")
+        #expect(action.channel == "web")
+    }
+
+    @Test
     func companyEventLineDecoderDropsMalformedLineAndKeepsValidEventsDecodable() throws {
         let invalid = DesktopAPI.decodeCompanyEventLine("{not-json")
         let valid = DesktopAPI.decodeCompanyEventLine("""
@@ -297,6 +322,7 @@ struct ModelsTests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DesktopAPICapturingURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
         var capturedPath: String?
         DesktopAPICapturingURLProtocol.requestHandler = { request in
             capturedPath = request.url?.path

@@ -54,6 +54,7 @@ class EnhancedRunCommand :
         help = "Run a pipeline with real-time monitoring"
     ),
     KoinComponent {
+    private val logger = org.slf4j.LoggerFactory.getLogger(EnhancedRunCommand::class.java)
     private val configRepository: ConfigRepository by inject()
     private val agentRegistry: AgentRegistry by inject()
     private val orchestrator: PipelineOrchestrator by inject()
@@ -204,7 +205,7 @@ class EnhancedRunCommand :
         } catch (e: Exception) {
             echo("Error: ${e.message}", err = true)
             if (verbose) {
-                e.printStackTrace()
+                logger.error("Unexpected error in run command", e)
             }
             throw e
         }
@@ -269,6 +270,7 @@ class ValidateCommand :
         help = "Validate pipeline configuration"
     ),
     KoinComponent {
+    private val logger = org.slf4j.LoggerFactory.getLogger(ValidateCommand::class.java)
     private val configRepository: ConfigRepository by inject()
     private val agentRegistry: AgentRegistry by inject()
 
@@ -341,7 +343,7 @@ class ValidateCommand :
             throw e
         } catch (e: Exception) {
             echo("Error: ${e.message}", err = true)
-            e.printStackTrace()
+            logger.error("Unexpected error in validate command", e)
             throw e
         }
     }

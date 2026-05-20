@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.reflect.KClass
@@ -54,6 +55,7 @@ interface EventBus {
 class CoroutineEventBus(
     capacity: Int = DEFAULT_CAPACITY
 ) : EventBus, AutoCloseable {
+    private val logger = LoggerFactory.getLogger(CoroutineEventBus::class.java)
     private val subscribers = ConcurrentHashMap<KClass<out CotorEvent>, MutableList<EventSubscription>>()
     private val eventChannel = Channel<CotorEvent>(capacity)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -95,7 +97,7 @@ class CoroutineEventBus(
                     subscription.handler(event)
                 } catch (e: Exception) {
                     // Log error but continue processing other handlers
-                    println("Error processing event: ${e.message}")
+                    logger.error("Error processing event: ${event::class.simpleName}", e)
                 }
             }
         }

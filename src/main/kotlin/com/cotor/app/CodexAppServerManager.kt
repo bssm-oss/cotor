@@ -32,7 +32,8 @@ class CodexAppServerManager {
         val process: Process,
         val baseUrl: String,
         val port: Int,
-        val startedAt: Long
+        val startedAt: Long,
+        val logDir: Path? = null
     )
 
     internal data class PreparedManagedLaunch(
@@ -127,7 +128,8 @@ class CodexAppServerManager {
                     process = process,
                     baseUrl = baseUrl,
                     port = port,
-                    startedAt = System.currentTimeMillis()
+                    startedAt = System.currentTimeMillis(),
+                    logDir = preparedLaunch.logDir
                 )
                 processes[companyId] = launched
                 failures.remove(companyId)
@@ -172,10 +174,15 @@ class CodexAppServerManager {
 
     fun stop(companyId: String) {
         synchronized(this) {
-            val process = processes.remove(companyId)?.process ?: return
-            process.destroy()
-            if (process.isAlive) {
-                process.destroyForcibly()
+            val managed = processes.remove(companyId) ?: return
+            managed.process.destroy()
+            if (managed.process.isAlive) {
+                managed.process.destroyForcibly()
+            }
+            managed.logDir?.let { logDir ->
+                runCatching {
+                    Files.walk(logDir).sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
+                }
             }
         }
     }
