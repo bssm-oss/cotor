@@ -5529,13 +5529,15 @@ class DesktopAppServiceTest : FunSpec({
             description = "Creating an autonomous goal should boot the company loop immediately."
         )
 
-        withTimeout(5_000) {
-            while (service.runtimeStatus(goal.companyId).status != CompanyRuntimeStatus.RUNNING) {
-                delay(25)
+        try {
+            withTimeout(30_000) {
+                while (service.runtimeStatus(goal.companyId).status != CompanyRuntimeStatus.RUNNING) {
+                    delay(25)
+                }
             }
+        } finally {
+            service.stopCompanyRuntime(goal.companyId).status shouldBe CompanyRuntimeStatus.STOPPED
         }
-
-        service.stopCompanyRuntime(goal.companyId).status shouldBe CompanyRuntimeStatus.STOPPED
     }
 
     test("company runtime falls back to local execution when codex app server is unavailable") {

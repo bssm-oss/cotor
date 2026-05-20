@@ -35,6 +35,7 @@ class ValidateCommandTest : FunSpec({
     val agentRegistry = InMemoryAgentRegistry()
 
     beforeSpec {
+        runCatching { stopKoin() }
         startKoin {
             modules(
                 module {

@@ -44,6 +44,7 @@ import kotlin.io.path.writeText
 
 class InteractiveCommandTest : FunSpec({
     beforeSpec {
+        runCatching { stopKoin() }
         startKoin {
             modules(
                 module {
