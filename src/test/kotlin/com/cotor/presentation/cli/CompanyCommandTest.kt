@@ -24,6 +24,7 @@ class CompanyCommandTest : FunSpec({
     val service = mockk<DesktopAppService>(relaxed = true)
 
     beforeSpec {
+        runCatching { stopKoin() }
         startKoin {
             modules(
                 module {

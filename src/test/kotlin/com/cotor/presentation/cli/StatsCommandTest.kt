@@ -25,6 +25,7 @@ class StatsCommandTest : FunSpec({
     val statsManager = mockk<StatsManager>()
 
     beforeSpec {
+        runCatching { stopKoin() }
         startKoin {
             modules(
                 module {

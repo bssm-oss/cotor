@@ -42,6 +42,7 @@ class CliGoldenSnapshotTest : FunSpec({
     lateinit var statsManager: StatsManager
 
     beforeSpec {
+        runCatching { stopKoin() }
         configRepository = mockk()
         agentRegistry = mockk()
         statsManager = mockk()

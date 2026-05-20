@@ -32,6 +32,7 @@ class LintCommandTest : FunSpec({
     val configRepository = mockk<ConfigRepository>()
 
     beforeSpec {
+        runCatching { stopKoin() }
         startKoin {
             modules(
                 module {
