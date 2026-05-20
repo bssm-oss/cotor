@@ -56,7 +56,10 @@ class WebServerTest : FunSpec({
             val response = client.get("/company")
             response.status.value shouldBe 200
             response.bodyAsText() shouldContain "Cotor Company Console"
+            response.bodyAsText() shouldContain "Companies"
+            response.bodyAsText() shouldContain "Open Issues"
             response.bodyAsText() shouldContain "/api/company/dashboard"
+            response.bodyAsText() shouldNotContain "JSON.stringify(data, null, 2)"
         }
     }
 

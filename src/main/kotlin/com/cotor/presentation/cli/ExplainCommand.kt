@@ -30,6 +30,7 @@ class ExplainCommand :
         help = "Explain the execution plan of a pipeline"
     ),
     KoinComponent {
+    private val logger = org.slf4j.LoggerFactory.getLogger(ExplainCommand::class.java)
     private val configRepository: ConfigRepository by inject()
 
     private val configPath by option("--config", "-c", help = "Path to configuration file")
@@ -64,7 +65,7 @@ class ExplainCommand :
             echo(e.message, err = true)
         } catch (e: Exception) {
             echo("Error: ${e.message}", err = true)
-            e.printStackTrace()
+            logger.error("Unexpected error in explain command", e)
         }
     }
 }

@@ -5,9 +5,9 @@ pipelines:
     stages:
       - id: brief
         agent:
-          name: codex
+          name: example-agent
         input: "Summarize the goal of cotor-project and propose the next implementation step."
       - id: refine
         agent:
-          name: codex
+          name: example-agent
         input: "Take the previous result and turn it into a concise execution checklist."

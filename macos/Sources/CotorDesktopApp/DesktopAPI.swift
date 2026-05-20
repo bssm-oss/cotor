@@ -104,7 +104,9 @@ struct DesktopAPI {
     }
 
     init() {
-        let fallbackURL = URL(string: "http://127.0.0.1:8787")!
+        guard let fallbackURL = URL(string: "http://127.0.0.1:8787") else {
+            fatalError("Invalid fallback URL")
+        }
         let env = ProcessInfo.processInfo.environment
         let (validatedURL, resolvedToken) = DesktopAPI.validatedAppServerConfiguration(
             envURL: env["COTOR_APP_SERVER_URL"],

@@ -6,7 +6,7 @@ This scaffold was generated for `cotor-project`.
 
 - Pipeline name: `cotor-project-starter`
 - Execution mode: `SEQUENTIAL`
-- Agent: `codex`
+- Agent: `example-agent`
 - Stages:
   - `brief`: generate a short plan for the project
   - `refine`: turn the brief into an executable checklist

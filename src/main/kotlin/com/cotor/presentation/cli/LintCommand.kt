@@ -34,6 +34,7 @@ class LintCommand :
         help = "Statically check configuration for schema violations and best practices."
     ),
     KoinComponent {
+    private val logger = org.slf4j.LoggerFactory.getLogger(LintCommand::class.java)
     private val configRepository: ConfigRepository by inject()
     private val linter = Linter()
 
@@ -75,7 +76,7 @@ class LintCommand :
             throw ProgramResult(1)
         } catch (e: Exception) {
             terminal.println(red("An unexpected error occurred: ${e.message ?: "Unknown error"}"))
-            e.printStackTrace()
+            logger.error("Unexpected error in lint command", e)
             throw ProgramResult(1)
         }
     }

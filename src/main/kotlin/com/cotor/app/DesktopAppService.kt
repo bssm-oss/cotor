@@ -2041,9 +2041,42 @@ class DesktopAppService(
         val latestQueueItem = state.reviewQueue
             .filter { it.issueId == issueId }
             .maxByOrNull { it.updatedAt }
-        return state.tasks
+        val issueTasks = state.tasks
             .filter { it.issueId == issueId }
             .sortedByDescending { it.updatedAt }
+
+        if (issueTasks.isEmpty() && issue.status in setOf(IssueStatus.BLOCKED, IssueStatus.WAITING_FOR_APPROVAL)) {
+            val agentName = assigneeProfile?.executionAgentName ?: "runtime"
+            val agentDefinition = resolveCompanyAgentDefinition(state, issue, assigneeProfile, agentName)
+            val reason = listOfNotNull(
+                issue.providerBlockReason,
+                issue.transitionReason,
+                latestQueueItem?.providerBlockReason,
+                latestQueueItem?.checksSummary
+            ).firstOrNull { it.isNotBlank() } ?: "Issue is blocked before an agent task could start."
+            return listOf(
+                IssueAgentExecutionDetail(
+                    roleName = assigneeProfile?.roleName
+                        ?: agentDefinition?.title
+                        ?: "Runtime Gate",
+                    agentName = agentName,
+                    agentCli = agentDefinition?.agentCli ?: assigneeProfile?.executionAgentName ?: agentName,
+                    model = agentDefinition?.model ?: BuiltinAgentCatalog.get(agentName)?.parameters?.get("model"),
+                    assignedPrompt = reason,
+                    taskId = "blocked-${issue.id}",
+                    taskStatus = issue.status.name,
+                    runStatus = issue.runtimeDisposition,
+                    stderr = reason,
+                    branchName = issue.branchName,
+                    pullRequestUrl = latestQueueItem?.pullRequestUrl ?: issue.pullRequestUrl,
+                    updatedAt = issue.updatedAt,
+                    publishSummary = buildIssueExecutionPublishSummary(issue, latestQueueItem, run = null)
+                        ?: issue.blockedBy.takeIf { it.isNotEmpty() }?.joinToString(prefix = "Blocked by issue(s): ")
+                )
+            )
+        }
+
+        return issueTasks
             .flatMap { task ->
                 val latestRuns = state.runs
                     .filter { it.taskId == task.id }
@@ -9449,6 +9482,7 @@ class DesktopAppService(
             val blockedIssue = currentIssue.copy(
                 status = IssueStatus.BLOCKED,
                 blockedBy = (currentIssue.blockedBy + infraIssue.id).distinct(),
+                providerBlockReason = reason,
                 transitionReason = reason,
                 updatedAt = now
             )
