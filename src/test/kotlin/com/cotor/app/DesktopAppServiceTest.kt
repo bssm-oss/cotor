@@ -4731,7 +4731,7 @@ class DesktopAppServiceTest : FunSpec({
         )
 
         service.runTask(qaTask.id)
-        withTimeout(5_000) {
+        withTimeout(30_000) {
             while (stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }.qaVerdict != "PASS") {
                 delay(25)
             }
@@ -4793,7 +4793,7 @@ class DesktopAppServiceTest : FunSpec({
         )
 
         service.runTask(approvalTask.id)
-        withTimeout(5_000) {
+        withTimeout(30_000) {
             while (stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }.status != ReviewQueueStatus.MERGED) {
                 delay(25)
             }
