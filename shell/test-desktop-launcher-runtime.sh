@@ -83,6 +83,8 @@ ps() {
     printf '%s\n' \
       "123 $BINARY_PATH" \
       "124 /bin/bash $SCRIPT_DIR/CotorDesktopLauncher" \
+      "126 /bin/bash /private/tmp/old/Cotor Desktop.app/Contents/MacOS/CotorDesktopLauncher" \
+      "127 /private/tmp/old/Cotor Desktop.app/Contents/MacOS/CotorDesktopBinary" \
       "125 /usr/bin/other-process"
     return 0
   fi
@@ -101,7 +103,11 @@ sleep() {
 
 terminate_existing_desktop_instances
 
-if [[ "$terminated_instances" != *"123"* || "$terminated_instances" != *"124"* || "$terminated_instances" == *"125"* ]]; then
+if [[ "$terminated_instances" != *"123"* ||
+  "$terminated_instances" != *"124"* ||
+  "$terminated_instances" != *"126"* ||
+  "$terminated_instances" != *"127"* ||
+  "$terminated_instances" == *"125"* ]]; then
   echo "terminate_existing_desktop_instances did not target only old desktop instances"
   exit 1
 fi

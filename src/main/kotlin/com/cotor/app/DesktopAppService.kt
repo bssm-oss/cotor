@@ -13012,6 +13012,29 @@ class DesktopAppService(
         )
     }
 
+    private fun isStaleCompletionBlockedByNewerNonRecoverableFailure(
+        task: AgentTask,
+        issue: CompanyIssue,
+        issueTasks: List<AgentTask>,
+        latestRunsByTaskId: Map<String, AgentRun>
+    ): Boolean {
+        if (task.status != DesktopTaskStatus.COMPLETED || issue.status != IssueStatus.BLOCKED) {
+            return false
+        }
+        if (task.createdAt > issue.updatedAt) {
+            return false
+        }
+        val newerBlockingTask = issueTasks
+            .filter {
+                it.id != task.id &&
+                    it.status in setOf(DesktopTaskStatus.FAILED, DesktopTaskStatus.PARTIAL) &&
+                    it.updatedAt >= issue.updatedAt
+            }
+            .maxByOrNull { it.updatedAt }
+            ?: return false
+        return !isRecoverableInfrastructureFailure(newerBlockingTask, latestRunsByTaskId[newerBlockingTask.id])
+    }
+
     private suspend fun reconcileTerminalIssueStates(companyId: String): Int {
         val taskIdsToSync = mutableListOf<String>()
         val informationalTraceEvents = mutableListOf<CompanyAutomationTraceEvent>()
@@ -13229,6 +13252,15 @@ class DesktopAppService(
                 val issueTasks = tasksByIssueId[issue.id].orEmpty().sortedByDescending { it.updatedAt }
                 val latestRun = latestTask?.let { latestRunsByTaskId[it.id] }
                 val retryDecision = resolveRecoverableRetryDecision(issueTasks, latestRunsByTaskId, now)
+                val staleCompletionAfterIssueBlocked =
+                    latestTask?.let { task ->
+                        isStaleCompletionBlockedByNewerNonRecoverableFailure(
+                            task = task,
+                            issue = issue,
+                            issueTasks = issueTasks,
+                            latestRunsByTaskId = latestRunsByTaskId
+                        )
+                    } == true
                 val recoverableRetryPending =
                     latestTask != null &&
                         latestTask.status != DesktopTaskStatus.RUNNING &&
@@ -13287,6 +13319,7 @@ class DesktopAppService(
                         issue.status in setOf(IssueStatus.PLANNED, IssueStatus.BACKLOG, IssueStatus.DELEGATED)
                 val nextStatus = when {
                     staleTerminalFailureAlreadySuperseded -> issue.status
+                    staleCompletionAfterIssueBlocked -> issue.status
                     executionSatisfiedByMergedPullRequest -> IssueStatus.DONE
                     approvalSatisfiedByMergedExecution -> IssueStatus.DONE
                     supersededBySuccessfulRetry -> IssueStatus.CANCELED
@@ -13305,7 +13338,19 @@ class DesktopAppService(
                     else -> issue.status
                 }
                 if (nextStatus == issue.status) {
-                    if (recoverableRetryPending) {
+                    if (staleCompletionAfterIssueBlocked) {
+                        informationalTraceEvents += buildCompanyAutomationTraceEvent(
+                            issue = issue,
+                            goal = goal,
+                            oldStatus = issue.status,
+                            newStatus = issue.status,
+                            source = "normalizeCompanyAutomationState",
+                            reason = "Skipped stale task completion because the issue was blocked after that task started.",
+                            latestTask = latestTask,
+                            latestRun = latestRun,
+                            retryEligible = false
+                        )
+                    } else if (recoverableRetryPending) {
                         informationalTraceEvents += buildCompanyAutomationTraceEvent(
                             issue = issue,
                             goal = goal,
@@ -21393,9 +21438,13 @@ class DesktopAppService(
         stateMutex.withLock {
             val state = stateStore.load()
             val currentIssue = state.issues.firstOrNull { it.id == issue.id } ?: return@withLock
+            val issueTasks = state.tasks.filter { it.issueId == currentIssue.id }
+            val latestRunsByTaskId = state.runs
+                .groupBy { it.taskId }
+                .mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! }
             val retryDecision = resolveRecoverableRetryDecision(
-                state.tasks.filter { it.issueId == currentIssue.id },
-                state.runs.groupBy { it.taskId }.mapValues { (_, runs) -> runs.maxByOrNull { it.updatedAt }!! },
+                issueTasks,
+                latestRunsByTaskId,
                 now
             )
             val recoverableRetryPending =
@@ -21434,22 +21483,13 @@ class DesktopAppService(
                 }
                 return@withLock
             }
-            val newerBlockingTask = state.tasks
-                .filter {
-                    it.issueId == currentIssue.id &&
-                        it.id != task.id &&
-                        it.status in setOf(DesktopTaskStatus.FAILED, DesktopTaskStatus.PARTIAL) &&
-                        it.updatedAt >= currentIssue.updatedAt &&
-                        it.createdAt >= task.createdAt
-                }
-                .maxByOrNull { it.updatedAt }
-            val newerBlockingRun = newerBlockingTask?.let { latestRunForTask(state, it.id) }
             val staleCompletionAfterIssueBlocked =
-                finalStatus == DesktopTaskStatus.COMPLETED &&
-                    currentIssue.status == IssueStatus.BLOCKED &&
-                    task.createdAt <= currentIssue.updatedAt &&
-                    newerBlockingTask != null &&
-                    !isRecoverableInfrastructureFailure(newerBlockingTask, newerBlockingRun)
+                isStaleCompletionBlockedByNewerNonRecoverableFailure(
+                    task = task.copy(status = finalStatus),
+                    issue = currentIssue,
+                    issueTasks = issueTasks,
+                    latestRunsByTaskId = latestRunsByTaskId
+                )
             if (staleCompletionAfterIssueBlocked) {
                 informationalTraceEvents += buildCompanyAutomationTraceEvent(
                     issue = currentIssue,
