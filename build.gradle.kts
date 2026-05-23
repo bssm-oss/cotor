@@ -100,6 +100,10 @@ tasks.register("formatCheck") {
 tasks.test {
     useJUnitPlatform()
     maxParallelForks = 1
+    reports.junitXml.apply {
+        includeSystemOutLog.set(false)
+        includeSystemErrLog.set(false)
+    }
     testLogging {
         events("failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
