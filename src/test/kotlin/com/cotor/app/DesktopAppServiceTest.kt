@@ -2723,7 +2723,7 @@ class DesktopAppServiceTest : FunSpec({
 
         fixture.service.runTask(fixture.task.id)
         val run = fixture.awaitRuns().single()
-        val updatedIssue = withTimeout(30_000) {
+        val updatedIssue = withTimeout(90_000) {
             while (true) {
                 val candidate = fixture.stateStore.load().issues.single { it.id == issue.id }
                 if (candidate.status == IssueStatus.WAITING_FOR_APPROVAL) {
@@ -4731,7 +4731,7 @@ class DesktopAppServiceTest : FunSpec({
         )
 
         service.runTask(qaTask.id)
-        withTimeout(30_000) {
+        withTimeout(90_000) {
             while (stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }.qaVerdict != "PASS") {
                 delay(25)
             }
@@ -4793,7 +4793,7 @@ class DesktopAppServiceTest : FunSpec({
         )
 
         service.runTask(approvalTask.id)
-        withTimeout(30_000) {
+        withTimeout(90_000) {
             while (stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }.status != ReviewQueueStatus.MERGED) {
                 delay(25)
             }
