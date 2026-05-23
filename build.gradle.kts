@@ -104,6 +104,7 @@ tasks.test {
         includeSystemOutLog.set(false)
         includeSystemErrLog.set(false)
     }
+    reports.html.required.set(false)
     testLogging {
         events("failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
