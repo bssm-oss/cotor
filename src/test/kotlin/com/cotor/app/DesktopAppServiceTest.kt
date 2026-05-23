@@ -648,7 +648,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = service.createCompany(name = "Operator Free Model", rootPath = appHome.toString())
 
@@ -1147,7 +1148,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = service.createCompany(name = "Operator Approval", rootPath = appHome.toString())
         val now = System.currentTimeMillis()
@@ -4732,7 +4734,11 @@ class DesktopAppServiceTest : FunSpec({
 
         service.runTask(qaTask.id)
         withTimeout(90_000) {
-            while (stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }.qaVerdict != "PASS") {
+            while (true) {
+                val item = stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }
+                if (item.qaVerdict == "PASS" && item.status == ReviewQueueStatus.READY_FOR_CEO) {
+                    break
+                }
                 delay(25)
             }
         }
@@ -4742,7 +4748,13 @@ class DesktopAppServiceTest : FunSpec({
         queueAfterQa.status shouldBe ReviewQueueStatus.READY_FOR_CEO
         queueAfterQa.qaVerdict shouldBe "PASS"
 
-        val approvalIssue = refreshed.issues.firstOrNull { it.goalId == goal.id && it.kind == "approval" }
+        val approvalIssue = queueAfterQa.approvalIssueId?.let { approvalIssueId ->
+            refreshed.issues.firstOrNull { it.id == approvalIssueId }
+        } ?: refreshed.issues.firstOrNull {
+            it.goalId == goal.id &&
+                it.kind == "approval" &&
+                it.sourceSignal == "ceo-approval:${executionIssue.id}"
+        }
             ?: CompanyIssue(
                 id = java.util.UUID.randomUUID().toString(),
                 companyId = company.id,
@@ -4784,6 +4796,18 @@ class DesktopAppServiceTest : FunSpec({
                     )
                 )
             }
+        val beforeApprovalTask = stateStore.load()
+        stateStore.save(
+            beforeApprovalTask.copy(
+                reviewQueue = beforeApprovalTask.reviewQueue.map { item ->
+                    if (item.issueId == executionIssue.id) {
+                        item.copy(approvalIssueId = approvalIssue.id, updatedAt = System.currentTimeMillis())
+                    } else {
+                        item
+                    }
+                }
+            )
+        )
         val approvalTask = service.createTask(
             workspaceId = approvalIssue.workspaceId,
             title = approvalIssue.title,

@@ -34,7 +34,7 @@ import kotlin.io.path.exists
 @OptIn(kotlin.io.path.ExperimentalPathApi::class)
 @Isolate
 class A2aApiTest : FunSpec({
-    val desktopService = mockk<DesktopAppService>(relaxed = true)
+    val desktopService = mockk<DesktopAppService>(relaxed = true, relaxUnitFun = true)
     val tuiSessionService = mockk<DesktopTuiSessionService>(relaxed = true)
     val json = Json { encodeDefaults = true }
 

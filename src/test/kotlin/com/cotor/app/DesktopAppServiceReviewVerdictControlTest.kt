@@ -33,7 +33,8 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+            agentExecutor = mockk<AgentExecutor>(relaxed = true),
+            autoStartAutomationRefresh = false
         )
 
         val company = service.createCompany(
@@ -161,7 +162,8 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+            agentExecutor = mockk<AgentExecutor>(relaxed = true),
+            autoStartAutomationRefresh = false
         )
 
         val company = service.createCompany(
@@ -285,7 +287,8 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+            agentExecutor = mockk<AgentExecutor>(relaxed = true),
+            autoStartAutomationRefresh = false
         )
 
         val company = service.createCompany(
@@ -423,7 +426,8 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+            agentExecutor = mockk<AgentExecutor>(relaxed = true),
+            autoStartAutomationRefresh = false
         )
 
         val company = service.createCompany(
@@ -613,7 +617,8 @@ class DesktopAppServiceReviewVerdictControlTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk<ConfigRepository>(relaxed = true),
-            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+            agentExecutor = mockk<AgentExecutor>(relaxed = true),
+            autoStartAutomationRefresh = false
         )
 
         val error = runCatching {
@@ -664,7 +669,8 @@ private suspend fun mergeGuardFixture(
         stateStore = stateStore,
         gitWorkspaceService = gitWorkspaceService,
         configRepository = mockk<ConfigRepository>(relaxed = true),
-        agentExecutor = mockk<AgentExecutor>(relaxed = true)
+        agentExecutor = mockk<AgentExecutor>(relaxed = true),
+        autoStartAutomationRefresh = false
     )
     val now = System.currentTimeMillis()
     val company = Company(
