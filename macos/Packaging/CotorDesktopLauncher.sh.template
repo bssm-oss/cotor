@@ -259,7 +259,10 @@ terminate_existing_desktop_instances() {
     while read -r pid args; do
         [[ -n "$pid" ]] || continue
         [[ "$pid" == "$$" ]] && continue
-        [[ "$args" == *"$BINARY_PATH"* || "$args" == *"$SCRIPT_DIR/CotorDesktopLauncher"* ]] || continue
+        [[ "$args" == *"$BINARY_PATH"* ||
+            "$args" == *"$SCRIPT_DIR/CotorDesktopLauncher"* ||
+            "$args" == *"/Cotor Desktop.app/Contents/MacOS/CotorDesktopBinary"* ||
+            "$args" == *"/Cotor Desktop.app/Contents/MacOS/CotorDesktopLauncher"* ]] || continue
         existing_pids+=("$pid")
     done < <(ps -axo pid=,args=)
 
