@@ -10,6 +10,12 @@ package com.cotor.app
 
 import com.cotor.data.process.ProcessManager
 import com.cotor.model.ProcessResult
+import com.cotor.provenance.ProvenanceService
+import com.cotor.provenance.ProvenanceStore
+import com.cotor.runtime.actions.ActionExecutionService
+import com.cotor.runtime.actions.ActionStore
+import com.cotor.runtime.durable.DurableRuntimeService
+import com.cotor.runtime.durable.DurableRuntimeStore
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldBeNull
@@ -1135,6 +1141,118 @@ class GitWorkspaceServiceTest : FunSpec({
         publish.pushedBranch.shouldBeNull()
         publish.pullRequestUrl.shouldBeNull()
         publish.error shouldBe "No changes to publish from codex/cotor/read-only/codex against master"
+        processManager.remainingSteps() shouldBe 0
+    }
+
+    test("publishRun resolves company scope for direct tasks without an issue") {
+        val worktree = Files.createTempDirectory("git-workspace-service-direct-task")
+        val actionHome = Files.createTempDirectory("git-workspace-action-home")
+        val durableHome = Files.createTempDirectory("git-workspace-durable-home")
+        val processManager = FakeProcessManager(
+            listOf(
+                FakeProcessManager.Step(listOf("git", "status", "--porcelain=v1", "-z", "--untracked-files=all"), ProcessResult(0, "", "", true)),
+                FakeProcessManager.Step(listOf("git", "rev-parse", "HEAD"), ProcessResult(0, "abc1234567890\n", "", true)),
+                FakeProcessManager.Step(listOf("git", "rev-list", "--count", "master..HEAD"), ProcessResult(0, "0\n", "", true))
+            )
+        )
+        val task = AgentTask(
+            id = "task-direct-no-issue",
+            workspaceId = "ws-direct",
+            title = "Direct app smoke",
+            prompt = "Inspect repository state only.",
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.RUNNING,
+            createdAt = 0,
+            updatedAt = 0
+        )
+        val definition = CompanyAgentDefinition(
+            id = "agent-builder",
+            companyId = "company-1",
+            title = "Builder",
+            agentCli = "opencode",
+            roleSummary = "Runs direct implementation tasks.",
+            createdAt = 0,
+            updatedAt = 0
+        )
+        val stateStore = mockk<DesktopStateStore>()
+        coEvery { stateStore.load() } returns DesktopAppState(
+            companies = listOf(
+                Company(
+                    id = "company-1",
+                    name = "Direct QA Company",
+                    rootPath = worktree.toString(),
+                    repositoryId = "repo-1",
+                    defaultBaseBranch = "master",
+                    createdAt = 0,
+                    updatedAt = 0
+                )
+            ),
+            companyAgentDefinitions = listOf(definition),
+            agentCapabilityProfiles = listOf(
+                AgentCapabilityProfile(
+                    companyId = "company-1",
+                    agentId = definition.id,
+                    settings = defaultAgentCapabilitySettings() + mapOf(
+                        CapabilityKey.GIT_WRITE to AgentCapabilitySetting(
+                            enabled = true,
+                            mode = CapabilityMode.AUTO,
+                            pathAllowlist = listOf(worktree.toString())
+                        )
+                    ),
+                    updatedAt = 0
+                )
+            ),
+            repositories = listOf(
+                ManagedRepository(
+                    id = "repo-1",
+                    name = "direct-qa",
+                    localPath = worktree.toString(),
+                    sourceKind = RepositorySourceKind.LOCAL,
+                    defaultBranch = "master",
+                    createdAt = 0,
+                    updatedAt = 0
+                )
+            ),
+            workspaces = listOf(
+                Workspace(
+                    id = "ws-direct",
+                    repositoryId = "repo-1",
+                    name = "Direct QA",
+                    baseBranch = "master",
+                    createdAt = 0,
+                    updatedAt = 0
+                )
+            ),
+            tasks = listOf(task)
+        )
+        val durableRuntimeStore = DurableRuntimeStore(durableHome.resolve("runtime"))
+        val durableRuntimeService = DurableRuntimeService(runtimeStore = durableRuntimeStore)
+        val service = GitWorkspaceService(
+            processManager = processManager,
+            stateStore = stateStore,
+            logger = mockk(relaxed = true),
+            durableRuntimeService = durableRuntimeService,
+            actionExecutionService = ActionExecutionService(
+                actionStore = ActionStore { actionHome },
+                durableRuntimeService = durableRuntimeService,
+                provenanceService = ProvenanceService(ProvenanceStore { actionHome }),
+                interceptors = listOf(AgentCapabilityGuard(stateStore))
+            )
+        )
+
+        val publish = service.publishRun(
+            task = task,
+            agentName = "opencode",
+            worktreePath = worktree,
+            branchName = "codex/cotor/direct-task/opencode",
+            baseBranch = "master",
+            requirePullRequest = false
+        )
+
+        publish.commitSha shouldBe "abc1234567890"
+        publish.pushedBranch.shouldBeNull()
+        publish.pullRequestUrl.shouldBeNull()
+        publish.error shouldBe "No changes to publish from codex/cotor/direct-task/opencode against master"
         processManager.remainingSteps() shouldBe 0
     }
 
