@@ -1094,18 +1094,27 @@ final class DesktopStore: ObservableObject {
         await EmbeddedBackendLauncher.shared.ensureRunning()
         // Installed app bundles launch the backend lazily, so the first request can
         // arrive before `cotor app-server` has finished binding its localhost port.
-        for attempt in 0 ..< 4 {
+        let maxAttempts = 4
+        for attempt in 0 ..< maxAttempts {
             await refreshDashboard()
-            if !isOffline {
+            if !shouldRetryBootstrapAfterRefresh(attempt: attempt, maxAttempts: maxAttempts) {
                 return
             }
-            if attempt < 3 {
-                statusState = .waitingForServer
-                objectWillChange.send()
-                await EmbeddedBackendLauncher.shared.ensureRunning()
-                try? await Task.sleep(for: .seconds(1))
-            }
+            statusState = .waitingForServer
+            objectWillChange.send()
+            await EmbeddedBackendLauncher.shared.ensureRunning()
+            try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    func shouldRetryBootstrapAfterRefresh(attempt: Int, maxAttempts: Int) -> Bool {
+        guard attempt < maxAttempts - 1 else { return false }
+        if isOffline { return true }
+        return dashboard.companies.isEmpty &&
+            dashboard.repositories.isEmpty &&
+            dashboard.goals.isEmpty &&
+            dashboard.issues.isEmpty &&
+            dashboard.tasks.isEmpty
     }
 
     func handleAppBecameActive() async {

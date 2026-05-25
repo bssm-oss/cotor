@@ -43,15 +43,15 @@ agents:
 The `OpenCodePlugin` executes:
 
 ```bash
-opencode run --model <model> --format json "Execute the instructions in the attached prompt file." --file <0600-prompt-file>
+opencode run --print-logs --log-level ERROR --dangerously-skip-permissions --model <model> --format json "Execute the instructions in the attached prompt file." --file <0600-prompt-file>
 ```
 
-This runs OpenCode in non-interactive mode while keeping the full task prompt out of process arguments. The plugin writes the prompt to a temporary `0600` file, attaches it, captures stdout, deletes the temporary file, and returns the parsed output to Cotor's orchestration layer.
+This runs OpenCode in non-interactive mode while keeping the full task prompt out of process arguments. Cotor applies its own company capability checks and isolates work in a task worktree before invoking OpenCode, then uses `--dangerously-skip-permissions` so the OpenCode CLI cannot block the app-server on an interactive permission prompt. The plugin writes the prompt to a temporary `0600` file, attaches it, captures stdout, deletes the temporary file, and returns the parsed output to Cotor's orchestration layer.
 
 ### Command Flow
 
 1. Cotor receives a prompt (from pipeline, interactive session, or company workflow)
-2. `OpenCodePlugin.execute()` writes the prompt to a temporary file and builds the command: `["opencode", "run", "--model", "<model>", "--format", "json", "Execute the instructions in the attached prompt file.", "--file", "<prompt-file>"]`
+2. `OpenCodePlugin.execute()` writes the prompt to a temporary file and builds the command: `["opencode", "run", "--print-logs", "--log-level", "ERROR", "--dangerously-skip-permissions", "--model", "<model>", "--format", "json", "Execute the instructions in the attached prompt file.", "--file", "<prompt-file>"]`
 3. `ProcessManager` spawns the child process with configured env/working directory
 4. Process output is captured and returned as `PluginExecutionOutput`
 5. If the process exits with a non-zero code, a `ProcessExecutionException` is thrown with captured stdout/stderr
@@ -126,7 +126,7 @@ OpenCode's `run` command should exit after completing the prompt. If it hangs:
 
 | Agent | Command | Auto-Approval | Notes |
 |-------|---------|---------------|-------|
-| opencode | `opencode run <prompt>` | Via yolo mode config | Open-source, configurable |
+| opencode | `opencode run --dangerously-skip-permissions <prompt>` | Cotor capability checks plus OpenCode skip-permissions flag | Open-source, configurable |
 | codex | `codex exec --full-auto` | `--full-auto` flag | OpenAI |
 | claude | `claude --dangerously-skip-permissions` | `--dangerously-skip-permissions` | Anthropic |
 | gemini | `gemini --yolo` | `--yolo` flag | Google |

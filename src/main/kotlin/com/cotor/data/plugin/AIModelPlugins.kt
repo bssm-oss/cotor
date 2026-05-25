@@ -863,6 +863,9 @@ class OpenCodePlugin : AgentPlugin {
             add("--print-logs")
             add("--log-level")
             add("ERROR")
+            if (!planningOnly) {
+                add("--dangerously-skip-permissions")
+            }
             if (planningOnly) {
                 context.workingDirectory?.let {
                     add("--dir")

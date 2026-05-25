@@ -104,6 +104,48 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func bootstrapRetriesEmptySuccessfulDashboardBeforeSettling() {
+        let store = DesktopStore()
+
+        store.isOffline = false
+        store.dashboard = DashboardPayload.empty
+
+        #expect(store.shouldRetryBootstrapAfterRefresh(attempt: 0, maxAttempts: 4))
+        #expect(!store.shouldRetryBootstrapAfterRefresh(attempt: 3, maxAttempts: 4))
+
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DashboardPayload.empty.settings,
+            companies: [company(id: "company", repositoryId: "repo", name: "Company")],
+            companyAgentDefinitions: [],
+            agentCapabilityProfiles: [],
+            projectContexts: [],
+            goals: [],
+            issues: [],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: [],
+            agentPerformance: []
+        )
+
+        #expect(!store.shouldRetryBootstrapAfterRefresh(attempt: 0, maxAttempts: 4))
+
+        store.isOffline = true
+
+        #expect(store.shouldRetryBootstrapAfterRefresh(attempt: 0, maxAttempts: 4))
+    }
+
+    @Test
     func fullAutoOperatorChatRequestAddsConfirmationToTimeline() async {
         let store = DesktopStore()
 
