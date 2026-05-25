@@ -1058,19 +1058,20 @@ class OpenCodePluginTest : FunSpec({
 private const val OPENCODE_PROMPT_INSTRUCTION = "Execute the instructions in the attached prompt file."
 
 private fun assertOpenCodeRunCommand(command: List<String>, model: String, expectedPrompt: String) {
-    command.size shouldBe 11
+    command.size shouldBe 12
     command[0] shouldBe "opencode"
     command[1] shouldBe "run"
     command[2] shouldBe "--print-logs"
     command[3] shouldBe "--log-level"
     command[4] shouldBe "ERROR"
-    command[5] shouldBe "--model"
-    command[6] shouldBe model
-    command[7] shouldBe "--format"
-    command[8] shouldBe "json"
-    command[9] shouldBe OPENCODE_PROMPT_INSTRUCTION
-    command[10].startsWith("--file=") shouldBe true
-    Files.readString(Path.of(command[10].removePrefix("--file="))) shouldBe expectedPrompt
+    command[5] shouldBe "--dangerously-skip-permissions"
+    command[6] shouldBe "--model"
+    command[7] shouldBe model
+    command[8] shouldBe "--format"
+    command[9] shouldBe "json"
+    command[10] shouldBe OPENCODE_PROMPT_INSTRUCTION
+    command[11].startsWith("--file=") shouldBe true
+    Files.readString(Path.of(command[11].removePrefix("--file="))) shouldBe expectedPrompt
 }
 
 private fun localRoutingServer(handler: (HttpExchange) -> Unit): HttpServer {

@@ -4732,16 +4732,7 @@ class DesktopAppServiceTest : FunSpec({
             issueId = qaIssue.id
         )
 
-        service.runTask(qaTask.id)
-        withTimeout(90_000) {
-            while (true) {
-                val item = stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }
-                if (item.qaVerdict == "PASS" && item.status == ReviewQueueStatus.READY_FOR_CEO) {
-                    break
-                }
-                delay(25)
-            }
-        }
+        service.runTaskInlineForTesting(qaTask.id)
 
         var refreshed = stateStore.load()
         val queueAfterQa = refreshed.reviewQueue.single { it.issueId == executionIssue.id }
@@ -4816,12 +4807,7 @@ class DesktopAppServiceTest : FunSpec({
             issueId = approvalIssue.id
         )
 
-        service.runTask(approvalTask.id)
-        withTimeout(90_000) {
-            while (stateStore.load().reviewQueue.single { it.issueId == executionIssue.id }.status != ReviewQueueStatus.MERGED) {
-                delay(25)
-            }
-        }
+        service.runTaskInlineForTesting(approvalTask.id)
 
         refreshed = stateStore.load()
         refreshed.reviewQueue.single { it.issueId == executionIssue.id }.status shouldBe ReviewQueueStatus.MERGED

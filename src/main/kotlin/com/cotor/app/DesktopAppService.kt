@@ -346,7 +346,7 @@ class DesktopAppService(
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val companyRuntimeJobs: MutableMap<String, Job> = ConcurrentHashMap()
     private val companyRuntimeWakeSignals = ConcurrentHashMap<String, MutableSharedFlow<Unit>>()
-    private val automationRefreshJobs: MutableMap<String, Job> = linkedMapOf()
+    private val automationRefreshJobs: MutableMap<String, Job> = ConcurrentHashMap()
     private val activeTaskJobs: MutableMap<String, Job> = ConcurrentHashMap()
     private val intentionallyInterruptedTaskIds = ConcurrentHashMap.newKeySet<String>()
     private val recentCompanyAutomationTraceKeys = ConcurrentHashMap<String, Long>()
@@ -16719,6 +16719,10 @@ class DesktopAppService(
         } finally {
             intentionallyInterruptedTaskIds.remove(taskId)
         }
+    }
+
+    internal suspend fun runTaskInlineForTesting(taskId: String) {
+        executeTaskInline(taskId)
     }
 
     private suspend fun recordRunFailure(

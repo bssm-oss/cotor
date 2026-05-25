@@ -43,15 +43,15 @@ agents:
 `OpenCodePlugin`은 다음을 실행합니다:
 
 ```bash
-opencode run --model <model> --format json "Execute the instructions in the attached prompt file." --file <0600-prompt-file>
+opencode run --print-logs --log-level ERROR --dangerously-skip-permissions --model <model> --format json "Execute the instructions in the attached prompt file." --file <0600-prompt-file>
 ```
 
-이는 전체 작업 프롬프트를 process argument에 노출하지 않고 OpenCode를 논인터랙티브 모드로 실행합니다. 플러그인은 프롬프트를 임시 `0600` 파일에 쓰고, 파일로 첨부한 뒤 stdout을 캡처하고, 임시 파일을 삭제한 다음 파싱된 출력을 Cotor의 오케스트레이션 레이어에 반환합니다.
+이는 전체 작업 프롬프트를 process argument에 노출하지 않고 OpenCode를 논인터랙티브 모드로 실행합니다. Cotor는 OpenCode 호출 전에 회사 capability 검사와 태스크 worktree 격리를 적용하고, OpenCode CLI가 인터랙티브 권한 프롬프트로 app-server를 막지 않도록 `--dangerously-skip-permissions`를 사용합니다. 플러그인은 프롬프트를 임시 `0600` 파일에 쓰고, 파일로 첨부한 뒤 stdout을 캡처하고, 임시 파일을 삭제한 다음 파싱된 출력을 Cotor의 오케스트레이션 레이어에 반환합니다.
 
 ### 명령 흐름
 
 1. Cotor가 프롬프트 수신 (파이프라인, 인터랙티브 세션, 또는 회사 워크플로우에서)
-2. `OpenCodePlugin.execute()`가 프롬프트를 임시 파일에 쓰고 명령어 빌드: `["opencode", "run", "--model", "<model>", "--format", "json", "Execute the instructions in the attached prompt file.", "--file", "<prompt-file>"]`
+2. `OpenCodePlugin.execute()`가 프롬프트를 임시 파일에 쓰고 명령어 빌드: `["opencode", "run", "--print-logs", "--log-level", "ERROR", "--dangerously-skip-permissions", "--model", "<model>", "--format", "json", "Execute the instructions in the attached prompt file.", "--file", "<prompt-file>"]`
 3. `ProcessManager`가 설정된 env/작업 디렉토리로 자식 프로세스 생성
 4. 프로세스 출력이 캡처되어 `PluginExecutionOutput`으로 반환
 5. 프로세스가 0이 아닌 종료 코드로 종료되면 캡처된 stdout/stderr와 함께 `ProcessExecutionException` 발생
@@ -126,7 +126,7 @@ OpenCode의 `run` 명령어는 프롬프트 완료 후 종료되어야 합니다
 
 | 에이전트 | 명령어 | 자동 승인 | 비고 |
 |---------|--------|----------|------|
-| opencode | `opencode run <prompt>` | yolo 모드 설정 | 오픈소스, 설정 가능 |
+| opencode | `opencode run --dangerously-skip-permissions <prompt>` | Cotor capability 검사 + OpenCode skip-permissions 플래그 | 오픈소스, 설정 가능 |
 | codex | `codex exec --full-auto` | `--full-auto` 플래그 | OpenAI |
 | claude | `claude --dangerously-skip-permissions` | `--dangerously-skip-permissions` | Anthropic |
 | gemini | `gemini --yolo` | `--yolo` 플래그 | Google |
