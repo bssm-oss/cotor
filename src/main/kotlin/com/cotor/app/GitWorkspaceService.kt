@@ -699,16 +699,26 @@ class GitWorkspaceService(
         val state = runCatching { stateStore.load() }.getOrNull()
         val task = state?.tasks?.firstOrNull { it.id == taskId }
         val issue = task?.issueId?.let { issueId -> state.issues.firstOrNull { it.id == issueId } }
+        val workspace = task?.workspaceId?.let { workspaceId ->
+            state?.workspaces?.firstOrNull { it.id == workspaceId }
+        }
+        val companyId = issue?.companyId ?: workspace?.repositoryId?.let { repositoryId ->
+            state?.companies?.firstOrNull { it.repositoryId == repositoryId }?.id
+        }
         val definition = issue?.assigneeProfileId?.let { profileId ->
             state.companyAgentDefinitions.firstOrNull { it.id == profileId }
-        } ?: issue?.companyId?.let { companyId ->
-            state.companyAgentDefinitions.firstOrNull { definition ->
-                definition.companyId == companyId &&
-                    (definition.agentCli.equals(agentName, ignoreCase = true) || definition.title.equals(agentName, ignoreCase = true))
+        } ?: companyId?.let { resolvedCompanyId ->
+            state?.companyAgentDefinitions?.firstOrNull { definition ->
+                definition.companyId == resolvedCompanyId &&
+                    (
+                        definition.id.equals(agentName, ignoreCase = true) ||
+                            definition.agentCli.equals(agentName, ignoreCase = true) ||
+                            definition.title.equals(agentName, ignoreCase = true)
+                        )
             }
         }
         return ActionSubject(
-            companyId = issue?.companyId,
+            companyId = companyId,
             goalId = issue?.goalId,
             issueId = issue?.id,
             taskId = taskId,

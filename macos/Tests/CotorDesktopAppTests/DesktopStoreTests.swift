@@ -948,6 +948,140 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func graphifyOperatorChatRunsRepositorySkillInsteadOfSelectedIssue() async throws {
+        let host = "desktop-operator-skill.test"
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let api = DesktopAPI(
+            baseURL: URL(string: "http://\(host)")!,
+            token: "test-token",
+            session: session
+        )
+        let store = DesktopStore(api: api)
+        let company = company(id: "company", repositoryId: "repo", name: "Company")
+        let selectedIssue = issue(
+            id: "issue",
+            companyId: company.id,
+            goalId: "goal",
+            workspaceId: "workspace",
+            status: "PLANNED"
+        )
+        let agent = agentDefinition(id: "agent-builder", title: "Builder", roleSummary: "repository analysis")
+        let graphifySkill = skillEntry(
+            name: "graphify",
+            displayName: "Repository Mapper",
+            requiredCapabilities: ["KNOWLEDGE_GRAPH_READ"]
+        )
+        store.selectedCompanyID = company.id
+        store.selectedIssueID = selectedIssue.id
+        store.availableSkills = [graphifySkill]
+        store.dashboard = DashboardPayload(
+            repositories: [],
+            workspaces: [],
+            tasks: [],
+            settings: DashboardPayload.empty.settings,
+            companies: [company],
+            companyAgentDefinitions: [agent],
+            agentCapabilityProfiles: [
+                capabilityProfile(agentId: agent.id, settings: [
+                    "SKILL_RUN": AgentCapabilitySettingRecord(
+                        enabled: true,
+                        mode: "AUTO",
+                        skillAllowlist: ["graphify"]
+                    ),
+                    "KNOWLEDGE_GRAPH_READ": AgentCapabilitySettingRecord(enabled: true, mode: "READ_ONLY")
+                ])
+            ],
+            projectContexts: [],
+            goals: [goal(id: "goal", companyId: company.id, title: "Map repository", status: "ACTIVE")],
+            issues: [selectedIssue],
+            reviewQueue: [],
+            orgProfiles: [],
+            workflowTopologies: [],
+            goalDecisions: [],
+            runningAgentSessions: [],
+            backendStatuses: [],
+            opsMetrics: DashboardPayload.empty.opsMetrics,
+            activity: [],
+            companyRuntimes: [],
+            agentContextEntries: [],
+            agentMessages: [],
+            agentPerformance: []
+        )
+
+        let skillRunRequests = Locked<[SkillRunRequestPayload]>([])
+        let issueRunPaths = Locked<[String]>([])
+        let skillResult = SkillRunResultRecord(
+            skill: "graphify",
+            status: "COMPLETED",
+            capability: CapabilitySimulationResultRecord(
+                action: "skill.run",
+                capability: "SKILL_RUN",
+                mode: "AUTO",
+                allowed: true,
+                requiresApproval: false,
+                reason: "delegated"
+            ),
+            runId: "run-graphify",
+            actions: ["graphify"],
+            evidence: [
+                SkillRunEvidenceRecord(
+                    type: "file",
+                    path: "graphify-out/GRAPH_REPORT.md",
+                    url: nil,
+                    title: "Graph report",
+                    detail: "Repository graph updated."
+                )
+            ],
+            summary: "Graphify returned repository map evidence.",
+            output: nil,
+            error: nil
+        )
+        DesktopStoreCapturingURLProtocol.setRequestHandler(forHost: host) { request in
+            let encoder = JSONEncoder()
+            let path = request.url?.path ?? ""
+            let data: Data
+            switch (request.httpMethod ?? "GET", path) {
+            case ("POST", "/api/app/skills/graphify/run"):
+                let body = try #require(requestBodyData(from: request))
+                let payload = try JSONDecoder().decode(SkillRunRequestPayload.self, from: body)
+                skillRunRequests.withLock { $0.append(payload) }
+                data = try encoder.encode(skillResult)
+            case ("POST", "/api/app/companies/company/issues/issue/run"):
+                issueRunPaths.withLock { $0.append(path) }
+                data = try encoder.encode(selectedIssue)
+            case ("GET", "/api/app/companies/company/dashboard"):
+                data = Data("{}".utf8)
+            case ("GET", "/api/app/skills"),
+                 ("GET", "/api/app/marketing/policies"),
+                 ("GET", "/api/app/marketing/runs"),
+                 ("GET", "/api/app/companies/company/reports"),
+                 ("GET", "/api/app/companies/company/problem-signals"):
+                data = Data("[]".utf8)
+            default:
+                data = Data("{}".utf8)
+            }
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        defer { DesktopStoreCapturingURLProtocol.removeRequestHandler(forHost: host) }
+
+        await store.submitOperatorChatMessage("graphify 실행해서 리포지토리 구조 알려줘")
+
+        #expect(skillRunRequests.withLock { $0.map(\.agentId) } == [agent.id])
+        #expect(skillRunRequests.withLock { $0.map(\.companyId) } == [company.id])
+        #expect(skillRunRequests.withLock { $0.map(\.input) } == ["graphify 실행해서 리포지토리 구조 알려줘"])
+        #expect(issueRunPaths.withLock { $0.isEmpty })
+        #expect(store.operatorChatMessages.last?.text == "Graphify returned repository map evidence.")
+    }
+
+    @Test
     func marketingSkillsStayOptInAndPolicyFormLoadsForOperator() {
         let store = DesktopStore()
         store.availableSkills = [

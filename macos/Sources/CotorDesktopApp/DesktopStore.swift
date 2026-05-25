@@ -3257,13 +3257,14 @@ final class DesktopStore: ObservableObject {
         ]
     }
 
+    @discardableResult
     func runSkill(
         skillName: String,
         agentId: String,
         input: String? = nil,
         parameters: [String: String] = [:]
-    ) async {
-        guard let companyId = selectedCompanyID else { return }
+    ) async -> SkillRunResultRecord? {
+        guard let companyId = selectedCompanyID else { return nil }
         let key = "\(agentId):\(skillName)"
         runningSkillRunKeys.insert(key)
         defer { runningSkillRunKeys.remove(key) }
@@ -3296,8 +3297,10 @@ final class DesktopStore: ObservableObject {
             skillRuns = ([record] + skillRuns.filter { $0.id != record.id })
                 .sorted { $0.updatedAt > $1.updatedAt }
             await refreshCompanyDashboard(restartEventStream: false)
+            return result
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -3541,6 +3544,16 @@ final class DesktopStore: ObservableObject {
                 ? language("Turned on goal automation.", "목표 자동화를 켰습니다.")
                 : language("Turned off goal automation.", "목표 자동화를 껐습니다.")
         }
+        if looksLikeRepositoryMapChatRequest(normalized) {
+            return await runSkillChatReply(
+                skillIDs: ["graphify", "repository-mapper"],
+                input: message,
+                unavailable: language(
+                    "No runnable repository mapping skill is available for the selected company.",
+                    "선택한 회사에서 바로 실행 가능한 리포지토리 맵 스킬이 없습니다."
+                )
+            )
+        }
         if looksLikeIssueRunChatRequest(normalized),
            await applyChatExecutionProposal(ChatExecutionProposal(summary: message)) != nil {
             return language("Started the selected issue.", "선택한 이슈를 실행했습니다.")
@@ -3618,6 +3631,44 @@ final class DesktopStore: ObservableObject {
             return operatorFailureFallback()
         }
         return operatorAssistantText(for: response)
+    }
+
+    private func runSkillChatReply(
+        skillIDs: Set<String>,
+        input: String,
+        unavailable: String
+    ) async -> String {
+        let normalizedSkillIDs = Set(skillIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        guard let card = agentSkillCards.first(where: { card in
+            card.companyId == selectedCompanyID &&
+                card.enabled &&
+                card.runnableSkills.contains { normalizedSkillIDs.contains($0.id.lowercased()) }
+        }),
+            let skill = card.runnableSkills.first(where: { normalizedSkillIDs.contains($0.id.lowercased()) }) else {
+            return unavailable
+        }
+
+        guard let result = await runSkill(skillName: skill.id, agentId: card.id, input: input) else {
+            return operatorFailureFallback()
+        }
+        return operatorSkillRunText(for: result)
+    }
+
+    private func operatorSkillRunText(for result: SkillRunResultRecord) -> String {
+        let detail = sanitizeOperatorUserText(result.summary ?? result.error ?? result.output ?? "", language: language)
+        if !detail.isEmpty {
+            return detail
+        }
+        switch result.status.uppercased() {
+        case "COMPLETED":
+            return language("Skill run completed.", "스킬 실행이 완료되었습니다.")
+        case "RUNNING":
+            return language("Skill run started.", "스킬 실행을 시작했습니다.")
+        case "DENIED", "APPROVAL_REQUIRED":
+            return language("Skill run needs delegated permission.", "스킬 실행 권한 위임이 필요합니다.")
+        default:
+            return language("Skill run recorded.", "스킬 실행을 기록했습니다.")
+        }
     }
 
     private func operatorAssistantText(for response: OperatorCommandResponsePayload) -> String {
@@ -3831,6 +3882,10 @@ final class DesktopStore: ObservableObject {
 
     private func looksLikeIssueRunChatRequest(_ text: String) -> Bool {
         containsAny(text, ["이슈 실행", "run issue", "실행해", "시작해"])
+    }
+
+    private func looksLikeRepositoryMapChatRequest(_ text: String) -> Bool {
+        containsAny(text, ["graphify", "리포 맵", "리포지토리 맵", "리포지토리 구조", "repository map", "repository structure", "repo map", "map repo"])
     }
 
     private func looksLikeIssueDelegationChatRequest(_ text: String) -> Bool {
