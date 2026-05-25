@@ -16721,6 +16721,10 @@ class DesktopAppService(
         }
     }
 
+    internal suspend fun runTaskInlineForTesting(taskId: String) {
+        executeTaskInline(taskId)
+    }
+
     private suspend fun recordRunFailure(
         task: AgentTask,
         workspace: Workspace,

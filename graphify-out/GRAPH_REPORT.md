@@ -1,7 +1,7 @@
 # Graph Report - cotor-qa-appbuild-20260526  (2026-05-26)
 
 ## Corpus Check
-- 358 files · ~612,665 words
+- 358 files · ~612,630 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -332,12 +332,12 @@
 10. `DesktopStateStore` - 30 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `userFacingIssueKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `userFacingDecisionTitle()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `localizedSourceKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
+- `language` --calls--> `userFacingIssueKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `userFacingDecisionTitle()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `localizedSourceKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
 - `sceneState()` --calls--> `PixelOfficeLayout`  [INFERRED]
   macos/Tests/CotorDesktopAppTests/MeetingRoomProjectionTests.swift → macos/Sources/CotorDesktopApp/MeetingRoomScene.swift
 - `agent()` --calls--> `CompanyAgentDefinitionRecord`  [INFERRED]
