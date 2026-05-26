@@ -156,6 +156,76 @@ class SkillRuntimeTest : FunSpec({
         result.evidence.mapNotNull { it.path }.forEach { path -> Files.exists(java.nio.file.Path.of(path)) shouldBe true }
         result.output shouldContain "Video Plan"
     }
+
+    test("seeded Engineering Lead profile allowlists browser-smoke and enables browser capabilities") {
+        val appHome = Files.createTempDirectory("skill-eng-lead-browser-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val service = skillRuntimeService(appHome)
+        val company = service.createCompany(name = "Eng Lead Browser Co", rootPath = repoRoot.toString())
+        val dashboard = service.dashboard()
+        val engineeringLead = dashboard.companyAgentDefinitions.first {
+            it.companyId == company.id && it.title == "Engineering Lead"
+        }
+        val profile = dashboard.agentCapabilityProfiles.first {
+            it.companyId == company.id && it.agentId == engineeringLead.id
+        }
+
+        profile.settings.getValue(CapabilityKey.SKILL_RUN).skillAllowlist.contains("browser-smoke") shouldBe true
+        profile.settings.getValue(CapabilityKey.BROWSER_READ).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.BROWSER_SCREENSHOT).mode shouldBe CapabilityMode.AUTO
+    }
+
+    test("seeded Marketing Operator profile enables all marketing capabilities") {
+        val appHome = Files.createTempDirectory("skill-marketing-seed-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val service = skillRuntimeService(appHome)
+        val company = service.createCompany(name = "Marketing Seed Co", rootPath = repoRoot.toString())
+        val dashboard = service.dashboard()
+        val marketingAgent = dashboard.companyAgentDefinitions.first {
+            it.companyId == company.id && it.title == "Marketing Operator"
+        }
+        val profile = dashboard.agentCapabilityProfiles.first {
+            it.companyId == company.id && it.agentId == marketingAgent.id
+        }
+
+        profile.settings.getValue(CapabilityKey.BROWSER_READ).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.BROWSER_INTERACT).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.BROWSER_EXTERNAL_DOMAIN).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.BROWSER_LOGIN_FLOW).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.WEB_PUBLISH).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.SOCIAL_POST_CREATE).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.MARKETING_ANALYTICS_READ).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.VIDEO_SCRIPT_WRITE).mode shouldBe CapabilityMode.AUTO
+    }
+
+    test("looksLikeOperatorSkillRequest does not false-positive on passive inquiry phrases") {
+        val service = skillRuntimeService(Files.createTempDirectory("nlp-fp-home"))
+
+        service.looksLikeOperatorSkillRequest("analytics 요약 알려줘") shouldBe false
+        service.looksLikeOperatorSkillRequest("analytics 보고서 보여줘") shouldBe false
+        service.looksLikeOperatorSkillRequest("마케팅 리포트 알려줘") shouldBe false
+        service.looksLikeOperatorSkillRequest("analytics run") shouldBe true
+        service.looksLikeOperatorSkillRequest("browser-smoke 실행해줘") shouldBe true
+        service.looksLikeOperatorSkillRequest("repo map 실행") shouldBe true
+    }
+
+    test("inferOperatorSkillName does not fall back to graphify for unrecognized input") {
+        val service = skillRuntimeService(Files.createTempDirectory("nlp-infer-home"))
+
+        service.inferOperatorSkillName("random unrelated message") shouldBe ""
+        service.inferOperatorSkillName("help me please") shouldBe ""
+        service.inferOperatorSkillName("analytics") shouldBe "analytics-reporter"
+        service.inferOperatorSkillName("browser screenshot test") shouldBe "browser-smoke"
+        service.inferOperatorSkillName("graphify repo structure") shouldBe "graphify"
+    }
+
+    test("prewarm is a no-op and completes without error when node and npm are unavailable") {
+        val runner = LocalPlaywrightBrowserSkillRunner(
+            appHomeProvider = { Files.createTempDirectory("prewarm-noop-home") },
+            commandAvailability = { false }
+        )
+        runner.prewarm()
+    }
 })
 
 private fun skillRuntimeService(

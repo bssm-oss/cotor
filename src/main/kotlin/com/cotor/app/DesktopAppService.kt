@@ -6908,7 +6908,7 @@ class DesktopAppService(
             ?: enabledDefinitions.firstOrNull()?.id
     }
 
-    private fun inferOperatorSkillName(message: String): String {
+    internal fun inferOperatorSkillName(message: String): String {
         val normalized = message.lowercase()
         return when {
             "browser" in normalized || "브라우저" in normalized || "screenshot" in normalized || "스크린샷" in normalized -> "browser-smoke"
@@ -6919,11 +6919,11 @@ class DesktopAppService(
             "social" in normalized || "linkedin" in normalized || "twitter" in normalized || "x " in normalized || "소셜" in normalized -> "social-publisher"
             "content" in normalized || "blog" in normalized || "cms" in normalized || "블로그" in normalized -> "content-publisher"
             "marketing" in normalized || "마케팅" in normalized || "홍보" in normalized -> "marketing-operator"
-            else -> "graphify"
+            else -> ""
         }
     }
 
-    private fun looksLikeOperatorSkillRequest(normalized: String): Boolean {
+    internal fun looksLikeOperatorSkillRequest(normalized: String): Boolean {
         val explicitSkillName = listOf(
             "run_skill",
             "skill_run",
@@ -6965,14 +6965,8 @@ class DesktopAppService(
             "execute",
             "invoke",
             "map",
-            "summarize",
-            "summary",
             "실행",
-            "돌려",
-            "요약",
-            "알려",
-            "보고서",
-            "리포트"
+            "돌려"
         ).any { it in normalized }
         return skillTarget && executionIntent
     }
@@ -20451,7 +20445,7 @@ class DesktopAppService(
             CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
                 enabled = true,
                 mode = CapabilityMode.AUTO,
-                skillAllowlist = listOf("graphify"),
+                skillAllowlist = listOf("graphify", "browser-smoke"),
                 requiresEvidence = true,
                 requiresReview = false,
                 notes = notes
@@ -20471,6 +20465,20 @@ class DesktopAppService(
                 requiresEvidence = true,
                 requiresReview = false,
                 notes = notes
+            ),
+            CapabilityKey.BROWSER_READ to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                requiresEvidence = true,
+                requiresReview = false,
+                notes = notes
+            ),
+            CapabilityKey.BROWSER_SCREENSHOT to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                requiresEvidence = true,
+                requiresReview = false,
+                notes = notes
             )
         )
     }
@@ -20479,8 +20487,9 @@ class DesktopAppService(
         definition.title.equals("Marketing Operator", ignoreCase = true) ||
             definition.specialties.any { it.equals("marketing", ignoreCase = true) }
 
-    private fun marketingOperatorSkillSettings(): Map<CapabilityKey, AgentCapabilitySetting> =
-        mapOf(
+    private fun marketingOperatorSkillSettings(): Map<CapabilityKey, AgentCapabilitySetting> {
+        val notes = "Marketing Operator is permitted to run all marketing skills including browser, social, and analytics actions."
+        return mapOf(
             CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
                 enabled = true,
                 mode = CapabilityMode.AUTO,
@@ -20493,9 +20502,18 @@ class DesktopAppService(
                 ),
                 requiresEvidence = true,
                 requiresReview = false,
-                notes = "Marketing skill execution is available, but browser publishing still requires a MarketingDelegationPolicy."
-            )
+                notes = notes
+            ),
+            CapabilityKey.BROWSER_READ to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes),
+            CapabilityKey.BROWSER_INTERACT to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes),
+            CapabilityKey.BROWSER_EXTERNAL_DOMAIN to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes),
+            CapabilityKey.BROWSER_LOGIN_FLOW to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes),
+            CapabilityKey.WEB_PUBLISH to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes),
+            CapabilityKey.SOCIAL_POST_CREATE to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes),
+            CapabilityKey.MARKETING_ANALYTICS_READ to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes),
+            CapabilityKey.VIDEO_SCRIPT_WRITE to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.AUTO, requiresEvidence = true, requiresReview = false, notes = notes)
         )
+    }
 
     private fun repositoryScopedCompanyAgentCapabilitySettings(rootPath: String): Map<CapabilityKey, AgentCapabilitySetting> {
         val repositoryRoot = Path.of(rootPath).toAbsolutePath().normalize().toString()

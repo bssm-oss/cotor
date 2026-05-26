@@ -34,6 +34,7 @@ data class BrowserSkillResult(
 
 interface BrowserSkillRunner {
     suspend fun execute(command: BrowserSkillCommand): BrowserSkillResult
+    suspend fun prewarm() {}
 }
 
 class LocalPlaywrightBrowserSkillRunner(
@@ -91,6 +92,16 @@ class LocalPlaywrightBrowserSkillRunner(
             } finally {
                 process?.takeIf { it.isAlive }?.let(::destroyProcessTree)
             }
+        }
+    }
+
+    override suspend fun prewarm(): Unit = withContext(Dispatchers.IO) {
+        if (commandAvailability("node") && commandAvailability("npm")) {
+            val runtimeDir = appHomeProvider()
+                .resolve("runtime")
+                .resolve("browser-skills")
+            runtimeDir.createDirectories()
+            ensurePlaywrightDependency(runtimeDir, 60)
         }
     }
 

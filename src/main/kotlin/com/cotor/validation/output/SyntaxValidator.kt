@@ -34,8 +34,8 @@ class SyntaxValidator {
             val process = ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .start()
-            val output = process.inputStream.bufferedReader().readText()
             val exitCode = process.waitFor()
+            val output = process.inputStream.bufferedReader().readText()
 
             if (exitCode == 0) {
                 SyntaxValidationResult(true, "$label syntax valid")
