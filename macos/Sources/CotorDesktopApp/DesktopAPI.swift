@@ -977,6 +977,89 @@ struct DesktopAPI {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
     }
+
+    // MARK: - Direct Chat API
+
+    func listDirectChatConversations(companyId: String) async throws -> [DirectChatConversation] {
+        try await get(pathSegments: ["api", "app", "companies", companyId, "direct-chat", "conversations"])
+    }
+
+    func createDirectChatConversation(
+        companyId: String,
+        title: String,
+        model: String,
+        provider: String,
+        baseUrl: String = "",
+        systemPrompt: String = ""
+    ) async throws -> DirectChatConversation {
+        struct Body: Encodable {
+            let title: String
+            let model: String
+            let provider: String
+            let baseUrl: String
+            let systemPrompt: String
+        }
+        return try await post(
+            pathSegments: ["api", "app", "companies", companyId, "direct-chat", "conversations"],
+            body: Body(title: title, model: model, provider: provider, baseUrl: baseUrl, systemPrompt: systemPrompt)
+        )
+    }
+
+    func deleteDirectChatConversation(conversationId: String, companyId: String) async throws {
+        let _: EmptyPayload = try await delete(
+            pathSegments: ["api", "app", "companies", companyId, "direct-chat", "conversations", conversationId]
+        )
+    }
+
+    func listDirectChatModels(baseUrl: String = "http://127.0.0.1:11434") async throws -> [DirectChatAvailableModel] {
+        try await get(
+            pathSegments: ["api", "app", "companies", "_", "direct-chat", "models"],
+            query: [URLQueryItem(name: "baseUrl", value: baseUrl)]
+        )
+    }
+
+    func streamDirectChatMessage(
+        companyId: String,
+        conversationId: String,
+        message: String
+    ) -> AsyncThrowingStream<DirectChatStreamChunk, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    guard let url = try? makeURL(
+                        pathSegments: ["api", "app", "companies", companyId, "direct-chat", "conversations", conversationId, "messages"]
+                    ) else {
+                        continuation.finish(throwing: URLError(.badURL))
+                        return
+                    }
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    addHeaders(to: &request)
+                    request.httpBody = try JSONEncoder().encode(["message": message])
+
+                    let (bytes, _) = try await URLSession.shared.bytes(for: request)
+                    var buffer = ""
+                    for try await byte in bytes {
+                        let char = String(bytes: [byte], encoding: .utf8) ?? ""
+                        buffer += char
+                        if char == "\n" {
+                            let line = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                            buffer = ""
+                            if line.isEmpty { continue }
+                            if let data = line.data(using: .utf8),
+                               let chunk = try? JSONDecoder().decode(DirectChatStreamChunk.self, from: data) {
+                                continuation.yield(chunk)
+                                if chunk.done { break }
+                            }
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
 }
 
 private struct EmptyPayload: Codable {}

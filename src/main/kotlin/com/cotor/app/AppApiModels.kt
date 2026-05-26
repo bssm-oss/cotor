@@ -430,6 +430,36 @@ internal fun DesktopSettings.redactedForApi(): DesktopSettings = copy(
     backendStatuses = backendStatuses.map { it.redactedForApi() }
 )
 
+// ── Direct Chat API Models ──────────────────────────────────────────
+
+@Serializable
+data class CreateDirectChatConversationRequest(
+    val title: String = "",
+    val model: String,
+    val provider: String,
+    val baseUrl: String = "",
+    val systemPrompt: String = ""
+)
+
+@Serializable
+data class SendDirectChatMessageRequest(val message: String)
+
+@Serializable
+data class DirectChatStreamChunk(
+    val conversationId: String,
+    val messageId: String,
+    val content: String,
+    val done: Boolean = false,
+    val error: String? = null
+)
+
+@Serializable
+data class DirectChatAvailableModel(
+    val id: String,
+    val provider: String,
+    val displayName: String
+)
+
 internal fun CompanyDashboardResponse.redactedForApi(): CompanyDashboardResponse = copy(
     companies = companies.map { it.redactedForApi() },
     backendStatuses = backendStatuses.map { it.redactedForApi() }

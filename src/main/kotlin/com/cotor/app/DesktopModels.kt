@@ -1250,6 +1250,30 @@ data class ShortcutBinding(
     val shortcut: String
 )
 
+// ── Direct AI Chat Models ───────────────────────────────────────────
+
+@Serializable
+data class DirectChatConversation(
+    val id: String,
+    val companyId: String,
+    val title: String,
+    val model: String,
+    val provider: String,
+    val baseUrl: String = "",
+    val systemPrompt: String = "",
+    val messages: List<DirectChatMessage> = emptyList(),
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Serializable
+data class DirectChatMessage(
+    val id: String,
+    val role: String,
+    val content: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 /**
  * Entire persisted desktop state snapshot.
  */
@@ -1284,7 +1308,8 @@ data class DesktopAppState(
     val marketingRuns: List<MarketingRunRecord> = emptyList(),
     val skillRuns: List<SkillRunRecord> = emptyList(),
     val companyRuntimeWorkItems: List<CompanyRuntimeWorkItem> = emptyList(),
-    val problemSignals: List<CompanyProblemSignal> = emptyList()
+    val problemSignals: List<CompanyProblemSignal> = emptyList(),
+    val directChatConversations: List<DirectChatConversation> = emptyList()
 )
 
 private fun defaultBackendConfigs(): List<BackendConnectionConfig> = listOf(

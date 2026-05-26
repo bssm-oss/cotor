@@ -4795,7 +4795,7 @@ private struct CenterPaneView: View {
         case .room:
             companyMeetingRoomPage
         case .chat:
-            companyChatControlPage
+            directChatPage
         case .goals:
             goalOverviewPage
         case .performance:
@@ -4826,6 +4826,17 @@ private struct CenterPaneView: View {
                 subtitle: l("Run selected-company operations through a command chat.", "선택된 회사 운영을 명령 채팅으로 실행합니다.")
             )
             CompanyChatControlRail(layoutMode: layoutMode)
+        }
+    }
+
+    @ViewBuilder
+    private var directChatPage: some View {
+        if let companyId = store.selectedCompanyID {
+            DirectChatView(companyId: companyId)
+        } else {
+            Text(l("Select a company first", "먼저 회사를 선택하세요."))
+                .foregroundColor(ShellPalette.muted)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
