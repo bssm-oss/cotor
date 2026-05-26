@@ -45,7 +45,7 @@ class ActionExecutionService(
         block: suspend () -> T
     ): T {
         val runtimeContext = currentCoroutineContext()[DurableRuntimeContext]
-        val runId = request.subject.runId ?: runtimeContext?.runId ?: "standalone"
+        val runId = request.subject.runId ?: runtimeContext?.runId ?: request.id
         val startedAt = System.currentTimeMillis()
         var decisionId: String? = null
 

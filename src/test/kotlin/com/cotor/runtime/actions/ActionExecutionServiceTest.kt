@@ -48,14 +48,13 @@ class ActionExecutionServiceTest : FunSpec({
             interceptors = listOf(PolicyEngine(policyStore))
         )
 
+        val request = ActionRequest(
+            kind = ActionKind.GIT_PUBLISH,
+            label = "git.publish:test-branch"
+        )
         val error = runCatching {
             kotlinx.coroutines.runBlocking {
-                service.run(
-                    request = ActionRequest(
-                        kind = ActionKind.GIT_PUBLISH,
-                        label = "git.publish:test-branch"
-                    )
-                ) {
+                service.run(request = request) {
                     "should-not-run"
                 }
             }
@@ -63,7 +62,7 @@ class ActionExecutionServiceTest : FunSpec({
 
         error shouldNotBe null
         (error is ActionDeniedException) shouldBe true
-        val snapshot = actionStore.load("standalone")
+        val snapshot = actionStore.load(request.id)
         snapshot shouldNotBe null
         snapshot!!.records.single().status shouldBe ActionStatus.DENIED
     }

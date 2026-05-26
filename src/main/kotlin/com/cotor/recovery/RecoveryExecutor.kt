@@ -210,16 +210,36 @@ class RecoveryExecutor(
         input: String?,
         pipelineContext: PipelineContext?
     ): AgentResult {
-        val metadata = AgentExecutionMetadata(
-            pipelineContext = pipelineContext,
-            stageId = stage.id
-        )
+        val metadata = if (pipelineContext != null) {
+            AgentExecutionMetadata(
+                pipelineContext = pipelineContext,
+                stageId = stage.id,
+                repoRoot = resolvePath(pipelineContext.metadata["repoRoot"]),
+                workspaceId = pipelineContext.metadata["workspaceId"] as? String,
+                taskId = pipelineContext.metadata["taskId"] as? String,
+                agentId = pipelineContext.metadata["agentId"] as? String ?: agentConfig.name,
+                baseBranch = pipelineContext.metadata["baseBranch"] as? String,
+                branchName = pipelineContext.metadata["branchName"] as? String,
+                workingDirectory = resolvePath(pipelineContext.metadata["workingDirectory"])
+            )
+        } else {
+            AgentExecutionMetadata(
+                pipelineContext = pipelineContext,
+                stageId = stage.id
+            )
+        }
         val result = agentExecutor.executeAgent(agentConfig, input, metadata)
         if (!result.isSuccess && result.metadata["failureCategory"] == null) {
             val updatedMetadata = result.metadata + ("failureCategory" to FailureCategory.AGENT_ERROR.name)
             return applyValidation(stage, result.copy(metadata = updatedMetadata))
         }
         return applyValidation(stage, result)
+    }
+
+    private fun resolvePath(value: Any?): java.nio.file.Path? = when (value) {
+        is java.nio.file.Path -> value
+        is String -> java.nio.file.Path.of(value)
+        else -> null
     }
 
     private fun applyValidation(stage: PipelineStage, result: AgentResult): AgentResult {
