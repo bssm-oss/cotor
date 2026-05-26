@@ -439,10 +439,25 @@ data class CreateDirectChatConversationRequest(
     val provider: String,
     val baseUrl: String = "",
     val systemPrompt: String = ""
-)
+) {
+    init {
+        require(provider in setOf("ollama", "lmstudio", "claude-cli")) {
+            "Unsupported provider: $provider"
+        }
+        require(model.isNotBlank() && model.length <= 200) { "Invalid model name" }
+        require(baseUrl.length <= 500) { "baseUrl too long" }
+        require(systemPrompt.length <= 10_000) { "systemPrompt too long" }
+        require(title.length <= 200) { "title too long" }
+    }
+}
 
 @Serializable
-data class SendDirectChatMessageRequest(val message: String)
+data class SendDirectChatMessageRequest(val message: String) {
+    init {
+        require(message.isNotBlank()) { "Message must not be blank" }
+        require(message.length <= 100_000) { "Message too long (max 100k chars)" }
+    }
+}
 
 @Serializable
 data class DirectChatStreamChunk(

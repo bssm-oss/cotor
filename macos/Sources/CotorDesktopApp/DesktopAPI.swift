@@ -1024,7 +1024,7 @@ struct DesktopAPI {
         message: String
     ) -> AsyncThrowingStream<DirectChatStreamChunk, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     guard let url = try? makeURL(
                         pathSegments: ["api", "app", "companies", companyId, "direct-chat", "conversations", conversationId, "messages"]
@@ -1038,19 +1038,21 @@ struct DesktopAPI {
                     request.httpBody = try JSONEncoder().encode(["message": message])
 
                     let (bytes, _) = try await URLSession.shared.bytes(for: request)
-                    var buffer = ""
+                    var lineBuffer = Data()
                     for try await byte in bytes {
-                        let char = String(bytes: [byte], encoding: .utf8) ?? ""
-                        buffer += char
-                        if char == "\n" {
-                            let line = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-                            buffer = ""
-                            if line.isEmpty { continue }
-                            if let data = line.data(using: .utf8),
+                        if Task.isCancelled { break }
+                        if byte == 0x0A {  // newline byte
+                            if let line = String(data: lineBuffer, encoding: .utf8)?
+                                .trimmingCharacters(in: .whitespacesAndNewlines),
+                               !line.isEmpty,
+                               let data = line.data(using: .utf8),
                                let chunk = try? JSONDecoder().decode(DirectChatStreamChunk.self, from: data) {
                                 continuation.yield(chunk)
                                 if chunk.done { break }
                             }
+                            lineBuffer = Data()
+                        } else {
+                            lineBuffer.append(byte)
                         }
                     }
                     continuation.finish()
@@ -1058,6 +1060,7 @@ struct DesktopAPI {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 }

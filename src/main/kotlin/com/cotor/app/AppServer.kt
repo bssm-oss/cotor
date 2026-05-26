@@ -1768,9 +1768,11 @@ internal fun Application.cotorAppModule(
 
                         delete("/{conversationId}") {
                             if (!requireToken(token)) return@delete
+                            val companyId = call.parameters["companyId"]
+                                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
                             val conversationId = call.parameters["conversationId"]
                                 ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "conversationId is required"))
-                            desktopService.deleteDirectChatConversation(conversationId)
+                            desktopService.deleteDirectChatConversation(conversationId, companyId)
                             call.respond(HttpStatusCode.NoContent)
                         }
 

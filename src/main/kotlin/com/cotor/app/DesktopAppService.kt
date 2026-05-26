@@ -23973,11 +23973,20 @@ class DesktopAppService(
     suspend fun getDirectChatConversation(id: String): DirectChatConversation? =
         stateStore.load().directChatConversations.firstOrNull { it.id == id }
 
-    suspend fun deleteDirectChatConversation(id: String) {
+    suspend fun deleteDirectChatConversation(id: String, companyId: String) {
         stateMutex.withLock {
             val state = stateStore.load()
+            val target = state.directChatConversations.firstOrNull { it.id == id }
+            if (target != null) {
+                require(target.companyId == companyId) {
+                    "Conversation $id does not belong to company $companyId"
+                }
+            }
             stateStore.save(
-                state.copy(directChatConversations = state.directChatConversations.filterNot { it.id == id })
+                state.copy(
+                    directChatConversations = state.directChatConversations
+                        .filterNot { it.id == id && it.companyId == companyId }
+                )
             )
         }
     }
