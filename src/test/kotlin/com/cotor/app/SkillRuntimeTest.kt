@@ -273,6 +273,29 @@ class SkillRuntimeTest : FunSpec({
         }
         prewarmCalled.get() shouldBe true
     }
+
+    test("resolveOperatorSkillAgent does not fall back to an unskilled agent when no allowlist match exists") {
+        val appHome = Files.createTempDirectory("skill-no-fallback-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val service = skillRuntimeService(appHome)
+        val company = service.createCompany(name = "No Fallback Co", rootPath = repoRoot.toString())
+        val builder = service.listCompanyAgentDefinitions(company.id).first { it.title == "Builder" }
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = builder.id,
+            settings = mapOf(
+                CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                    enabled = true,
+                    mode = CapabilityMode.AUTO,
+                    skillAllowlist = listOf("graphify")
+                )
+            )
+        )
+
+        val agentId = service.resolveOperatorSkillAgent(company.id, "browser-smoke")
+
+        agentId shouldBe null
+    }
 })
 
 private fun skillRuntimeService(

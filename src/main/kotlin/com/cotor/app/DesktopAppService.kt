@@ -6890,7 +6890,7 @@ class DesktopAppService(
         )
     }
 
-    private suspend fun resolveOperatorSkillAgent(companyId: String, skillName: String): String? {
+    internal suspend fun resolveOperatorSkillAgent(companyId: String, skillName: String): String? {
         val state = stateStore.load()
         val enabledDefinitions = state.companyAgentDefinitions.filter { it.companyId == companyId && it.enabled }
         data class SkillAgentCandidate(
@@ -6919,7 +6919,6 @@ class DesktopAppService(
             ?: candidates.firstOrNull { it.exactAllowlistMatch }?.definition?.id
             ?: candidates.firstOrNull { it.setting.mode == CapabilityMode.AUTO }?.definition?.id
             ?: candidates.firstOrNull()?.definition?.id
-            ?: enabledDefinitions.firstOrNull()?.id
     }
 
     internal fun inferOperatorSkillName(message: String): String {
