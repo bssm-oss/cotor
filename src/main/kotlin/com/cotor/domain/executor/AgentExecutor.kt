@@ -13,6 +13,8 @@ import com.cotor.data.process.ProcessManager
 import com.cotor.model.*
 import com.cotor.monitoring.NoopObservabilityService
 import com.cotor.monitoring.ObservabilityService
+import com.cotor.runtime.actions.ActionApprovalRequiredException
+import com.cotor.runtime.actions.ActionDeniedException
 import com.cotor.runtime.actions.ActionEvidence
 import com.cotor.runtime.actions.ActionExecutionService
 import com.cotor.runtime.actions.ActionKind
@@ -261,9 +263,13 @@ class DefaultAgentExecutor(
                     isSuccess = false,
                     output = e.stdout.takeIf { it.isNotBlank() },
                     error = "$message (exit=${e.exitCode}): $stderr",
-                    duration = 0,
+                    duration = System.currentTimeMillis() - startedAtMs,
                     metadata = observability.failAgent(observation, metadata, System.currentTimeMillis() - startedAtMs, e)
                 )
+            } catch (e: ActionApprovalRequiredException) {
+                throw e
+            } catch (e: ActionDeniedException) {
+                throw e
             } catch (e: Exception) {
                 logAgentFailure("Agent execution failed: ${agent.name}", e)
                 AgentResult(
@@ -271,7 +277,7 @@ class DefaultAgentExecutor(
                     isSuccess = false,
                     output = null,
                     error = e.message ?: "Unknown error",
-                    duration = 0,
+                    duration = System.currentTimeMillis() - startedAtMs,
                     metadata = observability.failAgent(observation, metadata, System.currentTimeMillis() - startedAtMs, e)
                 )
             }

@@ -555,6 +555,8 @@ class DefaultPipelineOrchestrator(
             } else {
                 recoveryExecutor.executeWithRecovery(stage, input, pipelineContext)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val failureResult = AgentResult(
                 agentName = agentName,
