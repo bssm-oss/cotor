@@ -3052,11 +3052,11 @@ class DesktopAppService(
             .redirectErrorStream(true)
             .start()
         val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
-        val output = process.inputStream.bufferedReader().readText()
         if (!finished) {
             process.destroyForcibly()
             error("${command.joinToString(" ")} timed out after ${timeoutSeconds}s.")
         }
+        val output = process.inputStream.bufferedReader().readText()
         if (process.exitValue() != 0) {
             error(output.ifBlank { "${command.joinToString(" ")} failed with exit ${process.exitValue()}." })
         }

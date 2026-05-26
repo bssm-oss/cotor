@@ -814,6 +814,7 @@ class DefaultPipelineOrchestrator(
     private fun getGitCommit(): String {
         return try {
             val process = ProcessBuilder("git", "rev-parse", "--short", "HEAD").start()
+            process.waitFor()
             process.inputStream.bufferedReader().readText().trim()
         } catch (e: Exception) {
             "unknown"
