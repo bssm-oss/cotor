@@ -6879,19 +6879,33 @@ class DesktopAppService(
     private suspend fun resolveOperatorSkillAgent(companyId: String, skillName: String): String? {
         val state = stateStore.load()
         val enabledDefinitions = state.companyAgentDefinitions.filter { it.companyId == companyId && it.enabled }
-        val byAllowlist = enabledDefinitions.firstOrNull { definition ->
+        data class SkillAgentCandidate(
+            val definition: CompanyAgentDefinition,
+            val setting: AgentCapabilitySetting,
+            val exactAllowlistMatch: Boolean
+        )
+
+        val candidates = enabledDefinitions.mapNotNull { definition ->
             val setting = state.agentCapabilityProfiles
                 .firstOrNull { it.companyId == companyId && it.agentId == definition.id }
                 ?.settings
                 ?.get(CapabilityKey.SKILL_RUN)
-            setting?.enabled == true &&
+                ?: return@mapNotNull null
+            val exactAllowlistMatch = setting.skillAllowlist.any { it.equals(skillName, ignoreCase = true) }
+            val allowedByCapability = setting.enabled &&
                 setting.mode != CapabilityMode.DISABLED &&
-                (setting.skillAllowlist.isEmpty() || setting.skillAllowlist.any { it.equals(skillName, ignoreCase = true) })
+                (setting.skillAllowlist.isEmpty() || exactAllowlistMatch)
+            if (allowedByCapability) {
+                SkillAgentCandidate(definition, setting, exactAllowlistMatch)
+            } else {
+                null
+            }
         }
-        if (byAllowlist != null) {
-            return byAllowlist.id
-        }
-        return enabledDefinitions.firstOrNull()?.id
+        return candidates.firstOrNull { it.exactAllowlistMatch && it.setting.mode == CapabilityMode.AUTO }?.definition?.id
+            ?: candidates.firstOrNull { it.exactAllowlistMatch }?.definition?.id
+            ?: candidates.firstOrNull { it.setting.mode == CapabilityMode.AUTO }?.definition?.id
+            ?: candidates.firstOrNull()?.definition?.id
+            ?: enabledDefinitions.firstOrNull()?.id
     }
 
     private fun inferOperatorSkillName(message: String): String {
