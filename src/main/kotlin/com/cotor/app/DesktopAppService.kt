@@ -387,6 +387,7 @@ class DesktopAppService(
 
     init {
         liveServicesForTesting += this
+        serviceScope.launch { runCatching { browserSkillRunner.prewarm() } }
         // Runtime state is persisted across app-server restarts. Reattach loops eagerly
         // on service startup so companies keep progressing even before the UI polls.
         if (autoStartAutomationRefresh) {
@@ -6821,6 +6822,19 @@ class DesktopAppService(
                 ?: toolCall.args["skillName"]
                 ?: inferOperatorSkillName(userMessage)
             ).trim()
+        if (skillName.isBlank()) {
+            val action = OperatorCommandAction(
+                type = "skill-run",
+                title = "Skill name required",
+                detail = "Could not determine which skill to run. Try naming the skill explicitly, e.g. 'run analytics-reporter'.",
+                status = "FAILED_SETUP"
+            )
+            return OperatorChatToolExecution(
+                blockedActions = listOf(action),
+                answerSources = listOf(OperatorAnswerSource("skill-run", action.title, action.detail)),
+                resultLines = listOf("skill: FAILED_SETUP - skill name could not be inferred")
+            )
+        }
         val agentId = toolCall.args["agentId"]?.trim()?.takeIf { it.isNotBlank() }
             ?: resolveOperatorSkillAgent(companyId, skillName)
         if (agentId.isNullOrBlank()) {
@@ -6958,7 +6972,13 @@ class DesktopAppService(
             "audience-scout",
             "analytics",
             "마케팅",
-            "marketing"
+            "marketing",
+            "소셜",
+            "블로그",
+            "cms",
+            "고객",
+            "타깃",
+            "콘텐츠"
         ).any { it in normalized }
         val executionIntent = listOf(
             "run",
@@ -20498,7 +20518,8 @@ class DesktopAppService(
                     "audience-scout",
                     "content-publisher",
                     "social-publisher",
-                    "analytics-reporter"
+                    "analytics-reporter",
+                    "video-plan"
                 ),
                 requiresEvidence = true,
                 requiresReview = false,
