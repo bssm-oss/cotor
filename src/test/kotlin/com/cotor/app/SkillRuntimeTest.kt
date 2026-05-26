@@ -24,6 +24,40 @@ class SkillRuntimeTest : FunSpec({
         graphify.requiredCapabilities.contains(CapabilityKey.KNOWLEDGE_GRAPH_WRITE) shouldBe true
     }
 
+    test("new companies seed a repository mapper agent for the operator repo map shortcut") {
+        val appHome = Files.createTempDirectory("skill-graphify-seed-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val service = skillRuntimeService(appHome)
+        val company = service.createCompany(name = "Graph Seed Co", rootPath = repoRoot.toString())
+        val companyRoot = java.nio.file.Path.of(company.rootPath).toAbsolutePath().normalize()
+        companyRoot.resolve("graphify-out").createDirectories()
+        companyRoot.resolve("graphify-out").resolve("GRAPH_REPORT.md").writeText("# Graph\n\n- service: DesktopAppService")
+        val dashboard = service.dashboard()
+        val engineeringLead = dashboard.companyAgentDefinitions.first {
+            it.companyId == company.id && it.title == "Engineering Lead"
+        }
+        val profile = dashboard.agentCapabilityProfiles.first {
+            it.companyId == company.id && it.agentId == engineeringLead.id
+        }
+        val skillRun = profile.settings.getValue(CapabilityKey.SKILL_RUN)
+        val graphWrite = profile.settings.getValue(CapabilityKey.KNOWLEDGE_GRAPH_WRITE)
+
+        skillRun.mode shouldBe CapabilityMode.AUTO
+        skillRun.skillAllowlist.contains("graphify") shouldBe true
+        graphWrite.mode shouldBe CapabilityMode.AUTO
+        graphWrite.pathAllowlist.contains(companyRoot.toString()) shouldBe true
+
+        val result = service.runSkill(
+            name = "graphify",
+            companyId = company.id,
+            agentId = engineeringLead.id,
+            parameters = mapOf("refresh" to "false")
+        )
+
+        result.status shouldBe "COMPLETED"
+        result.output shouldContain "DesktopAppService"
+    }
+
     test("runSkill dispatches graphify to graph report evidence instead of READY") {
         val appHome = Files.createTempDirectory("skill-graphify-home")
         val service = skillRuntimeService(appHome)
