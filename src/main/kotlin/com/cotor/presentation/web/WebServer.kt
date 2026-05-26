@@ -941,7 +941,8 @@ private fun openInBrowser(url: String) {
         if (Desktop.isDesktopSupported()) {
             Desktop.getDesktop().browse(URI(url))
         } else {
-            Runtime.getRuntime().exec(arrayOf("open", url))
+            val process = Runtime.getRuntime().exec(arrayOf("open", url))
+            process.waitFor()
         }
     } catch (_: Exception) {
         // Ignore failures
