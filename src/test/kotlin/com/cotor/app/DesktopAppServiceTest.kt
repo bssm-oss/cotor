@@ -969,6 +969,37 @@ class DesktopAppServiceTest : FunSpec({
         stateStore.load().skillRuns.single().skill shouldBe "graphify"
     }
 
+    test("operator chat prefers predelegated repository mapper agent over broad approval gates") {
+        val appHome = Files.createTempDirectory("operator-chat-skill-agent-selection-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Chat Skill Agent Selection", rootPath = appHome.toString())
+        Path.of(company.rootPath).resolve("graphify-out").also { Files.createDirectories(it) }
+            .resolve("GRAPH_REPORT.md")
+            .toFile()
+            .writeText("# Graph\n\n- predelegated engineering lead path")
+        val engineeringLead = service.listCompanyAgentDefinitions(company.id).first { it.title == "Engineering Lead" }
+
+        val response = service.runOperatorChat(
+            companyId = company.id,
+            message = "graphify 실행해서 리포지토리 구조 알려줘",
+            automationMode = OperatorAutomationMode.FULL_AUTO,
+            confirmFullAuto = true
+        )
+
+        response.actions.any { it.type == "skill-run" && it.status == "COMPLETED" } shouldBe true
+        response.blockedActions.shouldBeEmpty()
+        stateStore.load().skillRuns.single().agentId shouldBe engineeringLead.id
+    }
+
     test("operator chat keeps broad skill status questions on the status path") {
         val appHome = Files.createTempDirectory("operator-chat-skill-status-home")
         val repoRoot = Files.createDirectories(appHome.resolve("repo"))
@@ -9338,6 +9369,7 @@ class DesktopAppServiceTest : FunSpec({
             )
         )
 
+        service.stopCompanyRuntime(company.id)
         service.runCompanyRuntimeTick(company.id)
 
         stateStore.load().goals.first { it.id == followUpGoal.id }.status shouldBe GoalStatus.ACTIVE
