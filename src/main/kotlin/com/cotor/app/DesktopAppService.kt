@@ -13105,7 +13105,10 @@ class DesktopAppService(
         issueTasks: List<AgentTask>,
         latestRunsByTaskId: Map<String, AgentRun>
     ): Boolean {
-        if (task.status != DesktopTaskStatus.COMPLETED || issue.status != IssueStatus.BLOCKED) {
+        if (task.status != DesktopTaskStatus.COMPLETED ||
+            issue.status == IssueStatus.DONE ||
+            issue.status == IssueStatus.CANCELED
+        ) {
             return false
         }
         if (task.createdAt > issue.updatedAt) {
@@ -13115,7 +13118,7 @@ class DesktopAppService(
             .filter {
                 it.id != task.id &&
                     it.status in setOf(DesktopTaskStatus.FAILED, DesktopTaskStatus.PARTIAL) &&
-                    it.updatedAt >= issue.updatedAt
+                    (it.updatedAt >= issue.updatedAt || it.updatedAt >= task.createdAt)
             }
             .maxByOrNull { it.updatedAt }
             ?: return false
@@ -13183,6 +13186,26 @@ class DesktopAppService(
                             newStatus = issue.status,
                             source = "reconcileTerminalIssueStates",
                             reason = "Skipped task-to-issue reconciliation because the latest run produced no new diff on an existing PR lineage and existing-PR recovery should run first.",
+                            latestTask = latestTask,
+                            latestRun = latestRun
+                        )
+                        return@forEach
+                    }
+                    val staleCompletionAfterIssueBlocked =
+                        isStaleCompletionBlockedByNewerNonRecoverableFailure(
+                            task = latestTask,
+                            issue = issue,
+                            issueTasks = issueTasks,
+                            latestRunsByTaskId = latestRunsByTaskId
+                        )
+                    if (staleCompletionAfterIssueBlocked) {
+                        informationalTraceEvents += buildCompanyAutomationTraceEvent(
+                            issue = issue,
+                            goal = state.goals.firstOrNull { it.id == issue.goalId },
+                            oldStatus = issue.status,
+                            newStatus = issue.status,
+                            source = "reconcileTerminalIssueStates",
+                            reason = "Skipped stale completed-task reconciliation because a newer non-recoverable failure already blocked the issue.",
                             latestTask = latestTask,
                             latestRun = latestRun
                         )
