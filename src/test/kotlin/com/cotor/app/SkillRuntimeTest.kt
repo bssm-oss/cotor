@@ -279,18 +279,20 @@ class SkillRuntimeTest : FunSpec({
         val repoRoot = Files.createDirectories(appHome.resolve("repo"))
         val service = skillRuntimeService(appHome)
         val company = service.createCompany(name = "No Fallback Co", rootPath = repoRoot.toString())
-        val builder = service.listCompanyAgentDefinitions(company.id).first { it.title == "Builder" }
-        service.updateAgentCapabilities(
-            companyId = company.id,
-            agentId = builder.id,
-            settings = mapOf(
-                CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
-                    enabled = true,
-                    mode = CapabilityMode.AUTO,
-                    skillAllowlist = listOf("graphify")
+        val allAgents = service.listCompanyAgentDefinitions(company.id)
+        for (agent in allAgents) {
+            service.updateAgentCapabilities(
+                companyId = company.id,
+                agentId = agent.id,
+                settings = mapOf(
+                    CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                        enabled = true,
+                        mode = CapabilityMode.AUTO,
+                        skillAllowlist = listOf("graphify")
+                    )
                 )
             )
-        )
+        }
 
         val agentId = service.resolveOperatorSkillAgent(company.id, "browser-smoke")
 
