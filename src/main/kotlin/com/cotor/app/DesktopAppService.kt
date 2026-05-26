@@ -20287,16 +20287,26 @@ class DesktopAppService(
         profile: AgentCapabilityProfile,
         now: Long
     ): AgentCapabilityProfile {
-        if (!isChiefAgentDefinition(definition)) {
-            return profile
-        }
         var changed = false
         val nextSettings = profile.settings.toMutableMap()
-        chiefAgentApprovalSettings().forEach { (key, setting) ->
-            val current = nextSettings[key]
-            if (current == null || !current.enabled || current.mode == CapabilityMode.DISABLED) {
-                nextSettings[key] = setting
-                changed = true
+
+        if (isChiefAgentDefinition(definition)) {
+            chiefAgentApprovalSettings().forEach { (key, setting) ->
+                val current = nextSettings[key]
+                if (current == null || !current.enabled || current.mode == CapabilityMode.DISABLED) {
+                    nextSettings[key] = setting
+                    changed = true
+                }
+            }
+        }
+        if (isRepositoryMappingAgentDefinition(definition)) {
+            val defaults = defaultAgentCapabilitySettings()
+            repositoryMappingSkillSettings(company.rootPath).forEach { (key, setting) ->
+                val current = nextSettings[key]
+                if (current == null || current == defaults[key]) {
+                    nextSettings[key] = setting
+                    changed = true
+                }
             }
         }
         if (!changed) {
@@ -20315,9 +20325,44 @@ class DesktopAppService(
         val base = repositoryScopedCompanyAgentCapabilitySettings(company.rootPath)
         return when {
             isChiefAgentDefinition(definition) -> base + chiefAgentApprovalSettings()
+            isRepositoryMappingAgentDefinition(definition) -> base + repositoryMappingSkillSettings(company.rootPath)
             isMarketingOperatorDefinition(definition) -> base + marketingOperatorSkillSettings()
             else -> base
         }
+    }
+
+    private fun isRepositoryMappingAgentDefinition(definition: CompanyAgentDefinition): Boolean =
+        definition.title.equals("Engineering Lead", ignoreCase = true)
+
+    private fun repositoryMappingSkillSettings(rootPath: String): Map<CapabilityKey, AgentCapabilitySetting> {
+        val repositoryRoot = Path.of(rootPath).toAbsolutePath().normalize().toString()
+        val notes = "Repository mapping is delegated only inside this company's root for the operator repo-map shortcut."
+        return mapOf(
+            CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                skillAllowlist = listOf("graphify"),
+                requiresEvidence = true,
+                requiresReview = false,
+                notes = notes
+            ),
+            CapabilityKey.KNOWLEDGE_GRAPH_READ to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.READ_ONLY,
+                pathAllowlist = listOf(repositoryRoot),
+                requiresEvidence = true,
+                requiresReview = false,
+                notes = notes
+            ),
+            CapabilityKey.KNOWLEDGE_GRAPH_WRITE to AgentCapabilitySetting(
+                enabled = true,
+                mode = CapabilityMode.AUTO,
+                pathAllowlist = listOf(repositoryRoot),
+                requiresEvidence = true,
+                requiresReview = false,
+                notes = notes
+            )
+        )
     }
 
     private fun isMarketingOperatorDefinition(definition: CompanyAgentDefinition): Boolean =
