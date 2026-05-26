@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -22,6 +23,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 private val directChatHttpThreadCounter = AtomicInteger()
@@ -40,8 +42,22 @@ private val directChatJson = Json { ignoreUnknownKeys = true }
 
 class DirectChatService {
 
+    private fun validateAndNormalizeBaseUrl(raw: String, defaultBase: String): String {
+        if (raw.isBlank()) return defaultBase
+        val uri = URI.create(raw)
+        val scheme = uri.scheme?.lowercase()
+        require(scheme == "http" || scheme == "https") {
+            "Only http/https schemes are allowed, got: $scheme"
+        }
+        val host = uri.host?.lowercase()
+        require(host in setOf("127.0.0.1", "localhost", "::1")) {
+            "Only localhost connections are allowed, got: $host"
+        }
+        return raw.trimEnd('/')
+    }
+
     fun listAvailableModels(baseUrl: String = "http://127.0.0.1:11434"): List<DirectChatAvailableModel> {
-        val effectiveBase = baseUrl.trimEnd('/')
+        val effectiveBase = validateAndNormalizeBaseUrl(baseUrl, "http://127.0.0.1:11434")
         return try {
             val request = HttpRequest.newBuilder()
                 .uri(URI.create("$effectiveBase/api/tags"))
@@ -71,13 +87,13 @@ class DirectChatService {
         messageId: String
     ): Flow<DirectChatStreamChunk> = flow {
         val provider = conversation.provider
-        val effectiveBase = conversation.baseUrl.trimEnd('/').ifBlank {
-            when (provider) {
-                "ollama" -> "http://127.0.0.1:11434"
-                "lmstudio" -> "http://127.0.0.1:1234"
-                else -> ""
-            }
+        val defaultBase = when (provider) {
+            "ollama" -> "http://127.0.0.1:11434"
+            "lmstudio" -> "http://127.0.0.1:1234"
+            else -> ""
         }
+        val effectiveBase = if (defaultBase.isBlank()) defaultBase
+        else validateAndNormalizeBaseUrl(conversation.baseUrl, defaultBase)
 
         when (provider) {
             "ollama" -> streamOllama(conversation, userMessage, messageId, effectiveBase)
@@ -128,26 +144,28 @@ class DirectChatService {
             val response = withContext(Dispatchers.IO) {
                 directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofLines())
             }
-            val iterator = response.body().iterator()
-            while (withContext(Dispatchers.IO) { iterator.hasNext() }) {
-                val line = withContext(Dispatchers.IO) { iterator.next() }
-                if (line.isBlank()) continue
-                try {
-                    val parsed = directChatJson.parseToJsonElement(line).jsonObject
-                    val done = parsed["done"]?.jsonPrimitive?.contentOrNull == "true"
-                    val content = parsed["message"]?.jsonObject?.get("content")
-                        ?.jsonPrimitive?.contentOrNull ?: ""
-                    emit(
-                        DirectChatStreamChunk(
-                            conversationId = conversation.id,
-                            messageId = messageId,
-                            content = content,
-                            done = done
+            response.body().use { lineStream ->
+                val iterator = lineStream.iterator()
+                while (withContext(Dispatchers.IO) { iterator.hasNext() }) {
+                    val line = withContext(Dispatchers.IO) { iterator.next() }
+                    if (line.isBlank()) continue
+                    try {
+                        val parsed = directChatJson.parseToJsonElement(line).jsonObject
+                        val done = parsed["done"]?.jsonPrimitive?.booleanOrNull == true
+                        val content = parsed["message"]?.jsonObject?.get("content")
+                            ?.jsonPrimitive?.contentOrNull ?: ""
+                        emit(
+                            DirectChatStreamChunk(
+                                conversationId = conversation.id,
+                                messageId = messageId,
+                                content = content,
+                                done = done
+                            )
                         )
-                    )
-                    if (done) break
-                } catch (_: Exception) {
-                    // skip malformed lines
+                        if (done) break
+                    } catch (_: Exception) {
+                        // skip malformed lines
+                    }
                 }
             }
             // ensure done=true is emitted if the stream ended without an explicit done
@@ -203,47 +221,49 @@ class DirectChatService {
                 directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofLines())
             }
             var doneSent = false
-            val iterator = response.body().iterator()
-            while (withContext(Dispatchers.IO) { iterator.hasNext() }) {
-                val line = withContext(Dispatchers.IO) { iterator.next() }
-                if (line.isBlank()) continue
-                if (!line.startsWith("data:")) continue
-                val data = line.removePrefix("data:").trim()
-                if (data == "[DONE]") {
-                    if (!doneSent) {
-                        doneSent = true
+            response.body().use { lineStream ->
+                val iterator = lineStream.iterator()
+                while (withContext(Dispatchers.IO) { iterator.hasNext() }) {
+                    val line = withContext(Dispatchers.IO) { iterator.next() }
+                    if (line.isBlank()) continue
+                    if (!line.startsWith("data:")) continue
+                    val data = line.removePrefix("data:").trim()
+                    if (data == "[DONE]") {
+                        if (!doneSent) {
+                            doneSent = true
+                            emit(
+                                DirectChatStreamChunk(
+                                    conversationId = conversation.id,
+                                    messageId = messageId,
+                                    content = "",
+                                    done = true
+                                )
+                            )
+                        }
+                        break
+                    }
+                    try {
+                        val parsed = directChatJson.parseToJsonElement(data).jsonObject
+                        val finishReason = parsed["choices"]?.jsonArray
+                            ?.firstOrNull()?.jsonObject?.get("finish_reason")
+                            ?.jsonPrimitive?.contentOrNull
+                        val content = parsed["choices"]?.jsonArray
+                            ?.firstOrNull()?.jsonObject?.get("delta")
+                            ?.jsonObject?.get("content")
+                            ?.jsonPrimitive?.contentOrNull ?: ""
+                        val done = finishReason != null && finishReason != "null"
                         emit(
                             DirectChatStreamChunk(
                                 conversationId = conversation.id,
                                 messageId = messageId,
-                                content = "",
-                                done = true
+                                content = content,
+                                done = done
                             )
                         )
+                        if (done) { doneSent = true; break }
+                    } catch (_: Exception) {
+                        // skip malformed SSE lines
                     }
-                    break
-                }
-                try {
-                    val parsed = directChatJson.parseToJsonElement(data).jsonObject
-                    val finishReason = parsed["choices"]?.jsonArray
-                        ?.firstOrNull()?.jsonObject?.get("finish_reason")
-                        ?.jsonPrimitive?.contentOrNull
-                    val content = parsed["choices"]?.jsonArray
-                        ?.firstOrNull()?.jsonObject?.get("delta")
-                        ?.jsonObject?.get("content")
-                        ?.jsonPrimitive?.contentOrNull ?: ""
-                    val done = finishReason != null && finishReason != "null"
-                    emit(
-                        DirectChatStreamChunk(
-                            conversationId = conversation.id,
-                            messageId = messageId,
-                            content = content,
-                            done = done
-                        )
-                    )
-                    if (done) { doneSent = true; break }
-                } catch (_: Exception) {
-                    // skip malformed SSE lines
                 }
             }
             if (!doneSent) {
@@ -280,8 +300,11 @@ class DirectChatService {
                 val process = ProcessBuilder("claude", "-p", prompt)
                     .redirectErrorStream(true)
                     .start()
-                val text = process.inputStream.bufferedReader().readText()
-                process.waitFor()
+                val text = process.inputStream.bufferedReader().use { it.readText() }
+                if (!process.waitFor(5, TimeUnit.MINUTES)) {
+                    process.destroyForcibly()
+                    error("claude-cli timed out")
+                }
                 text
             }
             emit(
@@ -313,7 +336,7 @@ class DirectChatService {
         if (conversation.systemPrompt.isNotBlank()) {
             result += "system" to conversation.systemPrompt
         }
-        conversation.messages.forEach { msg ->
+        conversation.messages.takeLast(40).forEach { msg ->
             result += msg.role to msg.content
         }
         result += "user" to userMessage
@@ -335,12 +358,19 @@ class DirectChatService {
     }
 
     private fun jsonString(value: String): String {
-        val escaped = value
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-        return "\"$escaped\""
+        val sb = StringBuilder("\"")
+        for (ch in value) {
+            when {
+                ch == '"'  -> sb.append("\\\"")
+                ch == '\\' -> sb.append("\\\\")
+                ch == '\n' -> sb.append("\\n")
+                ch == '\r' -> sb.append("\\r")
+                ch == '\t' -> sb.append("\\t")
+                ch.code < 0x20 -> sb.append("\\u%04x".format(ch.code))
+                else -> sb.append(ch)
+            }
+        }
+        sb.append("\"")
+        return sb.toString()
     }
 }
