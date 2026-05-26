@@ -56,7 +56,7 @@ class LocalPlaywrightMarketingBrowserRunner(
                     destroyProcessTree(process)
                     error("Marketing browser execution timed out after ${timeoutSeconds}s.")
                 }
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                 if (process.exitValue() != 0) {
                     error(output.ifBlank { "Marketing browser execution failed with exit ${process.exitValue()}." })
                 }
@@ -97,7 +97,7 @@ class LocalPlaywrightMarketingBrowserRunner(
                 destroyProcessTree(process)
                 error("Playwright dependency install timed out after ${installTimeoutSeconds}s.")
             }
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             if (process.exitValue() != 0) {
                 error(output.ifBlank { "Playwright dependency install failed with exit ${process.exitValue()}." })
             }

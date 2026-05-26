@@ -3057,7 +3057,7 @@ class DesktopAppService(
             process.destroyForcibly()
             error("${command.joinToString(" ")} timed out after ${timeoutSeconds}s.")
         }
-        val output = process.inputStream.bufferedReader().readText()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
         if (process.exitValue() != 0) {
             error(output.ifBlank { "${command.joinToString(" ")} failed with exit ${process.exitValue()}." })
         }

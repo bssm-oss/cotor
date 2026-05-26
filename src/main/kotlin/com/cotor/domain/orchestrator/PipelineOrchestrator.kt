@@ -817,7 +817,7 @@ class DefaultPipelineOrchestrator(
         return try {
             val process = ProcessBuilder("git", "rev-parse", "--short", "HEAD").start()
             process.waitFor()
-            process.inputStream.bufferedReader().readText().trim()
+            process.inputStream.bufferedReader().use { it.readText() }.trim()
         } catch (e: Exception) {
             "unknown"
         }
