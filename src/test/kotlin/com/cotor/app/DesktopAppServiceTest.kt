@@ -1769,8 +1769,7 @@ class DesktopAppServiceTest : FunSpec({
             autoStartAutomationRefresh = false
         )
 
-        service.runTask(task.id)
-        awaitTaskCompletion(stateStore, task.id)
+        service.runTaskInlineForTesting(task.id)
 
         capturedAgents shouldHaveSize 2
         capturedAgents.all { it.name == "opencode" } shouldBe true
@@ -4514,8 +4513,7 @@ class DesktopAppServiceTest : FunSpec({
             issueId = executionIssue.id
         )
 
-        service.runTask(task.id)
-        awaitTaskCompletion(stateStore, task.id)
+        service.runTaskInlineForTesting(task.id)
 
         val document = Files.readString(worktreeRoot.resolve("docs/installed-app-filter-e2e.md"))
         document shouldContain "Installed app filtered PR verification note"

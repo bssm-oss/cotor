@@ -1,7 +1,7 @@
-# Graph Report - cotor-qa-appbuild-20260526  (2026-05-26)
+# Graph Report - cotor-ultraqa-20260526.qJfPNp  (2026-05-26)
 
 ## Corpus Check
-- 358 files · ~612,630 words
+- 358 files · ~612,626 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
