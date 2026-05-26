@@ -12,6 +12,7 @@ import com.cotor.data.config.ConfigRepository
 import com.cotor.data.config.YamlParser
 import com.cotor.model.AgentConfig
 import com.cotor.model.CotorConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.slf4j.Logger
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
@@ -184,14 +186,24 @@ class DesktopTuiSessionService(
 
     private fun startReader(session: RuntimeSession, stream: InputStream) {
         scope.launch {
-            stream.use { input ->
-                val buffer = ByteArray(4096)
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count == -1) {
-                        break
+            runCatching {
+                stream.use { input ->
+                    val buffer = ByteArray(4096)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count == -1) {
+                            break
+                        }
+                        session.append(String(buffer, 0, count, StandardCharsets.UTF_8).replace("\u0000", ""))
                     }
-                    session.append(String(buffer, 0, count, StandardCharsets.UTF_8).replace("\u0000", ""))
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) {
+                    logger.debug("TUI session reader cancelled")
+                } else if (error is IOException && !session.process.isAlive) {
+                    logger.debug("TUI session reader closed after process exit")
+                } else {
+                    logger.warn("TUI session reader failed", error)
                 }
             }
         }

@@ -885,10 +885,13 @@ class DesktopAppServiceTest : FunSpec({
 
     test("operator chat can route natural requests into a real skill run") {
         val appHome = Files.createTempDirectory("operator-chat-skill-run-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
         val stateStore = DesktopStateStore { appHome }
         val service = DesktopAppService(
             stateStore = stateStore,
-            gitWorkspaceService = mockk(relaxed = true),
+            gitWorkspaceService = gitWorkspaceService,
             configRepository = mockk(relaxed = true),
             agentExecutor = operatorChatLlmExecutor(
                 """{"reply":"리포지토리 맵을 확인할게요.","toolCalls":[{"tool":"run_skill","reason":"User asked for repository structure.","args":{"skill":"graphify","refresh":"false"}}],"answerSourceHints":["skill-run"]}""",
@@ -921,6 +924,75 @@ class DesktopAppServiceTest : FunSpec({
         skillAction.status shouldBe "COMPLETED"
         response.answerSources.any { it.type == "skill-run" } shouldBe true
         stateStore.load().skillRuns.single().skill shouldBe "graphify"
+    }
+
+    test("operator chat with explicit automation mode still routes skill requests") {
+        val appHome = Files.createTempDirectory("operator-chat-command-skill-run-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Chat Command Skill", rootPath = appHome.toString())
+        Path.of(company.rootPath).resolve("graphify-out").also { Files.createDirectories(it) }
+            .resolve("GRAPH_REPORT.md")
+            .toFile()
+            .writeText("# Graph\n\n- command skill path")
+        val ceo = service.listCompanyAgentDefinitions(company.id).first { it.title == "CEO" }
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = ceo.id,
+            settings = mapOf(
+                CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                    enabled = true,
+                    mode = CapabilityMode.AUTO,
+                    skillAllowlist = listOf("graphify")
+                ),
+                CapabilityKey.KNOWLEDGE_GRAPH_READ to AgentCapabilitySetting(enabled = true, mode = CapabilityMode.READ_ONLY)
+            )
+        )
+
+        val response = service.runOperatorChat(
+            companyId = company.id,
+            message = "graphify 실행해서 리포지토리 구조 알려줘",
+            automationMode = OperatorAutomationMode.FULL_AUTO,
+            confirmFullAuto = true
+        )
+
+        response.actions.any { it.type == "skill-run" && it.status == "COMPLETED" } shouldBe true
+        response.actions.none { it.type == "status-check" } shouldBe true
+        stateStore.load().skillRuns.single().skill shouldBe "graphify"
+    }
+
+    test("operator chat keeps broad skill status questions on the status path") {
+        val appHome = Files.createTempDirectory("operator-chat-skill-status-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true)
+        )
+        val company = service.createCompany(name = "Operator Chat Skill Status", rootPath = appHome.toString())
+
+        val response = service.runOperatorChat(
+            companyId = company.id,
+            message = "스킬 상태 확인해줘",
+            automationMode = OperatorAutomationMode.FULL_AUTO,
+            confirmFullAuto = true
+        )
+
+        response.actions.any { it.type == "status-check" } shouldBe true
+        response.actions.none { it.type == "skill-run" } shouldBe true
+        stateStore.load().skillRuns.shouldBeEmpty()
     }
 
     test("operator chat hard gates destructive policy changes") {
@@ -8382,9 +8454,7 @@ class DesktopAppServiceTest : FunSpec({
             }
             error("Unreachable")
         }
-        val remediationIssue = stateStore.load().issues.first {
-            it.goalId == followUpGoal.id && it.kind == "execution"
-        }
+        val remediationIssue = followUpRemediationIssue(stateStore, followUpGoal)
         awaitIssueTasksSettled(stateStore, remediationIssue.id)
         val existingRemediationTask = service.createTask(
             workspaceId = remediationIssue.workspaceId,
@@ -8477,9 +8547,7 @@ class DesktopAppServiceTest : FunSpec({
             }
             error("Unreachable")
         }
-        val remediationIssue = stateStore.load().issues.first {
-            it.goalId == followUpGoal.id && it.kind == "execution"
-        }
+        val remediationIssue = followUpRemediationIssue(stateStore, followUpGoal)
         awaitIssueTasksSettled(stateStore, remediationIssue.id)
         val seededTasks = (1..3).map { attempt ->
             service.createTask(
@@ -9090,9 +9158,7 @@ class DesktopAppServiceTest : FunSpec({
             }
             error("Unreachable")
         }
-        val remediationIssue = stateStore.load().issues.first {
-            it.goalId == followUpGoal.id && it.kind == "execution"
-        }
+        val remediationIssue = followUpRemediationIssue(stateStore, followUpGoal)
         awaitIssueTasksSettled(stateStore, remediationIssue.id)
         val existingRemediationTask = service.createTask(
             workspaceId = remediationIssue.workspaceId,
@@ -9228,9 +9294,7 @@ class DesktopAppServiceTest : FunSpec({
             }
             error("Unreachable")
         }
-        val remediationIssue = stateStore.load().issues.first {
-            it.goalId == followUpGoal.id && it.kind == "execution"
-        }
+        val remediationIssue = followUpRemediationIssue(stateStore, followUpGoal)
         awaitIssueTasksSettled(stateStore, remediationIssue.id)
         val existingRemediationTask = service.createTask(
             workspaceId = remediationIssue.workspaceId,
@@ -15668,6 +15732,23 @@ private suspend fun awaitTaskCompletion(stateStore: DesktopStateStore, taskId: S
         error("Timed out waiting for task $taskId completion; task=$task runs=$runs")
     }
 }
+
+private suspend fun followUpRemediationIssue(stateStore: DesktopStateStore, followUpGoal: CompanyGoal): CompanyIssue {
+    val snapshot = stateStore.load()
+    return snapshot.issues.firstOrNull {
+        it.goalId == followUpGoal.id &&
+            it.kind.equals("execution", ignoreCase = true) &&
+            it.title == FOLLOW_UP_REMEDIATION_TITLE
+    } ?: error(
+        "Follow-up remediation issue was not synthesized. Follow-up issues: ${
+            snapshot.issues
+                .filter { it.goalId == followUpGoal.id }
+                .map { "${it.kind}:${it.title}:${it.status}" }
+        }"
+    )
+}
+
+private const val FOLLOW_UP_REMEDIATION_TITLE = "Unblock the affected work or satisfy the failed review signal."
 
 /**
  * Mark an issue as BLOCKED and seed a non-recoverable failed task so that the

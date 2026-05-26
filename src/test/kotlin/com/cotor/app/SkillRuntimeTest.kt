@@ -6,6 +6,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.mockk.coEvery
 import io.mockk.mockk
 import java.nio.file.Files
 import kotlin.io.path.createDirectories
@@ -160,15 +161,18 @@ class SkillRuntimeTest : FunSpec({
 private fun skillRuntimeService(
     appHome: java.nio.file.Path,
     browserRunner: BrowserSkillRunner = RecordingBrowserSkillRunner()
-): DesktopAppService =
-    DesktopAppService(
+): DesktopAppService {
+    val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+    coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } answers { firstArg() }
+    return DesktopAppService(
         stateStore = DesktopStateStore { appHome },
-        gitWorkspaceService = mockk(relaxed = true),
+        gitWorkspaceService = gitWorkspaceService,
         configRepository = mockk<ConfigRepository>(relaxed = true),
         agentExecutor = mockk<AgentExecutor>(relaxed = true),
         commandAvailability = { command -> command in setOf("graphify", "node", "npm") },
         browserSkillRunner = browserRunner
     )
+}
 
 private class RecordingBrowserSkillRunner : BrowserSkillRunner {
     val commands = mutableListOf<BrowserSkillCommand>()

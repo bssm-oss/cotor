@@ -5901,7 +5901,8 @@ class DesktopAppService(
             return response
         }
 
-        if (looksLikeStatusRequest(normalized)) {
+        val operatorSkillRequest = looksLikeOperatorSkillRequest(normalized)
+        if (!operatorSkillRequest && looksLikeStatusRequest(normalized)) {
             summary = buildOperatorCompanySummary(companyId)
             actions += OperatorCommandAction(
                 type = "status-check",
@@ -5909,6 +5910,24 @@ class DesktopAppService(
                 detail = formatOperatorStatusBrief(summary),
                 status = "DONE"
             )
+            handled = true
+        }
+
+        if (operatorSkillRequest) {
+            val skillName = inferOperatorSkillName(trimmedMessage)
+            val execution = runOperatorSkillTool(
+                companyId = companyId,
+                userMessage = trimmedMessage,
+                toolCall = OperatorChatToolCall(
+                    tool = "run_skill",
+                    reason = "Operator command requested a delegated skill run.",
+                    args = mapOf("skill" to skillName, "refresh" to "false")
+                )
+            )
+            actions += execution.actions
+            pendingApprovals += execution.pendingApprovals
+            blockedActions += execution.blockedActions
+            summary = buildOperatorCompanySummary(companyId)
             handled = true
         }
 
@@ -6888,6 +6907,60 @@ class DesktopAppService(
             "marketing" in normalized || "마케팅" in normalized || "홍보" in normalized -> "marketing-operator"
             else -> "graphify"
         }
+    }
+
+    private fun looksLikeOperatorSkillRequest(normalized: String): Boolean {
+        val explicitSkillName = listOf(
+            "run_skill",
+            "skill_run",
+            "execute_skill",
+            "graphify",
+            "browser-smoke",
+            "video-plan",
+            "audience-scout",
+            "analytics-reporter",
+            "social-publisher",
+            "content-publisher",
+            "marketing-operator"
+        ).any { it in normalized }
+        if (explicitSkillName) {
+            return true
+        }
+
+        val skillTarget = listOf(
+            "skill",
+            "스킬",
+            "repo",
+            "repository",
+            "리포",
+            "구조",
+            "browser",
+            "브라우저",
+            "screenshot",
+            "스크린샷",
+            "video",
+            "영상",
+            "audience",
+            "audience-scout",
+            "analytics",
+            "마케팅",
+            "marketing"
+        ).any { it in normalized }
+        val executionIntent = listOf(
+            "run",
+            "execute",
+            "invoke",
+            "map",
+            "summarize",
+            "summary",
+            "실행",
+            "돌려",
+            "요약",
+            "알려",
+            "보고서",
+            "리포트"
+        ).any { it in normalized }
+        return skillTarget && executionIntent
     }
 
     private suspend fun inspectOperatorRuntimeTool(companyId: String): OperatorChatToolExecution {
