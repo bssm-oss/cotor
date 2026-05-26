@@ -182,7 +182,7 @@ object CompanyIssueReadinessResolver {
             durableRunId = readiness.durableRunId ?: issue.durableRunId,
             reason = readiness.reason,
             createdAt = previous?.createdAt ?: now,
-            updatedAt = if (previous.matches(readiness, issue)) previous!!.updatedAt else now
+            updatedAt = previous?.takeIf { it.matches(readiness, issue) }?.updatedAt ?: now
         )
 
     private fun CompanyRuntimeWorkItem?.matches(readiness: CompanyIssueReadinessResolution, issue: CompanyIssue): Boolean =

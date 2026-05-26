@@ -49,7 +49,9 @@ class DefaultResultAnalyzer : ResultAnalyzer {
             for (j in i + 1 until comparable.size) {
                 val left = comparable[i]
                 val right = comparable[j]
-                val score = similarity(left.output!!, right.output!!)
+                val leftOutput = checkNotNull(left.output) { "Expected non-null output after filtering" }
+                val rightOutput = checkNotNull(right.output) { "Expected non-null output after filtering" }
+                val score = similarity(leftOutput, rightOutput)
                 pairSimilarities += score
                 if (score < 0.4) {
                     disagreements += "Low agreement between ${left.agentName} and ${right.agentName} (${percent(score)})."
