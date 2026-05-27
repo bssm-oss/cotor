@@ -9,6 +9,8 @@ package com.cotor.app
  */
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
@@ -30,7 +32,10 @@ private val directChatHttpThreadCounter = AtomicInteger()
 private val directChatHttpClient: HttpClient = HttpClient.newBuilder()
     .connectTimeout(Duration.ofSeconds(10))
     .executor(
-        java.util.concurrent.Executors.newCachedThreadPool { runnable ->
+        java.util.concurrent.ThreadPoolExecutor(
+            0, 16, 60L, TimeUnit.SECONDS,
+            java.util.concurrent.SynchronousQueue()
+        ) { runnable ->
             Thread(runnable, "cotor-direct-chat-http-${directChatHttpThreadCounter.incrementAndGet()}").apply {
                 isDaemon = true
             }
@@ -144,6 +149,10 @@ class DirectChatService {
             val response = withContext(Dispatchers.IO) {
                 directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofLines())
             }
+            if (response.statusCode() !in 200..299) {
+                error("Ollama request failed with HTTP ${response.statusCode()}")
+            }
+            var doneSent = false
             response.body().use { lineStream ->
                 val iterator = lineStream.iterator()
                 while (withContext(Dispatchers.IO) { iterator.hasNext() }) {
@@ -162,21 +171,26 @@ class DirectChatService {
                                 done = done
                             )
                         )
-                        if (done) break
+                        if (done) {
+                            doneSent = true
+                            break
+                        }
                     } catch (_: Exception) {
                         // skip malformed lines
                     }
                 }
             }
             // ensure done=true is emitted if the stream ended without an explicit done
-            emit(
-                DirectChatStreamChunk(
-                    conversationId = conversation.id,
-                    messageId = messageId,
-                    content = "",
-                    done = true
+            if (!doneSent) {
+                emit(
+                    DirectChatStreamChunk(
+                        conversationId = conversation.id,
+                        messageId = messageId,
+                        content = "",
+                        done = true
+                    )
                 )
-            )
+            }
         } catch (e: Exception) {
             emit(
                 DirectChatStreamChunk(
@@ -219,6 +233,9 @@ class DirectChatService {
 
             val response = withContext(Dispatchers.IO) {
                 directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofLines())
+            }
+            if (response.statusCode() !in 200..299) {
+                error("LM Studio request failed with HTTP ${response.statusCode()}")
             }
             var doneSent = false
             response.body().use { lineStream ->
@@ -297,15 +314,33 @@ class DirectChatService {
         val prompt = buildClaudeCliPrompt(conversation, userMessage)
         try {
             val output = withContext(Dispatchers.IO) {
-                val process = ProcessBuilder("claude", "-p", prompt)
-                    .redirectErrorStream(true)
-                    .start()
-                val text = process.inputStream.bufferedReader().use { it.readText() }
-                if (!process.waitFor(5, TimeUnit.MINUTES)) {
-                    process.destroyForcibly()
-                    error("claude-cli timed out")
+                coroutineScope {
+                    val process = ProcessBuilder("claude", "-p", prompt)
+                        .redirectErrorStream(true)
+                        .start()
+                    // Read and wait concurrently so killing the process unblocks the read
+                    val readJob = async(Dispatchers.IO) {
+                        val sb = StringBuilder()
+                        process.inputStream.bufferedReader().use { reader ->
+                            val buf = CharArray(8192)
+                            var read: Int
+                            while (reader.read(buf).also { read = it } != -1) {
+                                sb.append(buf, 0, read)
+                                if (sb.length > 1_000_000) {
+                                    process.destroyForcibly()
+                                    error("claude-cli output exceeded 1MB limit")
+                                }
+                            }
+                        }
+                        sb.toString()
+                    }
+                    if (!process.waitFor(5, TimeUnit.MINUTES)) {
+                        process.destroyForcibly()
+                        readJob.cancel()
+                        error("claude-cli timed out after 5 minutes")
+                    }
+                    readJob.await()
                 }
-                text
             }
             emit(
                 DirectChatStreamChunk(
@@ -350,7 +385,7 @@ class DirectChatService {
         if (conversation.systemPrompt.isNotBlank()) {
             append("System: ${conversation.systemPrompt}\n\n")
         }
-        conversation.messages.forEach { msg ->
+        conversation.messages.takeLast(40).forEach { msg ->
             val label = if (msg.role == "user") "Human" else "Assistant"
             append("$label: ${msg.content}\n\n")
         }

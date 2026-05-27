@@ -1737,8 +1737,16 @@ internal fun Application.cotorAppModule(
                 route("/{companyId}/direct-chat") {
                     get("/models") {
                         if (!requireToken(token)) return@get
-                        val baseUrl = call.request.queryParameters["baseUrl"] ?: "http://127.0.0.1:11434"
-                        call.respond(desktopService.listDirectChatModels(baseUrl))
+                        val rawBaseUrl = call.request.queryParameters["baseUrl"]
+                            ?.takeIf { it.isNotBlank() } ?: "http://127.0.0.1:11434"
+                        val baseUrlHost = runCatching { java.net.URI.create(rawBaseUrl).host?.lowercase() }.getOrNull()
+                        if (baseUrlHost !in setOf("127.0.0.1", "localhost", "::1")) {
+                            return@get call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf("error" to "Only localhost base URLs are allowed")
+                            )
+                        }
+                        call.respond(desktopService.listDirectChatModels(rawBaseUrl))
                     }
 
                     route("/conversations") {
@@ -1784,8 +1792,21 @@ internal fun Application.cotorAppModule(
                                 ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "conversationId is required"))
                             val request = call.receive<SendDirectChatMessageRequest>()
                             call.respondTextWriter(ContentType.parse("application/x-ndjson")) {
-                                desktopService.streamDirectChatMessage(conversationId, companyId, request.message).collect { chunk ->
-                                    write(streamJson.encodeToString(DirectChatStreamChunk.serializer(), chunk))
+                                try {
+                                    desktopService.streamDirectChatMessage(conversationId, companyId, request.message).collect { chunk ->
+                                        write(streamJson.encodeToString(DirectChatStreamChunk.serializer(), chunk))
+                                        write("\n")
+                                        flush()
+                                    }
+                                } catch (e: Exception) {
+                                    val errChunk = DirectChatStreamChunk(
+                                        conversationId = conversationId,
+                                        messageId = "error",
+                                        content = "",
+                                        done = true,
+                                        error = e.message ?: "Stream failed"
+                                    )
+                                    write(streamJson.encodeToString(DirectChatStreamChunk.serializer(), errChunk))
                                     write("\n")
                                     flush()
                                 }
