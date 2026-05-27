@@ -47,7 +47,13 @@ import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.produceIn
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
@@ -64,6 +70,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.IOException
+import java.io.Writer
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.channels.FileChannel
@@ -76,6 +83,8 @@ import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.createDirectories
+
+private const val COMPANY_EVENT_STREAM_HEARTBEAT_MS = 5_000L
 
 /**
  * Lightweight localhost-only API used by the native macOS shell.
@@ -1932,11 +1941,11 @@ internal fun Application.cotorAppModule(
                         val companyId = call.parameters["companyId"]
                             ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
                         call.respondTextWriter(ContentType.parse("application/x-ndjson")) {
-                            desktopService.companyEvents(companyId).collect { envelope ->
-                                write(streamJson.encodeToString(CompanyEventEnvelope.serializer(), envelope))
-                                write("\n")
-                                flush()
-                            }
+                            writeCompanyEventStream(
+                                events = desktopService.companyEvents(companyId),
+                                companyId = companyId,
+                                streamJson = streamJson
+                            )
                         }
                     }
                 }
@@ -2821,6 +2830,46 @@ private suspend fun RoutingContext.respondDesktopRequest(block: suspend () -> An
             HttpStatusCode.InternalServerError,
             mapOf("error" to (cause.message ?: cause::class.simpleName ?: "Internal server error"))
         )
+    }
+}
+
+private suspend fun Writer.writeCompanyEventStream(
+    events: Flow<CompanyEventEnvelope>,
+    companyId: String,
+    streamJson: Json
+) = coroutineScope {
+    val channel = events.produceIn(this)
+    try {
+        while (currentCoroutineContext().isActive) {
+            val next = withTimeoutOrNull(COMPANY_EVENT_STREAM_HEARTBEAT_MS) {
+                channel.receiveCatching()
+            }
+            if (next == null) {
+                write(
+                    streamJson.encodeToString(
+                        CompanyEventEnvelope.serializer(),
+                        CompanyEventEnvelope(
+                            event = CompanyEvent(
+                                id = "heartbeat-${System.currentTimeMillis()}",
+                                companyId = companyId,
+                                type = "stream.heartbeat",
+                                title = "Stream heartbeat",
+                                createdAt = System.currentTimeMillis()
+                            )
+                        )
+                    )
+                )
+                write("\n")
+                flush()
+                continue
+            }
+            val envelope = next.getOrNull() ?: break
+            write(streamJson.encodeToString(CompanyEventEnvelope.serializer(), envelope))
+            write("\n")
+            flush()
+        }
+    } finally {
+        channel.cancel()
     }
 }
 
