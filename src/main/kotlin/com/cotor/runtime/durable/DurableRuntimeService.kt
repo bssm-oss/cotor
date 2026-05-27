@@ -7,6 +7,9 @@ import com.cotor.model.PipelineContext
 import com.cotor.model.PipelineStage
 import java.time.Instant
 
+private const val MAX_PERSISTED_CHECKPOINT_OUTPUT_CHARS = 100_000
+private const val MAX_PERSISTED_CHECKPOINT_ERROR_CHARS = 20_000
+
 class DurableRuntimeService(
     private val checkpointManager: CheckpointManager = CheckpointManager(),
     private val runtimeStore: DurableRuntimeStore = DurableRuntimeStore(),
@@ -14,6 +17,8 @@ class DurableRuntimeService(
     private val sideEffectJournalStore: SideEffectJournalStore = SideEffectJournalStore(runtimeStore)
 ) {
     fun listRuns(): List<DurableRunSnapshot> = runtimeStore.listRuns()
+
+    fun listRunSummaries(): List<DurableRunSummary> = runtimeStore.listRunSummaries()
 
     fun inspectRun(runId: String): DurableRunSnapshot? =
         runtimeStore.loadRun(runId) ?: importLegacyCheckpoint(runId)
@@ -75,8 +80,8 @@ class DurableRuntimeService(
             stageId = stage.id,
             state = CheckpointNodeState.COMPLETED,
             agentName = result.agentName,
-            output = result.output,
-            error = result.error,
+            output = compactDurableRuntimeText(result.output, MAX_PERSISTED_CHECKPOINT_OUTPUT_CHARS),
+            error = compactDurableRuntimeText(result.error, MAX_PERSISTED_CHECKPOINT_ERROR_CHARS),
             isSuccess = result.isSuccess,
             durationMs = result.duration,
             createdAt = System.currentTimeMillis(),
@@ -94,8 +99,8 @@ class DurableRuntimeService(
             stageId = stage.id,
             state = CheckpointNodeState.FAILED,
             agentName = result.agentName,
-            output = result.output,
-            error = result.error,
+            output = compactDurableRuntimeText(result.output, MAX_PERSISTED_CHECKPOINT_OUTPUT_CHARS),
+            error = compactDurableRuntimeText(result.error, MAX_PERSISTED_CHECKPOINT_ERROR_CHARS),
             isSuccess = false,
             durationMs = result.duration,
             createdAt = System.currentTimeMillis(),
@@ -217,7 +222,7 @@ class DurableRuntimeService(
                 stageId = stage.stageId,
                 state = CheckpointNodeState.IMPORTED_LEGACY,
                 agentName = stage.agentName,
-                output = stage.output,
+                output = compactDurableRuntimeText(stage.output, MAX_PERSISTED_CHECKPOINT_OUTPUT_CHARS),
                 isSuccess = stage.isSuccess,
                 durationMs = stage.duration,
                 createdAt = runCatching { Instant.parse(stage.timestamp).toEpochMilli() }.getOrDefault(System.currentTimeMillis()),
@@ -288,4 +293,18 @@ class DurableRuntimeService(
         context.metadata["replayMode"]?.toString()?.let {
             runCatching { ReplayMode.valueOf(it) }.getOrDefault(ReplayMode.LIVE)
         } ?: ReplayMode.LIVE
+
+    private fun compactDurableRuntimeText(value: String?, maxChars: Int): String? {
+        val text = value ?: return null
+        if (text.length <= maxChars) {
+            return text
+        }
+        val omittedChars = text.length - maxChars
+        return buildString {
+            append(text.take(maxChars))
+            append("\n\n[cotor durable runtime compacted ")
+            append(omittedChars)
+            append(" chars]")
+        }
+    }
 }

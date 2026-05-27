@@ -9,6 +9,7 @@ package com.cotor.app
  */
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -102,6 +103,42 @@ class DesktopStateStoreTest : FunSpec({
             directory = appHome,
             nowMillis = Files.getLastModifiedTime(freshTemp).toMillis() + 1_000L
         ) shouldBe emptyList()
+    }
+
+    test("save compacts direct chat conversations and messages before persistence") {
+        val appHome = Files.createTempDirectory("desktop-state-store-direct-chat-home")
+        val store = DesktopStateStore { appHome }
+        val conversations = (0 until 30).map { conversationIndex ->
+            DirectChatConversation(
+                id = "conversation-$conversationIndex",
+                companyId = "company-1",
+                title = "Conversation $conversationIndex",
+                model = "gemma",
+                provider = "ollama",
+                systemPrompt = "s".repeat(5_000),
+                messages = (0 until 100).map { messageIndex ->
+                    DirectChatMessage(
+                        id = "message-$conversationIndex-$messageIndex",
+                        role = if (messageIndex % 2 == 0) "user" else "assistant",
+                        content = "x".repeat(21_000),
+                        createdAt = messageIndex.toLong()
+                    )
+                },
+                createdAt = conversationIndex.toLong(),
+                updatedAt = conversationIndex.toLong()
+            )
+        }
+
+        store.save(DesktopAppState(directChatConversations = conversations))
+
+        val persisted = store.load().directChatConversations
+        persisted shouldHaveSize 25
+        persisted.first().id shouldBe "conversation-29"
+        persisted.map { it.id }.contains("conversation-0") shouldBe false
+        persisted.first().messages shouldHaveSize 80
+        persisted.first().messages.first().id shouldBe "message-29-20"
+        persisted.first().messages.first().content shouldContain "[compacted "
+        persisted.first().systemPrompt shouldContain "[compacted "
     }
 
     test("load prunes dangling company goal and runtime records") {
@@ -581,6 +618,121 @@ class DesktopStateStoreTest : FunSpec({
         recovered.workflowPipelines.map { it.id } shouldBe listOf("pipeline-1")
         recovered.agentContextEntries.map { it.id } shouldBe listOf("context-1")
         recovered.agentMessages.map { it.id } shouldBe listOf("message-1")
+    }
+
+    test("lenient recovery preserves runtime work queue, problem signals, and direct chat") {
+        val appHome = Files.createTempDirectory("desktop-state-store-lenient-latest-fields-home")
+        val store = DesktopStateStore { appHome }
+        val company = Company(
+            id = "company-1",
+            name = "Latest Fields Company",
+            rootPath = "/tmp/latest-fields-company",
+            repositoryId = "repo-1",
+            defaultBaseBranch = "master",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val goal = CompanyGoal(
+            id = "goal-1",
+            companyId = company.id,
+            title = "Keep latest fields",
+            description = "Preserve newer state fields during lenient recovery.",
+            status = GoalStatus.ACTIVE,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val issue = CompanyIssue(
+            id = "issue-1",
+            companyId = company.id,
+            goalId = goal.id,
+            workspaceId = "workspace-1",
+            title = "Runtime work",
+            description = "Keep work queue data.",
+            status = IssueStatus.PLANNED,
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val state = DesktopAppState(
+            companies = listOf(company),
+            goals = listOf(goal),
+            issues = listOf(issue),
+            tasks = listOf(
+                AgentTask(
+                    id = "task-1",
+                    workspaceId = "workspace-1",
+                    issueId = issue.id,
+                    title = "Invalid task",
+                    prompt = "prompt",
+                    agents = listOf("codex"),
+                    status = DesktopTaskStatus.COMPLETED,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            companyRuntimeWorkItems = listOf(
+                CompanyRuntimeWorkItem(
+                    id = "work-1",
+                    companyId = company.id,
+                    goalId = goal.id,
+                    issueId = issue.id,
+                    status = CompanyRuntimeWorkItemStatus.READY,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            problemSignals = listOf(
+                CompanyProblemSignal(
+                    id = "signal-1",
+                    companyId = company.id,
+                    kind = "runtime",
+                    title = "Keep signal",
+                    detail = "This signal should survive partial state recovery.",
+                    source = "test",
+                    dedupeKey = "signal-1",
+                    goalId = goal.id,
+                    issueId = issue.id,
+                    firstSeenAt = 1L,
+                    lastSeenAt = 1L,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            directChatConversations = listOf(
+                DirectChatConversation(
+                    id = "conversation-1",
+                    companyId = company.id,
+                    title = "Keep chat",
+                    model = "gemma",
+                    provider = "ollama",
+                    messages = listOf(
+                        DirectChatMessage(
+                            id = "message-1",
+                            role = "user",
+                            content = "Do not drop this chat during lenient recovery.",
+                            createdAt = 1L
+                        )
+                    ),
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            )
+        )
+
+        store.save(state)
+        val statePath = appHome.resolve("state.json")
+        val corruptedPayload = statePath.readText().replaceFirst(
+            "\"status\": \"COMPLETED\"",
+            "\"status\": \"NOT_A_REAL_STATUS\""
+        )
+        Files.writeString(statePath, corruptedPayload)
+
+        val recovered = store.load()
+
+        recovered.tasks shouldBe emptyList()
+        recovered.companyRuntimeWorkItems.map { it.id } shouldBe listOf("work-1")
+        recovered.problemSignals.map { it.id } shouldBe listOf("signal-1")
+        recovered.directChatConversations.map { it.id } shouldBe listOf("conversation-1")
+        recovered.directChatConversations.single().messages.map { it.id } shouldBe listOf("message-1")
     }
 
     test("save compacts terminal task prompts and run outputs for faster future loads") {

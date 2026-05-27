@@ -9,8 +9,17 @@ import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeout
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class LocalModelPluginTest : FunSpec({
     test("calls Ollama chat endpoint with Gemma model") {
@@ -114,6 +123,128 @@ class LocalModelPluginTest : FunSpec({
             server.stop(0)
         }
     }
+
+    test("managed Ollama start failure surfaces an actionable agent error") {
+        val plugin = LocalModelPlugin(
+            ollamaExecutableResolver = { "/tmp/fake-ollama" },
+            managedOllamaProcessStarter = { throw IOException("Permission denied") },
+            managedOllamaReachability = { false }
+        )
+
+        val error = shouldThrow<AgentExecutionException> {
+            plugin.execute(
+                context = localModelContext(
+                    provider = "ollama",
+                    baseUrl = "http://127.0.0.1:11434",
+                    model = "gemma4:e2b"
+                ),
+                processManager = unusedProcessManager()
+            )
+        }
+
+        error.message.orEmpty() shouldContain "Failed to start managed Ollama server"
+        error.message.orEmpty() shouldContain "/tmp/fake-ollama"
+    }
+
+    test("managed Ollama readiness failure tears down the started process") {
+        val startedProcess = ProcessBuilder("sleep", "30").start()
+        val plugin = LocalModelPlugin(
+            ollamaExecutableResolver = { "/tmp/fake-ollama" },
+            managedOllamaProcessStarter = { startedProcess },
+            managedOllamaReachability = { false },
+            managedOllamaStartupTimeoutMs = 200,
+            managedOllamaStartupPollMs = 25
+        )
+
+        try {
+            val error = shouldThrow<AgentExecutionException> {
+                plugin.execute(
+                    context = localModelContext(
+                        provider = "ollama",
+                        baseUrl = "http://127.0.0.1:11434",
+                        model = "gemma4:e2b"
+                    ),
+                    processManager = unusedProcessManager()
+                )
+            }
+
+            error.message.orEmpty() shouldContain "Managed Ollama server did not become ready"
+            eventuallyProcessExited(startedProcess) shouldBe true
+        } finally {
+            runCatching { startedProcess.destroyForcibly() }
+        }
+    }
+
+    test("local model failure response body is capped") {
+        val server = localRoutingServer { exchange ->
+            if (exchange.requestURI.path == "/api/chat") {
+                exchange.respondJson("x".repeat(256), status = 500)
+            } else {
+                exchange.sendResponseHeaders(404, -1)
+            }
+        }
+        try {
+            val error = shouldThrow<AgentExecutionException> {
+                LocalModelPlugin(httpResponseBodyLimitChars = 32).execute(
+                    context = localModelContext(
+                        provider = "ollama",
+                        baseUrl = "http://127.0.0.1:${server.address.port}",
+                        model = "gemma4:e2b"
+                    ),
+                    processManager = unusedProcessManager()
+                )
+            }
+            val message = error.message.orEmpty()
+            message shouldContain "Local model request failed (500)"
+            message shouldContain "cotor truncated HTTP response body"
+            message.contains("x".repeat(64)) shouldBe false
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    test("local model HTTP request does not block caller coroutine dispatcher") {
+        val requestEntered = CountDownLatch(1)
+        val releaseResponse = CountDownLatch(1)
+        val server = localRoutingServer { exchange ->
+            when (exchange.requestURI.path) {
+                "/api/chat" -> {
+                    requestEntered.countDown()
+                    releaseResponse.await(2, TimeUnit.SECONDS)
+                    exchange.respondJson("""{"message":{"content":"dispatcher ok"}}""")
+                }
+                else -> exchange.sendResponseHeaders(404, -1)
+            }
+        }
+        val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        try {
+            coroutineScope {
+                val running = async(dispatcher) {
+                    LocalModelPlugin().execute(
+                        context = localModelContext(
+                            provider = "ollama",
+                            baseUrl = "http://127.0.0.1:${server.address.port}",
+                            model = "gemma4:e2b"
+                        ),
+                        processManager = unusedProcessManager()
+                    )
+                }
+
+                requestEntered.await(1, TimeUnit.SECONDS) shouldBe true
+                val marker = withTimeout(500) {
+                    async(dispatcher) { "caller dispatcher free" }.await()
+                }
+                marker shouldBe "caller dispatcher free"
+
+                releaseResponse.countDown()
+                running.await().output shouldBe "dispatcher ok"
+            }
+        } finally {
+            releaseResponse.countDown()
+            dispatcher.close()
+            server.stop(0)
+        }
+    }
 })
 
 private fun localJsonServer(path: String, body: String): HttpServer {
@@ -167,4 +298,14 @@ private fun unusedProcessManager(): ProcessManager = object : ProcessManager {
         workingDirectory: Path?,
         onStart: ((Long) -> Unit)?
     ): ProcessResult = error("LocalModelPlugin should not spawn child processes")
+}
+
+private fun eventuallyProcessExited(process: Process): Boolean {
+    repeat(20) {
+        if (!process.isAlive) {
+            return true
+        }
+        Thread.sleep(50)
+    }
+    return !process.isAlive
 }

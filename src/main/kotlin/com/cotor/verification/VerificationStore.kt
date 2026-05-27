@@ -1,6 +1,7 @@
 package com.cotor.verification
 
 import com.cotor.app.defaultDesktopAppHome
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
@@ -8,7 +9,6 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 class VerificationStore(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() }
@@ -30,7 +30,7 @@ class VerificationStore(
         synchronized(lock) {
             val root = dir()
             root.createDirectories()
-            outcomeFile(outcome.issueId).writeText(json.encodeToString(VerificationOutcome.serializer(), outcome))
+            writeTextAtomically(outcomeFile(outcome.issueId), json.encodeToString(VerificationOutcome.serializer(), outcome))
         }
     }
 
@@ -48,7 +48,8 @@ class VerificationStore(
             val updated = (current + observation).takeLast(50)
             val root = dir()
             root.createDirectories()
-            observationFile(issueId).writeText(
+            writeTextAtomically(
+                observationFile(issueId),
                 json.encodeToString(ListSerializer(VerificationObservation.serializer()), updated)
             )
         }

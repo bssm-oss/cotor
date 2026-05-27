@@ -11,6 +11,7 @@ package com.cotor.integrations.linear
 import com.cotor.app.CompanyIssue
 import com.cotor.app.LinearConnectionConfig
 import com.cotor.data.http.CotorHttpClients
+import com.cotor.data.http.sendBoundedText
 import com.cotor.security.NetworkEndpointPolicy
 import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.Dispatchers
@@ -25,8 +26,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
+
+private const val LINEAR_GRAPHQL_RESPONSE_BODY_LIMIT_CHARS = 1_000_000
+private const val LINEAR_GRAPHQL_DIAGNOSTIC_BODY_LIMIT_CHARS = 4_000
 
 data class LinearIssueMirror(
     val id: String,
@@ -76,11 +79,14 @@ class LinearClient(
                 .header(HttpHeaders.ContentType, "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json.encodeToString(JsonObject.serializer(), payload)))
                 .build()
-            val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-            require(response.statusCode() in 200..299) {
-                "Linear returned HTTP ${response.statusCode()}: ${response.body()}"
+            val response = httpClient.sendBoundedText(request, LINEAR_GRAPHQL_RESPONSE_BODY_LIMIT_CHARS)
+            require(response.statusCode in 200..299) {
+                "Linear returned HTTP ${response.statusCode}: ${response.diagnosticBody().take(LINEAR_GRAPHQL_DIAGNOSTIC_BODY_LIMIT_CHARS)}"
             }
-            val body = json.parseToJsonElement(response.body()).jsonObject
+            require(!response.truncated) {
+                "Linear response exceeded $LINEAR_GRAPHQL_RESPONSE_BODY_LIMIT_CHARS characters"
+            }
+            val body = json.parseToJsonElement(response.body).jsonObject
             val errors = body["errors"] as? JsonArray
             require(errors == null || errors.isEmpty()) {
                 "Linear GraphQL error: ${errors?.joinToString { it.toString() }}"

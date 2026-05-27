@@ -8,11 +8,16 @@ package com.cotor.app
  * Read here first when tracing behavior that flows through direct multi-turn AI conversations.
  */
 
+import com.cotor.data.process.destroyProcessTree
+import com.cotor.data.http.sendBoundedText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
@@ -20,10 +25,13 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.InputStreamReader
+import java.io.Reader
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -48,7 +56,18 @@ private val directChatHttpClient: HttpClient = HttpClient.newBuilder()
 
 private val directChatJson = Json { ignoreUnknownKeys = true }
 
-class DirectChatService {
+private const val DEFAULT_DIRECT_CHAT_MODEL_LIST_RESPONSE_LIMIT_CHARS = 1_000_000
+private const val DEFAULT_DIRECT_CHAT_STREAM_LINE_LIMIT_CHARS = 200_000
+private const val DEFAULT_DIRECT_CHAT_STREAM_CONTENT_LIMIT_CHARS = 1_000_000
+
+class DirectChatService(
+    private val claudeCommand: String = "claude",
+    private val claudeTimeoutMillis: Long = TimeUnit.MINUTES.toMillis(5),
+    private val claudeOutputLimitChars: Int = 1_000_000,
+    private val modelListResponseLimitChars: Int = DEFAULT_DIRECT_CHAT_MODEL_LIST_RESPONSE_LIMIT_CHARS,
+    private val streamLineLimitChars: Int = DEFAULT_DIRECT_CHAT_STREAM_LINE_LIMIT_CHARS,
+    private val streamContentLimitChars: Int = DEFAULT_DIRECT_CHAT_STREAM_CONTENT_LIMIT_CHARS
+) {
 
     private fun validateAndNormalizeBaseUrl(raw: String, defaultBase: String): String {
         if (raw.isBlank()) return defaultBase
@@ -72,9 +91,9 @@ class DirectChatService {
                 .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build()
-            val response = directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofString())
-            if (response.statusCode() != 200) return emptyList()
-            val body = directChatJson.parseToJsonElement(response.body()).jsonObject
+            val response = directChatHttpClient.sendBoundedText(request, modelListResponseLimitChars)
+            if (response.statusCode != 200 || response.truncated) return emptyList()
+            val body = directChatJson.parseToJsonElement(response.body).jsonObject
             val modelsArray = body["models"]?.jsonArray ?: return emptyList()
             modelsArray.mapNotNull { element ->
                 val name = element.jsonObject["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
@@ -153,36 +172,48 @@ class DirectChatService {
                 .build()
 
             val response = withContext(Dispatchers.IO) {
-                directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofLines())
+                directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
             }
             if (response.statusCode() !in 200..299) {
                 error("Ollama request failed with HTTP ${response.statusCode()}")
             }
             var doneSent = false
-            response.body().use { lineStream ->
-                val iterator = lineStream.iterator()
-                while (withContext(Dispatchers.IO) { iterator.hasNext() }) {
-                    val line = withContext(Dispatchers.IO) { iterator.next() }
+            var emittedContentChars = 0
+            response.body().use { stream ->
+                val reader = BoundedDirectChatLineReader(
+                    reader = InputStreamReader(stream, StandardCharsets.UTF_8),
+                    lineLimitChars = streamLineLimitChars,
+                    provider = "Ollama"
+                )
+                while (true) {
+                    val line = withContext(Dispatchers.IO) { reader.readLine() } ?: break
                     if (line.isBlank()) continue
-                    try {
+                    val parsedChunk = try {
                         val parsed = directChatJson.parseToJsonElement(line).jsonObject
                         val done = parsed["done"]?.jsonPrimitive?.booleanOrNull == true
                         val content = parsed["message"]?.jsonObject?.get("content")
                             ?.jsonPrimitive?.contentOrNull ?: ""
-                        emit(
-                            DirectChatStreamChunk(
-                                conversationId = conversation.id,
-                                messageId = messageId,
-                                content = content,
-                                done = done
-                            )
-                        )
-                        if (done) {
-                            doneSent = true
-                            break
-                        }
+                        content to done
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (_: Exception) {
                         // skip malformed lines
+                        null
+                    } ?: continue
+
+                    val (content, done) = parsedChunk
+                    emittedContentChars = updatedStreamContentChars("Ollama", emittedContentChars, content)
+                    emit(
+                        DirectChatStreamChunk(
+                            conversationId = conversation.id,
+                            messageId = messageId,
+                            content = content,
+                            done = done
+                        )
+                    )
+                    if (done) {
+                        doneSent = true
+                        break
                     }
                 }
             }
@@ -197,6 +228,8 @@ class DirectChatService {
                     )
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             emit(
                 DirectChatStreamChunk(
@@ -238,16 +271,21 @@ class DirectChatService {
                 .build()
 
             val response = withContext(Dispatchers.IO) {
-                directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofLines())
+                directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
             }
             if (response.statusCode() !in 200..299) {
                 error("LM Studio request failed with HTTP ${response.statusCode()}")
             }
             var doneSent = false
-            response.body().use { lineStream ->
-                val iterator = lineStream.iterator()
-                while (withContext(Dispatchers.IO) { iterator.hasNext() }) {
-                    val line = withContext(Dispatchers.IO) { iterator.next() }
+            var emittedContentChars = 0
+            response.body().use { stream ->
+                val reader = BoundedDirectChatLineReader(
+                    reader = InputStreamReader(stream, StandardCharsets.UTF_8),
+                    lineLimitChars = streamLineLimitChars,
+                    provider = "LM Studio"
+                )
+                while (true) {
+                    val line = withContext(Dispatchers.IO) { reader.readLine() } ?: break
                     if (line.isBlank()) continue
                     if (!line.startsWith("data:")) continue
                     val data = line.removePrefix("data:").trim()
@@ -265,7 +303,7 @@ class DirectChatService {
                         }
                         break
                     }
-                    try {
+                    val parsedChunk = try {
                         val parsed = directChatJson.parseToJsonElement(data).jsonObject
                         val finishReason = parsed["choices"]?.jsonArray
                             ?.firstOrNull()?.jsonObject?.get("finish_reason")
@@ -275,20 +313,27 @@ class DirectChatService {
                             ?.jsonObject?.get("content")
                             ?.jsonPrimitive?.contentOrNull ?: ""
                         val done = finishReason != null && finishReason != "null"
-                        emit(
-                            DirectChatStreamChunk(
-                                conversationId = conversation.id,
-                                messageId = messageId,
-                                content = content,
-                                done = done
-                            )
-                        )
-                        if (done) {
-                            doneSent = true
-                            break
-                        }
+                        content to done
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (_: Exception) {
                         // skip malformed SSE lines
+                        null
+                    } ?: continue
+
+                    val (content, done) = parsedChunk
+                    emittedContentChars = updatedStreamContentChars("LM Studio", emittedContentChars, content)
+                    emit(
+                        DirectChatStreamChunk(
+                            conversationId = conversation.id,
+                            messageId = messageId,
+                            content = content,
+                            done = done
+                        )
+                    )
+                    if (done) {
+                        doneSent = true
+                        break
                     }
                 }
             }
@@ -302,6 +347,8 @@ class DirectChatService {
                     )
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             emit(
                 DirectChatStreamChunk(
@@ -324,31 +371,55 @@ class DirectChatService {
         try {
             val output = withContext(Dispatchers.IO) {
                 coroutineScope {
-                    val process = ProcessBuilder("claude", "-p", prompt)
-                        .redirectErrorStream(true)
-                        .start()
-                    // Read and wait concurrently so killing the process unblocks the read
-                    val readJob = async(Dispatchers.IO) {
-                        val sb = StringBuilder()
-                        process.inputStream.bufferedReader().use { reader ->
-                            val buf = CharArray(8192)
-                            var read: Int
-                            while (reader.read(buf).also { read = it } != -1) {
-                                sb.append(buf, 0, read)
-                                if (sb.length > 1_000_000) {
-                                    process.destroyForcibly()
-                                    error("claude-cli output exceeded 1MB limit")
+                    var process: Process? = null
+                    try {
+                        process = ProcessBuilder(claudeCommand, "-p")
+                            .redirectErrorStream(true)
+                            .start()
+                        // Read and wait concurrently so killing the process unblocks the read.
+                        val readJob = async(Dispatchers.IO) {
+                            val sb = StringBuilder()
+                            process.inputStream.bufferedReader().use { reader ->
+                                val buf = CharArray(8192)
+                                var read: Int
+                                while (reader.read(buf).also { read = it } != -1) {
+                                    sb.append(buf, 0, read)
+                                    if (sb.length > claudeOutputLimitChars) {
+                                        destroyProcessTree(process)
+                                        error("claude-cli output exceeded ${claudeOutputLimitChars} character limit")
+                                    }
                                 }
                             }
+                            sb.toString()
                         }
-                        sb.toString()
+                        val writeJob = async(Dispatchers.IO) {
+                            process.outputStream.bufferedWriter().use { writer ->
+                                writer.write(prompt)
+                                writer.flush()
+                            }
+                        }
+                        val finished = withTimeoutOrNull(claudeTimeoutMillis.coerceAtLeast(1)) {
+                            while (!process.waitFor(50, TimeUnit.MILLISECONDS)) {
+                                yield()
+                            }
+                            true
+                        } == true
+                        if (!finished) {
+                            destroyProcessTree(process)
+                            readJob.cancel()
+                            writeJob.cancel()
+                            error("claude-cli timed out after ${claudeTimeoutMillis}ms")
+                        }
+                        writeJob.await()
+                        val output = readJob.await()
+                        val exitCode = process.exitValue()
+                        if (exitCode != 0) {
+                            error(output.ifBlank { "claude-cli failed with exit $exitCode" })
+                        }
+                        output
+                    } finally {
+                        process?.takeIf { it.isAlive }?.let(::destroyProcessTree)
                     }
-                    if (!process.waitFor(5, TimeUnit.MINUTES)) {
-                        process.destroyForcibly()
-                        readJob.cancel()
-                        error("claude-cli timed out after 5 minutes")
-                    }
-                    readJob.await()
                 }
             }
             emit(
@@ -359,6 +430,8 @@ class DirectChatService {
                     done = true
                 )
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             emit(
                 DirectChatStreamChunk(
@@ -369,6 +442,54 @@ class DirectChatService {
                     error = e.message ?: "claude-cli execution failed"
                 )
             )
+        }
+    }
+
+    private fun updatedStreamContentChars(provider: String, current: Int, content: String): Int {
+        val limit = streamContentLimitChars.coerceAtLeast(1)
+        val next = current + content.length
+        require(next <= limit) {
+            "$provider stream content exceeded $limit character limit"
+        }
+        return next
+    }
+
+    private class BoundedDirectChatLineReader(
+        private val reader: Reader,
+        lineLimitChars: Int,
+        private val provider: String
+    ) {
+        private val limit = lineLimitChars.coerceAtLeast(1)
+        private val buffer = CharArray(8_192)
+        private var offset = 0
+        private var length = 0
+
+        fun readLine(): String? {
+            val line = StringBuilder()
+            var sawAny = false
+
+            while (true) {
+                if (offset >= length) {
+                    length = reader.read(buffer)
+                    offset = 0
+                    if (length < 0) {
+                        return if (sawAny) line.toString() else null
+                    }
+                }
+
+                val ch = buffer[offset++]
+                sawAny = true
+                when (ch) {
+                    '\n' -> return line.toString()
+                    '\r' -> Unit
+                    else -> {
+                        require(line.length < limit) {
+                            "$provider stream line exceeded $limit character limit"
+                        }
+                        line.append(ch)
+                    }
+                }
+            }
         }
     }
 

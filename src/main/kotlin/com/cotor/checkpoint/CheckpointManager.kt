@@ -8,6 +8,7 @@ package com.cotor.checkpoint
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
+import com.cotor.storage.writeTextAtomically
 import com.cotor.model.AgentResult
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -59,7 +60,7 @@ class CheckpointManager(
         )
 
         val checkpointFile = checkpointFile(pipelineId)
-        checkpointFile.writeText(json.encodeToString(checkpoint))
+        writeTextAtomically(checkpointFile.toPath(), json.encodeToString(checkpoint))
 
         return checkpointFile.absolutePath
     }

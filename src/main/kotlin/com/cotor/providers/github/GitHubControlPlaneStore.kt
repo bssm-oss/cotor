@@ -1,14 +1,11 @@
 package com.cotor.providers.github
 
 import com.cotor.app.defaultDesktopAppHome
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.json.Json
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 class GitHubControlPlaneStore(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() }
@@ -57,9 +54,6 @@ class GitHubControlPlaneStore(
 
     private fun writeState(state: GitHubProviderState) {
         val file = file()
-        file.parent?.createDirectories()
-        val temp = Files.createTempFile(file.parent, "state", ".tmp")
-        temp.writeText(json.encodeToString(GitHubProviderState.serializer(), state))
-        Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        writeTextAtomically(file, json.encodeToString(GitHubProviderState.serializer(), state))
     }
 }

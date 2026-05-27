@@ -8,6 +8,7 @@ package com.cotor.data.process
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
+import com.cotor.model.ProcessResult
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.longs.shouldBeGreaterThan
@@ -143,6 +144,28 @@ class ProcessManagerTest : FunSpec({
         result.stdout shouldContain "parent-exit"
     }
 
+    test("executeProcess cleans background descendants after parent exits") {
+        val processManager = CoroutineProcessManager(mockk<Logger>(relaxed = true))
+        val tempDir = Files.createTempDirectory("process-manager-descendant-cleanup")
+        val marker = tempDir.resolve("descendant-marker.txt")
+
+        val result = processManager.executeProcess(
+            command = listOf(
+                "/bin/sh",
+                "-c",
+                "(sleep 1; echo leaked > '${marker.toAbsolutePath()}') & sleep 0.2; echo parent-exit"
+            ),
+            input = null,
+            environment = emptyMap(),
+            timeout = 5_000
+        )
+        Thread.sleep(1_500)
+
+        result.isSuccess shouldBe true
+        result.stdout shouldContain "parent-exit"
+        Files.exists(marker) shouldBe false
+    }
+
     test("executeProcess drains large stdout output before returning") {
         val processManager = CoroutineProcessManager(mockk<Logger>(relaxed = true))
 
@@ -162,6 +185,28 @@ class ProcessManagerTest : FunSpec({
         result.stdout shouldContain "line-19999"
     }
 
+    test("executeProcess caps captured stdout while streaming full output") {
+        val processManager = CoroutineProcessManager(
+            logger = mockk<Logger>(relaxed = true),
+            maxCapturedOutputChars = 32
+        )
+        val payload = "start-" + "x".repeat(80) + "-tail"
+        val streamed = StringBuilder()
+
+        val result = processManager.executeProcess(
+            command = listOf("/bin/sh", "-c", "printf '%s' \"\$PAYLOAD\""),
+            input = null,
+            environment = mapOf("PAYLOAD" to payload),
+            timeout = 5_000,
+            onStdoutChunk = { streamed.append(it) }
+        )
+
+        result.isSuccess shouldBe true
+        streamed.toString() shouldBe payload
+        result.stdout shouldContain "cotor truncated"
+        result.stdout shouldContain "-tail"
+    }
+
     test("executeProcessWithInputFile redirects stdin from a real file") {
         val processManager = CoroutineProcessManager(mockk<Logger>(relaxed = true))
         val inputFile = Files.createTempFile("process-manager-input-", ".txt")
@@ -178,6 +223,34 @@ class ProcessManagerTest : FunSpec({
 
         result.isSuccess shouldBe true
         result.stdout shouldBe "file-backed-stdin"
+    }
+
+    test("default executeProcessWithInputFile fails instead of materializing stdin file") {
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult {
+                throw AssertionError("file-backed stdin must not fall back to String input")
+            }
+        }
+        val inputFile = Files.createTempFile("process-manager-default-input-", ".txt")
+        Files.writeString(inputFile, "small sentinel")
+
+        shouldThrow<UnsupportedOperationException> {
+            processManager.executeProcessWithInputFile(
+                command = listOf("/bin/cat"),
+                inputFile = inputFile,
+                environment = emptyMap(),
+                timeout = 5_000,
+                onStdoutChunk = null,
+                onStderrChunk = null
+            )
+        }
     }
 
     test("effectiveUserHome prefers HOME from the environment over user.home") {

@@ -120,6 +120,14 @@ data class ActionLogSnapshot(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+@Serializable
+data class ActionLogSummary(
+    val runId: String,
+    val updatedAt: Long,
+    val recordCount: Int = 0,
+    val blockedByCompany: Map<String, Int> = emptyMap()
+)
+
 class ActionDeniedException(
     val request: ActionRequest,
     message: String

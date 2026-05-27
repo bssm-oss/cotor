@@ -60,6 +60,28 @@ class StoreConcurrencyTest : FunSpec({
         }
     }
 
+    test("ActionStore caps per-run records while keeping the newest action history") {
+        val appHome = Files.createTempDirectory("action-store-retention")
+        val store = ActionStore(maxRecordsPerRun = 3) { appHome }
+
+        repeat(5) { index ->
+            store.append(
+                runId = "run-1",
+                record = actionRecord(index)
+            )
+        }
+
+        val snapshot = store.load("run-1")!!
+        snapshot.records.map { it.id } shouldBe listOf("record-2", "record-3", "record-4")
+
+        val replaced = store.replace("run-1", "record-3") {
+            it.copy(status = ActionStatus.SUCCEEDED, outputSummary = "updated")
+        }
+        replaced.records.map { it.id } shouldBe listOf("record-2", "record-3", "record-4")
+        replaced.records.single { it.id == "record-3" }.status shouldBe ActionStatus.SUCCEEDED
+        store.load("run-1")!!.records.single { it.id == "record-3" }.outputSummary shouldBe "updated"
+    }
+
     test("VerificationStore appendObservation is atomic under concurrent writers") {
         val appHome = Files.createTempDirectory("verification-store-concurrency")
         val store = VerificationStore { appHome }
@@ -96,3 +118,19 @@ class StoreConcurrencyTest : FunSpec({
         }
     }
 })
+
+private fun actionRecord(index: Int): ActionExecutionRecord =
+    ActionExecutionRecord(
+        id = "record-$index",
+        runId = "run-1",
+        request = ActionRequest(
+            id = "request-$index",
+            kind = ActionKind.AGENT_EXEC,
+            label = "record-$index",
+            scope = ActionScope.RUN,
+            subject = ActionSubject(runId = "run-1")
+        ),
+        status = ActionStatus.STARTED,
+        createdAt = index.toLong(),
+        updatedAt = index.toLong()
+    )

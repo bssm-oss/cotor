@@ -29,9 +29,12 @@ import com.cotor.stats.StatsManager
 import com.cotor.validation.PipelineTemplateValidator
 import com.cotor.validation.output.OutputValidator
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.slf4j.Logger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.EmptyCoroutineContext
 
 /**
@@ -74,6 +77,44 @@ private data class LoopStageResult(
     val nextIndex: Int
 )
 
+private fun String.compactForStageInput(maxChars: Int = MAX_PROPAGATED_STAGE_INPUT_CHARS): String {
+    if (length <= maxChars) return this
+    val marker = "\n[cotor truncated ${length - maxChars} chars from upstream stage output]\n"
+    if (maxChars <= marker.length + 2) {
+        return take(maxChars)
+    }
+    val headChars = (maxChars - marker.length) / 2
+    val tailChars = maxChars - marker.length - headChars
+    return take(headChars) + marker + takeLast(tailChars)
+}
+
+private fun List<String>.joinToStageInput(maxChars: Int = MAX_PROPAGATED_STAGE_INPUT_CHARS): String {
+    if (isEmpty()) return ""
+    val builder = StringBuilder()
+    var truncatedChars = 0L
+    forEachIndexed { index, text ->
+        val separator = if (index == 0) "" else "\n"
+        for (piece in listOf(separator, text)) {
+            val remaining = maxChars - builder.length
+            if (remaining <= 0) {
+                truncatedChars += piece.length.toLong()
+            } else if (piece.length <= remaining) {
+                builder.append(piece)
+            } else {
+                builder.append(piece, 0, remaining)
+                truncatedChars += (piece.length - remaining).toLong()
+            }
+        }
+    }
+    if (truncatedChars == 0L) {
+        return builder.toString()
+    }
+    return "${builder}\n[cotor truncated $truncatedChars chars from upstream stage outputs]"
+        .compactForStageInput(maxChars)
+}
+
+private const val MAX_PROPAGATED_STAGE_INPUT_CHARS = 200_000
+
 /**
  * Default implementation of pipeline orchestrator
  */
@@ -87,6 +128,7 @@ class DefaultPipelineOrchestrator(
     private val statsManager: StatsManager,
     private val checkpointManager: CheckpointManager = CheckpointManager(),
     private val templateValidator: PipelineTemplateValidator = PipelineTemplateValidator(TemplateEngine()),
+    private val performanceConfig: PerformanceConfig = PerformanceConfig(),
     private val observability: ObservabilityService = NoopObservabilityService,
     private val durableRuntimeService: DurableRuntimeService = DurableRuntimeService(),
     private val pipelineGuardService: PipelineGuardService = PipelineGuardService(),
@@ -292,7 +334,7 @@ class DefaultPipelineOrchestrator(
             .ifEmpty { pipelineContext.stageResults.values.toList() }
             .toMutableList()
         val stageIndexMap = pipeline.stages.mapIndexed { index, stage -> stage.id to index }.toMap()
-        var previousOutput: String? = results.lastOrNull()?.output
+        var previousOutput: String? = results.lastOrNull()?.output?.compactForStageInput()
 
         val startIndex = fromStageId?.let {
             stageIndexMap[it] ?: throw PipelineException("Resume stage '$it' not found in pipeline")
@@ -317,7 +359,7 @@ class DefaultPipelineOrchestrator(
                     results.add(result)
 
                     if (result.isSuccess && !result.output.isNullOrBlank()) {
-                        previousOutput = result.output
+                        previousOutput = result.output.compactForStageInput()
                     }
 
                     if (!result.isSuccess && stage.failureStrategy == FailureStrategy.ABORT && !stage.optional) {
@@ -372,12 +414,15 @@ class DefaultPipelineOrchestrator(
         }
         validateDagDependencies(pipeline.stages)
         val orderedStages = topologicalSort(pipeline.stages)
+        val stageSemaphore = stageExecutionSemaphore()
         val results = stageConflictDetector.conflictSafeBatches(orderedStages, pipelineContext)
             .flatMap { batch ->
                 batch.map { stage ->
                     async(Dispatchers.Default) {
-                        val interpolatedInput = stage.input?.let { templateEngine.interpolate(it, pipelineContext) }
-                        executeStageWithGuards(stage, pipelineId, pipelineContext, interpolatedInput)
+                        stageSemaphore.withPermit {
+                            val interpolatedInput = stage.input?.let { templateEngine.interpolate(it, pipelineContext) }
+                            executeStageWithGuards(stage, pipelineId, pipelineContext, interpolatedInput)
+                        }
                     }
                 }.awaitAll()
             }
@@ -486,10 +531,13 @@ class DefaultPipelineOrchestrator(
         val sourceData = pipelineContext.sharedState[sourceName] as? List<*>
             ?: throw PipelineException("Fanout source '$sourceName' not found in shared state or is not a list")
 
+        val stageSemaphore = stageExecutionSemaphore()
         val results = sourceData.map { item ->
             async(Dispatchers.Default) {
-                val stageInput = item.toString()
-                executeStageWithGuards(fanoutStage, pipelineId, pipelineContext, stageInput)
+                stageSemaphore.withPermit {
+                    val stageInput = item.toString()
+                    executeStageWithGuards(fanoutStage, pipelineId, pipelineContext, stageInput)
+                }
             }
         }.awaitAll()
 
@@ -503,7 +551,11 @@ class DefaultPipelineOrchestrator(
         return dependencies
             .mapNotNull { results[it]?.output }
             .takeIf { it.isNotEmpty() }
-            ?.joinToString("\n")
+            ?.joinToStageInput()
+    }
+
+    private fun stageExecutionSemaphore(): Semaphore {
+        return Semaphore(performanceConfig.maxConcurrentAgents.coerceAtLeast(1))
     }
 
     private suspend fun executeStageWithGuards(
@@ -815,8 +867,16 @@ class DefaultPipelineOrchestrator(
 
     private fun getGitCommit(): String {
         return try {
-            val process = ProcessBuilder("git", "rev-parse", "--short", "HEAD").start()
-            process.waitFor()
+            val process = ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+            if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                return "unknown"
+            }
+            if (process.exitValue() != 0) {
+                return "unknown"
+            }
             process.inputStream.bufferedReader().readText().trim()
         } catch (e: Exception) {
             "unknown"

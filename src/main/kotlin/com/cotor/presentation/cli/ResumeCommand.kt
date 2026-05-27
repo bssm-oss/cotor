@@ -71,7 +71,7 @@ class ResumeCommand :
     }
 
     private fun listAvailableRuns() {
-        val durableRuns = durableRuntimeService.listRuns()
+        val durableRuns = durableRuntimeService.listRunSummaries()
         if (durableRuns.isNotEmpty()) {
             terminal.println(bold(blue("📦 Durable Runs")))
             terminal.println(
@@ -84,8 +84,8 @@ class ResumeCommand :
                                 run.runId.take(8),
                                 run.replayMode.name,
                                 run.status.name,
-                                run.checkpoints.size.toString(),
-                                run.approvalPauses.count { it.status == ApprovalPauseStatus.PENDING }.toString()
+                                run.checkpointCount.toString(),
+                                run.pendingApprovalCount.toString()
                             )
                         }
                     }

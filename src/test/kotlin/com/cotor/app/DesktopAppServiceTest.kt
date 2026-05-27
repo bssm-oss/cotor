@@ -8897,6 +8897,7 @@ class DesktopAppServiceTest : FunSpec({
         // relaxed mock executor fails.  Verify the retry was attempted via task count.
         stateStore.load().tasks.count { it.issueId == executionIssue.id } shouldBeGreaterThan 1
         stateStore.load().goals.first { it.id == goal.id }.status shouldBe GoalStatus.ACTIVE
+        service.flushCompanyAutomationTraceForTesting()
         val traceLog = Files.readString(appHome.resolve("runtime").resolve("backend").resolve("company-automation-trace.log"))
         traceLog shouldContain "\"issueId\":\"${executionIssue.id}\""
         traceLog shouldContain "recoverable"

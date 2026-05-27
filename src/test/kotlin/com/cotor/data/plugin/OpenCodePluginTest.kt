@@ -79,10 +79,12 @@ class OpenCodePluginTest : FunSpec({
         sawModelsLookup shouldBe true
     }
 
-    test("writes task-scoped execution config with explicit tool permissions") {
+    test("passes task-scoped execution config through environment without mutating project config") {
         val plugin = OpenCodePlugin()
         val workdir = Files.createTempDirectory("opencode-execution-config")
         val configPath = workdir.resolve(".opencode").resolve("opencode.json")
+        Files.createDirectories(configPath.parent)
+        Files.writeString(configPath, """{"existing":true}""")
         val processManager = object : ProcessManager {
             override suspend fun executeProcess(
                 command: List<String>,
@@ -102,12 +104,13 @@ class OpenCodePluginTest : FunSpec({
                     else -> {
                         workingDirectory shouldBe workdir
                         Files.exists(configPath) shouldBe true
-                        val config = Files.readString(configPath)
-                        config.contains("\"read\": \"allow\"") shouldBe true
-                        config.contains("\"write\": \"allow\"") shouldBe true
-                        config.contains("\"edit\": \"allow\"") shouldBe true
-                        config.contains("\"bash\": \"allow\"") shouldBe true
-                        config.contains("\"external_directory\": \"deny\"") shouldBe true
+                        Files.readString(configPath) shouldBe """{"existing":true}"""
+                        environment["OPENCODE_DISABLE_PROJECT_CONFIG"] shouldBe "true"
+                        environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"read\": \"allow\"") shouldBe true
+                        environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"write\": \"allow\"") shouldBe true
+                        environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"edit\": \"allow\"") shouldBe true
+                        environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"bash\": \"allow\"") shouldBe true
+                        environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"external_directory\": \"deny\"") shouldBe true
                         assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
                         ProcessResult(
                             exitCode = 0,
@@ -133,7 +136,7 @@ class OpenCodePluginTest : FunSpec({
         )
 
         result.output shouldBe "configured"
-        Files.exists(configPath) shouldBe false
+        Files.readString(configPath) shouldBe """{"existing":true}"""
     }
 
     test("throws ProcessExecutionException with exit code and streams on failure") {
@@ -643,6 +646,26 @@ class OpenCodePluginTest : FunSpec({
                     isSuccess = false
                 )
             }
+
+            override suspend fun executeProcessWithInputFile(
+                command: List<String>,
+                inputFile: Path,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?,
+                onStdoutChunk: ((String) -> Unit)?,
+                onStderrChunk: ((String) -> Unit)?
+            ): ProcessResult = executeProcess(
+                command = command,
+                input = null,
+                environment = environment,
+                timeout = timeout,
+                workingDirectory = workingDirectory,
+                onStart = onStart,
+                onStdoutChunk = onStdoutChunk,
+                onStderrChunk = onStderrChunk
+            )
         }
 
         try {
@@ -1028,6 +1051,26 @@ class OpenCodePluginTest : FunSpec({
                     isSuccess = false
                 )
             }
+
+            override suspend fun executeProcessWithInputFile(
+                command: List<String>,
+                inputFile: Path,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?,
+                onStdoutChunk: ((String) -> Unit)?,
+                onStderrChunk: ((String) -> Unit)?
+            ): ProcessResult = executeProcess(
+                command = command,
+                input = null,
+                environment = environment,
+                timeout = timeout,
+                workingDirectory = workingDirectory,
+                onStart = onStart,
+                onStdoutChunk = onStdoutChunk,
+                onStderrChunk = onStderrChunk
+            )
         }
 
         try {

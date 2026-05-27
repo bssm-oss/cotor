@@ -8,22 +8,29 @@ package com.cotor.chat
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption.APPEND
+import java.nio.file.StandardOpenOption.CREATE
+import java.nio.file.StandardOpenOption.READ
 import java.time.Instant
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
-import kotlin.io.path.readLines
-import kotlin.io.path.writeText
 
 class ChatTranscriptWriter(
-    private val saveDir: java.nio.file.Path
+    private val saveDir: Path
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonlFile = saveDir.resolve("session.jsonl")
     private val memoryFile = saveDir.resolve("MEMORY.md")
 
-    fun ensureDir(): java.nio.file.Path {
+    fun ensureDir(): Path {
         saveDir.createDirectories()
         return saveDir
     }
@@ -31,26 +38,35 @@ class ChatTranscriptWriter(
     fun loadSessionMessages(): List<ChatMessage> {
         ensureDir()
         if (!jsonlFile.exists()) return emptyList()
-        return jsonlFile.readLines()
+        val messages = ArrayDeque<ChatMessage>()
+        readUtf8Tail(jsonlFile, MAX_SESSION_JSONL_READ_BYTES)
+            .lineSequence()
             .filter { it.isNotBlank() }
-            .mapNotNull { line ->
-                runCatching { json.decodeFromString<ChatMessage>(line) }.getOrNull()
+            .forEach { line ->
+                val message = runCatching { json.decodeFromString<ChatMessage>(line) }.getOrNull()
+                if (message != null) {
+                    if (messages.size == MAX_LOADED_SESSION_MESSAGES) {
+                        messages.removeFirst()
+                    }
+                    messages.addLast(message)
+                }
             }
+        return messages.toList()
     }
 
     fun writeJsonl(session: ChatSession) {
         ensureDir()
         val body = buildString {
             session.snapshot().forEach { msg ->
-                appendLine(json.encodeToString(msg))
+                appendLine(json.encodeToString(msg.compactForResume()))
             }
         }
-        jsonlFile.writeText(body)
+        writeTextAtomically(jsonlFile, body)
     }
 
     fun clearJsonl() {
         ensureDir()
-        jsonlFile.writeText("")
+        writeTextAtomically(jsonlFile, "")
     }
 
     fun flushMemoryIfNeeded(session: ChatSession, flushThreshold: Int = 80, keepTail: Int = 30) {
@@ -76,8 +92,8 @@ class ChatTranscriptWriter(
             appendLine()
         }
 
-        val existing = if (memoryFile.exists()) memoryFile.readLines().joinToString("\n") else ""
-        memoryFile.writeText((existing + "\n" + entry).trimStart())
+        val prefix = if (memoryFile.exists() && Files.size(memoryFile) > 0L) "\n" else ""
+        Files.writeString(memoryFile, prefix + entry, StandardCharsets.UTF_8, CREATE, APPEND)
 
         session.compactHistory(keepHead = 4, keepTail = keepTail)
         writeJsonl(session)
@@ -88,7 +104,8 @@ class ChatTranscriptWriter(
         val tokens = query.lowercase().split(" ").filter { it.isNotBlank() }
         if (tokens.isEmpty()) return emptyList()
 
-        return memoryFile.readLines()
+        return readUtf8Tail(memoryFile, MAX_MEMORY_SEARCH_READ_BYTES)
+            .lineSequence()
             .filter { it.startsWith("-") }
             .map { it.removePrefix("-").trim() }
             .map { line ->
@@ -99,6 +116,7 @@ class ChatTranscriptWriter(
             .sortedByDescending { it.second }
             .take(limit)
             .map { it.first }
+            .toList()
     }
 
     fun writeMarkdown(
@@ -129,7 +147,7 @@ class ChatTranscriptWriter(
                 }
             }
         }
-        saveDir.resolve("transcript.md").writeText(md)
+        writeTextAtomically(saveDir.resolve("transcript.md"), md)
     }
 
     fun writeRawText(session: ChatSession) {
@@ -145,6 +163,43 @@ class ChatTranscriptWriter(
                 appendLine()
             }
         }
-        saveDir.resolve("transcript.txt").writeText(txt)
+        writeTextAtomically(saveDir.resolve("transcript.txt"), txt)
+    }
+
+    private fun ChatMessage.compactForResume(): ChatMessage {
+        if (content.length <= MAX_PERSISTED_MESSAGE_CHARS) return this
+        return copy(
+            content = content.take(MAX_PERSISTED_MESSAGE_CHARS) +
+                "\n[cotor truncated persisted interactive message after $MAX_PERSISTED_MESSAGE_CHARS chars]"
+        )
+    }
+
+    private fun readUtf8Tail(path: Path, maxBytes: Long): String {
+        require(maxBytes > 0L) { "maxBytes must be positive" }
+        val size = Files.size(path)
+        val start = (size - maxBytes).coerceAtLeast(0L)
+        val length = (size - start).toInt()
+        val buffer = ByteBuffer.allocate(length)
+
+        Files.newByteChannel(path, READ).use { channel ->
+            channel.position(start)
+            while (buffer.hasRemaining()) {
+                if (channel.read(buffer) < 0) break
+            }
+        }
+
+        buffer.flip()
+        val decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)
+        val text = decoder.decode(buffer).toString()
+        return if (start > 0L) text.substringAfter('\n', "") else text
+    }
+
+    private companion object {
+        const val MAX_SESSION_JSONL_READ_BYTES = 2_000_000L
+        const val MAX_MEMORY_SEARCH_READ_BYTES = 1_000_000L
+        const val MAX_LOADED_SESSION_MESSAGES = 5_000
+        const val MAX_PERSISTED_MESSAGE_CHARS = 100_000
     }
 }

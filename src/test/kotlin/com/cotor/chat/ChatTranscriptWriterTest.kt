@@ -46,6 +46,38 @@ class ChatTranscriptWriterTest : FunSpec({
         writer.loadSessionMessages() shouldBe emptyList()
     }
 
+    test("writeJsonl caps oversized messages persisted for resume") {
+        val dir = Files.createTempDirectory("cotor-chat-test-large")
+        val writer = ChatTranscriptWriter(dir)
+        val session = ChatSession(includeContext = true, maxHistoryMessages = 10)
+
+        session.addAssistant("x".repeat(120_000))
+
+        writer.writeJsonl(session)
+
+        val loaded = writer.loadSessionMessages()
+        loaded.shouldHaveSize(1)
+        (loaded.first().content.length < 101_000) shouldBe true
+        loaded.first().content shouldContain "cotor truncated persisted interactive message"
+    }
+
+    test("loadSessionMessages keeps only newest bounded resume messages") {
+        val dir = Files.createTempDirectory("cotor-chat-test-window")
+        val writer = ChatTranscriptWriter(dir)
+        val session = ChatSession(includeContext = true, maxHistoryMessages = 6_000)
+
+        repeat(5_050) { index ->
+            session.addUser("message-$index")
+        }
+
+        writer.writeJsonl(session)
+
+        val loaded = writer.loadSessionMessages()
+        loaded.shouldHaveSize(5_000)
+        loaded.first().content shouldBe "message-50"
+        loaded.last().content shouldBe "message-5049"
+    }
+
     test("flushMemoryIfNeeded writes MEMORY and compacts session") {
         val dir = Files.createTempDirectory("cotor-chat-memory")
         val writer = ChatTranscriptWriter(dir)
@@ -77,5 +109,18 @@ class ChatTranscriptWriterTest : FunSpec({
 
         val found = writer.searchMemory("retry consensus", limit = 2)
         found.shouldHaveSize(2)
+    }
+
+    test("searchMemory scans recent bounded memory content") {
+        val dir = Files.createTempDirectory("cotor-chat-search-large")
+        val writer = ChatTranscriptWriter(dir)
+        Files.writeString(
+            dir.resolve("MEMORY.md"),
+            "older prefix ".repeat(120_000) + "\n- recent retry consensus signal\n"
+        )
+
+        val found = writer.searchMemory("retry consensus", limit = 2)
+
+        found shouldBe listOf("recent retry consensus signal")
     }
 })

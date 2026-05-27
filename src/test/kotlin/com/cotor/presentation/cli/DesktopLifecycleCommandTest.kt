@@ -19,6 +19,7 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.createFile
 import kotlin.io.path.createParentDirectories
 import kotlin.io.path.exists
+import kotlin.io.path.writeText
 
 class DesktopLifecycleCommandTest : FunSpec({
     test("desktopInstallHomeDirectory prefers HOME over user.home") {
@@ -158,6 +159,83 @@ class DesktopLifecycleCommandTest : FunSpec({
 
         result.exitCode shouldBe 0
         installedBundle.exists() shouldBe false
+    }
+
+    test("runPackagedDesktopAction update runs Homebrew through the injectable bounded runner") {
+        val packagedRoot = Files.createTempDirectory("cotor-packaged-update")
+        val bundle = createPackagedBundle(packagedRoot)
+        val installRoot = Files.createTempDirectory("cotor-app-update-root")
+        val calls = mutableListOf<List<String>>()
+
+        val result = runPackagedDesktopAction(
+            layout = DesktopInstallLayout(
+                kind = DesktopInstallLayoutKind.PACKAGED_INSTALL,
+                root = packagedRoot,
+                desktopBundle = bundle
+            ),
+            action = DesktopInstallAction.UPDATE,
+            environment = mapOf("COTOR_DESKTOP_INSTALL_ROOT" to installRoot.toString()),
+            homeDirectoryProvider = { installRoot.resolve("home") },
+            homebrewRunner = { args ->
+                calls += args
+                DesktopScriptResult(exitCode = 0, output = "homebrew ${args.first()} ok\n")
+            }
+        )
+
+        result.exitCode shouldBe 0
+        calls shouldBe listOf(
+            listOf("tap", COTOR_BREW_TAP, COTOR_BREW_TAP_URL),
+            listOf("upgrade", COTOR_BREW_FORMULA)
+        )
+        installRoot.resolve(BUNDLED_DESKTOP_APP_NAME).exists() shouldBe true
+        result.output shouldContain "Homebrew package upgraded"
+    }
+
+    test("runDesktopScript times out hanging source lifecycle scripts") {
+        val root = Files.createTempDirectory("cotor-desktop-script-timeout")
+        root.resolve("shell").createDirectories()
+        root.resolve("shell/install-desktop-app.sh").writeText(
+            """
+            #!/usr/bin/env bash
+            printf 'started\n'
+            sleep 30
+            """.trimIndent()
+        )
+
+        val result = runDesktopScript(
+            projectRoot = root,
+            scriptName = "install-desktop-app.sh",
+            timeoutSeconds = 1,
+            outputLimitChars = 1024
+        )
+
+        result.exitCode shouldBe 124
+        result.output shouldContain "started"
+        result.output shouldContain "timed out after 1s"
+    }
+
+    test("runDesktopScript keeps a bounded output tail") {
+        val root = Files.createTempDirectory("cotor-desktop-script-output")
+        root.resolve("shell").createDirectories()
+        root.resolve("shell/install-desktop-app.sh").writeText(
+            """
+            #!/usr/bin/env bash
+            printf 'prefix-'
+            printf '0123456789%.0s' {1..20}
+            printf -- '-suffix'
+            """.trimIndent()
+        )
+
+        val result = runDesktopScript(
+            projectRoot = root,
+            scriptName = "install-desktop-app.sh",
+            timeoutSeconds = 5,
+            outputLimitChars = 32
+        )
+
+        result.exitCode shouldBe 0
+        result.output shouldContain "truncated to last 32 chars"
+        result.output shouldContain "-suffix"
     }
 
     test("desktop lifecycle commands fail outside macOS") {

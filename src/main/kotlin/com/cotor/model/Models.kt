@@ -441,6 +441,60 @@ data class StageExecutionRecord(
     val result: AgentResult
 )
 
+private const val PIPELINE_CONTEXT_OUTPUT_SEPARATOR = "\n\n---\n\n"
+private const val MAX_PIPELINE_CONTEXT_OUTPUT_AGGREGATION_CHARS = 200_000
+
+private fun Sequence<AgentResult>.joinOutputsForPipelineContext(
+    includeResult: (AgentResult) -> Boolean = { true }
+): String {
+    val builder = StringBuilder()
+    var hasOutput = false
+    var truncatedChars = 0L
+
+    for (result in this) {
+        if (!includeResult(result)) continue
+        val output = result.output ?: continue
+        val separator = if (hasOutput) PIPELINE_CONTEXT_OUTPUT_SEPARATOR else ""
+        val segmentLength = separator.length + output.length
+        val remainingChars = MAX_PIPELINE_CONTEXT_OUTPUT_AGGREGATION_CHARS - builder.length
+
+        if (remainingChars <= 0) {
+            truncatedChars += segmentLength.toLong()
+            hasOutput = true
+            continue
+        }
+
+        if (segmentLength <= remainingChars) {
+            builder.append(separator)
+            builder.append(output)
+            hasOutput = true
+            continue
+        }
+
+        val separatorChars = minOf(separator.length, remainingChars)
+        if (separatorChars > 0) {
+            builder.append(separator, 0, separatorChars)
+        }
+        val outputChars = minOf(output.length, remainingChars - separatorChars)
+        if (outputChars > 0) {
+            builder.append(output, 0, outputChars)
+        }
+        truncatedChars += (segmentLength - separatorChars - outputChars).toLong()
+        hasOutput = true
+    }
+
+    if (truncatedChars > 0) {
+        val marker = "\n[cotor truncated at least $truncatedChars chars from pipeline context outputs]"
+        val maxBodyLength = (MAX_PIPELINE_CONTEXT_OUTPUT_AGGREGATION_CHARS - marker.length).coerceAtLeast(0)
+        if (builder.length > maxBodyLength) {
+            builder.setLength(maxBodyLength)
+        }
+        builder.append(marker)
+    }
+
+    return builder.toString()
+}
+
 /**
  * Shared pipeline context accessible to all stages
  */
@@ -471,19 +525,23 @@ data class PipelineContext(
         stageExecutionHistory.toList()
     }
 
+    private fun resultsForOutputAggregation(): Sequence<AgentResult> {
+        val history = getStageExecutionHistory()
+        return if (history.isNotEmpty()) {
+            history.asSequence().map { it.result }
+        } else {
+            stageResults.values.asSequence()
+        }
+    }
+
     fun getAllOutputs(): String {
-        val results = getStageExecutionHistory().map { it.result }.ifEmpty { stageResults.values.toList() }
-        return results
-            .mapNotNull { it.output }
-            .joinToString("\n\n---\n\n")
+        return resultsForOutputAggregation()
+            .joinOutputsForPipelineContext()
     }
 
     fun getSuccessfulOutputs(): String {
-        val results = getStageExecutionHistory().map { it.result }.ifEmpty { stageResults.values.toList() }
-        return results
-            .filter { it.isSuccess }
-            .mapNotNull { it.output }
-            .joinToString("\n\n---\n\n")
+        return resultsForOutputAggregation()
+            .joinOutputsForPipelineContext { it.isSuccess }
     }
 
     fun elapsedTime(): Long = System.currentTimeMillis() - startTime

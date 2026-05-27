@@ -23,14 +23,18 @@ class A2aSessionStore(
 
     fun open(request: A2aHelloRequest, now: Long): A2aSession {
         prune(now)
+        val agentId = request.agentId.trim()
+        require(agentId.isNotBlank()) { "agentId is required" }
+        val tenant = request.tenant.normalized()
+        require(tenant.companyId.isNotBlank()) { "tenant.companyId is required" }
         val session = A2aSession(
             id = UUID.randomUUID().toString(),
-            agentId = request.agentId.trim(),
-            roleName = request.roleName?.trim(),
-            executionAgentName = request.executionAgentName?.trim(),
+            agentId = agentId,
+            roleName = request.roleName?.trim()?.takeIf { it.isNotBlank() },
+            executionAgentName = request.executionAgentName?.trim()?.takeIf { it.isNotBlank() },
             capabilities = request.capabilities.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
-            tenant = request.tenant,
-            nonce = request.nonce,
+            tenant = tenant,
+            nonce = request.nonce?.trim()?.takeIf { it.isNotBlank() },
             createdAt = now,
             updatedAt = now
         )
@@ -69,7 +73,7 @@ class A2aSessionStore(
                 )
             )
         }
-        sessions.computeIfPresent(sessionId) { _, session -> session.copy(updatedAt = now) }
+        touchInMemory(sessionId, now)
         persist()
     }
 
@@ -86,8 +90,7 @@ class A2aSessionStore(
                 }
             }
         }
-        sessions.computeIfPresent(sessionId) { _, session -> session.copy(updatedAt = now) }
-        persist()
+        touchInMemory(sessionId, now)
         return messages
     }
 
@@ -105,8 +108,10 @@ class A2aSessionStore(
                 removedCount++
             }
         }
-        sessions.computeIfPresent(sessionId) { _, session -> session.copy(updatedAt = now) }
-        persist()
+        touchInMemory(sessionId, now)
+        if (removedCount > 0) {
+            persist()
+        }
         return removedCount to synchronized(queue) { queue.size }
     }
 
@@ -125,6 +130,10 @@ class A2aSessionStore(
         }
         persist()
         return requireNotNull(updated)
+    }
+
+    private fun touchInMemory(sessionId: String, now: Long) {
+        sessions.computeIfPresent(sessionId) { _, session -> session.copy(updatedAt = now) }
     }
 
     @Synchronized
@@ -147,9 +156,15 @@ class A2aSessionStore(
         persistenceStore?.save(
             A2aSessionPersistenceStore.Snapshot(
                 sessions = sessions.values.toList(),
-                inboxes = inboxes.mapValues { (_, queue) -> queue.toList() },
+                inboxes = inboxes.mapValues { (_, queue) -> synchronized(queue) { queue.toList() } },
                 cursors = cursors.mapValues { (_, cursor) -> cursor.get() }
             )
         )
     }
 }
+
+private fun A2aTenant.normalized(): A2aTenant =
+    copy(
+        companyId = companyId.trim(),
+        projectContextId = projectContextId?.trim()?.takeIf { it.isNotBlank() }
+    )

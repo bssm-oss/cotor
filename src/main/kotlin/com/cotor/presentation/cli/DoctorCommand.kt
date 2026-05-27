@@ -14,7 +14,6 @@ import com.github.ajalt.mordant.rendering.TextStyles.*
 import com.github.ajalt.mordant.terminal.Terminal
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.TimeUnit
 import kotlin.io.path.Path
 import kotlin.io.path.exists
 import kotlin.io.path.isRegularFile
@@ -127,17 +126,7 @@ class DoctorCommand(
     companion object {
         private fun defaultCommandAvailable(name: String): Boolean {
             val cmd = if (isWindows()) listOf("where", name) else listOf("which", name)
-            return try {
-                val process = ProcessBuilder(cmd).start()
-                val finished = process.waitFor(5, TimeUnit.SECONDS)
-                if (!finished) {
-                    process.destroyForcibly()
-                    return false
-                }
-                process.exitValue() == 0
-            } catch (_: Exception) {
-                false
-            }
+            return runDiscardingOutputProbe(cmd, timeoutSeconds = 5)
         }
 
         private fun isWindows(): Boolean =

@@ -157,7 +157,20 @@ val cotorModule = module {
     single<SyntaxValidator> { SyntaxValidator() }
     single<OutputValidator> { DefaultOutputValidator(get()) }
     single<StatsManager> { StatsManager() }
-    single<PipelineOrchestrator> { DefaultPipelineOrchestrator(get(), get(), get(), get(), get(), get(), get(), observability = get(), durableRuntimeService = get()) }
+    single<PipelineOrchestrator> {
+        DefaultPipelineOrchestrator(
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            performanceConfig = get(),
+            observability = get(),
+            durableRuntimeService = get()
+        )
+    }
     single(createdAtStart = true) { PipelineRunTracker(get()) }
 
     // Event System

@@ -86,23 +86,20 @@ interface ProcessManager {
         onStart: ((Long) -> Unit)? = null,
         onStdoutChunk: ((String) -> Unit)?,
         onStderrChunk: ((String) -> Unit)?
-    ): ProcessResult = executeProcess(
-        command = command,
-        input = Files.readString(inputFile),
-        environment = environment,
-        timeout = timeout,
-        workingDirectory = workingDirectory,
-        onStart = onStart,
-        onStdoutChunk = onStdoutChunk,
-        onStderrChunk = onStderrChunk
-    )
+    ): ProcessResult {
+        throw UnsupportedOperationException(
+            "This ProcessManager implementation does not support file-backed stdin. " +
+                "Override executeProcessWithInputFile instead of materializing inputFile as a String."
+        )
+    }
 }
 
 /**
  * Coroutine-based process manager implementation
  */
 class CoroutineProcessManager(
-    private val logger: Logger
+    private val logger: Logger,
+    private val maxCapturedOutputChars: Int = DEFAULT_MAX_CAPTURED_OUTPUT_CHARS
 ) : ProcessManager {
 
     override suspend fun executeProcess(
@@ -220,11 +217,13 @@ class CoroutineProcessManager(
 
         logger.debug("Starting process: ${redactedCommandForLogs(resolvedCommand)}")
         val process = processBuilder.start()
+        val descendantTracker = ProcessDescendantTracker(process)
         onStart?.invoke(process.pid())
         logger.debug("Started process pid=${process.pid()} cwd=${workingDirectory ?: Path.of("").toAbsolutePath().normalize()} command=${redactedCommandForLogs(resolvedCommand)}")
 
-        val stdoutBuffer = StringBuffer()
-        val stderrBuffer = StringBuffer()
+        val outputLimit = maxCapturedOutputChars.coerceAtLeast(0)
+        val stdoutBuffer = BoundedOutputBuffer(outputLimit)
+        val stderrBuffer = BoundedOutputBuffer(outputLimit)
 
         val stdoutThread = thread(
             start = true,
@@ -236,9 +235,7 @@ class CoroutineProcessManager(
                 while (true) {
                     val read = reader.read(chunk)
                     if (read < 0) break
-                    synchronized(stdoutBuffer) {
-                        stdoutBuffer.append(chunk, 0, read)
-                    }
+                    stdoutBuffer.append(chunk, 0, read)
                     onStdoutChunk?.invoke(String(chunk, 0, read))
                 }
             }
@@ -253,9 +250,7 @@ class CoroutineProcessManager(
                 while (true) {
                     val read = reader.read(chunk)
                     if (read < 0) break
-                    synchronized(stderrBuffer) {
-                        stderrBuffer.append(chunk, 0, read)
-                    }
+                    stderrBuffer.append(chunk, 0, read)
                     onStderrChunk?.invoke(String(chunk, 0, read))
                 }
             }
@@ -284,12 +279,17 @@ class CoroutineProcessManager(
                     yield()
                 }
             }
-            cleanupSurvivingDescendants(process, logger)
+            val observedDescendantPids = descendantTracker.stopAndSnapshot()
+            cleanupSurvivingDescendants(
+                process = process,
+                logger = logger,
+                observedDescendantPids = observedDescendantPids
+            )
             joinReader(stdoutThread)
             joinReader(stderrThread)
             val exitCode = process.exitValue()
-            val stdout = synchronized(stdoutBuffer) { stdoutBuffer.toString() }
-            val stderr = synchronized(stderrBuffer) { stderrBuffer.toString() }
+            val stdout = stdoutBuffer.snapshot("stdout")
+            val stderr = stderrBuffer.snapshot("stderr")
 
             logger.debug("Process completed with exit code: $exitCode")
 
@@ -304,90 +304,29 @@ class CoroutineProcessManager(
             logger.warn("Process timeout, destroying process")
             // Force-kill on timeout because some developer tools spawn interactive shells
             // that ignore polite termination and would otherwise leak in the background.
-            destroyProcessTree(process, logger)
+            destroyProcessTree(process, logger = logger)
+            val observedDescendantPids = descendantTracker.stopAndSnapshot()
+            cleanupSurvivingDescendants(
+                process = process,
+                logger = logger,
+                observedDescendantPids = observedDescendantPids
+            )
             joinReader(stdoutThread)
             joinReader(stderrThread)
             throw e
         } catch (e: Exception) {
             logger.error("Process execution failed", e)
-            destroyProcessTree(process, logger)
+            destroyProcessTree(process, logger = logger)
+            val observedDescendantPids = descendantTracker.stopAndSnapshot()
+            cleanupSurvivingDescendants(
+                process = process,
+                logger = logger,
+                observedDescendantPids = observedDescendantPids
+            )
             joinReader(stdoutThread)
             joinReader(stderrThread)
             throw e
         }
-    }
-}
-
-private fun destroyProcessTree(process: Process, logger: Logger) {
-    val descendants = process.toHandle()
-        .descendants()
-        .toArray()
-        .filterIsInstance<ProcessHandle>()
-        .asReversed()
-    terminateUnixChildren(process.pid(), force = false, logger = logger)
-    descendants.forEach { handle ->
-        if (handle.isAlive) {
-            runCatching { handle.destroy() }
-                .onFailure { logger.debug("Failed to request descendant process ${handle.pid()} termination", it) }
-        }
-    }
-    if (process.isAlive) {
-        runCatching { process.destroy() }
-            .onFailure { logger.debug("Failed to request process ${process.pid()} termination", it) }
-    }
-    waitForProcessHandles(descendants, PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS)
-    if (process.isAlive) {
-        runCatching { process.waitFor(PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
-    }
-    terminateUnixChildren(process.pid(), force = true, logger = logger)
-    descendants.forEach { handle ->
-        if (handle.isAlive) {
-            runCatching { handle.destroyForcibly() }
-                .onFailure { logger.debug("Failed to destroy descendant process ${handle.pid()}", it) }
-        }
-    }
-    if (process.isAlive) {
-        runCatching { process.destroyForcibly() }
-            .onFailure { logger.debug("Failed to destroy process ${process.pid()}", it) }
-    }
-    waitForProcessHandles(descendants, PROCESS_TREE_JOIN_TIMEOUT_MS)
-    runCatching { process.waitFor(PROCESS_TREE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
-}
-
-private fun terminateUnixChildren(parentPid: Long, force: Boolean, logger: Logger) {
-    val signal = if (force) "-KILL" else "-TERM"
-    val pkill = ProcessBuilder("pkill", signal, "-P", parentPid.toString())
-    runCatching {
-        val process = pkill.start()
-        process.waitFor(PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        if (process.isAlive) {
-            process.destroyForcibly()
-        }
-    }.onFailure {
-        logger.debug("Failed to request child process termination with pkill for parent pid=$parentPid", it)
-    }
-}
-
-private fun cleanupSurvivingDescendants(process: Process, logger: Logger) {
-    val descendants = process.toHandle()
-        .descendants()
-        .toArray()
-        .filterIsInstance<ProcessHandle>()
-        .asReversed()
-        .filter { it.isAlive }
-    if (descendants.isEmpty()) {
-        return
-    }
-    descendants.forEach { handle ->
-        runCatching { handle.destroyForcibly() }
-            .onFailure { logger.debug("Failed to clean up surviving descendant process ${handle.pid()}", it) }
-    }
-    waitForProcessHandles(descendants, PROCESS_TREE_JOIN_TIMEOUT_MS)
-}
-
-private fun waitForProcessHandles(handles: List<ProcessHandle>, timeoutMs: Long) {
-    handles.forEach { handle ->
-        runCatching { handle.onExit().get(timeoutMs, TimeUnit.MILLISECONDS) }
     }
 }
 
@@ -407,11 +346,37 @@ private fun joinReader(thread: Thread) {
     thread.join(READER_JOIN_TIMEOUT_MS)
 }
 
-private const val READER_JOIN_TIMEOUT_MS = 250L
-private const val PROCESS_TREE_POLITE_JOIN_TIMEOUT_MS = 250L
-private const val PROCESS_TREE_JOIN_TIMEOUT_MS = 500L
+private class BoundedOutputBuffer(private val maxChars: Int) {
+    private val buffer = StringBuilder()
+    private var truncatedChars: Long = 0
 
-private fun buildEffectivePath(
+    @Synchronized
+    fun append(chars: CharArray, offset: Int, length: Int) {
+        if (maxChars == 0) {
+            truncatedChars += length.toLong()
+            return
+        }
+        buffer.append(chars, offset, length)
+        val overflow = buffer.length - maxChars
+        if (overflow > 0) {
+            buffer.delete(0, overflow)
+            truncatedChars += overflow.toLong()
+        }
+    }
+
+    @Synchronized
+    fun snapshot(streamName: String): String {
+        if (truncatedChars == 0L) {
+            return buffer.toString()
+        }
+        return "[cotor truncated $truncatedChars chars from the beginning of $streamName]\n$buffer"
+    }
+}
+
+private const val DEFAULT_MAX_CAPTURED_OUTPUT_CHARS = 2_000_000
+private const val READER_JOIN_TIMEOUT_MS = 250L
+
+internal fun buildEffectivePath(
     inheritedPath: String?,
     overridePath: String?,
     resolvedExecutable: Path?

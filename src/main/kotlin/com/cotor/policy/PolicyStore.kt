@@ -1,17 +1,18 @@
 package com.cotor.policy
 
 import com.cotor.app.defaultDesktopAppHome
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 class PolicyStore(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() }
 ) {
+    private val lock = Any()
     private val json = Json {
         prettyPrint = true
         ignoreUnknownKeys = true
@@ -40,30 +41,35 @@ class PolicyStore(
     fun saveDocument(document: PolicyDocument) {
         val dir = policiesDir()
         dir.createDirectories()
-        dir.resolve("${document.name}.policy.json").writeText(
+        writeTextAtomically(
+            dir.resolve("${document.name}.policy.json"),
             json.encodeToString(PolicyDocument.serializer(), document)
         )
     }
 
     fun appendDecision(decision: PolicyDecision) {
-        val current = loadAudit()
-        val updated = current.copy(
-            decisions = (current.decisions + decision).takeLast(500),
-            updatedAt = System.currentTimeMillis()
-        )
-        val dir = policiesDir()
-        dir.createDirectories()
-        auditFile().writeText(json.encodeToString(PolicyAuditLog.serializer(), updated))
+        synchronized(lock) {
+            val current = loadAudit()
+            val updated = current.copy(
+                decisions = (current.decisions + decision).takeLast(500),
+                updatedAt = System.currentTimeMillis()
+            )
+            val dir = policiesDir()
+            dir.createDirectories()
+            writeTextAtomically(auditFile(), json.encodeToString(PolicyAuditLog.serializer(), updated))
+        }
     }
 
     fun loadAudit(): PolicyAuditLog {
-        val file = auditFile()
-        if (!file.exists()) {
-            return PolicyAuditLog()
+        return synchronized(lock) {
+            val file = auditFile()
+            if (!file.exists()) {
+                return@synchronized PolicyAuditLog()
+            }
+            runCatching {
+                json.decodeFromString(PolicyAuditLog.serializer(), file.readText())
+            }.getOrDefault(PolicyAuditLog())
         }
-        return runCatching {
-            json.decodeFromString(PolicyAuditLog.serializer(), file.readText())
-        }.getOrDefault(PolicyAuditLog())
     }
 
     fun defaultPermissiveProfile(): PolicyDocument =

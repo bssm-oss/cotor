@@ -8,6 +8,7 @@ package com.cotor.stats
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
+import com.cotor.storage.writeTextAtomically
 import com.cotor.model.AggregatedResult
 import com.cotor.model.FailureCategory
 import kotlinx.serialization.Serializable
@@ -21,11 +22,14 @@ import java.time.Instant
  * Manages pipeline execution statistics
  */
 class StatsManager(
-    private val statsDir: String = ".cotor/stats"
+    private val statsDir: String = ".cotor/stats",
+    private val maxStoredExecutions: Int = DEFAULT_MAX_STORED_EXECUTIONS
 ) {
+    private val lock = Any()
     private val json = Json { prettyPrint = true }
 
     init {
+        require(maxStoredExecutions > 0) { "maxStoredExecutions must be positive" }
         File(statsDir).mkdirs()
     }
 
@@ -37,52 +41,56 @@ class StatsManager(
         result: AggregatedResult,
         stages: List<StageExecution>
     ) {
-        val execution = PipelineExecution(
-            pipelineName = pipelineName,
-            timestamp = Instant.now().toString(),
-            totalDuration = result.totalDuration,
-            successCount = result.successCount,
-            failureCount = result.failureCount,
-            totalAgents = result.totalAgents,
-            stages = stages
-        )
+        synchronized(lock) {
+            val execution = PipelineExecution(
+                pipelineName = pipelineName,
+                timestamp = Instant.now().toString(),
+                totalDuration = result.totalDuration,
+                successCount = result.successCount,
+                failureCount = result.failureCount,
+                totalAgents = result.totalAgents,
+                stages = stages
+            )
 
-        val statsFile = getStatsFile(pipelineName)
-        val stats = loadStats(pipelineName) ?: PipelineStats(pipelineName = pipelineName)
+            val statsFile = getStatsFile(pipelineName)
+            val stats = loadStats(pipelineName) ?: PipelineStats(pipelineName = pipelineName)
 
-        val updatedFailureCounts = stats.failureCategoryCounts.toMutableMap()
-        result.results.filter { !it.isSuccess }.forEach {
-            val categoryString = it.metadata["failureCategory"] ?: FailureCategory.UNKNOWN.name
-            val category = FailureCategory.valueOf(categoryString)
-            updatedFailureCounts[category] = (updatedFailureCounts[category] ?: 0) + 1
+            val updatedFailureCounts = stats.failureCategoryCounts.toMutableMap()
+            result.results.filter { !it.isSuccess }.forEach {
+                val categoryString = it.metadata["failureCategory"] ?: FailureCategory.UNKNOWN.name
+                val category = FailureCategory.valueOf(categoryString)
+                updatedFailureCounts[category] = (updatedFailureCounts[category] ?: 0) + 1
+            }
+
+            val updatedStats = stats.copy(
+                executions = (stats.executions + execution).takeLast(maxStoredExecutions),
+                totalExecutions = stats.totalExecutions + 1,
+                totalSuccesses = stats.totalSuccesses + result.successCount,
+                totalFailures = stats.totalFailures + result.failureCount,
+                totalDuration = stats.totalDuration + result.totalDuration,
+                lastExecuted = execution.timestamp,
+                failureCategoryCounts = updatedFailureCounts
+            )
+
+            writeTextAtomically(statsFile.toPath(), json.encodeToString(updatedStats))
         }
-
-        val updatedStats = stats.copy(
-            executions = stats.executions + execution,
-            totalExecutions = stats.totalExecutions + 1,
-            totalSuccesses = stats.totalSuccesses + result.successCount,
-            totalFailures = stats.totalFailures + result.failureCount,
-            totalDuration = stats.totalDuration + result.totalDuration,
-            lastExecuted = execution.timestamp,
-            failureCategoryCounts = updatedFailureCounts
-        )
-
-        statsFile.writeText(json.encodeToString(updatedStats))
     }
 
     /**
      * Load statistics for a pipeline
      */
     fun loadStats(pipelineName: String): PipelineStats? {
-        val statsFile = getStatsFile(pipelineName)
-        if (!statsFile.exists()) {
-            return null
-        }
+        return synchronized(lock) {
+            val statsFile = getStatsFile(pipelineName)
+            if (!statsFile.exists()) {
+                return@synchronized null
+            }
 
-        return try {
-            json.decodeFromString<PipelineStats>(statsFile.readText())
-        } catch (e: Exception) {
-            null
+            try {
+                json.decodeFromString<PipelineStats>(statsFile.readText())
+            } catch (e: Exception) {
+                null
+            }
         }
     }
 
@@ -197,7 +205,9 @@ class StatsManager(
      * Clear statistics for a pipeline
      */
     fun clearStats(pipelineName: String): Boolean {
-        return getStatsFile(pipelineName).delete()
+        return synchronized(lock) {
+            getStatsFile(pipelineName).delete()
+        }
     }
 
     /**
@@ -211,6 +221,10 @@ class StatsManager(
     private fun getStatsFile(pipelineName: String): File {
         val safeName = pipelineName.replace("[^a-zA-Z0-9-_]".toRegex(), "_")
         return File(statsDir, "$safeName.json")
+    }
+
+    private companion object {
+        const val DEFAULT_MAX_STORED_EXECUTIONS = 1_000
     }
 }
 

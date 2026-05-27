@@ -12,6 +12,9 @@ import com.cotor.model.AgentResult
 import com.cotor.model.ResultAnalysis
 import kotlin.math.min
 
+private const val MAX_ANALYZED_OUTPUT_CHARS = 100_000
+private const val MAX_OUTPUT_LENGTH_CONFIDENCE_BONUS = 1.0
+
 /**
  * Heuristic analyzer that compares agent outputs using token-based similarity
  * and metadata hints (validationScore) to highlight best candidates.
@@ -49,7 +52,7 @@ class DefaultResultAnalyzer : ResultAnalyzer {
             for (j in i + 1 until comparable.size) {
                 val left = comparable[i]
                 val right = comparable[j]
-                val score = similarity(left.output!!, right.output!!)
+                val score = similarity(left.analysisOutput(), right.analysisOutput())
                 pairSimilarities += score
                 if (score < 0.4) {
                     disagreements += "Low agreement between ${left.agentName} and ${right.agentName} (${percent(score)})."
@@ -81,9 +84,13 @@ class DefaultResultAnalyzer : ResultAnalyzer {
 
     private fun extractConfidence(result: AgentResult): Double {
         val validationScore = result.metadata["validationScore"]?.toDoubleOrNull() ?: 0.0
-        val outputBonus = (result.output?.length ?: 0) / 2000.0
+        val outputBonus = ((result.output?.length ?: 0).coerceAtMost(MAX_ANALYZED_OUTPUT_CHARS) / 2000.0)
+            .coerceAtMost(MAX_OUTPUT_LENGTH_CONFIDENCE_BONUS)
         return validationScore + outputBonus
     }
+
+    private fun AgentResult.analysisOutput(): String =
+        output?.take(MAX_ANALYZED_OUTPUT_CHARS).orEmpty()
 
     private fun similarity(left: String, right: String): Double {
         val leftTokens = tokenize(left)

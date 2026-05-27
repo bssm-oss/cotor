@@ -9,9 +9,13 @@ package com.cotor.data.plugin
  */
 
 import com.cotor.data.http.CotorHttpClients
+import com.cotor.data.http.BoundedHttpTextResponse
+import com.cotor.data.http.sendBoundedText
 import com.cotor.data.process.ProcessManager
+import com.cotor.data.process.destroyProcessTree
 import com.cotor.model.*
 import com.cotor.model.OpenCodeDefaults
+import com.cotor.storage.writeTextAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -31,12 +35,15 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.io.IOException
 import java.net.URI
+import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermission
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -81,10 +88,11 @@ class ClaudePlugin : AgentPlugin {
 
         val model = context.parameters.getOrDefault("model", "claude-sonnet-4-20250514")
 
-        // Execute Claude CLI with auto-approval (skip all permission prompts)
+        // Execute Claude CLI with auto-approval (skip all permission prompts).
+        // Keep prompt text on stdin so long task context is not exposed in argv.
         // NOTE: `claude` CLI does not consistently support `--temperature` across versions,
         // so we avoid passing it here for compatibility.
-        val command = mutableListOf("claude", "--dangerously-skip-permissions", "--print", prompt)
+        val command = mutableListOf("claude", "--dangerously-skip-permissions", "--print")
         if (model.isNotBlank()) {
             command.add("--model")
             command.add(model)
@@ -92,7 +100,7 @@ class ClaudePlugin : AgentPlugin {
 
         val result = processManager.executeProcess(
             command = command,
-            input = null,
+            input = prompt,
             environment = context.environment,
             timeout = context.timeout,
             workingDirectory = context.workingDirectory,
@@ -114,6 +122,9 @@ class ClaudePlugin : AgentPlugin {
         return ValidationResult.Success
     }
 }
+
+private const val DEFAULT_LOCAL_MODEL_HTTP_RESPONSE_BODY_LIMIT_CHARS = 2_000_000
+private const val DEFAULT_CODEX_OUTPUT_FILE_LIMIT_CHARS = 2_000_000
 
 /**
  * Codex Plugin (OpenAI Code Interpreter)
@@ -177,11 +188,11 @@ class CodexPlugin : AgentPlugin {
             if (model != null) {
                 command += listOf("--model", model)
             }
-            command += prompt
+            command += "-"
 
             val result = processManager.executeProcess(
                 command = command,
-                input = null,
+                input = prompt,
                 environment = if (isolatedCodexHome != null) {
                     baseEnvironment + mapOf("CODEX_HOME" to isolatedCodexHome.toString())
                 } else {
@@ -194,7 +205,7 @@ class CodexPlugin : AgentPlugin {
 
             // Prefer the captured final assistant message and fall back to stdout only when
             // the file is empty, which keeps the plugin resilient across CLI versions.
-            val finalText = Files.readString(outputFile).trim()
+            val finalText = readBoundedUtf8Text(outputFile, DEFAULT_CODEX_OUTPUT_FILE_LIMIT_CHARS).trim()
 
             if (!result.isSuccess && finalText.isBlank()) {
                 throw AgentExecutionException("Codex execution failed: ${result.stderr.ifBlank { result.stdout }}")
@@ -237,7 +248,7 @@ class CodexPlugin : AgentPlugin {
             ?.let { source ->
                 Files.copy(source, targetHome.resolve("auth.json"), StandardCopyOption.REPLACE_EXISTING)
             }
-        Files.writeString(targetHome.resolve("config.toml"), buildIsolatedCodexConfig())
+        writeTextAtomically(targetHome.resolve("config.toml"), buildIsolatedCodexConfig())
     }
 
     private fun resolveConfiguredCodexModel(environment: Map<String, String>): String? {
@@ -329,9 +340,94 @@ class CodexPlugin : AgentPlugin {
     }
 }
 
+private fun readBoundedUtf8Text(path: Path, maxChars: Int): String {
+    require(maxChars >= 0) { "maxChars must not be negative" }
+    if (maxChars == 0) {
+        return if (Files.size(path) > 0L) "[cotor truncated file output after 0 chars]" else ""
+    }
+
+    return Files.newBufferedReader(path, StandardCharsets.UTF_8).use { reader ->
+        val buffer = CharArray(maxChars)
+        var offset = 0
+        while (offset < maxChars) {
+            val read = reader.read(buffer, offset, maxChars - offset)
+            if (read < 0) {
+                return@use String(buffer, 0, offset)
+            }
+            offset += read
+        }
+        val truncated = reader.read() >= 0
+        if (truncated) {
+            String(buffer, 0, offset) + "\n[cotor truncated file output after $maxChars chars]"
+        } else {
+            String(buffer, 0, offset)
+        }
+    }
+}
+
+private suspend fun executePromptFileBackedProcess(
+    processManager: ProcessManager,
+    context: ExecutionContext,
+    prompt: String,
+    commandForPromptFile: (Path) -> List<String>
+): ProcessResult {
+    val promptDir = Files.createTempDirectory("cotor-agent-prompt-")
+    enforceOwnerOnlyPromptDirectoryPermissions(promptDir)
+    val promptFile = promptDir.resolve("prompt.md")
+    writeTextAtomically(
+        path = promptFile,
+        payload = prompt,
+        configureTempFile = ::enforceOwnerOnlyPromptFilePermissions
+    )
+    enforceOwnerOnlyPromptFilePermissions(promptFile)
+    return try {
+        processManager.executeProcess(
+            command = commandForPromptFile(promptFile),
+            input = null,
+            environment = context.environment,
+            timeout = context.timeout,
+            workingDirectory = context.workingDirectory,
+            onStart = context.onProcessStarted
+        )
+    } finally {
+        Files.deleteIfExists(promptFile)
+        Files.deleteIfExists(promptDir)
+    }
+}
+
+private fun promptFileHandoffInstruction(promptFile: Path): String {
+    val normalized = promptFile.toAbsolutePath().normalize()
+    return "Read the full task prompt from this UTF-8 file and execute it exactly: $normalized"
+}
+
+private fun enforceOwnerOnlyPromptDirectoryPermissions(path: Path) {
+    runCatching {
+        Files.setPosixFilePermissions(
+            path,
+            setOf(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.OWNER_EXECUTE
+            )
+        )
+    }
+}
+
+private fun enforceOwnerOnlyPromptFilePermissions(path: Path) {
+    runCatching {
+        Files.setPosixFilePermissions(
+            path,
+            setOf(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE
+            )
+        )
+    }
+}
+
 /**
  * GitHub Copilot Plugin
- * Executes: copilot -p <prompt> --allow-all-tools
+ * Executes: copilot with a file-backed prompt handoff.
  * Note: Copilot doesn't support full auto-approval, uses session-based silent auth
  */
 class CopilotPlugin : AgentPlugin {
@@ -349,19 +445,19 @@ class CopilotPlugin : AgentPlugin {
     ): PluginExecutionOutput {
         val prompt = context.input ?: throw IllegalArgumentException("Input prompt is required")
 
-        // Copilot's session model is quieter than the other CLIs, so this wrapper simply
-        // forwards the prompt and trusts the pre-authenticated CLI state on the machine.
+        // Copilot's prompt mode requires a prompt argument, so pass only a prompt-file
+        // handoff instruction in argv and keep the full task content out of process lists.
         // Note: Full auto-approval not supported, requires pre-authenticated session
-        val command = listOf("copilot", "-p", prompt, "--allow-all-tools")
-
-        val result = processManager.executeProcess(
-            command = command,
-            input = null,
-            environment = context.environment,
-            timeout = context.timeout,
-            workingDirectory = context.workingDirectory,
-            onStart = context.onProcessStarted
-        )
+        val result = executePromptFileBackedProcess(processManager, context, prompt) { promptFile ->
+            listOf(
+                "copilot",
+                "-p",
+                promptFileHandoffInstruction(promptFile),
+                "--add-dir",
+                promptFile.parent.toAbsolutePath().normalize().toString(),
+                "--allow-all-tools"
+            )
+        }
 
         if (!result.isSuccess) {
             throw AgentExecutionException("GitHub Copilot execution failed: ${result.stderr}")
@@ -380,7 +476,7 @@ class CopilotPlugin : AgentPlugin {
 
 /**
  * Google Gemini Plugin
- * Executes: gemini --yolo <prompt>
+ * Executes: gemini --yolo --prompt <safe handoff> with the full prompt on stdin.
  * Uses alwaysAllow whitelist for auto-approval
  */
 class GeminiPlugin : AgentPlugin {
@@ -398,14 +494,13 @@ class GeminiPlugin : AgentPlugin {
     ): PluginExecutionOutput {
         val prompt = context.input ?: throw IllegalArgumentException("Input prompt is required")
 
-        // Gemini exposes a single flag for broad tool approval, so the wrapper remains
-        // intentionally thin and lets cwd/env carry the worktree isolation.
-        // --yolo flag enables alwaysAllow mode for all tools
-        val command = listOf("gemini", "--yolo", prompt)
+        // Gemini appends stdin to --prompt in headless mode. Keep the sensitive
+        // task body on stdin so it is not exposed in argv.
+        val command = listOf("gemini", "--yolo", "--prompt", "Execute the task provided on stdin.")
 
         val result = processManager.executeProcess(
             command = command,
-            input = null,
+            input = prompt,
             environment = context.environment,
             timeout = context.timeout,
             workingDirectory = context.workingDirectory,
@@ -429,7 +524,7 @@ class GeminiPlugin : AgentPlugin {
 
 /**
  * Cursor AI Plugin
- * Executes: cursor-cli generate --auto-run <prompt>
+ * Executes: cursor-cli generate --auto-run with a file-backed prompt handoff.
  * Uses Auto-Run mode with Denylist for dangerous commands
  */
 class CursorPlugin : AgentPlugin {
@@ -447,19 +542,12 @@ class CursorPlugin : AgentPlugin {
     ): PluginExecutionOutput {
         val prompt = context.input ?: throw IllegalArgumentException("Input prompt is required")
 
-        // Cursor's CLI is another child-process-based integration, so its output path
-        // mirrors the other local tools and captures the pid for port inspection.
+        // Cursor's CLI is another child-process-based integration; keep the full
+        // prompt out of argv and hand it to the agent through an owner-only file.
         // Uses Denylist approach: auto-runs everything except dangerous commands (rm, etc)
-        val command = listOf("cursor-cli", "generate", "--auto-run", prompt)
-
-        val result = processManager.executeProcess(
-            command = command,
-            input = null,
-            environment = context.environment,
-            timeout = context.timeout,
-            workingDirectory = context.workingDirectory,
-            onStart = context.onProcessStarted
-        )
+        val result = executePromptFileBackedProcess(processManager, context, prompt) { promptFile ->
+            listOf("cursor-cli", "generate", "--auto-run", promptFileHandoffInstruction(promptFile))
+        }
 
         if (!result.isSuccess) {
             throw AgentExecutionException("Cursor execution failed: ${result.stderr}")
@@ -479,7 +567,14 @@ class CursorPlugin : AgentPlugin {
 /**
  * Local model plugin for Ollama and LM Studio/OpenAI-compatible servers.
  */
-class LocalModelPlugin : AgentPlugin {
+class LocalModelPlugin(
+    private val ollamaExecutableResolver: () -> String? = ::resolveDefaultOllamaExecutable,
+    private val managedOllamaProcessStarter: (String) -> Process = ::startManagedOllamaServeProcess,
+    private val managedOllamaReachability: ((String) -> Boolean)? = null,
+    private val managedOllamaStartupTimeoutMs: Long = 5_000L,
+    private val managedOllamaStartupPollMs: Long = 100L,
+    private val httpResponseBodyLimitChars: Int = DEFAULT_LOCAL_MODEL_HTTP_RESPONSE_BODY_LIMIT_CHARS
+) : AgentPlugin {
     override val metadata = AgentMetadata(
         name = "local-model",
         version = "1.0.0",
@@ -520,7 +615,7 @@ class LocalModelPlugin : AgentPlugin {
     override suspend fun execute(
         context: ExecutionContext,
         processManager: ProcessManager
-    ): PluginExecutionOutput {
+    ): PluginExecutionOutput = withContext(Dispatchers.IO) {
         val prompt = context.input ?: throw IllegalArgumentException("Input prompt is required for local model")
         val provider = normalizeProvider(context.parameters["provider"] ?: context.agentName)
         val model = LocalModelDefaults.normalizeModel(context.parameters["model"]) ?: LocalModelDefaults.GEMMA4_MODEL
@@ -528,7 +623,7 @@ class LocalModelPlugin : AgentPlugin {
             "lmstudio" -> LocalModelDefaults.normalizeBaseUrl(context.parameters["baseUrl"], LocalModelDefaults.LM_STUDIO_BASE_URL)
             else -> LocalModelDefaults.normalizeBaseUrl(context.parameters["baseUrl"], LocalModelDefaults.OLLAMA_BASE_URL)
         }
-        return when (provider) {
+        when (provider) {
             "lmstudio" -> executeLmStudio(baseUrl, model, prompt, context.timeout)
             else -> executeOllama(baseUrl, model, prompt, context.timeout)
         }
@@ -559,7 +654,7 @@ class LocalModelPlugin : AgentPlugin {
                 throw error
             }
         }.getOrThrow()
-        return PluginExecutionOutput(extractOllamaText(response.body()))
+        return PluginExecutionOutput(extractOllamaText(response.body))
     }
 
     private fun ollamaChatBody(model: String, prompt: String): String =
@@ -592,7 +687,7 @@ class LocalModelPlugin : AgentPlugin {
     private fun getOllamaModels(baseUrl: String): List<String> =
         runCatching {
             val response = getJson("$baseUrl/api/tags", timeoutMs = 2_000)
-            json.parseToJsonElement(response.body()).jsonObject["models"]?.jsonArray
+            json.parseToJsonElement(response.body).jsonObject["models"]?.jsonArray
                 ?.mapNotNull { model ->
                     val obj = model.jsonObject
                     val remoteHost = obj["remote_host"]?.jsonPrimitive?.contentOrNull
@@ -617,34 +712,40 @@ class LocalModelPlugin : AgentPlugin {
             )
         }.toString()
         val response = postJson("$baseUrl/chat/completions", body, timeoutMs)
-        val parsed = json.parseToJsonElement(response.body()).jsonObject
+        val parsed = json.parseToJsonElement(response.body).jsonObject
         val text = parsed["choices"]?.jsonArray?.firstOrNull()
             ?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
-            ?: response.body()
+            ?: response.body
         return PluginExecutionOutput(text)
     }
 
-    private fun postJson(url: String, body: String, timeoutMs: Long): HttpResponse<String> {
+    private fun postJson(url: String, body: String, timeoutMs: Long): BoundedHttpTextResponse {
         val request = HttpRequest.newBuilder(URI.create(url))
             .timeout(Duration.ofMillis(timeoutMs.coerceAtLeast(1_000L)))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        if (response.statusCode() !in 200..299) {
-            throw AgentExecutionException("Local model request failed (${response.statusCode()}): ${response.body()}")
+        val response = client.sendBoundedText(request, httpResponseBodyLimitChars)
+        if (response.statusCode !in 200..299) {
+            throw AgentExecutionException("Local model request failed (${response.statusCode}): ${response.diagnosticBody()}")
+        }
+        if (response.truncated) {
+            throw AgentExecutionException("Local model response exceeded ${httpResponseBodyLimitChars.coerceAtLeast(0)} character limit")
         }
         return response
     }
 
-    private fun getJson(url: String, timeoutMs: Long): HttpResponse<String> {
+    private fun getJson(url: String, timeoutMs: Long): BoundedHttpTextResponse {
         val request = HttpRequest.newBuilder(URI.create(url))
             .timeout(Duration.ofMillis(timeoutMs.coerceAtLeast(1_000L)))
             .GET()
             .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        if (response.statusCode() !in 200..299) {
-            throw AgentExecutionException("Local model request failed (${response.statusCode()}): ${response.body()}")
+        val response = client.sendBoundedText(request, httpResponseBodyLimitChars)
+        if (response.statusCode !in 200..299) {
+            throw AgentExecutionException("Local model request failed (${response.statusCode}): ${response.diagnosticBody()}")
+        }
+        if (response.truncated) {
+            throw AgentExecutionException("Local model response exceeded ${httpResponseBodyLimitChars.coerceAtLeast(0)} character limit")
         }
         return response
     }
@@ -657,24 +758,51 @@ class LocalModelPlugin : AgentPlugin {
 
     private fun ensureManagedOllamaServer(baseUrl: String) {
         if (!isDefaultLoopbackOllamaBaseUrl(baseUrl)) return
-        if (runCatching { getJson("$baseUrl/api/tags", timeoutMs = 1_000) }.isSuccess) return
-        val executable = resolveOllamaExecutable() ?: return
-        synchronized(ollamaServerLock) {
-            if (managedOllamaProcess?.isAlive == true) return@synchronized
-            managedOllamaProcess = ProcessBuilder(executable, "serve")
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectError(ProcessBuilder.Redirect.DISCARD)
-                .apply {
-                    environment()["OLLAMA_HOST"] = "127.0.0.1:11434"
+        if (isManagedOllamaReachable(baseUrl)) return
+        val executable = ollamaExecutableResolver() ?: return
+        val process = synchronized(ollamaServerLock) {
+            managedOllamaProcess?.takeIf { it.isAlive } ?: runCatching {
+                managedOllamaProcessStarter(executable)
+            }.getOrElse { error ->
+                if (error is IOException) {
+                    throw AgentExecutionException(
+                        "Failed to start managed Ollama server with $executable: ${error.message}"
+                    )
                 }
-                .start()
+                throw error
+            }.also {
+                managedOllamaProcess = it
+            }
         }
-        val deadline = System.currentTimeMillis() + 5_000L
+        val startupTimeoutMs = managedOllamaStartupTimeoutMs.coerceAtLeast(1L)
+        val pollMs = managedOllamaStartupPollMs.coerceAtLeast(1L)
+        val deadline = System.currentTimeMillis() + startupTimeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (runCatching { getJson("$baseUrl/api/tags", timeoutMs = 1_000) }.isSuccess) return
-            Thread.sleep(100)
+            if (runCatching { isManagedOllamaReachable(baseUrl) }.getOrDefault(false)) return
+            try {
+                Thread.sleep(pollMs)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                cleanupManagedOllamaProcess(process)
+                throw AgentExecutionException("Interrupted while waiting for managed Ollama server readiness")
+            }
         }
+        cleanupManagedOllamaProcess(process)
+        throw AgentExecutionException("Managed Ollama server did not become ready within ${startupTimeoutMs}ms")
     }
+
+    private fun cleanupManagedOllamaProcess(process: Process) {
+        synchronized(ollamaServerLock) {
+            if (managedOllamaProcess === process) {
+                managedOllamaProcess = null
+            }
+        }
+        destroyProcessTree(process)
+    }
+
+    private fun isManagedOllamaReachable(baseUrl: String): Boolean =
+        managedOllamaReachability?.invoke(baseUrl)
+            ?: runCatching { getJson("$baseUrl/api/tags", timeoutMs = 1_000) }.isSuccess
 
     private fun isDefaultLoopbackOllamaBaseUrl(baseUrl: String): Boolean {
         val uri = runCatching { URI.create(baseUrl) }.getOrNull() ?: return false
@@ -683,20 +811,6 @@ class LocalModelPlugin : AgentPlugin {
         return uri.scheme.equals("http", ignoreCase = true) &&
             port == 11434 &&
             host in setOf("127.0.0.1", "localhost", "::1")
-    }
-
-    private fun resolveOllamaExecutable(): String? {
-        val pathCandidates = System.getenv("PATH")
-            .orEmpty()
-            .split(java.io.File.pathSeparator)
-            .filter { it.isNotBlank() }
-            .map { Path.of(it).resolve("ollama") }
-        val candidates = pathCandidates + listOf(
-            Path.of("/opt/homebrew/bin/ollama"),
-            Path.of("/usr/local/bin/ollama"),
-            Path.of("/usr/bin/ollama")
-        )
-        return candidates.firstOrNull { Files.isExecutable(it) }?.toString()
     }
 
     private fun kotlinx.serialization.json.JsonArrayBuilder.addMessage(role: String, content: String) {
@@ -715,6 +829,29 @@ class LocalModelPlugin : AgentPlugin {
         private var managedOllamaProcess: Process? = null
     }
 }
+
+private fun resolveDefaultOllamaExecutable(): String? {
+    val pathCandidates = System.getenv("PATH")
+        .orEmpty()
+        .split(java.io.File.pathSeparator)
+        .filter { it.isNotBlank() }
+        .map { Path.of(it).resolve("ollama") }
+    val candidates = pathCandidates + listOf(
+        Path.of("/opt/homebrew/bin/ollama"),
+        Path.of("/usr/local/bin/ollama"),
+        Path.of("/usr/bin/ollama")
+    )
+    return candidates.firstOrNull { Files.isExecutable(it) }?.toString()
+}
+
+private fun startManagedOllamaServeProcess(executable: String): Process =
+    ProcessBuilder(executable, "serve")
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+        .apply {
+            environment()["OLLAMA_HOST"] = "127.0.0.1:11434"
+        }
+        .start()
 
 /**
  * OpenCode Agent Plugin
@@ -848,10 +985,15 @@ class OpenCodePlugin : AgentPlugin {
                         java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")
                     )
                 }
-                Files.writeString(path, prompt)
+                writeTextAtomically(path, prompt)
+                runCatching {
+                    Files.setPosixFilePermissions(
+                        path,
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")
+                    )
+                }
             }
         }
-        val ephemeralConfig = if (planningOnly) null else withContext(Dispatchers.IO) { createEphemeralOpenCodeConfig(context) }
         val fatalRuntimeError = AtomicReference<String?>(null)
         val childProcessId = AtomicLong(-1L)
         val command = buildList {
@@ -890,11 +1032,7 @@ class OpenCodePlugin : AgentPlugin {
                 add("--file=$promptFile")
             }
         }
-        val executionEnvironment = if (planningOnly) {
-            context.environment + planningOnlyOpenCodeEnvironment(context)
-        } else {
-            context.environment
-        }
+        val executionEnvironment = context.environment + openCodeRunEnvironment(context, planningOnly)
 
         return try {
             val result = coroutineScope {
@@ -968,13 +1106,25 @@ class OpenCodePlugin : AgentPlugin {
         } finally {
             withContext(Dispatchers.IO) {
                 runCatching { Files.deleteIfExists(promptFile) }
-                restoreEphemeralOpenCodeConfig(ephemeralConfig)
             }
         }
     }
 
     private fun isPlanningOnlyOpenCodeRun(context: ExecutionContext): Boolean =
         context.parameters["ephemeralOpencodeProfile"]?.trim() == "planning-only"
+
+    private fun openCodeRunEnvironment(context: ExecutionContext, planningOnly: Boolean): Map<String, String> =
+        if (planningOnly) {
+            planningOnlyOpenCodeEnvironment(context)
+        } else {
+            executionOpenCodeEnvironment()
+        }
+
+    private fun executionOpenCodeEnvironment(): Map<String, String> = mapOf(
+        "OPENCODE_CONFIG_CONTENT" to executionOpenCodeConfigJson(),
+        "OPENCODE_DISABLE_PROJECT_CONFIG" to "true",
+        "OPENCODE_DISABLE_AUTOUPDATE" to "true"
+    )
 
     private fun planningOnlyOpenCodeEnvironment(context: ExecutionContext): Map<String, String> = mapOf(
         "OPENCODE_CONFIG_CONTENT" to planningOnlyOpenCodeConfigJson(context),
@@ -984,48 +1134,6 @@ class OpenCodePlugin : AgentPlugin {
         "OPENCODE_DISABLE_MODELS_FETCH" to "true",
         "OPENCODE_PURE" to "true"
     )
-
-    private data class EphemeralOpenCodeConfig(
-        val configPath: Path,
-        val backupPath: Path?
-    )
-
-    private fun createEphemeralOpenCodeConfig(context: ExecutionContext): EphemeralOpenCodeConfig? {
-        val configJson = ephemeralOpenCodeConfigJson(context) ?: return null
-        val workdir = context.workingDirectory ?: return null
-        val configPath = workdir.resolve(".opencode").resolve("opencode.json")
-        Files.createDirectories(configPath.parent)
-        val backupPath = if (Files.exists(configPath)) {
-            val backup = Files.createTempFile(configPath.parent, "opencode.", ".json.bak")
-            Files.move(configPath, backup, StandardCopyOption.REPLACE_EXISTING)
-            backup
-        } else {
-            null
-        }
-        Files.writeString(configPath, configJson)
-        return EphemeralOpenCodeConfig(configPath = configPath, backupPath = backupPath)
-    }
-
-    private fun restoreEphemeralOpenCodeConfig(config: EphemeralOpenCodeConfig?) {
-        if (config == null) return
-        if (config.backupPath != null) {
-            runCatching { Files.deleteIfExists(config.configPath) }
-            runCatching {
-                Files.move(config.backupPath, config.configPath, StandardCopyOption.REPLACE_EXISTING)
-            }
-        } else {
-            runCatching { Files.deleteIfExists(config.configPath) }
-            runCatching { Files.deleteIfExists(config.configPath.parent) }
-        }
-    }
-
-    private fun ephemeralOpenCodeConfigJson(context: ExecutionContext): String? {
-        return when (context.parameters["ephemeralOpencodeProfile"]?.trim()) {
-            "planning-only" -> planningOnlyOpenCodeConfigJson(context)
-            null, "" -> executionOpenCodeConfigJson()
-            else -> null
-        }
-    }
 
     private fun executionOpenCodeConfigJson(): String = """
         {
@@ -1182,26 +1290,34 @@ class OpenCodePlugin : AgentPlugin {
             .toList()
     }
 
-    private fun ensureLocalOllamaModelAvailable(model: String, context: ExecutionContext) {
+    private suspend fun ensureLocalOllamaModelAvailable(model: String, context: ExecutionContext) {
         val tag = OpenCodeDefaults.ollamaTagForOpenCodeModel(model) ?: return
         val baseUrl = LocalModelDefaults.normalizeBaseUrl(
             context.parameters["ollamaBaseUrl"] ?: context.parameters["baseUrl"],
             LocalModelDefaults.OLLAMA_BASE_URL
         )
-        val response = runCatching {
-            val request = HttpRequest.newBuilder(URI.create("$baseUrl/api/tags"))
-                .timeout(Duration.ofMillis(minOf(context.timeout, 2_000).coerceAtLeast(1_000L)))
-                .GET()
-                .build()
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        }.getOrElse { cause ->
-            throw AgentExecutionException("LOCAL_GEMMA_MODEL_MISSING: could not reach local Ollama at $baseUrl (${cause.message}).")
+        val response = withContext(Dispatchers.IO) {
+            runCatching {
+                val request = HttpRequest.newBuilder(URI.create("$baseUrl/api/tags"))
+                    .timeout(Duration.ofMillis(minOf(context.timeout, 2_000).coerceAtLeast(1_000L)))
+                    .GET()
+                    .build()
+                httpClient.sendBoundedText(request, DEFAULT_LOCAL_MODEL_HTTP_RESPONSE_BODY_LIMIT_CHARS)
+            }.getOrElse { cause ->
+                throw AgentExecutionException("LOCAL_GEMMA_MODEL_MISSING: could not reach local Ollama at $baseUrl (${cause.message}).")
+            }
         }
-        if (response.statusCode() !in 200..299) {
-            throw AgentExecutionException("LOCAL_GEMMA_MODEL_MISSING: local Ollama at $baseUrl returned ${response.statusCode()}.")
+        if (response.statusCode !in 200..299) {
+            throw AgentExecutionException("LOCAL_GEMMA_MODEL_MISSING: local Ollama at $baseUrl returned ${response.statusCode}.")
+        }
+        if (response.truncated) {
+            throw AgentExecutionException(
+                "LOCAL_GEMMA_MODEL_MISSING: local Ollama /api/tags response exceeded " +
+                    "$DEFAULT_LOCAL_MODEL_HTTP_RESPONSE_BODY_LIMIT_CHARS character limit."
+            )
         }
         val models = runCatching {
-            json.parseToJsonElement(response.body()).jsonObject["models"]?.jsonArray
+            json.parseToJsonElement(response.body).jsonObject["models"]?.jsonArray
                 ?.mapNotNull { item ->
                     val obj = item.jsonObject
                     val remoteHost = obj["remote_host"]?.jsonPrimitive?.contentOrNull

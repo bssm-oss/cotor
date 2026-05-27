@@ -42,12 +42,18 @@ class SecurityValidatorTest : FunSpec({
 
     test("command validation rejects combined shell execution flags") {
         val validator = DefaultSecurityValidator(
-            SecurityConfig(allowedExecutables = setOf("bash")),
+            SecurityConfig(allowedExecutables = setOf("bash", "zsh", "pwsh")),
             LoggerFactory.getLogger("SecurityValidatorTest")
         )
 
-        shouldThrow<SecurityException> {
-            validator.validateCommand(listOf("bash", "-lc", "id"))
+        listOf(
+            listOf("bash", "-lc", "id"),
+            listOf("zsh", "-ec", "id"),
+            listOf("pwsh", "-EncodedCommand", "SQBk")
+        ).forEach { command ->
+            shouldThrow<SecurityException> {
+                validator.validateCommand(command)
+            }
         }
     }
 

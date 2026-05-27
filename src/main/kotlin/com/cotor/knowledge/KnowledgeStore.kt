@@ -1,12 +1,11 @@
 package com.cotor.knowledge
 
 import com.cotor.app.defaultDesktopAppHome
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
-import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 class KnowledgeStore(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() }
@@ -32,7 +31,6 @@ class KnowledgeStore(
 
     fun save(snapshot: KnowledgeSnapshot) {
         val file = file()
-        file.parent?.createDirectories()
-        file.writeText(json.encodeToString(KnowledgeSnapshot.serializer(), snapshot))
+        writeTextAtomically(file, json.encodeToString(KnowledgeSnapshot.serializer(), snapshot))
     }
 }

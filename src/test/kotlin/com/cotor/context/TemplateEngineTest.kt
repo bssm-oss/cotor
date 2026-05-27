@@ -11,6 +11,7 @@ package com.cotor.context
 import com.cotor.model.AgentResult
 import com.cotor.model.PipelineContext
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -92,5 +93,18 @@ class TemplateEngineTest {
         val expected = "User is jules"
         val actual = templateEngine.interpolate(template, pipelineContext)
         assertEquals(expected, actual)
+    }
+
+    @Test
+    fun `should cap legacy all outputs interpolation`() {
+        pipelineContext.addStageResult(
+            "step2",
+            AgentResult("agent1", true, "x".repeat(220_000), null, 0, emptyMap())
+        )
+
+        val actual = templateEngine.interpolate("Outputs: {{ context.allOutputs }}", pipelineContext)
+
+        assertTrue(actual.length <= "Outputs: ".length + 200_000)
+        assertTrue("cotor truncated" in actual)
     }
 }

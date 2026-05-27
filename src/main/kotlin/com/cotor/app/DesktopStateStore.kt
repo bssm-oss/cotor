@@ -9,6 +9,7 @@ package com.cotor.app
  */
 
 import com.cotor.app.persistence.StateRepository
+import com.cotor.storage.writeTextAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -33,7 +34,6 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 /**
  * Persists the lightweight desktop state into Application Support.
@@ -48,6 +48,10 @@ class DesktopStateStore(
         private const val MAX_PERSISTED_RESOLVED_ISSUES = 20
         private const val MAX_PERSISTED_TASK_PROMPT_CHARS = 512
         private const val MAX_PERSISTED_RUN_OUTPUT_CHARS = 4000
+        private const val MAX_PERSISTED_DIRECT_CHAT_CONVERSATIONS_PER_COMPANY = 25
+        private const val MAX_PERSISTED_DIRECT_CHAT_MESSAGES_PER_CONVERSATION = 80
+        private const val MAX_PERSISTED_DIRECT_CHAT_MESSAGE_CHARS = 20_000
+        private const val MAX_PERSISTED_DIRECT_CHAT_SYSTEM_PROMPT_CHARS = 4_000
         private const val MAX_STATE_LOAD_LOG_BYTES = 1L * 1024L * 1024L
         private const val STATE_LOAD_LOG_DEDUP_WINDOW_MS = 30_000L
         private const val STATE_LOCK_TIMEOUT_MS = 3_000L
@@ -237,15 +241,9 @@ class DesktopStateStore(
         val compactedState = normalizeStateForPersistence(state)
         val payload = json.encodeToString(DesktopAppState.serializer(), compactedState)
         cleanupStateTempFiles(file.parent)
-        val tempFile = Files.createTempFile(file.parent, "${file.fileName}.", ".tmp")
-        tempFile.writeText(payload)
-        enforceOwnerOnlyPermissions(tempFile)
-        moveWithAtomicFallback(tempFile, file)
+        writeOwnerOnlyTextAtomically(file, payload)
         enforceOwnerOnlyPermissions(file)
-        val backupTempFile = Files.createTempFile(backupFile.parent, "${backupFile.fileName}.", ".tmp")
-        backupTempFile.writeText(payload)
-        enforceOwnerOnlyPermissions(backupTempFile)
-        moveWithAtomicFallback(backupTempFile, backupFile)
+        writeOwnerOnlyTextAtomically(backupFile, payload)
         enforceOwnerOnlyPermissions(backupFile)
         updateCache(file, compactedState)
     }
@@ -547,6 +545,9 @@ class DesktopStateStore(
             marketingDelegationPolicies = decodeList("marketingDelegationPolicies", MarketingDelegationPolicy.serializer()),
             marketingRuns = decodeList("marketingRuns", MarketingRunRecord.serializer()),
             skillRuns = decodeList("skillRuns", SkillRunRecord.serializer()),
+            companyRuntimeWorkItems = decodeList("companyRuntimeWorkItems", CompanyRuntimeWorkItem.serializer()),
+            problemSignals = decodeList("problemSignals", CompanyProblemSignal.serializer()),
+            directChatConversations = decodeList("directChatConversations", DirectChatConversation.serializer()),
             opsMetrics = decodeObject("opsMetrics", OpsMetricSnapshot.serializer(), OpsMetricSnapshot()),
             signals = decodeList("signals", OpsSignal.serializer()),
             backendSettings = decodeObject("backendSettings", DesktopBackendSettings.serializer(), DesktopBackendSettings()),
@@ -663,24 +664,20 @@ class DesktopStateStore(
         }
     }
 
-    private fun moveWithAtomicFallback(source: Path, target: Path) {
-        try {
-            Files.move(
-                source,
-                target,
-                StandardCopyOption.REPLACE_EXISTING,
-                StandardCopyOption.ATOMIC_MOVE
-            )
-        } catch (error: Exception) {
-            appendStateLoadLog(
-                "ATOMIC_MOVE failed for ${target.fileName}: ${error.message ?: error::class.simpleName.orEmpty()}; falling back to non-atomic replace"
-            )
-            Files.move(
-                source,
-                target,
-                StandardCopyOption.REPLACE_EXISTING
-            )
-        }
+    private fun writeOwnerOnlyTextAtomically(path: Path, payload: String) {
+        writeTextAtomically(
+            path = path,
+            payload = payload,
+            configureTempFile = ::enforceOwnerOnlyPermissions,
+            onAtomicMoveFallback = { error -> appendAtomicMoveFallbackLog(path, error) }
+        )
+    }
+
+    private fun atomicMoveFallbackMessage(target: Path, error: Throwable): String =
+        "ATOMIC_MOVE failed for ${target.fileName}: ${error.message ?: error::class.simpleName.orEmpty()}; falling back to non-atomic replace"
+
+    private fun appendAtomicMoveFallbackLog(target: Path, error: Throwable) {
+        appendStateLoadLog(atomicMoveFallbackMessage(target, error))
     }
 
     private fun writeLockMetadata(metadataPath: Path) {
@@ -689,7 +686,7 @@ class DesktopStateStore(
         val payload = """
             {"pid":$pid,"lockedAt":$now,"appHome":"${appHome().toString().replace("\"", "\\\"")}"}
         """.trimIndent()
-        metadataPath.writeText(payload)
+        writeOwnerOnlyTextAtomically(metadataPath, payload)
         enforceOwnerOnlyPermissions(metadataPath)
     }
 
@@ -921,6 +918,7 @@ class DesktopStateStore(
                 goalDecisions = goalDecisions.sortedByDescending { it.createdAt }.take(150),
                 marketingRuns = marketingRuns.sortedByDescending { it.createdAt }.take(200),
                 skillRuns = skillRuns.sortedByDescending { it.updatedAt }.take(200),
+                directChatConversations = compactDirectChatConversations(directChatConversations),
                 problemSignals = problemSignals.sortedByDescending { it.updatedAt }.take(200)
             )
         }
@@ -957,6 +955,45 @@ class DesktopStateStore(
         } else {
             run.copy(output = compactText(run.output, MAX_PERSISTED_RUN_OUTPUT_CHARS))
         }
+
+    private fun compactDirectChatConversations(
+        conversations: List<DirectChatConversation>
+    ): List<DirectChatConversation> =
+        conversations
+            .groupBy { it.companyId }
+            .values
+            .flatMap { companyConversations ->
+                companyConversations
+                    .sortedWith(
+                        compareByDescending<DirectChatConversation> { it.updatedAt }
+                            .thenByDescending { it.createdAt }
+                    )
+                    .take(MAX_PERSISTED_DIRECT_CHAT_CONVERSATIONS_PER_COMPANY)
+                    .map(::compactDirectChatConversation)
+            }
+            .sortedWith(
+                compareByDescending<DirectChatConversation> { it.updatedAt }
+                    .thenByDescending { it.createdAt }
+            )
+
+    private fun compactDirectChatConversation(conversation: DirectChatConversation): DirectChatConversation =
+        conversation.copy(
+            systemPrompt = compactRequiredText(
+                conversation.systemPrompt,
+                MAX_PERSISTED_DIRECT_CHAT_SYSTEM_PROMPT_CHARS
+            ),
+            messages = conversation.messages
+                .sortedBy { it.createdAt }
+                .takeLast(MAX_PERSISTED_DIRECT_CHAT_MESSAGES_PER_CONVERSATION)
+                .map { message ->
+                    message.copy(
+                        content = compactRequiredText(
+                            message.content,
+                            MAX_PERSISTED_DIRECT_CHAT_MESSAGE_CHARS
+                        )
+                    )
+                }
+        )
 
     private fun compactText(value: String?, maxChars: Int): String? {
         val text = value ?: return null

@@ -110,6 +110,20 @@ internal class DeleteCommand(
 )
 
 internal fun runDesktopScript(projectRoot: Path, scriptName: String): DesktopScriptResult {
+    return runDesktopScript(
+        projectRoot = projectRoot,
+        scriptName = scriptName,
+        timeoutSeconds = DESKTOP_LIFECYCLE_COMMAND_TIMEOUT_SECONDS,
+        outputLimitChars = DESKTOP_LIFECYCLE_OUTPUT_LIMIT_CHARS
+    )
+}
+
+internal fun runDesktopScript(
+    projectRoot: Path,
+    scriptName: String,
+    timeoutSeconds: Long,
+    outputLimitChars: Int
+): DesktopScriptResult {
     val scriptPath = projectRoot.resolve("shell").resolve(scriptName)
     if (!scriptPath.exists()) {
         return DesktopScriptResult(
@@ -118,17 +132,16 @@ internal fun runDesktopScript(projectRoot: Path, scriptName: String): DesktopScr
         )
     }
 
-    val process = ProcessBuilder("/bin/bash", scriptPath.toString())
-        .directory(projectRoot.toFile())
-        .redirectErrorStream(true)
-        .apply {
-            environment()["COTOR_PROJECT_ROOT"] = projectRoot.toString()
+    return runDesktopCommand(
+        command = listOf("/bin/bash", scriptPath.toString()),
+        workingDirectory = projectRoot,
+        environment = mapOf("COTOR_PROJECT_ROOT" to projectRoot.toString()),
+        timeoutSeconds = timeoutSeconds,
+        outputLimitChars = outputLimitChars,
+        timeoutMessage = { effectiveTimeout ->
+            "Desktop lifecycle script timed out after ${effectiveTimeout}s: $scriptPath"
         }
-        .start()
-
-    val output = process.inputStream.bufferedReader().use { it.readText() }
-    val exitCode = process.waitFor()
-    return DesktopScriptResult(exitCode = exitCode, output = output)
+    )
 }
 
 private fun isMacOs(osName: String): Boolean = osName.lowercase().contains("mac")

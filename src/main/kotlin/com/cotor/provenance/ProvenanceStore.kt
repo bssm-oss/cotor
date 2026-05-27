@@ -1,12 +1,11 @@
 package com.cotor.provenance
 
 import com.cotor.app.defaultDesktopAppHome
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
-import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 class ProvenanceStore(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() }
@@ -32,7 +31,6 @@ class ProvenanceStore(
 
     fun save(graph: EvidenceGraph) {
         val file = graphFile()
-        file.parent?.createDirectories()
-        file.writeText(json.encodeToString(EvidenceGraph.serializer(), graph))
+        writeTextAtomically(file, json.encodeToString(EvidenceGraph.serializer(), graph))
     }
 }
