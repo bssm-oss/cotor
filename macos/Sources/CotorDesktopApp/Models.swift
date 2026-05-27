@@ -2468,3 +2468,39 @@ diff --git a/src/main/kotlin/com/cotor/app/AppServer.kt b/src/main/kotlin/com/co
         PortEntryPayload(port: 8787, url: "http://127.0.0.1:8787", label: "Cotor app-server")
     ]
 }
+
+// MARK: - Direct Chat Models
+
+struct DirectChatConversation: Codable, Identifiable {
+    let id: String
+    let companyId: String
+    var title: String
+    var model: String
+    var provider: String
+    var baseUrl: String
+    var systemPrompt: String
+    var messages: [DirectChatMessage]
+    let createdAt: Int64
+    var updatedAt: Int64
+}
+
+struct DirectChatMessage: Codable, Identifiable {
+    let id: String
+    let role: String   // "user" or "assistant"
+    var content: String
+    let createdAt: Int64
+}
+
+struct DirectChatStreamChunk: Codable {
+    let conversationId: String
+    let messageId: String
+    let content: String
+    let done: Bool
+    let error: String?
+}
+
+struct DirectChatAvailableModel: Codable, Identifiable {
+    let id: String
+    let provider: String
+    let displayName: String
+}

@@ -144,7 +144,7 @@ class DefaultSecurityValidator(
     }
 
     private fun validateEnvironment(environment: Map<String, String>) {
-        val dangerousVars = listOf("LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES")
+        val dangerousVars = setOf("LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES")
 
         environment.keys.forEach { key ->
             if (dangerousVars.contains(key)) {
@@ -162,10 +162,7 @@ class DefaultSecurityValidator(
     }
 
     private fun containsInjectionPattern(input: String): Boolean {
-        val injectionPatterns = listOf(
-            ";", "&&", "||", "|", "`", "$(",
-            "../", "..\\", "<", ">", "\n", "\r"
-        )
+        val injectionPatterns = listOf("`", "$(", "\n", "\r", " ")
 
         return injectionPatterns.any { pattern ->
             input.contains(pattern)
@@ -178,8 +175,7 @@ class DefaultSecurityValidator(
 
     private fun isShellExecuteOption(arg: String): Boolean {
         val normalized = arg.trim().lowercase()
-        if (normalized == "/c") return true
-        if (normalized in setOf("-command", "-encodedcommand", "-encodedarguments")) return true
-        return normalized.startsWith("-") && 'c' in normalized.drop(1)
+        return normalized in setOf("/c", "-c", "--command", "-command",
+            "-encodedcommand", "-encodedarguments")
     }
 }

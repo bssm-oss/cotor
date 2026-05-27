@@ -430,6 +430,51 @@ internal fun DesktopSettings.redactedForApi(): DesktopSettings = copy(
     backendStatuses = backendStatuses.map { it.redactedForApi() }
 )
 
+// ── Direct Chat API Models ──────────────────────────────────────────
+
+@Serializable
+data class CreateDirectChatConversationRequest(
+    val title: String = "",
+    val model: String,
+    val provider: String,
+    val baseUrl: String = "",
+    val systemPrompt: String = ""
+) {
+    init {
+        require(provider in setOf("ollama", "lmstudio", "claude-cli")) {
+            "Unsupported provider: $provider"
+        }
+        require(model.isNotBlank() && model.length <= 200) { "Invalid model name" }
+        require(baseUrl.length <= 500) { "baseUrl too long" }
+        require(systemPrompt.length <= 10_000) { "systemPrompt too long" }
+        require(title.length <= 200) { "title too long" }
+    }
+}
+
+@Serializable
+data class SendDirectChatMessageRequest(val message: String) {
+    init {
+        require(message.isNotBlank()) { "Message must not be blank" }
+        require(message.length <= 100_000) { "Message too long (max 100k chars)" }
+    }
+}
+
+@Serializable
+data class DirectChatStreamChunk(
+    val conversationId: String,
+    val messageId: String,
+    val content: String,
+    val done: Boolean = false,
+    val error: String? = null
+)
+
+@Serializable
+data class DirectChatAvailableModel(
+    val id: String,
+    val provider: String,
+    val displayName: String
+)
+
 internal fun CompanyDashboardResponse.redactedForApi(): CompanyDashboardResponse = copy(
     companies = companies.map { it.redactedForApi() },
     backendStatuses = backendStatuses.map { it.redactedForApi() }

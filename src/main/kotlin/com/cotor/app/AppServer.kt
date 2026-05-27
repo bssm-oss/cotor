@@ -1734,6 +1734,66 @@ internal fun Application.cotorAppModule(
                     }
                 }
 
+                route("/{companyId}/direct-chat") {
+                    get("/models") {
+                        if (!requireToken(token)) return@get
+                        val baseUrl = call.request.queryParameters["baseUrl"] ?: "http://127.0.0.1:11434"
+                        call.respond(desktopService.listDirectChatModels(baseUrl))
+                    }
+
+                    route("/conversations") {
+                        get {
+                            if (!requireToken(token)) return@get
+                            val companyId = call.parameters["companyId"]
+                                ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                            call.respond(desktopService.listDirectChatConversations(companyId))
+                        }
+
+                        post {
+                            if (!requireToken(token)) return@post
+                            val companyId = call.parameters["companyId"]
+                                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                            val request = call.receive<CreateDirectChatConversationRequest>()
+                            respondDesktopRequest {
+                                desktopService.createDirectChatConversation(
+                                    companyId = companyId,
+                                    title = request.title,
+                                    model = request.model,
+                                    provider = request.provider,
+                                    baseUrl = request.baseUrl,
+                                    systemPrompt = request.systemPrompt
+                                )
+                            }
+                        }
+
+                        delete("/{conversationId}") {
+                            if (!requireToken(token)) return@delete
+                            val companyId = call.parameters["companyId"]
+                                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                            val conversationId = call.parameters["conversationId"]
+                                ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "conversationId is required"))
+                            desktopService.deleteDirectChatConversation(conversationId, companyId)
+                            call.respond(HttpStatusCode.NoContent)
+                        }
+
+                        post("/{conversationId}/messages") {
+                            if (!requireToken(token)) return@post
+                            val companyId = call.parameters["companyId"]
+                                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                            val conversationId = call.parameters["conversationId"]
+                                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "conversationId is required"))
+                            val request = call.receive<SendDirectChatMessageRequest>()
+                            call.respondTextWriter(ContentType.parse("application/x-ndjson")) {
+                                desktopService.streamDirectChatMessage(conversationId, companyId, request.message).collect { chunk ->
+                                    write(streamJson.encodeToString(DirectChatStreamChunk.serializer(), chunk))
+                                    write("\n")
+                                    flush()
+                                }
+                            }
+                        }
+                    }
+                }
+
                 route("/{companyId}/issues") {
                     get {
                         if (!requireToken(token)) return@get

@@ -78,8 +78,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -368,6 +370,7 @@ class DesktopAppService(
     }
     private val localExecutionBackend = LocalCotorBackend(agentExecutor)
     private val codexAppServerBackend = CodexAppServerBackend(backendJson)
+    private val directChatService = DirectChatService()
 
     private enum class RecoverableRetryMode {
         NONE,
@@ -23933,6 +23936,158 @@ class DesktopAppService(
             error.contains("gh auth", ignoreCase = true) ||
             error.contains("GitHub publishing requires an authenticated gh CLI session.", ignoreCase = true)
     }
+
+    // ── Direct AI Chat ──────────────────────────────────────────────────
+
+    suspend fun createDirectChatConversation(
+        companyId: String,
+        title: String,
+        model: String,
+        provider: String,
+        baseUrl: String = "",
+        systemPrompt: String = ""
+    ): DirectChatConversation = stateMutex.withLock {
+        val state = stateStore.load()
+        val now = System.currentTimeMillis()
+        val conversation = DirectChatConversation(
+            id = UUID.randomUUID().toString(),
+            companyId = companyId,
+            title = title.trim().ifEmpty { model },
+            model = model,
+            provider = provider,
+            baseUrl = baseUrl,
+            systemPrompt = systemPrompt,
+            messages = emptyList(),
+            createdAt = now,
+            updatedAt = now
+        )
+        stateStore.save(
+            state.copy(directChatConversations = state.directChatConversations + conversation)
+        )
+        conversation
+    }
+
+    suspend fun listDirectChatConversations(companyId: String): List<DirectChatConversation> =
+        stateStore.load().directChatConversations.filter { it.companyId == companyId }
+
+    suspend fun getDirectChatConversation(id: String): DirectChatConversation? =
+        stateStore.load().directChatConversations.firstOrNull { it.id == id }
+
+    suspend fun deleteDirectChatConversation(id: String, companyId: String) {
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val target = state.directChatConversations.firstOrNull { it.id == id }
+            if (target != null) {
+                require(target.companyId == companyId) {
+                    "Conversation $id does not belong to company $companyId"
+                }
+            }
+            stateStore.save(
+                state.copy(
+                    directChatConversations = state.directChatConversations
+                        .filterNot { it.id == id && it.companyId == companyId }
+                )
+            )
+        }
+    }
+
+    fun streamDirectChatMessage(
+        conversationId: String,
+        companyId: String,
+        userMessage: String
+    ): Flow<DirectChatStreamChunk> = flow {
+        val conversation = getDirectChatConversation(conversationId)
+            ?: run {
+                emit(
+                    DirectChatStreamChunk(
+                        conversationId = conversationId,
+                        messageId = UUID.randomUUID().toString(),
+                        content = "",
+                        done = true,
+                        error = "Conversation not found: $conversationId"
+                    )
+                )
+                return@flow
+            }
+
+        if (conversation.companyId != companyId) {
+            emit(
+                DirectChatStreamChunk(
+                    conversationId = conversationId,
+                    messageId = UUID.randomUUID().toString(),
+                    content = "",
+                    done = true,
+                    error = "Conversation $conversationId does not belong to company $companyId"
+                )
+            )
+            return@flow
+        }
+
+        val userMessageId = UUID.randomUUID().toString()
+        val userMsg = DirectChatMessage(
+            id = userMessageId,
+            role = "user",
+            content = userMessage,
+            createdAt = System.currentTimeMillis()
+        )
+
+        // Save user message to state
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val now = System.currentTimeMillis()
+            stateStore.save(
+                state.copy(
+                    directChatConversations = state.directChatConversations.map { conv ->
+                        if (conv.id == conversationId) {
+                            conv.copy(messages = conv.messages + userMsg, updatedAt = now)
+                        } else conv
+                    }
+                )
+            )
+        }
+
+        val assistantMessageId = UUID.randomUUID().toString()
+        val contentBuilder = StringBuilder()
+        var streamError: String? = null
+
+        directChatService.streamChat(conversation, userMessage, assistantMessageId).collect { chunk ->
+            emit(chunk)
+            if (chunk.error != null) {
+                streamError = chunk.error
+            } else {
+                contentBuilder.append(chunk.content)
+            }
+            if (chunk.done) {
+                val assistantContent = contentBuilder.toString()
+                if (assistantContent.isNotEmpty()) {
+                    val assistantMsg = DirectChatMessage(
+                        id = assistantMessageId,
+                        role = "assistant",
+                        content = assistantContent,
+                        createdAt = System.currentTimeMillis()
+                    )
+                    stateMutex.withLock {
+                        val state = stateStore.load()
+                        val now = System.currentTimeMillis()
+                        stateStore.save(
+                            state.copy(
+                                directChatConversations = state.directChatConversations.map { conv ->
+                                    if (conv.id == conversationId) {
+                                        conv.copy(messages = conv.messages + assistantMsg, updatedAt = now)
+                                    } else conv
+                                }
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun listDirectChatModels(baseUrl: String = "http://127.0.0.1:11434"): List<DirectChatAvailableModel> =
+        withContext(Dispatchers.IO) {
+            directChatService.listAvailableModels(baseUrl)
+        }
 }
 
 internal fun defaultCommandAvailability(command: String): Boolean {
