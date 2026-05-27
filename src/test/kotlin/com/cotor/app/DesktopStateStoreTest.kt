@@ -718,7 +718,7 @@ class DesktopStateStoreTest : FunSpec({
             )
         )
 
-        store.save(state)
+        saveLegacyJsonState(appHome, state)
         val statePath = appHome.resolve("state.json")
         val corruptedPayload = statePath.readText().replaceFirst(
             "\"status\": \"COMPLETED\"",

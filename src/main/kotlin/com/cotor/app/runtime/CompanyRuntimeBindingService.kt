@@ -10,11 +10,11 @@ import com.cotor.app.ReviewQueueItem
 import com.cotor.policy.PolicyEngine
 import com.cotor.providers.github.GitHubControlPlaneService
 import com.cotor.providers.github.PullRequestSnapshot
-import com.cotor.runtime.actions.ActionLogSnapshot
-import com.cotor.runtime.actions.ActionStatus
+import com.cotor.runtime.actions.ActionLogSummary
 import com.cotor.runtime.actions.ActionStore
 import com.cotor.runtime.durable.DurableRunSnapshot
 import com.cotor.runtime.durable.DurableRunStatus
+import com.cotor.runtime.durable.DurableRunSummary
 import com.cotor.runtime.durable.DurableRuntimeService
 import java.util.concurrent.ConcurrentHashMap
 
@@ -34,8 +34,8 @@ class CompanyRuntimeBindingService(
 ) {
     private data class CachedValue<T>(val value: T, val storedAt: Long)
 
-    private val durableRunListCache = ConcurrentHashMap<String, CachedValue<List<DurableRunSnapshot>>>()
-    private val actionSnapshotListCache = ConcurrentHashMap<String, CachedValue<List<ActionLogSnapshot>>>()
+    private val durableRunSummaryCache = ConcurrentHashMap<String, CachedValue<List<DurableRunSummary>>>()
+    private val actionSummaryCache = ConcurrentHashMap<String, CachedValue<List<ActionLogSummary>>>()
     private val githubPullRequestCache = ConcurrentHashMap<String, CachedValue<List<PullRequestSnapshot>>>()
 
     fun bind(state: DesktopAppState, companyId: String, runtime: CompanyRuntimeSnapshot): BoundCompanyRuntime {
@@ -53,25 +53,22 @@ class CompanyRuntimeBindingService(
             .filter { it.isNotBlank() }
             .toSet()
         val directRuns = boundRunIds.mapNotNull(durableRuntimeService::inspectRun)
+        val directRunsById = directRuns.associateBy { it.runId }
         val runs = if (boundRunIds.isNotEmpty() && directRuns.size == boundRunIds.size) {
             directRuns
         } else {
             (
-                directRuns + cachedDurableRuns(companyId).filter { run ->
-                    run.runId in boundRunIds ||
-                        run.pipelineName in boundPipelineIds ||
-                        run.checkpoints.any { node -> node.metadata["companyId"] == companyId } ||
-                        run.sideEffects.any { effect -> effect.metadata["companyId"] == companyId }
+                directRuns + cachedRunSummaries(companyId).filter { summary ->
+                    summary.runId in boundRunIds ||
+                        summary.pipelineName in boundPipelineIds ||
+                        companyId in summary.companyIds
+                }.mapNotNull { summary ->
+                    directRunsById[summary.runId] ?: durableRuntimeService.inspectRun(summary.runId)
                 }
                 ).distinctBy { it.runId }
         }
         val githubPullRequests = cachedGithubPullRequests(companyId)
-        val directActionLogs = boundRunIds.mapNotNull(actionStore::load)
-        val actionLogs = if (boundRunIds.isNotEmpty() && directActionLogs.size == boundRunIds.size) {
-            directActionLogs
-        } else {
-            (directActionLogs + cachedActionSnapshots(companyId)).distinctBy { it.runId }
-        }
+        val actionSummaries = cachedActionSummaries(companyId)
 
         val resumableRunIds = runs
             .filter { it.status != DurableRunStatus.COMPLETED }
@@ -79,12 +76,7 @@ class CompanyRuntimeBindingService(
         val pendingApprovalRunIds = runs
             .filter { it.status == DurableRunStatus.WAITING_FOR_APPROVAL }
             .map { it.runId }
-        val blockedByPolicy = actionLogs.sumOf { snapshot ->
-            snapshot.records.count { record ->
-                record.request.subject.companyId == companyId &&
-                    (record.status == ActionStatus.DENIED || record.status == ActionStatus.WAITING_FOR_APPROVAL)
-            }
-        }
+        val blockedByPolicy = actionSummaries.sumOf { summary -> summary.blockedByCompany[companyId] ?: 0 }
         val blockedByCi = githubPullRequests.count { pullRequest ->
             val stateValue = pullRequest.state?.uppercase()
             stateValue == "OPEN" && (
@@ -182,27 +174,33 @@ class CompanyRuntimeBindingService(
             }
         }
         val pendingIssueIds = boundIssues
+            .filter { it.companyId == companyId }
             .filter { it.runtimeDisposition == CompanyIssueReadiness.RUNNABLE }
             .filter { it.status in setOf(IssueStatus.BACKLOG, IssueStatus.PLANNED, IssueStatus.DELEGATED, IssueStatus.IN_PROGRESS) }
             .filterNot { activeTaskByIssueId.containsKey(it.id) }
             .map { it.id }
         val pendingApprovalIssueIds = boundIssues
+            .filter { it.companyId == companyId }
             .filter { it.runtimeDisposition == CompanyIssueReadiness.WAITING_FOR_APPROVAL && it.durableRunId !in pendingApprovalRunIds }
             .map { it.id }
-        val blockedIssueIds = boundIssues.filter {
-            it.runtimeDisposition in setOf(
-                CompanyIssueReadiness.WAITING_FOR_CI,
-                CompanyIssueReadiness.WAITING_FOR_DEPENDENCY,
-                CompanyIssueReadiness.QUARANTINED
-            )
-        }.map { it.id }
-        val reviewQueueAttentionIds = boundQueue.filter {
-            it.runtimeDisposition in setOf(
-                CompanyIssueReadiness.WAITING_FOR_APPROVAL,
-                CompanyIssueReadiness.WAITING_FOR_CI,
-                CompanyIssueReadiness.RECOVERABLE
-            )
-        }.map { it.id }
+        val blockedIssueIds = boundIssues
+            .filter { it.companyId == companyId }
+            .filter {
+                it.runtimeDisposition in setOf(
+                    CompanyIssueReadiness.WAITING_FOR_CI,
+                    CompanyIssueReadiness.WAITING_FOR_DEPENDENCY,
+                    CompanyIssueReadiness.QUARANTINED
+                )
+            }.map { it.id }
+        val reviewQueueAttentionIds = boundQueue
+            .filter { it.companyId == companyId }
+            .filter {
+                it.runtimeDisposition in setOf(
+                    CompanyIssueReadiness.WAITING_FOR_APPROVAL,
+                    CompanyIssueReadiness.WAITING_FOR_CI,
+                    CompanyIssueReadiness.RECOVERABLE
+                )
+            }.map { it.id }
         return BoundCompanyRuntime(
             runtime = runtime.copy(
                 resumableRunCount = resumableRunIds.size,
@@ -221,11 +219,11 @@ class CompanyRuntimeBindingService(
         )
     }
 
-    private fun cachedDurableRuns(companyId: String): List<DurableRunSnapshot> =
-        cached(companyId, durableRunListCache) { durableRuntimeService.listRuns() }
+    private fun cachedRunSummaries(companyId: String): List<DurableRunSummary> =
+        cached(companyId, durableRunSummaryCache) { durableRuntimeService.listRunSummaries() }
 
-    private fun cachedActionSnapshots(companyId: String): List<ActionLogSnapshot> =
-        cached(companyId, actionSnapshotListCache) { actionStore.listSnapshots() }
+    private fun cachedActionSummaries(companyId: String): List<ActionLogSummary> =
+        cached(companyId, actionSummaryCache) { actionStore.listSummaries() }
 
     private fun cachedGithubPullRequests(companyId: String): List<PullRequestSnapshot> =
         cached(companyId, githubPullRequestCache) { gitHubControlPlaneService.listPullRequests(companyId) }
