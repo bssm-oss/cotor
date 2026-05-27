@@ -1558,6 +1558,26 @@ struct DashboardPayload: Codable {
     let agentPerformance: [AgentPerformanceSnapshotRecord]
 }
 
+struct DesktopLifecycleStartupPayload: Codable, Equatable {
+    let stateWarmed: Bool
+    let companyCount: Int
+    let workspaceCount: Int
+    let skillCatalogSize: Int
+    let staleRuntimeCount: Int
+    let runningRuntimeCount: Int
+    let browserSkillPrewarmQueued: Bool
+    let runtimeStarted: Bool
+}
+
+struct DesktopLifecycleShutdownPayload: Codable, Equatable {
+    let activeTaskCount: Int
+    let cancelledJobCount: Int
+    let stoppedRuntimeCount: Int
+    let terminatedRunProcessCount: Int
+    let codexBackendsStopped: Bool
+    let tuiSessionsShutdown: Bool
+}
+
 extension DashboardPayload {
     static let empty = DashboardPayload(
         repositories: [],

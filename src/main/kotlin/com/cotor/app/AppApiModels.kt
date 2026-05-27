@@ -530,6 +530,28 @@ data class HealthResponse(
     val build: String = "unknown"
 )
 
+@Serializable
+data class DesktopLifecycleStartupResponse(
+    val stateWarmed: Boolean,
+    val companyCount: Int,
+    val workspaceCount: Int,
+    val skillCatalogSize: Int,
+    val staleRuntimeCount: Int,
+    val runningRuntimeCount: Int,
+    val browserSkillPrewarmQueued: Boolean,
+    val runtimeStarted: Boolean = false
+)
+
+@Serializable
+data class DesktopLifecycleShutdownResponse(
+    val activeTaskCount: Int,
+    val cancelledJobCount: Int,
+    val stoppedRuntimeCount: Int,
+    val terminatedRunProcessCount: Int,
+    val codexBackendsStopped: Boolean,
+    val tuiSessionsShutdown: Boolean = false
+)
+
 // ── Pipeline API Models ─────────────────────────────────────────────
 
 @Serializable

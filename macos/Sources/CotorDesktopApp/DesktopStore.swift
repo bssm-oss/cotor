@@ -473,6 +473,7 @@ final class DesktopStore: ObservableObject {
     private var companyEventStreamGeneration = 0
     private var polledTuiSessionID: String?
     private var didInitializeShellMode = false
+    private var didRequestDesktopLifecycleStartup = false
 
     init(api: DesktopAPI = DesktopAPI()) {
         self.api = api
@@ -1092,6 +1093,7 @@ final class DesktopStore: ObservableObject {
         startCompanyStatePolling()
         startEmbeddedBackendWatchdog()
         await EmbeddedBackendLauncher.shared.ensureRunning()
+        await prepareDesktopLifecycleStartupIfNeeded()
         // Installed app bundles launch the backend lazily, so the first request can
         // arrive before `cotor app-server` has finished binding its localhost port.
         let maxAttempts = 4
@@ -1104,6 +1106,22 @@ final class DesktopStore: ObservableObject {
             objectWillChange.send()
             await EmbeddedBackendLauncher.shared.ensureRunning()
             try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    private func prepareDesktopLifecycleStartupIfNeeded() async {
+        guard !didRequestDesktopLifecycleStartup else { return }
+        didRequestDesktopLifecycleStartup = true
+        do {
+            let result = try await runWithEmbeddedBackendRecovery {
+                try await api.prepareDesktopStartup()
+            }
+            if result.runtimeStarted {
+                AppLogger.warning("Desktop lifecycle startup unexpectedly reported runtimeStarted=true.")
+            }
+        } catch {
+            didRequestDesktopLifecycleStartup = false
+            AppLogger.warning("Desktop lifecycle startup warmup failed: \(error.localizedDescription)")
         }
     }
 

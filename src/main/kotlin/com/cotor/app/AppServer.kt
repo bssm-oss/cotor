@@ -432,6 +432,24 @@ internal fun Application.cotorAppModule(
                 shutdownHandler?.invoke()
             }
 
+            route("/lifecycle") {
+                post("/startup") {
+                    if (!requireToken(token)) return@post
+                    respondDesktopRequest {
+                        desktopService.prepareDesktopAppStartup()
+                    }
+                }
+
+                post("/shutdown") {
+                    if (!requireToken(token)) return@post
+                    respondDesktopRequest {
+                        val result = desktopService.prepareDesktopAppShutdown()
+                        tuiSessionService.shutdown()
+                        result.copy(tuiSessionsShutdown = true)
+                    }
+                }
+            }
+
             get("/dashboard") {
                 if (!requireToken(token)) return@get
                 call.respond(desktopService.dashboard().redactedForApi())

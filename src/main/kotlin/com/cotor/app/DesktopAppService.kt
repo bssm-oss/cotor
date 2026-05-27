@@ -359,6 +359,7 @@ class DesktopAppService(
     private val automationRefreshJobs: MutableMap<String, Job> = ConcurrentHashMap()
     private val automationRefreshQueuedAt = ConcurrentHashMap<String, Long>()
     private val activeTaskJobs: MutableMap<String, Job> = ConcurrentHashMap()
+    private var browserSkillPrewarmJob: Job? = null
     private val intentionallyInterruptedTaskIds = ConcurrentHashMap.newKeySet<String>()
     private val recentCompanyAutomationTraceKeys = ConcurrentHashMap<String, Long>()
     private val recentSupersededPullRequestCleanupAt = ConcurrentHashMap<String, Long>()
@@ -407,51 +408,95 @@ class DesktopAppService(
     }
 
     fun shutdown() {
-        runBlocking {
-            serviceScope.cancel("DesktopAppService shutdown")
-            val jobsToJoin = synchronized(runtimeLifecycleLock) {
-                buildList {
-                    addAll(activeTaskJobs.values.filterNotNull())
-                    addAll(companyRuntimeJobs.values.filterNotNull())
-                    addAll(automationRefreshJobs.values.filterNotNull())
-                }.distinct()
-            }.distinct()
-            jobsToJoin.forEach { it.cancel() }
-            withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
-                jobsToJoin.forEach { it.cancelAndJoin() }
-            }
-            withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
-                interruptActiveTasksForShutdown()
-            }
-        }
-        synchronized(runtimeLifecycleLock) {
-            activeTaskJobs.clear()
-            companyRuntimeJobs.clear()
-            companyRuntimeTickMutexes.clear()
-            companyRuntimeWakeSignals.clear()
-            automationRefreshJobs.clear()
-        }
+        prepareForDesktopAppShutdown()
         intentionallyInterruptedTaskIds.clear()
         recentCompanyAutomationTraceKeys.clear()
         recentSupersededPullRequestCleanupAt.clear()
         recentNoOpPullRequestRefreshAt.clear()
         recentPullRequestMetadataRefreshes.clear()
         recentAgentModelDiscoveries.clear()
-        codexAppServerManager.stopAll()
-        runBlocking {
-            withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
-                interruptActiveTasksForShutdown()
-            }
-            withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
-                markRuntimesStoppedForServiceShutdown()
-            }
-        }
         serviceScope.cancel()
         liveServicesForTesting -= this
     }
 
-    private suspend fun markRuntimesStoppedForServiceShutdown() {
-        stateMutex.withLock {
+    fun prepareForDesktopAppShutdown(): DesktopLifecycleShutdownResponse = runBlocking {
+        shutdownOwnedDesktopWorkloads()
+    }
+
+    suspend fun prepareDesktopAppShutdown(): DesktopLifecycleShutdownResponse =
+        shutdownOwnedDesktopWorkloads()
+
+    suspend fun prepareDesktopAppStartup(): DesktopLifecycleStartupResponse {
+        pruneRuntimeCaches()
+        val staleRuntimeCount = markStalePersistedCompanyRuntimesStopped()
+        val state = stateStore.load().withDerivedMetrics()
+        val skillCount = skillCatalog().size
+        val prewarmQueued = queueBrowserSkillPrewarm()
+        return DesktopLifecycleStartupResponse(
+            stateWarmed = true,
+            companyCount = state.companies.size,
+            workspaceCount = state.workspaces.size,
+            skillCatalogSize = skillCount,
+            staleRuntimeCount = staleRuntimeCount,
+            runningRuntimeCount = state.companyRuntimes.count { it.status == CompanyRuntimeStatus.RUNNING },
+            browserSkillPrewarmQueued = prewarmQueued,
+            runtimeStarted = false
+        )
+    }
+
+    private suspend fun shutdownOwnedDesktopWorkloads(): DesktopLifecycleShutdownResponse {
+        val jobsToJoin = synchronized(runtimeLifecycleLock) {
+            buildList {
+                addAll(activeTaskJobs.values.filterNotNull())
+                addAll(companyRuntimeJobs.values.filterNotNull())
+                addAll(automationRefreshJobs.values.filterNotNull())
+                browserSkillPrewarmJob?.let(::add)
+            }.distinct()
+        }
+        jobsToJoin.forEach { it.cancel() }
+        withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
+            jobsToJoin.forEach { it.cancelAndJoin() }
+        }
+        val interrupted = withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
+            interruptActiveTasksForShutdown()
+        } ?: RuntimeStopInterruption(taskCount = 0, taskIds = emptySet(), processIds = emptyList())
+        val terminatedRunProcesses = terminateProcessIds(interrupted.processIds)
+        codexAppServerManager.stopAll()
+        val stoppedRuntimes = withTimeoutOrNull(SHUTDOWN_JOIN_TIMEOUT_MS) {
+            markRuntimesStoppedForServiceShutdown()
+        } ?: 0
+        synchronized(runtimeLifecycleLock) {
+            activeTaskJobs.clear()
+            companyRuntimeJobs.clear()
+            companyRuntimeTickMutexes.clear()
+            companyRuntimeWakeSignals.clear()
+            automationRefreshJobs.clear()
+            automationRefreshQueuedAt.clear()
+            browserSkillPrewarmJob = null
+        }
+        return DesktopLifecycleShutdownResponse(
+            activeTaskCount = interrupted.taskCount,
+            cancelledJobCount = jobsToJoin.size,
+            stoppedRuntimeCount = stoppedRuntimes,
+            terminatedRunProcessCount = terminatedRunProcesses,
+            codexBackendsStopped = true
+        )
+    }
+
+    private fun queueBrowserSkillPrewarm(): Boolean {
+        synchronized(runtimeLifecycleLock) {
+            if (browserSkillPrewarmJob?.isActive == true) {
+                return false
+            }
+            browserSkillPrewarmJob = serviceScope.launch {
+                runCatching { browserSkillRunner.prewarm() }
+            }
+            return true
+        }
+    }
+
+    private suspend fun markRuntimesStoppedForServiceShutdown(): Int {
+        return stateMutex.withLock {
             val state = stateStore.load()
             val runningRuntimes = state.companyRuntimes.filter { runtime ->
                 runtime.status == CompanyRuntimeStatus.RUNNING ||
@@ -460,7 +505,7 @@ class DesktopAppService(
                     runtime.backendPort != null
             }
             if (runningRuntimes.isEmpty()) {
-                return@withLock
+                return@withLock 0
             }
             val now = System.currentTimeMillis()
             val nextState = state.copy(
@@ -483,6 +528,7 @@ class DesktopAppService(
                 }
             ).withDerivedMetrics()
             stateStore.save(nextState)
+            return@withLock runningRuntimes.size
         }
     }
 
@@ -507,7 +553,8 @@ class DesktopAppService(
         "traceKeys" to recentCompanyAutomationTraceKeys.size,
         "supersededPrTimestamps" to recentSupersededPullRequestCleanupAt.size,
         "pullRequestMetadataRefreshes" to recentPullRequestMetadataRefreshes.size,
-        "agentModelDiscoveries" to recentAgentModelDiscoveries.size
+        "agentModelDiscoveries" to recentAgentModelDiscoveries.size,
+        "browserSkillPrewarmJob" to if (browserSkillPrewarmJob?.isActive == true) 1 else 0
     )
 
     private fun pruneRuntimeCaches(now: Long = System.currentTimeMillis()) {
@@ -1510,8 +1557,8 @@ class DesktopAppService(
         traceEvents.forEach(::appendCompanyAutomationTrace)
     }
 
-    private suspend fun markStalePersistedCompanyRuntimesStopped(companyId: String? = null) {
-        stateMutex.withLock {
+    private suspend fun markStalePersistedCompanyRuntimesStopped(companyId: String? = null): Int {
+        return stateMutex.withLock {
             val state = stateStore.load()
             val now = System.currentTimeMillis()
             val staleRuntimeIds = state.companyRuntimes
@@ -1525,7 +1572,7 @@ class DesktopAppService(
                 .mapNotNull { it.companyId }
                 .toSet()
             if (staleRuntimeIds.isEmpty()) {
-                return@withLock
+                return@withLock 0
             }
             stateStore.save(
                 state.copy(
@@ -1548,6 +1595,7 @@ class DesktopAppService(
                     }
                 ).withDerivedMetrics()
             )
+            return@withLock staleRuntimeIds.size
         }
     }
 
@@ -1672,9 +1720,9 @@ class DesktopAppService(
 
     private fun runsByTask(runs: List<AgentRun>): Map<String, List<AgentRun>> = runs.groupBy { it.taskId }
 
-    private suspend fun interruptActiveTasksForShutdown() {
+    private suspend fun interruptActiveTasksForShutdown(): RuntimeStopInterruption {
         val traceEvents = mutableListOf<CompanyAutomationTraceEvent>()
-        stateMutex.withLock {
+        val result = stateMutex.withLock {
             val state = stateStore.load()
             val now = System.currentTimeMillis()
             val issuesById = state.issues.associateBy { it.id }
@@ -1683,11 +1731,18 @@ class DesktopAppService(
                 it.status == DesktopTaskStatus.RUNNING || it.status == DesktopTaskStatus.QUEUED
             }
             if (activeTasks.isEmpty()) {
-                return@withLock
+                return@withLock RuntimeStopInterruption(taskCount = 0, taskIds = emptySet(), processIds = emptyList())
             }
 
             val interruptedTaskIds = activeTasks.mapTo(linkedSetOf()) { it.id }
             intentionallyInterruptedTaskIds.addAll(interruptedTaskIds)
+            val activeProcessIds = state.runs
+                .filter { run ->
+                    run.taskId in interruptedTaskIds &&
+                        (run.status == AgentRunStatus.RUNNING || run.status == AgentRunStatus.QUEUED)
+                }
+                .mapNotNull { it.processId }
+                .distinct()
 
             val updatedRuns = state.runs.map { run ->
                 if (run.taskId in interruptedTaskIds &&
@@ -1794,8 +1849,14 @@ class DesktopAppService(
                 severity = "warning"
             ).withDerivedMetrics()
             stateStore.save(nextState)
+            RuntimeStopInterruption(
+                taskCount = activeTasks.size,
+                taskIds = interruptedTaskIds,
+                processIds = activeProcessIds
+            )
         }
         traceEvents.forEach(::appendCompanyAutomationTrace)
+        return result
     }
 
     private suspend fun reopenInterruptedBlockedIssues(companyId: String): Int {
