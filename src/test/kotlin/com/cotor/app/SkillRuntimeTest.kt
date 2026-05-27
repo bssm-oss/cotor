@@ -200,6 +200,47 @@ class SkillRuntimeTest : FunSpec({
         profile.settings.getValue(CapabilityKey.BROWSER_SCREENSHOT).mode shouldBe CapabilityMode.AUTO
     }
 
+    test("legacy Engineering Lead graphify-only profile is upgraded for browser-smoke") {
+        val appHome = Files.createTempDirectory("skill-eng-lead-browser-upgrade-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val browser = RecordingBrowserSkillRunner()
+        val service = skillRuntimeService(appHome, browser)
+        val company = service.createCompany(name = "Eng Lead Browser Upgrade Co", rootPath = repoRoot.toString())
+        val engineeringLead = service.dashboard().companyAgentDefinitions.first {
+            it.companyId == company.id && it.title == "Engineering Lead"
+        }
+        service.updateAgentCapabilities(
+            companyId = company.id,
+            agentId = engineeringLead.id,
+            settings = mapOf(
+                CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                    enabled = true,
+                    mode = CapabilityMode.AUTO,
+                    skillAllowlist = listOf("graphify")
+                ),
+                CapabilityKey.BROWSER_READ to AgentCapabilitySetting(enabled = false, mode = CapabilityMode.DISABLED),
+                CapabilityKey.BROWSER_SCREENSHOT to AgentCapabilitySetting(enabled = false, mode = CapabilityMode.DISABLED)
+            )
+        )
+
+        service.prepareCompanyAutomationStateForTesting(company.id)
+        val profile = service.agentCapabilities(company.id, engineeringLead.id)
+
+        profile.settings.getValue(CapabilityKey.SKILL_RUN).skillAllowlist shouldBe listOf("graphify", "browser-smoke")
+        profile.settings.getValue(CapabilityKey.BROWSER_READ).mode shouldBe CapabilityMode.AUTO
+        profile.settings.getValue(CapabilityKey.BROWSER_SCREENSHOT).mode shouldBe CapabilityMode.AUTO
+
+        val result = service.runSkill(
+            name = "browser-smoke",
+            companyId = company.id,
+            agentId = engineeringLead.id,
+            parameters = mapOf("url" to "http://127.0.0.1:8787/health")
+        )
+
+        result.status shouldBe "COMPLETED"
+        browser.commands.single().url shouldBe "http://127.0.0.1:8787/health"
+    }
+
     test("seeded Marketing Operator profile enables all marketing capabilities") {
         val appHome = Files.createTempDirectory("skill-marketing-seed-home")
         val repoRoot = Files.createDirectories(appHome.resolve("repo"))

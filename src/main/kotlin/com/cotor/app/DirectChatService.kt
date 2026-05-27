@@ -8,17 +8,17 @@ package com.cotor.app
  * Read here first when tracing behavior that flows through direct multi-turn AI conversations.
  */
 
-import com.cotor.data.process.destroyProcessTree
 import com.cotor.data.http.sendBoundedText
+import com.cotor.data.process.destroyProcessTree
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -386,7 +386,7 @@ class DirectChatService(
                                     sb.append(buf, 0, read)
                                     if (sb.length > claudeOutputLimitChars) {
                                         destroyProcessTree(process)
-                                        error("claude-cli output exceeded ${claudeOutputLimitChars} character limit")
+                                        error("claude-cli output exceeded $claudeOutputLimitChars character limit")
                                     }
                                 }
                             }

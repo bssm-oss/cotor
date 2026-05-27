@@ -1124,6 +1124,89 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func browserSmokeSkillDefaultsToAppHealthURLWhenRunFromUI() async throws {
+        let host = "desktop-browser-skill.test"
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DesktopStoreCapturingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let api = DesktopAPI(
+            baseURL: try #require(URL(string: "http://\(host)")),
+            token: "test-token",
+            session: session
+        )
+        let store = DesktopStore(api: api)
+        store.selectedCompanyID = "company"
+
+        let skillRunRequests = Locked<[SkillRunRequestPayload]>([])
+        let skillResult = SkillRunResultRecord(
+            skill: "browser-smoke",
+            status: "COMPLETED",
+            capability: CapabilitySimulationResultRecord(
+                action: "skill.run",
+                capability: "SKILL_RUN",
+                mode: "AUTO",
+                allowed: true,
+                requiresApproval: false,
+                reason: "delegated"
+            ),
+            runId: "run-browser-smoke",
+            actions: ["browser-smoke"],
+            evidence: [
+                SkillRunEvidenceRecord(
+                    type: "url",
+                    path: nil,
+                    url: "http://\(host)/health",
+                    title: "Final URL",
+                    detail: "Cotor app-server"
+                )
+            ],
+            summary: "Visited http://\(host)/health (0 console error(s)).",
+            output: nil,
+            error: nil
+        )
+
+        DesktopStoreCapturingURLProtocol.setRequestHandler(forHost: host) { request in
+            let encoder = JSONEncoder()
+            let path = request.url?.path ?? ""
+            let data: Data
+            switch (request.httpMethod ?? "GET", path) {
+            case ("POST", "/api/app/skills/browser-smoke/run"):
+                let body = try #require(requestBodyData(from: request))
+                let payload = try JSONDecoder().decode(SkillRunRequestPayload.self, from: body)
+                skillRunRequests.withLock { $0.append(payload) }
+                data = try encoder.encode(skillResult)
+            case ("GET", "/api/app/companies/company/dashboard"):
+                data = Data("{}".utf8)
+            case ("GET", "/api/app/skills"),
+                 ("GET", "/api/app/marketing/policies"),
+                 ("GET", "/api/app/marketing/runs"),
+                 ("GET", "/api/app/companies/company/reports"),
+                 ("GET", "/api/app/companies/company/problem-signals"):
+                data = Data("[]".utf8)
+            default:
+                data = Data("{}".utf8)
+            }
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        defer { DesktopStoreCapturingURLProtocol.removeRequestHandler(forHost: host) }
+
+        let result = await store.runSkill(skillName: "browser-smoke", agentId: "agent-builder")
+
+        #expect(result?.status == "COMPLETED")
+        let payloads = skillRunRequests.withLock { $0 }
+        #expect(payloads.count == 1)
+        #expect(payloads.first?.companyId == "company")
+        #expect(payloads.first?.agentId == "agent-builder")
+        #expect(payloads.first?.parameters["url"] == "http://\(host)/health")
+    }
+
+    @Test
     func marketingSkillsStayOptInAndPolicyFormLoadsForOperator() {
         let store = DesktopStore()
         store.availableSkills = [

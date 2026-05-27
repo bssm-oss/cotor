@@ -8,8 +8,8 @@ package com.cotor.checkpoint
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
-import com.cotor.storage.writeTextAtomically
 import com.cotor.model.AgentResult
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString

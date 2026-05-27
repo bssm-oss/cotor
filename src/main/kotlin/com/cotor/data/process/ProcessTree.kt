@@ -90,13 +90,15 @@ internal fun cleanupSurvivingDescendants(
     logger: Logger? = null,
     observedDescendantPids: Iterable<Long> = emptyList()
 ) {
-    val descendants = (process.toHandle()
-        .descendants()
-        .toArray()
-        .filterIsInstance<ProcessHandle>()
-        .asReversed() + observedDescendantPids.mapNotNull { pid ->
-        ProcessHandle.of(pid).orElse(null)
-    })
+    val descendants = (
+        process.toHandle()
+            .descendants()
+            .toArray()
+            .filterIsInstance<ProcessHandle>()
+            .asReversed() + observedDescendantPids.mapNotNull { pid ->
+            ProcessHandle.of(pid).orElse(null)
+        }
+        )
         .distinctBy { it.pid() }
         .filter { it.isAlive }
     if (descendants.isEmpty()) {

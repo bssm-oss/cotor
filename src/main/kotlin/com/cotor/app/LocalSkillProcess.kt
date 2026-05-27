@@ -1,9 +1,9 @@
 package com.cotor.app
 
+import com.cotor.data.process.ProcessDescendantTracker
 import com.cotor.data.process.buildEffectivePath
 import com.cotor.data.process.cleanupSurvivingDescendants
 import com.cotor.data.process.destroyProcessTree
-import com.cotor.data.process.ProcessDescendantTracker
 import com.cotor.data.process.resolveExecutablePath
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

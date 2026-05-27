@@ -55,7 +55,8 @@ class DesktopAppServiceParallelDispatchTest : FunSpec({
             configRepository = mockk<ConfigRepository>(relaxed = true),
             agentExecutor = agentExecutor,
             companyRuntimeTickIntervalMs = 50,
-            commandAvailability = { command -> command == "opencode" }
+            commandAvailability = { command -> command == "opencode" },
+            autoStartAutomationRefresh = false
         )
 
         try {
@@ -233,7 +234,7 @@ class DesktopAppServiceParallelDispatchTest : FunSpec({
 
             val blockedIssue = withTimeout(5_000) {
                 var current = stateStore.load().issues.single { it.id == issue.id }
-                while (current.status == IssueStatus.IN_PROGRESS) {
+                while (current.status in setOf(IssueStatus.PLANNED, IssueStatus.DELEGATED, IssueStatus.IN_PROGRESS)) {
                     delay(50)
                     current = stateStore.load().issues.single { it.id == issue.id }
                 }

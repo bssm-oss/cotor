@@ -5,11 +5,11 @@ import com.cotor.app.AgentRunStatus
 import com.cotor.app.DesktopAppService
 import com.cotor.app.DesktopTuiSessionService
 import com.cotor.app.cotorAppModule
-import io.ktor.client.HttpClient
 import io.kotest.core.annotation.Isolate
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post

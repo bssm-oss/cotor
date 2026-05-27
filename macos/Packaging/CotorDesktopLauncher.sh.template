@@ -189,6 +189,59 @@ if pid:
 PY
 }
 
+read_existing_instance_port() {
+    if [[ ! -f "$INSTANCE_METADATA_FILE" ]]; then
+        return 0
+    fi
+
+    /usr/bin/python3 - "$INSTANCE_METADATA_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+metadata_path = pathlib.Path(sys.argv[1])
+try:
+    data = json.loads(metadata_path.read_text())
+except Exception:
+    sys.exit(0)
+
+port = data.get("port")
+if port:
+    print(port)
+PY
+}
+
+reattach_managed_backend_if_healthy() {
+    local existing_pid
+    local existing_port
+    local candidate_port
+    local candidate_url
+
+    existing_pid="$(read_existing_instance_pid)"
+    [[ -n "$existing_pid" ]] || return 1
+    is_pid_alive "$existing_pid" || return 1
+
+    existing_port="$(read_existing_instance_port)"
+    candidate_port="${SERVER_PORT:-$existing_port}"
+    [[ -n "$candidate_port" ]] || return 1
+    candidate_url="${SERVER_URL:-http://127.0.0.1:$candidate_port}"
+    is_backend_healthy "$candidate_url" || return 1
+
+    MANAGED_BACKEND_PID="$existing_pid"
+    MANAGED_BACKEND_STARTED=1
+    SERVER_PORT="$candidate_port"
+    SERVER_URL="$candidate_url"
+    echo "$existing_pid" > "$PID_FILE"
+    echo "$candidate_port" > "$PORT_FILE"
+    if [[ -n "$SERVER_TOKEN" ]]; then
+        umask 077
+        echo "$SERVER_TOKEN" > "$TOKEN_FILE"
+        chmod 600 "$TOKEN_FILE" >/dev/null 2>&1 || true
+    fi
+    log_launcher "Reattached to healthy managed backend $existing_pid on port $candidate_port."
+    return 0
+}
+
 terminate_conflicting_app_home_backend() {
     local existing_pid
     existing_pid="$(read_existing_instance_pid)"
@@ -375,6 +428,13 @@ restart_managed_backend() {
         return 1
     fi
 
+    if reattach_managed_backend_if_healthy; then
+        return 0
+    fi
+    if (( MANAGED_BACKEND_STARTED != 0 )); then
+        stop_managed_backend || true
+    fi
+
     MANAGED_BACKEND_STARTED=0
     MANAGED_BACKEND_PID=""
     rm -f "$PID_FILE" >/dev/null 2>&1 || true
@@ -384,7 +444,7 @@ restart_managed_backend() {
     fi
 
     log_launcher "Managed backend is not running. Restarting on preserved port $SERVER_PORT."
-    start_managed_backend 0
+    start_managed_backend 0 || reattach_managed_backend_if_healthy
 }
 
 stop_managed_backend() {

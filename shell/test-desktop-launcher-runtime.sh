@@ -57,6 +57,40 @@ if [[ -e "$PID_FILE" || -e "$BACKEND_RUNTIME_JAR" ]]; then
   exit 1
 fi
 
+INSTANCE_METADATA_FILE="$WORK_DIR/app-server.instance.json"
+SERVER_PORT="55123"
+SERVER_URL="http://127.0.0.1:55123"
+SERVER_TOKEN="token-123"
+PID_FILE="$WORK_DIR/app-server.pid"
+PORT_FILE="$WORK_DIR/app-server.port"
+TOKEN_FILE="$WORK_DIR/app-server.token"
+MANAGED_BACKEND_PID="555"
+MANAGED_BACKEND_STARTED=1
+restart_calls=0
+cat >"$INSTANCE_METADATA_FILE" <<'JSON'
+{"pid":444,"host":"127.0.0.1","port":55123,"appHome":"/tmp/cotor-test","startedAt":1}
+JSON
+echo "555" > "$PID_FILE"
+is_pid_alive() {
+  [[ "$1" == "444" ]]
+}
+is_backend_healthy() {
+  [[ "$1" == "http://127.0.0.1:55123" ]]
+}
+start_managed_backend() {
+  restart_calls=$((restart_calls + 1))
+}
+
+restart_managed_backend
+
+if [[ "$restart_calls" != "0" ||
+  "$MANAGED_BACKEND_PID" != "444" ||
+  "$(cat "$PID_FILE")" != "444" ||
+  "$(cat "$PORT_FILE")" != "55123" ]]; then
+  echo "restart_managed_backend did not reattach to healthy existing backend"
+  exit 1
+fi
+
 BACKEND_RUNTIME_DIR="$WORK_DIR/runtime/backend"
 mkdir -p "$BACKEND_RUNTIME_DIR"
 BACKEND_RUNTIME_JAR="$BACKEND_RUNTIME_DIR/cotor-backend-runtime-current.jar"

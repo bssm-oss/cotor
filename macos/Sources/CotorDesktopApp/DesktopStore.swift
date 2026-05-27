@@ -3293,6 +3293,11 @@ final class DesktopStore: ObservableObject {
     ) async -> SkillRunResultRecord? {
         guard let companyId = selectedCompanyID else { return nil }
         let key = "\(agentId):\(skillName)"
+        let effectiveParameters = skillRunParameters(
+            skillName: skillName,
+            input: input,
+            parameters: parameters
+        )
         runningSkillRunKeys.insert(key)
         defer { runningSkillRunKeys.remove(key) }
 
@@ -3302,7 +3307,7 @@ final class DesktopStore: ObservableObject {
                 companyId: companyId,
                 agentId: agentId,
                 input: input,
-                parameters: parameters
+                parameters: effectiveParameters
             )
             recentSkillRunResults = ([result] + recentSkillRunResults).prefix(20).map { $0 }
             let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -3329,6 +3334,33 @@ final class DesktopStore: ObservableObject {
             errorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    private func skillRunParameters(
+        skillName: String,
+        input: String?,
+        parameters: [String: String]
+    ) -> [String: String] {
+        guard skillName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "browser-smoke",
+              parameters["url"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+              firstWebURL(from: input) == nil else {
+            return parameters
+        }
+        var next = parameters
+        next["url"] = api.baseURL.appendingPathComponent("health").absoluteString
+        return next
+    }
+
+    private func firstWebURL(from text: String?) -> String? {
+        guard let text else { return nil }
+        return text
+            .split(whereSeparator: \.isWhitespace)
+            .map { token in
+                String(token).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:)]}\"'"))
+            }
+            .first { token in
+                token.hasPrefix("http://") || token.hasPrefix("https://")
+            }
     }
 
     func submitOperatorChatCommand(_ command: OperatorChatCommand) async {
