@@ -1780,8 +1780,12 @@ internal fun Application.cotorAppModule(
                                 ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
                             val conversationId = call.parameters["conversationId"]
                                 ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "conversationId is required"))
-                            desktopService.deleteDirectChatConversation(conversationId, companyId)
-                            call.respond(HttpStatusCode.NoContent)
+                            val deleted = desktopService.deleteDirectChatConversation(conversationId, companyId)
+                            if (deleted) {
+                                call.respond(HttpStatusCode.NoContent)
+                            } else {
+                                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Conversation not found: $conversationId"))
+                            }
                         }
 
                         post("/{conversationId}/messages") {
