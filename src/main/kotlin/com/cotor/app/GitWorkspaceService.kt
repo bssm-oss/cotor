@@ -43,6 +43,7 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.invariantSeparatorsPathString
@@ -134,6 +135,7 @@ class GitWorkspaceService(
     @Volatile private var cachedGitHubTokenAtMs: Long = 0L
     private val githubLoginCacheMutex = Mutex()
     private val githubTokenCacheMutex = Mutex()
+    private val repositoryMutationLocks = ConcurrentHashMap<String, Mutex>()
 
     private fun githubHttpEnabled(): Boolean {
         return githubHttpEnabledProvider()
@@ -360,37 +362,39 @@ class GitWorkspaceService(
                 ActionEvidence(branchName = binding.branchName)
             }
         ) {
-            ensureBootstrapCommit(repositoryRoot)
-            val agentSlug = slugify(agentName).ifBlank { "agent" }
-            val taskSlug = slugify(taskTitle).ifBlank { "task" }
-            val branchName = "codex/cotor/$taskSlug-${taskId.take(8)}/$agentSlug"
-            val worktreePath = repositoryRoot
-                .resolve(".cotor")
-                .resolve("worktrees")
-                .resolve(taskId)
-                .resolve(agentSlug)
-                .toAbsolutePath()
-                .normalize()
+            withRepositoryMutationLock(repositoryRoot) {
+                ensureBootstrapCommit(repositoryRoot)
+                val agentSlug = slugify(agentName).ifBlank { "agent" }
+                val taskSlug = slugify(taskTitle).ifBlank { "task" }
+                val branchName = "codex/cotor/$taskSlug-${taskId.take(8)}/$agentSlug"
+                val worktreePath = repositoryRoot
+                    .resolve(".cotor")
+                    .resolve("worktrees")
+                    .resolve(taskId)
+                    .resolve(agentSlug)
+                    .toAbsolutePath()
+                    .normalize()
 
-            if (worktreePath.exists()) {
-                WorktreeBinding(branchName = branchName, worktreePath = worktreePath)
-            } else {
-                worktreePath.parent?.createDirectories()
-                if (hasBranch(repositoryRoot, branchName)) {
-                    runGit(repositoryRoot, "worktree", "add", worktreePath.toString(), branchName)
+                if (worktreePath.exists()) {
+                    WorktreeBinding(branchName = branchName, worktreePath = worktreePath)
                 } else {
-                    val baseReference = resolveLatestBaseReference(repositoryRoot, baseBranch)
-                    runGit(
-                        repositoryRoot,
-                        "worktree",
-                        "add",
-                        "-b",
-                        branchName,
-                        worktreePath.toString(),
-                        baseReference.startPoint
-                    )
+                    worktreePath.parent?.createDirectories()
+                    if (hasBranch(repositoryRoot, branchName)) {
+                        runGit(repositoryRoot, "worktree", "add", worktreePath.toString(), branchName)
+                    } else {
+                        val baseReference = resolveLatestBaseReference(repositoryRoot, baseBranch)
+                        runGit(
+                            repositoryRoot,
+                            "worktree",
+                            "add",
+                            "-b",
+                            branchName,
+                            worktreePath.toString(),
+                            baseReference.startPoint
+                        )
+                    }
+                    WorktreeBinding(branchName = branchName, worktreePath = worktreePath)
                 }
-                WorktreeBinding(branchName = branchName, worktreePath = worktreePath)
             }
         }
     }
@@ -400,12 +404,12 @@ class GitWorkspaceService(
         branchName: String,
         worktreePath: Path,
         baseBranch: String
-    ): WorktreeBinding {
+    ): WorktreeBinding = withRepositoryMutationLock(repositoryRoot) {
         ensureBootstrapCommit(repositoryRoot)
         val normalizedPath = worktreePath.toAbsolutePath().normalize()
         if (normalizedPath.exists()) {
             verifyExistingWorktreeLineage(repositoryRoot, branchName, normalizedPath)
-            return WorktreeBinding(branchName = branchName, worktreePath = normalizedPath)
+            return@withRepositoryMutationLock WorktreeBinding(branchName = branchName, worktreePath = normalizedPath)
         }
 
         normalizedPath.parent?.createDirectories()
@@ -424,7 +428,7 @@ class GitWorkspaceService(
             )
         }
 
-        return WorktreeBinding(branchName = branchName, worktreePath = normalizedPath)
+        return@withRepositoryMutationLock WorktreeBinding(branchName = branchName, worktreePath = normalizedPath)
     }
 
     private suspend fun verifyExistingWorktreeLineage(
@@ -1187,90 +1191,92 @@ class GitWorkspaceService(
         }
 
         val repositoryRoot = repositoryCommonRoot(worktreePath)
-        if (!hasOriginRemote(repositoryRoot)) {
-            return BaseBranchSyncResult(skippedReason = "No origin remote configured for post-merge sync.")
-        }
-
-        val remoteTrackingRef = "refs/remotes/origin/$normalizedBaseBranch"
-        val fetchResult = runGit(
-            repositoryRoot,
-            "fetch",
-            "--no-tags",
-            "origin",
-            "refs/heads/$normalizedBaseBranch:$remoteTrackingRef",
-            failOnError = false,
-            timeoutMs = 30_000
-        )
-        if (!fetchResult.isSuccess) {
-            logger.warn("Could not fetch origin/$normalizedBaseBranch after merge")
-            return BaseBranchSyncResult(skippedReason = "Could not fetch origin/$normalizedBaseBranch after merge.")
-        }
-
-        val currentBranch = runGit(
-            repositoryRoot,
-            "rev-parse",
-            "--abbrev-ref",
-            "HEAD",
-            failOnError = false,
-            timeoutMs = 10_000
-        ).stdout.trim()
-
-        if (currentBranch == normalizedBaseBranch) {
-            if (!hasOnlyBenignCotorArtifacts(repositoryRoot)) {
-                return BaseBranchSyncResult(
-                    skippedReason = "Skipped post-merge sync for $normalizedBaseBranch because the repository root has uncommitted changes."
-                )
+        return withRepositoryMutationLock(repositoryRoot) {
+            if (!hasOriginRemote(repositoryRoot)) {
+                return@withRepositoryMutationLock BaseBranchSyncResult(skippedReason = "No origin remote configured for post-merge sync.")
             }
-            val fastForwardResult = runGit(
+
+            val remoteTrackingRef = "refs/remotes/origin/$normalizedBaseBranch"
+            val fetchResult = runGit(
                 repositoryRoot,
-                "merge",
-                "--ff-only",
-                remoteTrackingRef,
+                "fetch",
+                "--no-tags",
+                "origin",
+                "refs/heads/$normalizedBaseBranch:$remoteTrackingRef",
                 failOnError = false,
                 timeoutMs = 30_000
             )
-            if (!fastForwardResult.isSuccess) {
-                logger.warn("Could not fast-forward $normalizedBaseBranch to $remoteTrackingRef after merge")
-                return BaseBranchSyncResult(skippedReason = "Could not fast-forward local $normalizedBaseBranch after merge.")
+            if (!fetchResult.isSuccess) {
+                logger.warn("Could not fetch origin/$normalizedBaseBranch after merge")
+                return@withRepositoryMutationLock BaseBranchSyncResult(skippedReason = "Could not fetch origin/$normalizedBaseBranch after merge.")
             }
-            return BaseBranchSyncResult(synced = true, workingTreeUpdated = true)
-        }
 
-        val localBaseBranchExists = runGit(
-            repositoryRoot,
-            "show-ref",
-            "--verify",
-            "--quiet",
-            "refs/heads/$normalizedBaseBranch",
-            failOnError = false,
-            timeoutMs = 10_000
-        ).isSuccess
-        val updateRefResult = if (localBaseBranchExists) {
-            runGit(
+            val currentBranch = runGit(
                 repositoryRoot,
-                "branch",
-                "-f",
-                normalizedBaseBranch,
-                remoteTrackingRef,
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD",
                 failOnError = false,
                 timeoutMs = 10_000
-            )
-        } else {
-            runGit(
+            ).stdout.trim()
+
+            if (currentBranch == normalizedBaseBranch) {
+                if (!hasOnlyBenignCotorArtifacts(repositoryRoot)) {
+                    return@withRepositoryMutationLock BaseBranchSyncResult(
+                        skippedReason = "Skipped post-merge sync for $normalizedBaseBranch because the repository root has uncommitted changes."
+                    )
+                }
+                val fastForwardResult = runGit(
+                    repositoryRoot,
+                    "merge",
+                    "--ff-only",
+                    remoteTrackingRef,
+                    failOnError = false,
+                    timeoutMs = 30_000
+                )
+                if (!fastForwardResult.isSuccess) {
+                    logger.warn("Could not fast-forward $normalizedBaseBranch to $remoteTrackingRef after merge")
+                    return@withRepositoryMutationLock BaseBranchSyncResult(skippedReason = "Could not fast-forward local $normalizedBaseBranch after merge.")
+                }
+                return@withRepositoryMutationLock BaseBranchSyncResult(synced = true, workingTreeUpdated = true)
+            }
+
+            val localBaseBranchExists = runGit(
                 repositoryRoot,
-                "branch",
-                normalizedBaseBranch,
-                remoteTrackingRef,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/$normalizedBaseBranch",
                 failOnError = false,
                 timeoutMs = 10_000
-            )
-        }
-        if (!updateRefResult.isSuccess) {
-            logger.warn("Could not update local $normalizedBaseBranch ref to $remoteTrackingRef after merge")
-            return BaseBranchSyncResult(skippedReason = "Could not update local $normalizedBaseBranch ref after merge.")
-        }
+            ).isSuccess
+            val updateRefResult = if (localBaseBranchExists) {
+                runGit(
+                    repositoryRoot,
+                    "branch",
+                    "-f",
+                    normalizedBaseBranch,
+                    remoteTrackingRef,
+                    failOnError = false,
+                    timeoutMs = 10_000
+                )
+            } else {
+                runGit(
+                    repositoryRoot,
+                    "branch",
+                    normalizedBaseBranch,
+                    remoteTrackingRef,
+                    failOnError = false,
+                    timeoutMs = 10_000
+                )
+            }
+            if (!updateRefResult.isSuccess) {
+                logger.warn("Could not update local $normalizedBaseBranch ref to $remoteTrackingRef after merge")
+                return@withRepositoryMutationLock BaseBranchSyncResult(skippedReason = "Could not update local $normalizedBaseBranch ref after merge.")
+            }
 
-        return BaseBranchSyncResult(synced = true, workingTreeUpdated = false)
+            return@withRepositoryMutationLock BaseBranchSyncResult(synced = true, workingTreeUpdated = false)
+        }
     }
 
     private suspend fun hasOriginRemote(repositoryRoot: Path): Boolean {
@@ -1805,6 +1811,12 @@ class GitWorkspaceService(
     private suspend fun hasBranch(repositoryRoot: Path, branchName: String): Boolean {
         val result = runGit(repositoryRoot, "show-ref", "--verify", "--quiet", "refs/heads/$branchName", failOnError = false)
         return result.isSuccess
+    }
+
+    private suspend fun <T> withRepositoryMutationLock(repositoryRoot: Path, block: suspend () -> T): T {
+        val key = repositoryRoot.toAbsolutePath().normalize().toString()
+        val lock = repositoryMutationLocks.computeIfAbsent(key) { Mutex() }
+        return lock.withLock { block() }
     }
 
     private suspend fun hasUncommittedChanges(worktreePath: Path): Boolean {

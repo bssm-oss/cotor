@@ -482,6 +482,98 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.runtime.pendingIssueIds shouldNotContain issueId
         bound.runtime.blockedIssueIds shouldContain issueId
     }
+
+    test("bind reuses fallback durable action and github scans inside cache ttl") {
+        val appHome = Files.createTempDirectory("company-runtime-binding-cache")
+        val runStore = DurableRuntimeStore(appHome.resolve("runtime"))
+        val actionStore = ActionStore { appHome }
+        val githubStore = GitHubControlPlaneStore { appHome }
+        val companyId = "company-cache"
+        val issueId = "issue-cache"
+        val runId = "run-cache"
+        val pipelineId = "pipeline-cache"
+        var now = 1_000L
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = runStore),
+            actionStore = actionStore,
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = githubStore),
+            cacheTtlMs = 1_000L,
+            nowProvider = { now }
+        )
+        val state = DesktopAppState(
+            companies = listOf(testCompany(companyId)),
+            issues = listOf(
+                CompanyIssue(
+                    id = issueId,
+                    companyId = companyId,
+                    goalId = "goal-cache",
+                    workspaceId = "workspace-cache",
+                    title = "Cache issue",
+                    description = "Cache issue",
+                    status = IssueStatus.IN_PROGRESS,
+                    pipelineId = pipelineId,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            )
+        )
+        fun bind() = service.bind(
+            state = state,
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bind().runtime.resumableRunCount shouldBe 0
+        runStore.saveRun(
+            DurableRunSnapshot(
+                runId = runId,
+                pipelineName = pipelineId,
+                status = DurableRunStatus.RUNNING,
+                createdAt = 1L,
+                updatedAt = 2L
+            )
+        )
+        actionStore.append(
+            runId,
+            ActionExecutionRecord(
+                id = "action-cache",
+                runId = runId,
+                request = ActionRequest(
+                    kind = ActionKind.GITHUB_MERGE,
+                    label = "github.merge:44",
+                    scope = ActionScope.COMPANY,
+                    subject = ActionSubject(runId = runId, companyId = companyId, issueId = issueId)
+                ),
+                status = ActionStatus.DENIED,
+                createdAt = 2L,
+                updatedAt = 3L
+            )
+        )
+        GitHubControlPlaneService(store = githubStore).recordSnapshot(
+            PullRequestSnapshot(
+                number = 44,
+                state = "OPEN",
+                checksSummary = "ci=COMPLETED/FAILURE",
+                companyId = companyId,
+                issueId = issueId,
+                runId = runId
+            ),
+            eventType = "sync",
+            detail = "sync"
+        )
+
+        val cached = bind()
+        cached.runtime.resumableRunCount shouldBe 0
+        cached.runtime.blockedByPolicyCount shouldBe 0
+        cached.runtime.blockedByCiCount shouldBe 0
+
+        now += 1_001L
+        val refreshed = bind()
+        refreshed.runtime.resumableRunCount shouldBe 1
+        refreshed.runtime.blockedByPolicyCount shouldBe 1
+        refreshed.runtime.blockedByCiCount shouldBe 1
+    }
 })
 
 private fun bindSingleIssueForRuntimeDisposition(

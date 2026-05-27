@@ -41,7 +41,9 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 - Company/runtime backend errors:
   - `~/Library/Application Support/CotorDesktop/runtime/backend/company-runtime-errors.log`
 - Desktop persisted state:
-  - `~/Library/Application Support/CotorDesktop/state.json`
+  - `~/Library/Application Support/CotorDesktop/state.sqlite`
+  - legacy rollback copies remain at `state.json` and `state.json.bak` after migration
+  - set `COTOR_DESKTOP_STATE_BACKEND=json` only for emergency rollback to the legacy JSON backend
 - Runtime port/token/pid files:
   - `~/Library/Application Support/CotorDesktop/runtime/app-server.port`
   - `~/Library/Application Support/CotorDesktop/runtime/app-server.token`
@@ -67,12 +69,12 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 | --- | --- | --- |
 | `Cotor Desktop could not start its bundled app server.` | stale launcher/backend state, old install, or packaged app mismatch | `desktop-app.log`, `/health`, runtime pid/port files |
 | Clicking company `Start` / `Stop` makes the app look globally disconnected | benign request cancellation was misread as offline | `desktop-app.log` with `cancelled` refresh entries |
-| Company runtime keeps failing or the same issue keeps bouncing | permanent GitHub readiness failure, merge conflict, or blocked review state | `state.json`, `company-runtime-errors.log`, review queue |
-| Company runtime says `RUNNING` but the company looks stuck for a long time | dead or stale `RUNNING` task/run state combined with idle backoff | `state.json` runtime `lastAction`, `adaptiveTickMs`, task/run `processId` |
-| Company runtime is connected but no new work starts after spend climbs | the company hit its configured daily or monthly estimated spend cap and paused itself | company summary badges, `state.json` runtime `todaySpentCents` / `monthSpentCents` / `budgetPausedAt` |
+| Company runtime keeps failing or the same issue keeps bouncing | permanent GitHub readiness failure, merge conflict, or blocked review state | `state.sqlite`, `company-runtime-errors.log`, review queue |
+| Company runtime says `RUNNING` but the company looks stuck for a long time | dead or stale `RUNNING` task/run state combined with idle backoff | `state.sqlite` runtime `lastAction`, `adaptiveTickMs`, task/run `processId` |
+| Company runtime is connected but no new work starts after spend climbs | the company hit its configured daily or monthly estimated spend cap and paused itself | company summary badges, `state.sqlite` runtime `todaySpentCents` / `monthSpentCents` / `budgetPausedAt` |
 | Company mode shows `The data is missing.` and live updates stop | company dashboard/event payload was decoded too strictly, or the installed app/app-server is older than the current wire contract | desktop status pill, `desktop-app.log`, company dashboard/event responses |
-| Company issues start and immediately fall back to `BLOCKED` with Codex `model_not_found` | the runtime is still trying to call a retired Codex model id such as `gpt-5.3-codex-spark` | `state.json` run `error`, company automation trace, `ps` for live `codex exec --model ...` |
-| QA issue becomes `BLOCKED` | QA returned `CHANGES_REQUESTED`, usually because proof or validation output does not match the PR state | GitHub PR review, `state.json`, linked worktree files |
+| Company issues start and immediately fall back to `BLOCKED` with Codex `model_not_found` | the runtime is still trying to call a retired Codex model id such as `gpt-5.3-codex-spark` | `state.sqlite` run `error`, company automation trace, `ps` for live `codex exec --model ...` |
+| QA issue becomes `BLOCKED` | QA returned `CHANGES_REQUESTED`, usually because proof or validation output does not match the PR state | GitHub PR review, `state.sqlite`, linked worktree files |
 | CEO approval never reaches merge | self-approval restriction, real merge conflict, or stale approval state | GitHub PR status, `gh pr view`, runtime error log |
 | Local `master` does not show merged work | PR merged remotely but local branch is behind, or merge never actually happened | `git status -sb`, `git log --oneline --decorate -5`, `gh pr view` |
 | `cotor` interactive/TUI starts but does not answer well | thin PATH, unauthenticated AI CLI, or wrong starter selection | `interactive.log`, shell PATH, provider auth status |
@@ -144,7 +146,7 @@ Do not treat every company failure as a desktop connectivity problem.
 
 Check:
 
-- `state.json`
+- `state.sqlite`
 - company review queue items
 - `company-runtime-errors.log`
 - the selected company’s blocked issues and latest PRs
@@ -203,7 +205,7 @@ Current builds should:
 
 Confirm with:
 
-- the latest failed run in `~/Library/Application Support/CotorDesktop/state.json`
+- the latest failed run in `~/Library/Application Support/CotorDesktop/state.sqlite`
 - `~/Library/Application Support/CotorDesktop/runtime/backend/company-automation-trace.log`
 - `ps` output for live `codex exec --model ...` commands
 
@@ -222,7 +224,7 @@ When current builds estimate that the company has reached its configured daily o
 Confirm with:
 
 - the company summary badges in the desktop app
-- `todaySpentCents`, `monthSpentCents`, and `budgetPausedAt` in `~/Library/Application Support/CotorDesktop/state.json`
+- `todaySpentCents`, `monthSpentCents`, and `budgetPausedAt` in `~/Library/Application Support/CotorDesktop/state.sqlite`
 - the selected company settings panel, which should show the current cap and the current estimated spend
 
 Recovery depends on intent:

@@ -29,6 +29,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kaml)
 
+    // Desktop persistence
+    implementation(libs.sqlite.jdbc)
+
     // Dependency Injection
     implementation(libs.koin.core)
 

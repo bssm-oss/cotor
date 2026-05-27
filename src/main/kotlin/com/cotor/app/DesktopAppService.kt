@@ -37,6 +37,7 @@ import com.cotor.model.Pipeline
 import com.cotor.model.PipelineContext
 import com.cotor.model.PipelineStage
 import com.cotor.model.ProcessExecutionException
+import com.cotor.model.SecurityConfig
 import com.cotor.model.StageType
 import com.cotor.policy.PolicyDecision
 import com.cotor.policy.PolicyEngine
@@ -61,6 +62,8 @@ import com.cotor.runtime.durable.DurableRuntimeFlags
 import com.cotor.runtime.durable.DurableRuntimeService
 import com.cotor.runtime.durable.DurableRuntimeStore
 import com.cotor.runtime.durable.ReplayMode
+import com.cotor.security.DefaultSecurityValidator
+import com.cotor.security.SecurityValidator
 import com.cotor.verification.VerificationBundle
 import com.cotor.verification.VerificationBundleService
 import kotlinx.coroutines.CancellationException
@@ -265,6 +268,10 @@ class DesktopAppService(
     private val companyVerifierService: CompanyVerifierService = CompanyVerifierService(verificationBundleService),
     private val autonomousDiscoveryService: AutonomousDiscoveryService = AutonomousDiscoveryService(),
     private val companyRuntimeRetention: CompanyRuntimeRetention = CompanyRuntimeRetention(),
+    private val securityValidator: SecurityValidator = DefaultSecurityValidator(
+        SecurityConfig(useWhitelist = false, enablePathValidation = false),
+        org.slf4j.LoggerFactory.getLogger("Cotor")
+    ),
     private val marketingBrowserRunner: MarketingBrowserRunner = LocalPlaywrightMarketingBrowserRunner(
         appHomeProvider = { stateStore.appHome() },
         commandAvailability = commandAvailability
@@ -287,6 +294,7 @@ class DesktopAppService(
         private const val SUPERSEDED_PR_RECONCILIATION_INTERVAL_MS = 5L * 60_000L
         private const val NO_OP_PR_REUSE_REFRESH_INTERVAL_MS = 60_000L
         private const val PR_METADATA_REFRESH_CACHE_MS = 60_000L
+        private const val AUTOMATION_REFRESH_DEBOUNCE_MS = 15_000L
         private const val AGENT_MODEL_DISCOVERY_CACHE_MS = 5L * 60_000L
         private const val CEO_PLANNING_SOURCE = "ceo-planning"
         private const val FALLBACK_PLANNING_SOURCE_PREFIX = "fallback-planning:"
@@ -349,6 +357,7 @@ class DesktopAppService(
     private val companyRuntimeJobs: MutableMap<String, Job> = ConcurrentHashMap()
     private val companyRuntimeWakeSignals = ConcurrentHashMap<String, MutableSharedFlow<Unit>>()
     private val automationRefreshJobs: MutableMap<String, Job> = ConcurrentHashMap()
+    private val automationRefreshQueuedAt = ConcurrentHashMap<String, Long>()
     private val activeTaskJobs: MutableMap<String, Job> = ConcurrentHashMap()
     private val intentionallyInterruptedTaskIds = ConcurrentHashMap.newKeySet<String>()
     private val recentCompanyAutomationTraceKeys = ConcurrentHashMap<String, Long>()
@@ -515,7 +524,6 @@ class DesktopAppService(
         // restart. The read path stays cheap, but it nudges the automation layer back into the
         // expected steady state before serializing the full desktop snapshot.
         queueAutomationRefresh()
-        migrateLegacyOpenCodeCompanyAgentModels()
         val state = stateStore.load().withDerivedMetrics()
         val orgProfiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
         val boundIssuesById = mutableMapOf<String, CompanyIssue>()
@@ -566,7 +574,10 @@ class DesktopAppService(
     }
 
     suspend fun companyDashboard(companyId: String? = null): CompanyDashboardResponse {
-        return companyDashboardPrepared(companyId)
+        pruneRuntimeCaches()
+        queueAutomationRefresh(companyId)
+        val state = stateStore.load().withDerivedMetrics()
+        return companyDashboardSnapshot(state, companyId).redactedForApi()
     }
 
     suspend fun companyDashboardPrepared(companyId: String? = null): CompanyDashboardResponse {
@@ -1134,6 +1145,11 @@ class DesktopAppService(
         if (automationRefreshJobs[key]?.isActive == true) {
             return
         }
+        val now = System.currentTimeMillis()
+        automationRefreshQueuedAt[key]
+            ?.takeIf { now - it < AUTOMATION_REFRESH_DEBOUNCE_MS }
+            ?.let { return }
+        automationRefreshQueuedAt[key] = now
         automationRefreshJobs[key] = serviceScope.launch {
             try {
                 prepareCompanyAutomationState(companyId)
@@ -1151,6 +1167,7 @@ class DesktopAppService(
 
     private suspend fun prepareCompanyAutomationState(companyId: String? = null) {
         migrateLegacyCompanyRosters(companyId)
+        migrateLegacyOpenCodeCompanyAgentModels(companyId)
         ensureBaselineAgentCapabilityProfiles(companyId)
         migrateLegacyFollowUpGoals(companyId)
         reconcileStaleAgentRuns(companyId)
@@ -3050,6 +3067,7 @@ class DesktopAppService(
         workingDirectory: Path,
         timeoutSeconds: Long
     ): String = withContext(Dispatchers.IO) {
+        securityValidator.validateCommand(command)
         val process = ProcessBuilder(command)
             .directory(workingDirectory.toFile())
             .redirectErrorStream(true)
@@ -10703,6 +10721,7 @@ class DesktopAppService(
 
     suspend fun stopCompanyRuntime(companyId: String): CompanyRuntimeSnapshot {
         val interruptedBeforeStop = interruptActiveCompanyTasksForRuntimeStop(companyId)
+        cancelActiveTaskJobs(interruptedBeforeStop.taskIds)
         val terminatedBeforeStop = terminateProcessIds(interruptedBeforeStop.processIds)
         val runtimeJob = companyRuntimeJobs.remove(companyId)
         runtimeJob?.cancel()
@@ -10759,6 +10778,7 @@ class DesktopAppService(
 
     private data class RuntimeStopInterruption(
         val taskCount: Int,
+        val taskIds: Set<String>,
         val processIds: List<Long>
     )
 
@@ -10774,7 +10794,7 @@ class DesktopAppService(
                     task.issueId?.let { issueId -> issuesById[issueId]?.companyId == companyId } == true
             }
             if (activeTasks.isEmpty()) {
-                return@withLock RuntimeStopInterruption(taskCount = 0, processIds = emptyList())
+                return@withLock RuntimeStopInterruption(taskCount = 0, taskIds = emptySet(), processIds = emptyList())
             }
 
             val interruptedTaskIds = activeTasks.mapTo(linkedSetOf()) { it.id }
@@ -10861,10 +10881,16 @@ class DesktopAppService(
                 severity = "warning"
             ).withDerivedMetrics()
             stateStore.save(nextState)
-            RuntimeStopInterruption(taskCount = activeTasks.size, processIds = activeProcessIds)
+            RuntimeStopInterruption(taskCount = activeTasks.size, taskIds = interruptedTaskIds, processIds = activeProcessIds)
         }
         traceEvents.forEach(::appendCompanyAutomationTrace)
         return result
+    }
+
+    private fun cancelActiveTaskJobs(taskIds: Set<String>) {
+        taskIds.forEach { taskId ->
+            activeTaskJobs[taskId]?.cancel(CancellationException(INTERRUPTED_RUN_ERROR))
+        }
     }
 
     private suspend fun terminateActiveCompanyRunProcesses(companyId: String): Int {
@@ -10890,17 +10916,15 @@ class DesktopAppService(
         if (processIds.isEmpty()) {
             return 0
         }
-        return withContext(Dispatchers.IO) {
-            processIds.distinct().count { processId -> terminateProcessTree(processId) }
-        }
+        return processIds.distinct().count { processId -> terminateProcessTree(processId) }
     }
 
-    private fun terminateProcessTree(processId: Long): Boolean {
+    private suspend fun terminateProcessTree(processId: Long): Boolean {
         val root = ProcessHandle.of(processId).orElse(null) ?: return false
         if (!root.isAlive) {
             return false
         }
-        val handles = root.descendants().toList().asReversed() + root
+        val handles = withContext(Dispatchers.IO) { root.descendants().toList().asReversed() + root }
         handles.forEach { handle ->
             runCatching {
                 if (handle.isAlive) {
@@ -10910,7 +10934,7 @@ class DesktopAppService(
         }
         val deadline = System.currentTimeMillis() + RUN_PROCESS_TERMINATION_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline && handles.any { it.isAlive }) {
-            Thread.sleep(25)
+            delay(25)
         }
         handles.forEach { handle ->
             runCatching {
@@ -13332,6 +13356,17 @@ class DesktopAppService(
                 .filter { it.companyId == companyId && it.status == IssueStatus.DONE }
                 .groupBy { issue -> issue.kind.lowercase() to issue.title.trim().lowercase() }
                 .mapValues { (_, issues) -> issues.maxOf { it.updatedAt } }
+            val approvalIssueByExecutionId = state.issues
+                .asSequence()
+                .filter { it.companyId == companyId && it.kind.equals("approval", ignoreCase = true) }
+                .mapNotNull { approvalIssue -> relatedExecutionIssueId(approvalIssue)?.let { executionIssueId -> executionIssueId to approvalIssue } }
+                .groupBy({ it.first }, { it.second })
+                .mapValues { (_, approvals) -> approvals.maxByOrNull { it.updatedAt }!! }
+            val mergedReviewQueueByIssueId = state.reviewQueue
+                .asSequence()
+                .filter { it.companyId == companyId && it.status == ReviewQueueStatus.MERGED }
+                .groupBy { it.issueId }
+                .mapValues { (_, items) -> items.maxByOrNull { it.updatedAt }!! }
             val nextIssues = state.issues.map { issue ->
                 if (issue.companyId != companyId) {
                     return@map issue
@@ -13340,9 +13375,7 @@ class DesktopAppService(
                 val goal = goalsById[issue.goalId]
                 val workflowDrivenIssue = issue.kind.lowercase() in setOf("execution", "review", "approval")
                 val linkedApprovalIssue = if (issue.kind.equals("execution", ignoreCase = true)) {
-                    state.issues.firstOrNull {
-                        relatedExecutionIssueId(it) == issue.id && it.kind.equals("approval", ignoreCase = true)
-                    }
+                    approvalIssueByExecutionId[issue.id]
                 } else {
                     null
                 }
@@ -13352,7 +13385,7 @@ class DesktopAppService(
                     null
                 }
                 val mergedReviewQueueItem = if (issue.kind.equals("execution", ignoreCase = true)) {
-                    state.reviewQueue.firstOrNull { it.issueId == issue.id && it.status == ReviewQueueStatus.MERGED }
+                    mergedReviewQueueByIssueId[issue.id]
                 } else {
                     null
                 }
@@ -16240,12 +16273,7 @@ class DesktopAppService(
                 workingDirectory = binding.worktreePath,
                 onProcessStarted = { processId ->
                     runBlocking {
-                        replaceRun(
-                            startedRun.copy(
-                                processId = processId,
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        )
+                        recordRunProcessStarted(startedRun.id, task.id, processId)
                     }
                 },
                 onStdoutChunk = handler@{ chunk ->
@@ -16664,6 +16692,10 @@ class DesktopAppService(
     private suspend fun replaceRun(run: AgentRun) {
         stateMutex.withLock {
             val state = stateStore.load()
+            val existingRun = state.runs.firstOrNull { existing -> existing.id == run.id }
+            if (existingRun != null && shouldIgnoreStaleRunReplacement(existingRun, run)) {
+                return@withLock
+            }
             val nextRuns = if (state.runs.any { existing -> existing.id == run.id }) {
                 state.runs.map { existing -> if (existing.id == run.id) run else existing }
             } else {
@@ -16699,6 +16731,43 @@ class DesktopAppService(
                     tasks = nextTasks
                 )
             )
+        }
+    }
+
+    private fun shouldIgnoreStaleRunReplacement(existing: AgentRun, incoming: AgentRun): Boolean {
+        val existingTerminal = existing.status == AgentRunStatus.COMPLETED || existing.status == AgentRunStatus.FAILED
+        val incomingActive = incoming.status == AgentRunStatus.QUEUED || incoming.status == AgentRunStatus.RUNNING
+        return (existingTerminal && incomingActive) ||
+            (existingTerminal && existing.error == INTERRUPTED_RUN_ERROR) ||
+            (existingTerminal && incoming.taskId in intentionallyInterruptedTaskIds)
+    }
+
+    private suspend fun recordRunProcessStarted(runId: String, taskId: String, processId: Long) {
+        var shouldTerminate = taskId in intentionallyInterruptedTaskIds
+        stateMutex.withLock {
+            val state = stateStore.load()
+            val existing = state.runs.firstOrNull { it.id == runId }
+            if (
+                existing == null ||
+                existing.status == AgentRunStatus.COMPLETED ||
+                existing.status == AgentRunStatus.FAILED ||
+                taskId in intentionallyInterruptedTaskIds
+            ) {
+                shouldTerminate = true
+                return@withLock
+            }
+            val updated = existing.copy(
+                processId = processId,
+                updatedAt = System.currentTimeMillis()
+            )
+            stateStore.save(
+                state.copy(
+                    runs = state.runs.map { run -> if (run.id == runId) updated else run }
+                )
+            )
+        }
+        if (shouldTerminate) {
+            terminateProcessIds(listOf(processId))
         }
     }
 
@@ -24040,7 +24109,9 @@ class DesktopAppService(
                     directChatConversations = state.directChatConversations.map { conv ->
                         if (conv.id == conversationId) {
                             conv.copy(messages = conv.messages + userMsg, updatedAt = now)
-                        } else conv
+                        } else {
+                            conv
+                        }
                     }
                 )
             )
@@ -24075,7 +24146,9 @@ class DesktopAppService(
                                 directChatConversations = state.directChatConversations.map { conv ->
                                     if (conv.id == conversationId) {
                                         conv.copy(messages = conv.messages + assistantMsg, updatedAt = now)
-                                    } else conv
+                                    } else {
+                                        conv
+                                    }
                                 }
                             )
                         )

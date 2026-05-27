@@ -33,7 +33,10 @@ private val directChatHttpClient: HttpClient = HttpClient.newBuilder()
     .connectTimeout(Duration.ofSeconds(10))
     .executor(
         java.util.concurrent.ThreadPoolExecutor(
-            0, 16, 60L, TimeUnit.SECONDS,
+            0,
+            16,
+            60L,
+            TimeUnit.SECONDS,
             java.util.concurrent.SynchronousQueue()
         ) { runnable ->
             Thread(runnable, "cotor-direct-chat-http-${directChatHttpThreadCounter.incrementAndGet()}").apply {
@@ -97,8 +100,11 @@ class DirectChatService {
             "lmstudio" -> "http://127.0.0.1:1234"
             else -> ""
         }
-        val effectiveBase = if (defaultBase.isBlank()) defaultBase
-        else validateAndNormalizeBaseUrl(conversation.baseUrl, defaultBase)
+        val effectiveBase = if (defaultBase.isBlank()) {
+            defaultBase
+        } else {
+            validateAndNormalizeBaseUrl(conversation.baseUrl, defaultBase)
+        }
 
         when (provider) {
             "ollama" -> streamOllama(conversation, userMessage, messageId, effectiveBase)
@@ -277,7 +283,10 @@ class DirectChatService {
                                 done = done
                             )
                         )
-                        if (done) { doneSent = true; break }
+                        if (done) {
+                            doneSent = true
+                            break
+                        }
                     } catch (_: Exception) {
                         // skip malformed SSE lines
                     }
@@ -396,7 +405,7 @@ class DirectChatService {
         val sb = StringBuilder("\"")
         for (ch in value) {
             when {
-                ch == '"'  -> sb.append("\\\"")
+                ch == '"' -> sb.append("\\\"")
                 ch == '\\' -> sb.append("\\\\")
                 ch == '\n' -> sb.append("\\n")
                 ch == '\r' -> sb.append("\\r")

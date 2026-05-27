@@ -15,6 +15,7 @@ import io.kotest.matchers.string.shouldNotContain
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.attribute.FileTime
+import java.sql.DriverManager
 import kotlin.io.path.readText
 
 class DesktopStateStoreTest : FunSpec({
@@ -62,8 +63,34 @@ class DesktopStateStoreTest : FunSpec({
         store.save(DesktopAppState())
 
         stateTempFilesToClean(appHome) shouldBe emptyList()
-        appHome.resolve("state.json").toFile().exists() shouldBe true
-        appHome.resolve("state.json.bak").toFile().exists() shouldBe true
+        appHome.resolve("state.sqlite").toFile().exists() shouldBe true
+    }
+
+    test("load migrates legacy json state into sqlite without deleting rollback files") {
+        val appHome = Files.createTempDirectory("desktop-state-store-json-migration-home")
+        val legacyState = DesktopAppState(
+            companies = listOf(
+                Company(
+                    id = "company-1",
+                    name = "Migrated Company",
+                    rootPath = "/tmp/migrated-company",
+                    repositoryId = "repo-1",
+                    defaultBaseBranch = "master",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            )
+        )
+        saveLegacyJsonState(appHome, legacyState)
+        val legacyPayload = appHome.resolve("state.json").readText()
+
+        val loaded = DesktopStateStore { appHome }.load()
+
+        loaded.companies.map { it.name } shouldBe listOf("Migrated Company")
+        appHome.resolve("state.sqlite").toFile().exists() shouldBe true
+        appHome.resolve("state.json").readText() shouldBe legacyPayload
+        appHome.resolve("state.json.bak").readText() shouldBe legacyPayload
+        readSqliteCollection(appHome, "companies") shouldContain "Migrated Company"
     }
 
     test("fresh state temp files are not cleaned while another save may still be moving them") {
@@ -195,7 +222,7 @@ class DesktopStateStoreTest : FunSpec({
             )
         )
 
-        store.save(validState)
+        saveLegacyJsonState(appHome, validState)
         Files.writeString(
             appHome.resolve("state.json"),
             "{\n  \"companies\": [\n    {\n      \"id\": \"broken\"\n"
@@ -205,6 +232,7 @@ class DesktopStateStoreTest : FunSpec({
 
         recovered.companies.map { it.name } shouldBe listOf("Recovered From Backup")
         Files.readString(appHome.resolve("state.json.bak")).contains("Recovered From Backup") shouldBe true
+        appHome.resolve("state.sqlite").toFile().exists() shouldBe true
     }
 
     test("load restores the backup when the primary state file is corrupted in the middle") {
@@ -224,7 +252,7 @@ class DesktopStateStoreTest : FunSpec({
             )
         )
 
-        store.save(validState)
+        saveLegacyJsonState(appHome, validState)
         val validPayload = appHome.resolve("state.json").readText()
         val insertionPoint = validPayload.indexOf("\"name\":")
         val corruptedPayload = buildString {
@@ -292,19 +320,189 @@ class DesktopStateStoreTest : FunSpec({
         )
 
         store.save(validState)
-        val statePath = appHome.resolve("state.json")
-        val corruptedPayload = statePath.readText().replaceFirst(
+        val corruptedPayload = readSqliteCollection(appHome, "tasks").replaceFirst(
             "\"status\": \"COMPLETED\"",
             "\"status\": \"NOT_A_REAL_STATUS\""
         )
-        Files.writeString(statePath, corruptedPayload)
+        writeSqliteCollection(appHome, "tasks", corruptedPayload)
 
         val recovered = store.load()
 
         recovered.companies.map { it.name } shouldBe listOf("Lenient Company")
         recovered.goals.map { it.title } shouldBe listOf("Keep working")
         recovered.tasks shouldBe emptyList()
-        Files.readString(appHome.resolve("runtime").resolve("backend").resolve("state-load.log")) shouldContain "Recovered state with lenient decode"
+        Files.readString(appHome.resolve("runtime").resolve("backend").resolve("state-load.log")) shouldContain
+            "Recovered SQLite state without invalid collection tasks"
+    }
+
+    test("load returns sqlite revision cache when the database revision is unchanged") {
+        val appHome = Files.createTempDirectory("desktop-state-store-sqlite-cache-home")
+        val store = DesktopStateStore { appHome }
+        val state = DesktopAppState(
+            companies = listOf(
+                Company(
+                    id = "company-1",
+                    name = "Cached Company",
+                    rootPath = "/tmp/cached-company",
+                    repositoryId = "repo-1",
+                    defaultBaseBranch = "master",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            )
+        )
+
+        store.save(state)
+        val mutatedPayload = readSqliteCollection(appHome, "companies").replace("Cached Company", "Unrevised Company")
+        writeSqliteCollection(appHome, "companies", mutatedPayload, bumpRevision = false)
+
+        store.load().companies.map { it.name } shouldBe listOf("Cached Company")
+    }
+
+    test("save rewrites only sqlite collections whose payload changed") {
+        val appHome = Files.createTempDirectory("desktop-state-store-partial-update-home")
+        val store = DesktopStateStore { appHome }
+        val state = DesktopAppState(
+            companies = listOf(
+                Company(
+                    id = "company-1",
+                    name = "Stable Company",
+                    rootPath = "/tmp/stable-company",
+                    repositoryId = "repo-1",
+                    defaultBaseBranch = "master",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            tasks = listOf(
+                AgentTask(
+                    id = "task-1",
+                    workspaceId = "workspace-1",
+                    title = "Original task",
+                    prompt = "prompt",
+                    agents = listOf("codex"),
+                    status = DesktopTaskStatus.QUEUED,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            )
+        )
+
+        store.save(state)
+        val companyUpdatedAt = readSqliteCollectionUpdatedAt(appHome, "companies")
+        val taskUpdatedAt = readSqliteCollectionUpdatedAt(appHome, "tasks")
+        Thread.sleep(5L)
+        store.save(state.copy(tasks = state.tasks.map { it.copy(title = "Updated task", updatedAt = 2L) }))
+
+        readSqliteCollectionUpdatedAt(appHome, "companies") shouldBe companyUpdatedAt
+        (readSqliteCollectionUpdatedAt(appHome, "tasks") > taskUpdatedAt) shouldBe true
+    }
+
+    test("large state small mutation updates only the changed sqlite collection") {
+        val appHome = Files.createTempDirectory("desktop-state-store-large-partial-home")
+        val store = DesktopStateStore { appHome }
+        val company = Company(
+            id = "company-large",
+            name = "Large Company",
+            rootPath = "/tmp/large-company",
+            repositoryId = "repo-large",
+            defaultBaseBranch = "master",
+            createdAt = 1L,
+            updatedAt = 1L
+        )
+        val state = DesktopAppState(
+            companies = listOf(company),
+            repositories = listOf(
+                ManagedRepository(
+                    id = "repo-large",
+                    name = "Large Repo",
+                    localPath = "/tmp/large-company",
+                    sourceKind = RepositorySourceKind.LOCAL,
+                    defaultBranch = "master",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            workspaces = listOf(
+                Workspace(
+                    id = "workspace-large",
+                    repositoryId = "repo-large",
+                    name = "Large workspace",
+                    baseBranch = "master",
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            goals = listOf(
+                CompanyGoal(
+                    id = "goal-large",
+                    companyId = company.id,
+                    title = "Large goal",
+                    description = "Large goal",
+                    status = GoalStatus.ACTIVE,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            issues = (0 until 1_000).map { index ->
+                CompanyIssue(
+                    id = "issue-$index",
+                    companyId = company.id,
+                    goalId = "goal-large",
+                    workspaceId = "workspace-large",
+                    title = "Issue $index",
+                    description = "Issue $index",
+                    status = IssueStatus.PLANNED,
+                    createdAt = index.toLong(),
+                    updatedAt = index.toLong()
+                )
+            },
+            tasks = (0 until 2_000).map { index ->
+                AgentTask(
+                    id = "task-$index",
+                    workspaceId = "workspace-large",
+                    issueId = "issue-${index % 1_000}",
+                    title = "Task $index",
+                    prompt = "Prompt $index",
+                    agents = listOf("codex"),
+                    status = DesktopTaskStatus.QUEUED,
+                    createdAt = index.toLong(),
+                    updatedAt = index.toLong()
+                )
+            },
+            runs = (0 until 5_000).map { index ->
+                AgentRun(
+                    id = "run-$index",
+                    taskId = "task-${index % 2_000}",
+                    workspaceId = "workspace-large",
+                    repositoryId = "repo-large",
+                    agentName = "codex",
+                    branchName = "branch-$index",
+                    worktreePath = "/tmp/large-company/.cotor/worktrees/task-${index % 2_000}/codex",
+                    status = AgentRunStatus.COMPLETED,
+                    createdAt = index.toLong(),
+                    updatedAt = index.toLong()
+                )
+            }
+        )
+
+        store.save(state)
+        val issuesUpdatedAt = readSqliteCollectionUpdatedAt(appHome, "issues")
+        val runsUpdatedAt = readSqliteCollectionUpdatedAt(appHome, "runs")
+        val taskUpdatedAt = readSqliteCollectionUpdatedAt(appHome, "tasks")
+        Thread.sleep(5L)
+        store.save(
+            state.copy(
+                tasks = state.tasks.mapIndexed { index, task ->
+                    if (index == 0) task.copy(status = DesktopTaskStatus.COMPLETED, updatedAt = 9_999L) else task
+                }
+            )
+        )
+
+        readSqliteCollectionUpdatedAt(appHome, "issues") shouldBe issuesUpdatedAt
+        readSqliteCollectionUpdatedAt(appHome, "runs") shouldBe runsUpdatedAt
+        (readSqliteCollectionUpdatedAt(appHome, "tasks") > taskUpdatedAt) shouldBe true
+        store.load().tasks.first { it.id == "task-0" }.status shouldBe DesktopTaskStatus.COMPLETED
     }
 
     test("lenient recovery preserves workflow pipelines, agent context entries, and agent messages") {
@@ -371,12 +569,11 @@ class DesktopStateStoreTest : FunSpec({
         )
 
         store.save(state)
-        val statePath = appHome.resolve("state.json")
-        val corruptedPayload = statePath.readText().replaceFirst(
+        val corruptedPayload = readSqliteCollection(appHome, "tasks").replaceFirst(
             "\"status\": \"COMPLETED\"",
             "\"status\": \"NOT_A_REAL_STATUS\""
         )
-        Files.writeString(statePath, corruptedPayload)
+        writeSqliteCollection(appHome, "tasks", corruptedPayload)
 
         val recovered = store.load()
 
@@ -434,7 +631,7 @@ class DesktopStateStoreTest : FunSpec({
         )
 
         store.save(state)
-        val persisted = appHome.resolve("state.json").readText()
+        val persisted = readSqliteCollection(appHome, "tasks") + readSqliteCollection(appHome, "runs")
 
         persisted.shouldContain("[compacted ")
         persisted.shouldNotContain(longPrompt)
@@ -510,7 +707,7 @@ class DesktopStateStoreTest : FunSpec({
         )
 
         store.save(state)
-        val persisted = appHome.resolve("state.json").readText()
+        val persisted = readSqliteCollection(appHome, "tasks")
 
         persisted.shouldContain(longPrompt.take(200))
         persisted.shouldNotContain("[compacted ")
@@ -600,9 +797,64 @@ class DesktopStateStoreTest : FunSpec({
         )
 
         store.save(state)
-        val persisted = appHome.resolve("state.json").readText()
+        val persisted = readSqliteCollection(appHome, "runs")
 
         store.load().runs.single().output shouldBe longOutput
         persisted.shouldNotContain("[compacted ")
     }
 })
+
+private suspend fun saveLegacyJsonState(appHome: java.nio.file.Path, state: DesktopAppState) {
+    val previous = System.getProperty("cotor.desktop.state.backend")
+    System.setProperty("cotor.desktop.state.backend", "json")
+    try {
+        DesktopStateStore { appHome }.save(state)
+    } finally {
+        if (previous == null) {
+            System.clearProperty("cotor.desktop.state.backend")
+        } else {
+            System.setProperty("cotor.desktop.state.backend", previous)
+        }
+    }
+}
+
+private fun readSqliteCollection(appHome: java.nio.file.Path, name: String): String =
+    DriverManager.getConnection("jdbc:sqlite:${appHome.resolve("state.sqlite").toAbsolutePath().normalize()}").use { connection ->
+        connection.prepareStatement("SELECT payload FROM state_collections WHERE name = ?").use { statement ->
+            statement.setString(1, name)
+            statement.executeQuery().use { result ->
+                if (result.next()) result.getString(1) else ""
+            }
+        }
+    }
+
+private fun readSqliteCollectionUpdatedAt(appHome: java.nio.file.Path, name: String): Long =
+    DriverManager.getConnection("jdbc:sqlite:${appHome.resolve("state.sqlite").toAbsolutePath().normalize()}").use { connection ->
+        connection.prepareStatement("SELECT updated_at FROM state_collections WHERE name = ?").use { statement ->
+            statement.setString(1, name)
+            statement.executeQuery().use { result ->
+                if (result.next()) result.getLong(1) else 0L
+            }
+        }
+    }
+
+private fun writeSqliteCollection(
+    appHome: java.nio.file.Path,
+    name: String,
+    payload: String,
+    bumpRevision: Boolean = true
+) {
+    DriverManager.getConnection("jdbc:sqlite:${appHome.resolve("state.sqlite").toAbsolutePath().normalize()}").use { connection ->
+        connection.prepareStatement("UPDATE state_collections SET payload = ?, payload_sha256 = 'corrupted', updated_at = ? WHERE name = ?").use { statement ->
+            statement.setString(1, payload)
+            statement.setLong(2, System.currentTimeMillis())
+            statement.setString(3, name)
+            statement.executeUpdate()
+        }
+        if (bumpRevision) {
+            connection.prepareStatement("UPDATE state_meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'revision'").use { statement ->
+                statement.executeUpdate()
+            }
+        }
+    }
+}
