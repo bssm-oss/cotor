@@ -110,6 +110,10 @@ actor EmbeddedBackendLauncher {
         }
         shutdownRequested = true
         AppLogger.info("Embedded backend stop started.")
+        let lifecycleShutdownPrepared = await requestDesktopLifecycleShutdown()
+        if lifecycleShutdownPrepared {
+            AppLogger.info("Prepared desktop lifecycle shutdown over HTTP.")
+        }
         let gracefulShutdownRequested = await requestGracefulShutdown()
         if gracefulShutdownRequested {
             AppLogger.info("Requested graceful embedded backend shutdown over HTTP.")
@@ -271,6 +275,26 @@ actor EmbeddedBackendLauncher {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
                 return http.statusCode == 202 || (200 ..< 300).contains(http.statusCode)
+            }
+        } catch {
+            return false
+        }
+        return false
+    }
+
+    private func requestDesktopLifecycleShutdown() async -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/api/app/lifecycle/shutdown") else {
+            return false
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3.0
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(DesktopAPI.ensureAppToken())", forHTTPHeaderField: "Authorization")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                return (200 ..< 300).contains(http.statusCode)
             }
         } catch {
             return false

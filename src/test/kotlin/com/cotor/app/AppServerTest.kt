@@ -618,6 +618,52 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("desktop lifecycle routes warm startup and prepare shutdown") {
+        coEvery { desktopService.prepareDesktopAppStartup() } returns DesktopLifecycleStartupResponse(
+            stateWarmed = true,
+            companyCount = 2,
+            workspaceCount = 3,
+            skillCatalogSize = 8,
+            staleRuntimeCount = 1,
+            runningRuntimeCount = 0,
+            browserSkillPrewarmQueued = true
+        )
+        coEvery { desktopService.prepareDesktopAppShutdown() } returns DesktopLifecycleShutdownResponse(
+            activeTaskCount = 1,
+            cancelledJobCount = 2,
+            stoppedRuntimeCount = 1,
+            terminatedRunProcessCount = 1,
+            codexBackendsStopped = true
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val startup = client.post("/api/app/lifecycle/startup") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val shutdown = client.post("/api/app/lifecycle/shutdown") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            startup.status shouldBe HttpStatusCode.OK
+            startup.bodyAsText() shouldContain "\"stateWarmed\":true"
+            startup.bodyAsText() shouldContain "\"runtimeStarted\":false"
+            shutdown.status shouldBe HttpStatusCode.OK
+            shutdown.bodyAsText() shouldContain "\"terminatedRunProcessCount\":1"
+            shutdown.bodyAsText() shouldContain "\"tuiSessionsShutdown\":true"
+            coVerify(exactly = 1) { desktopService.prepareDesktopAppStartup() }
+            coVerify(exactly = 1) { desktopService.prepareDesktopAppShutdown() }
+            io.mockk.verify(exactly = 1) { tuiSessionService.shutdown() }
+        }
+    }
+
     test("browser smoke route delegates to guarded backend planner") {
         coEvery {
             desktopService.planBrowserSmoke(

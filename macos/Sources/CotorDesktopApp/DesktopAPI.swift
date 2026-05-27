@@ -154,6 +154,16 @@ struct DesktopAPI {
         try await get(path: "api/app/dashboard")
     }
 
+    /// Ask the backend to warm desktop-owned infrastructure without starting company work.
+    func prepareDesktopStartup() async throws -> DesktopLifecycleStartupPayload {
+        try await post(pathSegments: ["api", "app", "lifecycle", "startup"], body: EmptyPayload())
+    }
+
+    /// Ask the backend to stop desktop-owned work before the app-server process exits.
+    func prepareDesktopShutdown() async throws -> DesktopLifecycleShutdownPayload {
+        try await post(pathSegments: ["api", "app", "lifecycle", "shutdown"], body: EmptyPayload())
+    }
+
     /// Fetch the focused company snapshot used for live company-mode updates.
     func companyDashboard(companyId: String) async throws -> CompanyDashboardPayload {
         try await get(pathSegments: ["api", "app", "companies", companyId, "dashboard"])

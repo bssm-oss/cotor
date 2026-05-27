@@ -5,9 +5,12 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.FileTime
+import java.util.concurrent.atomic.AtomicInteger
 
 class DesktopAppServiceRuntimeCleanupTest : FunSpec({
     test("shutdown clears retained runtime cache state") {
@@ -25,6 +28,91 @@ class DesktopAppServiceRuntimeCleanupTest : FunSpec({
         service.shutdown()
 
         service.runtimeCacheSizesForTesting().values.forEach { it shouldBe 0 }
+    }
+
+    test("startup lifecycle warms infrastructure without starting company runtime") {
+        val appHome = Files.createTempDirectory("desktop-app-service-startup-lifecycle")
+        val stateStore = DesktopStateStore { appHome }
+        val browserSkillRunner = StartupRecordingBrowserSkillRunner()
+        val companyId = "company-startup"
+        val repo = Files.createTempDirectory("cotor-startup-lifecycle-repo")
+        stateStore.save(
+            baseState(companyId, repo).copy(
+                goals = baseState(companyId, repo).goals.map { it.copy(autonomyEnabled = true) },
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(
+                        companyId = companyId,
+                        status = CompanyRuntimeStatus.STOPPED,
+                        manuallyStoppedAt = System.currentTimeMillis()
+                    )
+                )
+            )
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            browserSkillRunner = browserSkillRunner,
+            autoStartAutomationRefresh = false
+        )
+
+        val response = service.prepareDesktopAppStartup()
+
+        response.stateWarmed shouldBe true
+        response.companyCount shouldBe 1
+        response.browserSkillPrewarmQueued shouldBe true
+        response.runtimeStarted shouldBe false
+        withTimeout(2_000) {
+            while (browserSkillRunner.prewarmCount.get() == 0) {
+                delay(10)
+            }
+        }
+        service.runtimeStatus(companyId).status shouldBe CompanyRuntimeStatus.STOPPED
+        service.runtimeCacheSizesForTesting()["runtimeJobs"] shouldBe 0
+    }
+
+    test("desktop shutdown lifecycle terminates active run process and marks runtime stopped") {
+        val appHome = Files.createTempDirectory("desktop-app-service-shutdown-lifecycle")
+        val stateStore = DesktopStateStore { appHome }
+        val service = testService(stateStore)
+        val companyId = "company-shutdown"
+        val repo = Files.createTempDirectory("cotor-shutdown-lifecycle-repo")
+        val worktreePath = worktree(repo, "task-running", "builder", System.currentTimeMillis())
+        val process = ProcessBuilder("/bin/sleep", "30").start()
+        try {
+            stateStore.save(
+                baseState(companyId, repo).copy(
+                    tasks = listOf(task("task-running", "issue-running").copy(status = DesktopTaskStatus.RUNNING)),
+                    issues = listOf(issue("issue-running", companyId, IssueStatus.IN_PROGRESS, worktreePath)),
+                    runs = listOf(
+                        run(
+                            runId = "run-running",
+                            taskId = "task-running",
+                            worktreePath = worktreePath,
+                            status = AgentRunStatus.RUNNING,
+                            updatedAt = System.currentTimeMillis()
+                        ).copy(processId = process.pid())
+                    ),
+                    companyRuntimes = listOf(
+                        CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+                    )
+                )
+            )
+
+            val result = service.prepareForDesktopAppShutdown()
+            val state = stateStore.load()
+
+            result.activeTaskCount shouldBe 1
+            result.stoppedRuntimeCount shouldBe 1
+            result.terminatedRunProcessCount shouldBe 1
+            process.isAlive shouldBe false
+            state.tasks.single().status shouldBe DesktopTaskStatus.FAILED
+            state.runs.single().status shouldBe AgentRunStatus.FAILED
+            state.companyRuntimes.single().status shouldBe CompanyRuntimeStatus.STOPPED
+        } finally {
+            process.takeIf { it.isAlive }?.destroyForcibly()
+        }
     }
 
     test("runtime cleanup protects active issue and review worktrees while pruning stale terminal worktrees") {
@@ -251,3 +339,15 @@ private fun run(
         createdAt = updatedAt,
         updatedAt = updatedAt
     )
+
+private class StartupRecordingBrowserSkillRunner : BrowserSkillRunner {
+    val prewarmCount = AtomicInteger(0)
+
+    override suspend fun execute(command: BrowserSkillCommand): BrowserSkillResult {
+        error("not used")
+    }
+
+    override suspend fun prewarm() {
+        prewarmCount.incrementAndGet()
+    }
+}
