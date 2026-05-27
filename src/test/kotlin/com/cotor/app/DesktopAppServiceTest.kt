@@ -7323,11 +7323,11 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         withTimeout(5_000) {
             while (true) {
-                service.companyDashboard(company.id)
+                service.companyDashboardPrepared(company.id)
                 val latestIssue = stateStore.load().issues.first { it.id == issue.id }
                 if (latestIssue.status == IssueStatus.PLANNED) {
                     latestIssue.blockedBy.shouldBeEmpty()
@@ -14451,7 +14451,7 @@ class DesktopAppServiceTest : FunSpec({
             )
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
         withTimeout(10_000) {
             while (true) {
                 val state = stateStore.load()
@@ -15334,11 +15334,11 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         withTimeout(5_000) {
             while (true) {
-                service.companyDashboard(company.id)
+                service.companyDashboardPrepared(company.id)
                 val latestIssue = stateStore.load().issues.first { it.id == qaIssue.id }
                 if (latestIssue.status == IssueStatus.PLANNED || latestIssue.status == IssueStatus.IN_PROGRESS) {
                     latestIssue.blockedBy.shouldBeEmpty()
