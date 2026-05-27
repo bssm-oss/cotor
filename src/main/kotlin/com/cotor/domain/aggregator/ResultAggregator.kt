@@ -13,6 +13,9 @@ import com.cotor.model.AgentResult
 import com.cotor.model.AggregatedResult
 import java.time.Instant
 
+private const val AGGREGATED_OUTPUT_SEPARATOR = "\n---\n"
+private const val MAX_AGGREGATED_OUTPUT_CHARS = 500_000
+
 /**
  * Interface for aggregating agent results
  */
@@ -51,10 +54,51 @@ class DefaultResultAggregator(
     }
 
     private fun mergeOutputs(results: List<AgentResult>): String {
-        return results
-            .filter { it.isSuccess && it.output != null }
-            .joinToString("\n---\n") { result ->
-                "[${result.agentName}]\n${result.output}"
+        val builder = StringBuilder()
+        var hasOutput = false
+        var truncatedChars = 0L
+
+        for (result in results) {
+            if (!result.isSuccess || result.output == null) continue
+            val segment = "[${result.agentName}]\n${result.output}"
+            val separator = if (hasOutput) AGGREGATED_OUTPUT_SEPARATOR else ""
+            val segmentLength = separator.length + segment.length
+            val remainingChars = MAX_AGGREGATED_OUTPUT_CHARS - builder.length
+
+            if (remainingChars <= 0) {
+                truncatedChars += segmentLength.toLong()
+                hasOutput = true
+                continue
             }
+
+            if (segmentLength <= remainingChars) {
+                builder.append(separator)
+                builder.append(segment)
+                hasOutput = true
+                continue
+            }
+
+            val separatorChars = minOf(separator.length, remainingChars)
+            if (separatorChars > 0) {
+                builder.append(separator, 0, separatorChars)
+            }
+            val segmentChars = minOf(segment.length, remainingChars - separatorChars)
+            if (segmentChars > 0) {
+                builder.append(segment, 0, segmentChars)
+            }
+            truncatedChars += (segmentLength - separatorChars - segmentChars).toLong()
+            hasOutput = true
+        }
+
+        if (truncatedChars > 0) {
+            val marker = "\n[cotor truncated at least $truncatedChars chars from aggregated agent outputs]"
+            val maxBodyLength = (MAX_AGGREGATED_OUTPUT_CHARS - marker.length).coerceAtLeast(0)
+            if (builder.length > maxBodyLength) {
+                builder.setLength(maxBodyLength)
+            }
+            builder.append(marker)
+        }
+
+        return builder.toString()
     }
 }

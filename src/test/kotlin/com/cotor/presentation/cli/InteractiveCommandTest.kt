@@ -111,6 +111,37 @@ class InteractiveCommandTest : FunSpec({
         txt.readText().shouldContain("hello")
     }
 
+    test("interactive --prompt-file streams nonblank prompt lines") {
+        val dir = Files.createTempDirectory("cotor-interactive-prompt-file")
+        val configPath = dir.resolve("cotor.yaml")
+        val saveDir = dir.resolve("out")
+        val promptFile = dir.resolve("prompts.txt")
+
+        configPath.writeText(
+            """
+            version: "1.0"
+            agents:
+              - name: echo1
+                pluginClass: com.cotor.data.plugin.EchoPlugin
+            """.trimIndent()
+        )
+        promptFile.writeText("one\n\ntwo\n")
+
+        val result = InteractiveCommand().test(
+            "--config", configPath.toString(),
+            "--mode", "single",
+            "--agent", "echo1",
+            "--no-context",
+            "--save-dir", saveDir.toString(),
+            "--prompt-file", promptFile.toString()
+        )
+
+        result.statusCode shouldBe 0
+        result.stdout.trim() shouldBe "one\n\ntwo"
+        saveDir.resolve("transcript.txt").readText().shouldContain("one")
+        saveDir.resolve("transcript.txt").readText().shouldContain("two")
+    }
+
     test("interactive defaults to a single preferred codex agent and writes an interactive log") {
         val dir = Files.createTempDirectory("cotor-interactive-default-single")
         val configPath = dir.resolve("cotor.yaml")

@@ -16,10 +16,13 @@ import com.cotor.model.*
 import com.cotor.stats.StatsManager
 import io.mockk.coEvery
 import io.mockk.mockk
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.slf4j.Logger
+import java.util.concurrent.atomic.AtomicInteger
 
 class PipelineOrchestratorMapTest {
 
@@ -85,4 +88,81 @@ class PipelineOrchestratorMapTest {
         assertEquals(0, result.failureCount)
         assertEquals(3, result.results.size)
     }
+
+    @Test
+    fun `MAP execution honors maxConcurrentAgents`() = runBlocking {
+        val trackingExecutor = TrackingAgentExecutor(delayMs = 50)
+        coEvery { agentRegistry.getAgent(any()) } returns AgentConfig(
+            name = "test-agent",
+            pluginClass = "com.cotor.agent.TestAgent"
+        )
+        val orchestrator = DefaultPipelineOrchestrator(
+            agentExecutor = trackingExecutor,
+            resultAggregator = resultAggregator,
+            eventBus = eventBus,
+            logger = logger,
+            agentRegistry = agentRegistry,
+            outputValidator = outputValidator,
+            statsManager = statsManager,
+            performanceConfig = PerformanceConfig(maxConcurrentAgents = 2)
+        )
+        val pipeline = Pipeline(
+            name = "bounded-map-pipeline",
+            executionMode = ExecutionMode.MAP,
+            stages = listOf(
+                PipelineStage(
+                    id = "fanout-stage",
+                    agent = AgentReference("test-agent"),
+                    fanout = FanoutConfig(source = "items")
+                )
+            )
+        )
+        val context = PipelineContext(
+            pipelineId = "bounded-map",
+            pipelineName = "bounded-map-pipeline",
+            totalStages = 1
+        )
+        context.sharedState["items"] = (1..8).toList()
+
+        val result = orchestrator.executePipeline(pipeline, context = context)
+
+        assertEquals(8, result.results.size)
+        assertTrue(trackingExecutor.maxActive.get() <= 2)
+    }
+}
+
+private class TrackingAgentExecutor(
+    private val delayMs: Long
+) : AgentExecutor {
+    private val active = AtomicInteger(0)
+    val maxActive = AtomicInteger(0)
+
+    override suspend fun executeAgent(
+        agent: AgentConfig,
+        input: String?,
+        metadata: AgentExecutionMetadata
+    ): AgentResult {
+        val current = active.incrementAndGet()
+        maxActive.updateAndGet { previous -> maxOf(previous, current) }
+        return try {
+            delay(delayMs)
+            AgentResult(
+                agentName = agent.name,
+                isSuccess = true,
+                output = "processed:$input",
+                error = null,
+                duration = delayMs,
+                metadata = emptyMap()
+            )
+        } finally {
+            active.decrementAndGet()
+        }
+    }
+
+    override suspend fun executeWithRetry(
+        agent: AgentConfig,
+        input: String?,
+        retryPolicy: RetryPolicy,
+        metadata: AgentExecutionMetadata
+    ): AgentResult = executeAgent(agent, input, metadata)
 }

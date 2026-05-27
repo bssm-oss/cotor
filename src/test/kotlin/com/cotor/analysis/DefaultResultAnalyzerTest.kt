@@ -54,4 +54,15 @@ class DefaultResultAnalyzerTest : FunSpec({
         analysis.disagreements.shouldHaveSize(1)
         analysis.recommendations.shouldHaveSize(1)
     }
+
+    test("caps output length bonus when selecting best agent") {
+        val analysis = analyzer.analyze(
+            listOf(
+                result("long", "x".repeat(300_000)),
+                result("validated", "small but verified", mapOf("validationScore" to "1.0"))
+            )
+        )!!
+
+        analysis.bestAgent shouldBe "validated"
+    }
 })

@@ -4,7 +4,6 @@ import com.cotor.data.process.resolveExecutablePath
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.util.concurrent.TimeUnit
 
 internal data class StarterAgentSpec(
     val name: String,
@@ -192,22 +191,5 @@ private fun starterHomeDirectory(environment: Map<String, String> = System.geten
 }
 
 private fun runStatusProbe(command: List<String>, timeoutSeconds: Long = 3): Boolean {
-    return runCatching {
-        val process = ProcessBuilder(command)
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start()
-
-        try {
-            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-                return false
-            }
-            process.exitValue() == 0
-        } finally {
-            process.inputStream.close()
-            process.errorStream.close()
-            process.outputStream.close()
-        }
-    }.getOrDefault(false)
+    return runDiscardingOutputProbe(command, timeoutSeconds)
 }

@@ -40,11 +40,12 @@ import org.jline.reader.UserInterruptException
 import org.jline.terminal.TerminalBuilder
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.io.PrintStream
 import kotlin.io.path.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
-import kotlin.io.path.readLines
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
@@ -215,9 +216,8 @@ class InteractiveCommand :
                     if (!currentPromptFile.exists()) {
                         throw IllegalArgumentException("Prompt file not found: $currentPromptFile")
                     }
-                    val prompts = currentPromptFile.readLines().map { it.trimEnd() }.filter { it.isNotBlank() }
-                    val outputs = mutableListOf<String>()
-                    for (line in prompts) {
+                    var emittedOutput = false
+                    processPromptFileLines(currentPromptFile) { line ->
                         val outcome = executeLoggedTurn(
                             session = session,
                             chatMode = chatMode,
@@ -231,13 +231,16 @@ class InteractiveCommand :
                         )
                         session.addUser(line)
                         session.addAssistant(outcome.response)
-                        outputs += outcome.response
+                        if (emittedOutput) {
+                            echo("")
+                        }
+                        echo(outcome.response)
+                        emittedOutput = true
                     }
                     transcript.writeMarkdown(session, headerLines)
                     transcript.writeRawText(session)
                     transcript.writeJsonl(session)
                     transcript.flushMemoryIfNeeded(session)
-                    echo(outputs.joinToString("\n\n"))
                     sessionEndReason = "prompt_file_completed"
                 }
 
@@ -301,6 +304,24 @@ class InteractiveCommand :
         } catch (e: Exception) {
             sessionLogger.logTurnFailure(turnContext, e, extractAgentSummaries(e))
             throw e
+        }
+    }
+
+    private suspend fun processPromptFileLines(
+        promptFile: java.nio.file.Path,
+        handlePrompt: suspend (String) -> Unit
+    ) {
+        Files.newBufferedReader(promptFile, StandardCharsets.UTF_8).use { reader ->
+            var lineNumber = 0
+            for (rawLine in reader.lineSequence()) {
+                lineNumber += 1
+                val line = rawLine.trimEnd()
+                if (line.isBlank()) continue
+                require(line.length <= MAX_PROMPT_FILE_LINE_CHARS) {
+                    "Prompt file line $lineNumber exceeds $MAX_PROMPT_FILE_LINE_CHARS characters"
+                }
+                handlePrompt(line)
+            }
         }
     }
 
@@ -748,6 +769,7 @@ class InteractiveCommand :
     companion object {
         private val ANSI_ESCAPE_REGEX = Regex("""\u001B\[[0-?]*[ -/]*[@-~]""")
         private val PROMPT_PREFIX_REGEX = Regex("""^\s*(?:you>\s*)+""")
+        private const val MAX_PROMPT_FILE_LINE_CHARS = 20_000
 
         internal fun normalizeInteractiveInput(line: String, isDesktopTui: Boolean): String {
             val withoutAnsi = ANSI_ESCAPE_REGEX.replace(line, "")

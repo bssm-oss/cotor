@@ -482,6 +482,11 @@ internal fun Application.cotorWebModule(
             call.respond(durableRuntimeService?.listRuns().orEmpty())
         }
 
+        get("/api/runtime/run-summaries") {
+            if (!call.requireWebToken(webToken)) return@get
+            call.respond(durableRuntimeService?.listRunSummaries().orEmpty())
+        }
+
         get("/api/runtime/runs/{runId}") {
             if (!call.requireWebToken(webToken)) return@get
             val runId = call.parameters["runId"]

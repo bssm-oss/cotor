@@ -20,6 +20,7 @@ import com.cotor.app.runtime.CompanyRuntimeMachine
 import com.cotor.app.runtime.RuntimeCommand
 import com.cotor.app.runtime.WorkQueue
 import com.cotor.data.config.ConfigRepository
+import com.cotor.data.http.sendBoundedText
 import com.cotor.data.process.resolveExecutablePath
 import com.cotor.domain.executor.AgentExecutor
 import com.cotor.domain.planning.GoalDrivenTaskPlanner
@@ -67,6 +68,7 @@ import com.cotor.security.SecurityValidator
 import com.cotor.verification.VerificationBundle
 import com.cotor.verification.VerificationBundleService
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -93,6 +95,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -150,6 +154,11 @@ private data class CompanyAutomationTraceEvent(
     val blockedReasonDetail: String? = null,
     val blockedRetryable: Boolean? = null
 )
+
+private sealed interface CompanyAutomationTraceWriteRequest {
+    data class Line(val value: String) : CompanyAutomationTraceWriteRequest
+    data class Flush(val ack: CompletableDeferred<Unit>) : CompanyAutomationTraceWriteRequest
+}
 
 @kotlinx.serialization.Serializable
 private data class CeoPlanningPayload(
@@ -287,6 +296,8 @@ class DesktopAppService(
             Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<DesktopAppService, Boolean>()))
         private const val COMPANY_TRACE_DEDUP_WINDOW_MS = 30_000L
         private const val COMPANY_TRACE_ROTATE_BYTES = 8L * 1024L * 1024L
+        private const val COMPANY_TRACE_QUEUE_CAPACITY = 512
+        private const val COMPANY_TRACE_FLUSH_TIMEOUT_MS = 5_000L
         private const val COMPANY_RUNTIME_ERROR_ROTATE_BYTES = 2L * 1024L * 1024L
         private const val RECOVERABLE_RETRY_BASE_DELAY_MS = 30_000L
         private const val RECOVERABLE_RETRY_MAX_DELAY_MS = 5L * 60_000L
@@ -296,6 +307,7 @@ class DesktopAppService(
         private const val PR_METADATA_REFRESH_CACHE_MS = 60_000L
         private const val AUTOMATION_REFRESH_DEBOUNCE_MS = 15_000L
         private const val AGENT_MODEL_DISCOVERY_CACHE_MS = 5L * 60_000L
+        private const val LOCAL_MODEL_DISCOVERY_RESPONSE_LIMIT_CHARS = 1_000_000
         private const val CEO_PLANNING_SOURCE = "ceo-planning"
         private const val FALLBACK_PLANNING_SOURCE_PREFIX = "fallback-planning:"
         private const val CEO_PLANNING_INVALID_OUTPUT = "CEO_PLANNING_INVALID_OUTPUT"
@@ -308,6 +320,7 @@ class DesktopAppService(
         private const val RUN_PROCESS_TERMINATION_TIMEOUT_MS = 2_000L
         private const val QA_REVIEW_SOURCE_PREFIX = "qa-review:"
         private const val CEO_APPROVAL_SOURCE_PREFIX = "ceo-approval:"
+        private const val RUNTIME_TICK_MUTEX_WAIT_TIMEOUT_MS = 5_000L
         private const val SHUTDOWN_JOIN_TIMEOUT_MS = 5_000L
         private const val ISSUE_RUN_AWAIT_TIMEOUT_MS = 60 * 60 * 1_000L
         private const val WORKTREE_BINDING_TIMEOUT_MS = 20_000L
@@ -368,6 +381,20 @@ class DesktopAppService(
     private val companyEventStream = MutableSharedFlow<CompanyEventEnvelope>(replay = 0, extraBufferCapacity = 64)
     private val recentAgentModelDiscoveries = ConcurrentHashMap<String, CachedAgentModels>()
     private val backendJson = Json { ignoreUnknownKeys = true }
+    private val companyAutomationTraceQueue = Channel<CompanyAutomationTraceWriteRequest>(
+        capacity = COMPANY_TRACE_QUEUE_CAPACITY,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    private val companyAutomationTraceWriterJob = serviceScope.launch {
+        for (request in companyAutomationTraceQueue) {
+            when (request) {
+                is CompanyAutomationTraceWriteRequest.Line -> runCatching {
+                    writeCompanyAutomationTraceLine(request.value)
+                }
+                is CompanyAutomationTraceWriteRequest.Flush -> request.ack.complete(Unit)
+            }
+        }
+    }
     private val skillActionExecutionService = ActionExecutionService(
         actionStore = ActionStore { stateStore.appHome() },
         durableRuntimeService = durableRuntimeService,
@@ -556,6 +583,20 @@ class DesktopAppService(
         "agentModelDiscoveries" to recentAgentModelDiscoveries.size,
         "browserSkillPrewarmJob" to if (browserSkillPrewarmJob?.isActive == true) 1 else 0
     )
+
+    internal fun ensureCompanyRuntimeLoopForTesting(companyId: String) {
+        ensureCompanyRuntimeLoop(companyId)
+    }
+
+    internal suspend fun flushCompanyAutomationTraceForTesting() {
+        val ack = CompletableDeferred<Unit>()
+        if (!companyAutomationTraceQueue.trySend(CompanyAutomationTraceWriteRequest.Flush(ack)).isSuccess) {
+            return
+        }
+        withTimeoutOrNull(COMPANY_TRACE_FLUSH_TIMEOUT_MS) {
+            ack.await()
+        }
+    }
 
     private fun pruneRuntimeCaches(now: Long = System.currentTimeMillis()) {
         recentCompanyAutomationTraceKeys.entries.removeIf { now - it.value > COMPANY_TRACE_DEDUP_WINDOW_MS }
@@ -3129,20 +3170,16 @@ class DesktopAppService(
         timeoutSeconds: Long
     ): String = withContext(Dispatchers.IO) {
         securityValidator.validateCommand(command)
-        val process = ProcessBuilder(command)
-            .directory(workingDirectory.toFile())
-            .redirectErrorStream(true)
-            .start()
-        val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
-        if (!finished) {
-            process.destroyForcibly()
-            error("${command.joinToString(" ")} timed out after ${timeoutSeconds}s.")
+        val result = runLocalSkillProcess(
+            command = command,
+            workingDirectory = workingDirectory,
+            timeoutSeconds = timeoutSeconds,
+            timeoutMessage = "${command.joinToString(" ")} timed out after ${timeoutSeconds}s."
+        )
+        if (result.exitCode != 0) {
+            error(result.output.ifBlank { "${command.joinToString(" ")} failed with exit ${result.exitCode}." })
         }
-        val output = process.inputStream.bufferedReader().readText()
-        if (process.exitValue() != 0) {
-            error(output.ifBlank { "${command.joinToString(" ")} failed with exit ${process.exitValue()}." })
-        }
-        output
+        result.output
     }
 
     private fun parseSkillChannels(raw: String?): List<String> =
@@ -11248,7 +11285,17 @@ class DesktopAppService(
         val tickMutex = stateMutex.withLock {
             companyRuntimeTickMutexes.getOrPut(companyId) { Mutex() }
         }
-        return tickMutex.withLock {
+        if (!tickMutex.tryLock()) {
+            markRuntimeTickHeartbeat(companyId, "tick-already-running")
+            val locked = withTimeoutOrNull(RUNTIME_TICK_MUTEX_WAIT_TIMEOUT_MS) {
+                tickMutex.lock()
+                true
+            } == true
+            if (!locked) {
+                return runtimeStatus(companyId)
+            }
+        }
+        return try {
             val tickStartedAt = System.currentTimeMillis()
             // A runtime tick is the autonomous "housekeeping plus scheduling" pass for one
             // company. The order matters: first reconcile stale terminal states from prior runs,
@@ -11266,11 +11313,11 @@ class DesktopAppService(
             val initial = stateStore.load()
             val runtime = initial.companyRuntimes.firstOrNull { it.companyId == companyId } ?: CompanyRuntimeSnapshot(companyId = companyId)
             if (runtime.status != CompanyRuntimeStatus.RUNNING) {
-                return@withLock runtimeStatus(companyId)
+                return runtimeStatus(companyId)
             }
             val actions = mutableListOf<String>()
             if (isBudgetExhausted(initial, companyId, runtime)) {
-                return@withLock updateRuntimeAfterTick(companyId, lastAction = "budget-paused")
+                return updateRuntimeAfterTick(companyId, lastAction = "budget-paused")
             }
             runCatching { startCompanyBackend(companyId) }
             if (reopenedInterruptedIssues > 0) {
@@ -11540,6 +11587,8 @@ class DesktopAppService(
                 companyId,
                 lastAction = effectiveLastAction
             )
+        } finally {
+            tickMutex.unlock()
         }
     }
 
@@ -14942,8 +14991,8 @@ class DesktopAppService(
             .timeout(java.time.Duration.ofSeconds(2))
             .GET()
             .build()
-        val response = localModelHttpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-        response.body().takeIf { response.statusCode() in 200..299 }
+        val response = localModelHttpClient.sendBoundedText(request, LOCAL_MODEL_DISCOVERY_RESPONSE_LIMIT_CHARS)
+        response.body.takeIf { response.statusCode in 200..299 && !response.truncated }
     }.getOrNull()
 
     private fun discoverOpenCodeModelsCached(): List<String> {
@@ -14956,22 +15005,21 @@ class DesktopAppService(
             return emptyList()
         }
         val models = runCatching {
-            val process = ProcessBuilder(resolveBuiltinExecutableAlias("opencode"), "models")
-                .redirectErrorStream(true)
-                .start()
-            val finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                emptyList()
-            } else if (process.exitValue() != 0) {
+            val result = runLocalSkillProcess(
+                command = listOf(resolveBuiltinExecutableAlias("opencode"), "models"),
+                workingDirectory = Path.of("").toAbsolutePath().normalize(),
+                timeoutSeconds = 10,
+                timeoutMessage = "opencode models timed out after 10s.",
+                outputLimitChars = 256_000
+            )
+            if (result.exitCode != 0) {
                 emptyList()
             } else {
-                process.inputStream.bufferedReader().useLines { lines ->
-                    lines.map { it.trim() }
-                        .filter(OpenCodeDefaults::isSelectableModel)
-                        .distinct()
-                        .toList()
-                }
+                result.output.lineSequence()
+                    .map { it.trim() }
+                    .filter(OpenCodeDefaults::isSelectableModel)
+                    .distinct()
+                    .toList()
             }
         }.getOrDefault(emptyList())
         recentAgentModelDiscoveries["opencode"] = CachedAgentModels(now, models)
@@ -23231,9 +23279,6 @@ class DesktopAppService(
             if (event.oldStatus == event.newStatus) {
                 return@runCatching
             }
-            val runtimeDir = stateStore.appHome().resolve("runtime").resolve("backend")
-            Files.createDirectories(runtimeDir)
-            val logFile = runtimeDir.resolve("company-automation-trace.log")
             val dedupKey = buildString {
                 append(event.companyId)
                 append('|')
@@ -23255,6 +23300,16 @@ class DesktopAppService(
             if (previousTimestamp != null && now - previousTimestamp < COMPANY_TRACE_DEDUP_WINDOW_MS) {
                 return@runCatching
             }
+            val line = backendJson.encodeToString(CompanyAutomationTraceEvent.serializer(), event) + "\n"
+            companyAutomationTraceQueue.trySend(CompanyAutomationTraceWriteRequest.Line(line))
+        }
+    }
+
+    private fun writeCompanyAutomationTraceLine(line: String) {
+        val runtimeDir = stateStore.appHome().resolve("runtime").resolve("backend")
+        Files.createDirectories(runtimeDir)
+        val logFile = runtimeDir.resolve("company-automation-trace.log")
+        runCatching {
             if (Files.exists(logFile) && Files.size(logFile) >= COMPANY_TRACE_ROTATE_BYTES) {
                 Files.move(
                     logFile,
@@ -23262,7 +23317,6 @@ class DesktopAppService(
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING
                 )
             }
-            val line = backendJson.encodeToString(CompanyAutomationTraceEvent.serializer(), event) + "\n"
             Files.writeString(
                 logFile,
                 line,
@@ -23273,69 +23327,82 @@ class DesktopAppService(
     }
 
     private fun ensureCompanyRuntimeLoop(companyId: String) {
-        if (companyRuntimeJobs[companyId]?.isActive == true) {
+        val existingJob = companyRuntimeJobs[companyId]
+        if (existingJob?.isActive == true) {
             return
         }
-        companyRuntimeJobs[companyId] = serviceScope.launch {
+        if (existingJob != null) {
+            companyRuntimeJobs.remove(companyId, existingJob)
+        }
+        val job = serviceScope.launch {
+            val activeJob = requireNotNull(coroutineContext[Job])
             var consecutiveFailures = 0
             val maxConsecutiveFailures = 5
             val wakeSignal = runtimeWakeSignal(companyId)
             var firstTick = true
-            while (isActive) {
-                val runtime = runtimeStatus(companyId)
-                val preTickState = stateStore.load()
-                val hasActiveWork = hasActiveCompanyTasks(preTickState, companyId)
-                val tickDelay = if (hasActiveWork) {
-                    15_000L
-                } else {
-                    runtime.adaptiveTickMs.coerceIn(15_000L, 120_000L)
-                }
-                if (firstTick) {
-                    firstTick = false
-                } else {
-                    withTimeoutOrNull(tickDelay) {
-                        wakeSignal.first()
+            try {
+                while (isActive) {
+                    val runtime = runtimeStatus(companyId)
+                    val preTickState = stateStore.load()
+                    val hasActiveWork = hasActiveCompanyTasks(preTickState, companyId)
+                    val tickDelay = if (hasActiveWork) {
+                        15_000L
+                    } else {
+                        runtime.adaptiveTickMs.coerceIn(15_000L, 120_000L)
                     }
-                }
-                try {
-                    if (runtimeStatus(companyId).status != CompanyRuntimeStatus.RUNNING) {
+                    if (firstTick) {
+                        firstTick = false
+                    } else {
+                        withTimeoutOrNull(tickDelay) {
+                            wakeSignal.first()
+                        }
+                    }
+                    try {
+                        if (runtimeStatus(companyId).status != CompanyRuntimeStatus.RUNNING) {
+                            break
+                        }
+                        val snapshot = runCompanyRuntimeTick(companyId)
+                        consecutiveFailures = 0
+                        val postTickState = stateStore.load()
+                        val hasActiveWorkAfterTick = hasActiveCompanyTasks(postTickState, companyId)
+                        // Adaptive tick: speed up when there's work, slow down when idle
+                        val wasProductive = snapshot.lastAction?.let {
+                            it != "idle" && !it.startsWith("idle-")
+                        } == true
+                        val nextTickMs = when {
+                            hasActiveWorkAfterTick -> 15_000L
+                            wasProductive -> 15_000L
+                            else -> (tickDelay + 10_000L).coerceAtMost(120_000L)
+                        }
+                        updateAdaptiveTickMs(companyId, nextTickMs)
+                    } catch (cancelled: CancellationException) {
                         break
+                    } catch (cause: Throwable) {
+                        consecutiveFailures++
+                        val disposition = recordCompanyRuntimeTickFailure(
+                            companyId = companyId,
+                            cause = cause,
+                            consecutiveFailures = consecutiveFailures,
+                            maxConsecutiveFailures = maxConsecutiveFailures
+                        )
+                        if (consecutiveFailures >= maxConsecutiveFailures) {
+                            break
+                        }
+                        if (disposition.terminal) {
+                            break
+                        }
+                        val backoffMs = (30_000L * (1L shl (consecutiveFailures - 1).coerceAtMost(3))).coerceAtMost(300_000L)
+                        updateAdaptiveTickMs(companyId, backoffMs)
+                        delay(backoffMs)
                     }
-                    val snapshot = runCompanyRuntimeTick(companyId)
-                    consecutiveFailures = 0
-                    val postTickState = stateStore.load()
-                    val hasActiveWorkAfterTick = hasActiveCompanyTasks(postTickState, companyId)
-                    // Adaptive tick: speed up when there's work, slow down when idle
-                    val wasProductive = snapshot.lastAction?.let {
-                        it != "idle" && !it.startsWith("idle-")
-                    } == true
-                    val nextTickMs = when {
-                        hasActiveWorkAfterTick -> 15_000L
-                        wasProductive -> 15_000L
-                        else -> (tickDelay + 10_000L).coerceAtMost(120_000L)
-                    }
-                    updateAdaptiveTickMs(companyId, nextTickMs)
-                } catch (cancelled: CancellationException) {
-                    break
-                } catch (cause: Throwable) {
-                    consecutiveFailures++
-                    val disposition = recordCompanyRuntimeTickFailure(
-                        companyId = companyId,
-                        cause = cause,
-                        consecutiveFailures = consecutiveFailures,
-                        maxConsecutiveFailures = maxConsecutiveFailures
-                    )
-                    if (consecutiveFailures >= maxConsecutiveFailures) {
-                        break
-                    }
-                    if (disposition.terminal) {
-                        break
-                    }
-                    val backoffMs = (30_000L * (1L shl (consecutiveFailures - 1).coerceAtMost(3))).coerceAtMost(300_000L)
-                    updateAdaptiveTickMs(companyId, backoffMs)
-                    delay(backoffMs)
                 }
+            } finally {
+                companyRuntimeJobs.remove(companyId, activeJob)
             }
+        }
+        companyRuntimeJobs[companyId] = job
+        if (job.isCompleted) {
+            companyRuntimeJobs.remove(companyId, job)
         }
     }
 

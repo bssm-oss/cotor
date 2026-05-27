@@ -6,7 +6,18 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
+import java.net.URI
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
 import java.util.UUID
+
+private const val MAX_A2A_ARTIFACT_KIND_CHARS = 64
+private const val MAX_A2A_ARTIFACT_LABEL_CHARS = 512
+private const val MAX_A2A_ARTIFACT_URL_CHARS = 2_048
+private const val MAX_A2A_ARTIFACT_PATH_CHARS = 4_096
+private const val MAX_A2A_ARTIFACT_REF_CHARS = 128
+private val A2A_ARTIFACT_KIND_REGEX = Regex("[a-z][a-z0-9._-]{0,63}")
+private val A2A_ARTIFACT_REF_REGEX = Regex("[A-Za-z0-9._:/@-]{1,128}")
 
 class A2aRouter(
     private val desktopService: DesktopAppService,
@@ -37,27 +48,28 @@ class A2aRouter(
     }
 
     suspend fun postMessage(envelope: A2aEnvelope, now: Long = System.currentTimeMillis()): A2aAckResponse {
-        validateEnvelope(envelope, now)
-        validateSenderTenant(envelope, now)
+        val normalizedEnvelope = envelope.normalizedForRouting()
+        validateEnvelope(normalizedEnvelope, now)
+        validateSenderTenant(normalizedEnvelope, now)
         val freshAck = A2aAck(
-            messageId = envelope.id,
+            messageId = normalizedEnvelope.id,
             dedupeStatus = "accepted",
             serverTs = now
         )
-        val dedupeScope = "${envelope.tenant.companyId}:${envelope.dedupeKey}"
+        val dedupeScope = "${normalizedEnvelope.tenant.companyId}:${normalizedEnvelope.dedupeKey}"
         val (accepted, ack) = dedupeStore.remember(dedupeScope, freshAck)
         if (!accepted) {
             return A2aAckResponse(
                 ack = ack.copy(dedupeStatus = "already_processed")
             )
         }
-        if (envelope.type == "sync.snapshot.request") {
-            enqueueSnapshotResponse(envelope, now)
+        if (normalizedEnvelope.type == "sync.snapshot.request") {
+            enqueueSnapshotResponse(normalizedEnvelope, now)
             return A2aAckResponse(ack = ack)
         }
-        persistInternalMessage(envelope)
-        recipientsFor(envelope).forEach { session ->
-            sessionStore.enqueue(session.id, envelope, now)
+        persistInternalMessage(normalizedEnvelope)
+        recipientsFor(normalizedEnvelope).forEach { session ->
+            sessionStore.enqueue(session.id, normalizedEnvelope, now)
         }
         return A2aAckResponse(ack = ack)
     }
@@ -95,16 +107,17 @@ class A2aRouter(
     }
 
     fun registerArtifact(request: A2aArtifactRegistrationRequest, now: Long = System.currentTimeMillis()): A2aArtifactRegistrationResponse {
+        val tenant = normalizeArtifactTenant(request.tenant)
         val artifact = A2aArtifactRegistration(
             id = UUID.randomUUID().toString(),
-            tenant = request.tenant,
-            kind = request.kind.trim(),
-            label = request.label.trim(),
-            url = request.url?.trim(),
-            localPath = request.localPath?.trim(),
-            issueId = request.issueId,
-            taskId = request.taskId,
-            runId = request.runId,
+            tenant = tenant,
+            kind = normalizeArtifactKind(request.kind),
+            label = normalizeArtifactLabel(request.label),
+            url = normalizeArtifactUrl(request.url),
+            localPath = normalizeArtifactLocalPath(request.localPath),
+            issueId = normalizeArtifactReference(request.issueId, "issueId"),
+            taskId = normalizeArtifactReference(request.taskId, "taskId"),
+            runId = normalizeArtifactReference(request.runId, "runId"),
             createdAt = now
         )
         artifactStore.append(artifact)
@@ -123,23 +136,88 @@ class A2aRouter(
 
     internal fun artifactCount(): Int = artifactStore.count()
 
+    private fun normalizeArtifactTenant(tenant: A2aTenant): A2aTenant {
+        val companyId = tenant.companyId.trim()
+        require(companyId.isNotBlank()) { "tenant.companyId is required" }
+        require(companyId.length <= MAX_A2A_ARTIFACT_REF_CHARS) { "tenant.companyId is too long" }
+        require(A2A_ARTIFACT_REF_REGEX.matches(companyId)) { "tenant.companyId contains unsupported characters" }
+        return tenant.copy(
+            companyId = companyId,
+            projectContextId = normalizeArtifactReference(tenant.projectContextId, "tenant.projectContextId")
+        )
+    }
+
+    private fun normalizeArtifactKind(kind: String): String {
+        val normalized = kind.trim().lowercase()
+        require(normalized.isNotBlank()) { "kind is required" }
+        require(normalized.length <= MAX_A2A_ARTIFACT_KIND_CHARS) { "kind is too long" }
+        require(A2A_ARTIFACT_KIND_REGEX.matches(normalized)) {
+            "kind must be a lowercase token containing only letters, digits, dot, underscore, or hyphen"
+        }
+        return normalized
+    }
+
+    private fun normalizeArtifactLabel(label: String): String {
+        val normalized = label.trim()
+        require(normalized.isNotBlank()) { "label is required" }
+        require(normalized.length <= MAX_A2A_ARTIFACT_LABEL_CHARS) { "label is too long" }
+        require(!normalized.contains('\u0000')) { "label contains unsupported characters" }
+        return normalized
+    }
+
+    private fun normalizeArtifactUrl(url: String?): String? {
+        val normalized = url?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        require(normalized.length <= MAX_A2A_ARTIFACT_URL_CHARS) { "url is too long" }
+        require(!normalized.contains('\u0000')) { "url contains unsupported characters" }
+        val uri = runCatching { URI(normalized).normalize() }
+            .getOrElse { throw IllegalArgumentException("url must be a valid URI") }
+        val scheme = uri.scheme?.lowercase()
+        require(scheme == "http" || scheme == "https") { "url must use http or https" }
+        require(!uri.host.isNullOrBlank()) { "url must include a host" }
+        require(uri.userInfo == null) { "url must not include credentials" }
+        return uri.toString()
+    }
+
+    private fun normalizeArtifactLocalPath(localPath: String?): String? {
+        val normalized = localPath?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        require(normalized.length <= MAX_A2A_ARTIFACT_PATH_CHARS) { "localPath is too long" }
+        require(!normalized.contains('\u0000')) { "localPath contains unsupported characters" }
+        val path = try {
+            Path.of(normalized).normalize()
+        } catch (_: InvalidPathException) {
+            throw IllegalArgumentException("localPath must be a valid path")
+        }
+        if (!path.isAbsolute) {
+            require(path.none { it.toString() == ".." }) { "localPath must not escape its base directory" }
+        }
+        return path.toString()
+    }
+
+    private fun normalizeArtifactReference(value: String?, label: String): String? {
+        val normalized = value?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        require(normalized.length <= MAX_A2A_ARTIFACT_REF_CHARS) { "$label is too long" }
+        require(A2A_ARTIFACT_REF_REGEX.matches(normalized)) { "$label contains unsupported characters" }
+        return normalized
+    }
+
     private fun validateEnvelope(envelope: A2aEnvelope, now: Long) {
         require(envelope.v == "a2a.v1") { "Unsupported protocol version: ${envelope.v}" }
         require(envelope.id.isNotBlank()) { "message id is required" }
         require(envelope.type in SUPPORTED_MESSAGE_TYPES) { "Unsupported message type: ${envelope.type}" }
         require(envelope.dedupeKey.isNotBlank()) { "dedupeKey is required" }
         require(envelope.ttlMs > 0) { "ttlMs must be positive" }
-        require(envelope.from.agentId.isNotBlank()) { "from.agentId is required" }
-        require(envelope.tenant.companyId.isNotBlank()) { "tenant.companyId is required" }
+        require(envelope.from.agentId.trim().isNotBlank()) { "from.agentId is required" }
+        require(envelope.tenant.companyId.trim().isNotBlank()) { "tenant.companyId is required" }
         if (envelope.ts + envelope.ttlMs < now) {
             error("expired_message")
         }
     }
 
     private fun validateSenderTenant(envelope: A2aEnvelope, now: Long) {
-        val knownSessions = sessionStore.sessionsForAgent(envelope.from.agentId, now)
-        if (knownSessions.isNotEmpty() && knownSessions.none { it.tenant == envelope.tenant }) {
-            throw IllegalArgumentException("from.agentId is not authorized for tenant.companyId ${envelope.tenant.companyId}")
+        val senderAgentId = envelope.from.agentId.trim()
+        val knownSessions = sessionStore.sessionsForAgent(senderAgentId, now)
+        if (knownSessions.none { it.tenant == envelope.tenant }) {
+            throw IllegalArgumentException("from.agentId requires an active session for tenant.companyId ${envelope.tenant.companyId}")
         }
     }
 
@@ -354,3 +432,26 @@ class A2aRouter(
         )
     }
 }
+
+private fun A2aEnvelope.normalizedForRouting(): A2aEnvelope =
+    copy(
+        id = id.trim(),
+        type = type.trim(),
+        tenant = tenant.normalized(),
+        from = from.normalized(),
+        to = to.map { it.normalized() },
+        dedupeKey = dedupeKey.trim()
+    )
+
+private fun A2aTenant.normalized(): A2aTenant =
+    copy(
+        companyId = companyId.trim(),
+        projectContextId = projectContextId?.trim()?.takeIf { it.isNotBlank() }
+    )
+
+private fun A2aParty.normalized(): A2aParty =
+    copy(
+        agentId = agentId.trim(),
+        roleName = roleName?.trim()?.takeIf { it.isNotBlank() },
+        executionAgentName = executionAgentName?.trim()?.takeIf { it.isNotBlank() }
+    )

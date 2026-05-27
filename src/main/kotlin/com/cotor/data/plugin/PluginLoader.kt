@@ -88,27 +88,31 @@ class ReflectionPluginLoader(
     private val pluginCache = ConcurrentHashMap<String, AgentPlugin>()
 
     override fun loadPlugin(pluginClass: String): AgentPlugin {
-        return pluginCache.computeIfAbsent(pluginClass) {
+        val normalizedPluginClass = normalizePluginClassName(pluginClass)
+        return pluginCache.computeIfAbsent(normalizedPluginClass) {
             try {
-                // Reflection keeps the plugin contract simple: adding a plugin only
-                // requires the class to be on the classpath and implement AgentPlugin.
-                val clazz = Class.forName(pluginClass)
+                val classLoader = Thread.currentThread().contextClassLoader
+                    ?: ReflectionPluginLoader::class.java.classLoader
+                val clazz = Class
+                    .forName(normalizedPluginClass, false, classLoader)
+                    .asSubclass(AgentPlugin::class.java)
                 val instance = clazz.getDeclaredConstructor().newInstance()
-
-                if (instance !is AgentPlugin) {
-                    throw PluginLoadException("Class $pluginClass does not implement AgentPlugin")
-                }
 
                 // Plugin discovery is useful during debugging but too noisy for the
                 // embedded desktop TUI, where each extra console line pollutes the
                 // terminal transcript and makes prompt/input flow harder to follow.
-                logger.debug("Loaded plugin: $pluginClass")
+                logger.debug("Loaded plugin: $normalizedPluginClass")
                 instance
             } catch (e: PluginLoadException) {
                 throw e
+            } catch (e: ClassCastException) {
+                throw PluginLoadException("Class $normalizedPluginClass does not implement AgentPlugin", e)
+            } catch (e: LinkageError) {
+                logger.error("Failed to link plugin: $normalizedPluginClass", e)
+                throw PluginLoadException("Cannot load plugin: $normalizedPluginClass", e)
             } catch (e: Exception) {
-                logger.error("Failed to load plugin: $pluginClass", e)
-                throw PluginLoadException("Cannot load plugin: $pluginClass", e)
+                logger.error("Failed to load plugin: $normalizedPluginClass", e)
+                throw PluginLoadException("Cannot load plugin: $normalizedPluginClass", e)
             }
         }
     }
@@ -123,5 +127,18 @@ class ReflectionPluginLoader(
                 pluginCache[plugin::class.java.name] = plugin
             }
         }
+    }
+
+    private fun normalizePluginClassName(pluginClass: String): String {
+        val normalized = pluginClass.trim()
+        if (!normalized.matches(PLUGIN_CLASS_NAME_PATTERN)) {
+            throw PluginLoadException("Invalid plugin class name: $pluginClass")
+        }
+        return normalized
+    }
+
+    private companion object {
+        private val PLUGIN_CLASS_NAME_PATTERN =
+            Regex("""[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*""")
     }
 }

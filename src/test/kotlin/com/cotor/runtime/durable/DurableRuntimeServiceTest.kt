@@ -10,6 +10,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -232,6 +233,107 @@ class DurableRuntimeServiceTest : FunSpec({
         val snapshot = service.inspectRun("parallel-run")!!
         snapshot.checkpoints shouldHaveSize 20
         snapshot.checkpoints.map { it.ordinal }.sorted() shouldBe (1..20).toList()
+    }
+
+    test("stage outputs are compacted before durable persistence") {
+        val runtimeDir = Files.createTempDirectory("durable-runtime-output-compaction")
+        val service = DurableRuntimeService(runtimeStore = DurableRuntimeStore(runtimeDir))
+        val pipeline = Pipeline(
+            name = "large-output-pipeline",
+            stages = listOf(PipelineStage(id = "stage-1"))
+        )
+        val context = PipelineContext(
+            pipelineId = "large-output-run",
+            pipelineName = pipeline.name,
+            totalStages = pipeline.stages.size
+        )
+        DurableRuntimeFlags.enable(context)
+        service.beginPipelineRun(pipeline, context)
+
+        service.recordStageCompleted(
+            context = context,
+            stage = pipeline.stages.first(),
+            result = com.cotor.model.AgentResult(
+                agentName = "codex",
+                isSuccess = true,
+                output = "o".repeat(120_000),
+                error = null,
+                duration = 10,
+                metadata = emptyMap()
+            )
+        )
+
+        val output = service.inspectRun("large-output-run")!!.latestCompletedCheckpoint!!.output!!
+        (output.length < 120_000) shouldBe true
+        output shouldContain "[cotor durable runtime compacted 20000 chars]"
+    }
+
+    test("listRunSummaries reads compact index without decoding full snapshots") {
+        val runtimeDir = Files.createTempDirectory("durable-runtime-summary-index")
+        val store = DurableRuntimeStore(runtimeDir)
+        store.saveRun(
+            DurableRunSnapshot(
+                runId = "indexed-run",
+                pipelineName = "indexed-pipeline",
+                status = DurableRunStatus.WAITING_FOR_APPROVAL,
+                createdAt = 1L,
+                updatedAt = 3L,
+                checkpoints = listOf(
+                    CheckpointNode(
+                        ordinal = 1,
+                        stageId = "stage-1",
+                        state = CheckpointNodeState.COMPLETED,
+                        output = "o".repeat(20_000),
+                        createdAt = 1L,
+                        metadata = mapOf("companyId" to "company-1")
+                    )
+                ),
+                sideEffects = listOf(
+                    SideEffectRecord(
+                        kind = SideEffectKind.HTTP_REQUEST,
+                        label = "http://localhost",
+                        replaySafe = true,
+                        approvalRequiredOnReplay = false,
+                        createdAt = 2L,
+                        metadata = mapOf("companyId" to "company-2")
+                    )
+                ),
+                approvalPauses = listOf(
+                    ApprovalPauseState(
+                        id = "pause-pending",
+                        sideEffectId = "side-effect-1",
+                        label = "approval",
+                        status = ApprovalPauseStatus.PENDING,
+                        reason = "approval needed",
+                        requestedAt = 2L
+                    ),
+                    ApprovalPauseState(
+                        id = "pause-approved",
+                        sideEffectId = "side-effect-2",
+                        label = "approved",
+                        status = ApprovalPauseStatus.APPROVED,
+                        reason = "already approved",
+                        requestedAt = 2L,
+                        decidedAt = 3L
+                    )
+                )
+            )
+        )
+
+        val summary = store.listRunSummaries().single()
+
+        summary.runId shouldBe "indexed-run"
+        summary.checkpointCount shouldBe 1
+        summary.pendingApprovalCount shouldBe 1
+        summary.companyIds shouldBe listOf("company-1", "company-2")
+
+        val runPath = runtimeDir.resolve("runs").resolve("indexed-run.json")
+        val originalModifiedAt = Files.getLastModifiedTime(runPath)
+        Files.writeString(runPath, "{not-json")
+        Files.setLastModifiedTime(runPath, originalModifiedAt)
+
+        store.listRunSummaries().single().runId shouldBe "indexed-run"
+        store.loadRun("indexed-run") shouldBe null
     }
 
     test("fork copies pending approval state into paused fork snapshot") {

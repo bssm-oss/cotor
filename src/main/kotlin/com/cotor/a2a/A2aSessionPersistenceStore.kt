@@ -8,7 +8,6 @@ import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 class A2aSessionPersistenceStore(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() }
@@ -40,7 +39,7 @@ class A2aSessionPersistenceStore(
         synchronized(lock) {
             val root = dir()
             root.createDirectories()
-            file().writeText(json.encodeToString(Snapshot.serializer(), snapshot))
+            writeA2aTextAtomically(file(), json.encodeToString(Snapshot.serializer(), snapshot))
         }
     }
 }

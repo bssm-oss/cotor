@@ -35,6 +35,8 @@ internal data class DesktopInstallLayout(
     val desktopBundle: Path? = null
 )
 
+internal typealias HomebrewCommandRunner = (List<String>) -> DesktopScriptResult
+
 internal fun detectDesktopInstallLayout(
     environment: Map<String, String> = System.getenv(),
     cwd: Path = Paths.get("").toAbsolutePath().normalize(),
@@ -77,7 +79,8 @@ internal fun runPackagedDesktopAction(
     environment: Map<String, String> = System.getenv(),
     homeDirectoryProvider: () -> Path = {
         desktopInstallHomeDirectory(environment)
-    }
+    },
+    homebrewRunner: HomebrewCommandRunner = ::runHomebrewCommand
 ): DesktopScriptResult {
     val desktopBundle = layout.desktopBundle ?: layout.root.resolve("desktop").resolve(BUNDLED_DESKTOP_APP_NAME)
     if (!desktopBundle.isDirectory()) {
@@ -107,11 +110,7 @@ internal fun runPackagedDesktopAction(
             }
 
             DesktopInstallAction.UPDATE -> {
-                val tapBootstrap = runHomebrewCommand(
-                    "tap",
-                    COTOR_BREW_TAP,
-                    COTOR_BREW_TAP_URL
-                )
+                val tapBootstrap = homebrewRunner(listOf("tap", COTOR_BREW_TAP, COTOR_BREW_TAP_URL))
                 if (tapBootstrap.exitCode != 0) {
                     return DesktopScriptResult(
                         exitCode = tapBootstrap.exitCode,
@@ -122,16 +121,12 @@ internal fun runPackagedDesktopAction(
                     )
                 }
 
-                val brewUpgrade = ProcessBuilder("brew", "upgrade", COTOR_BREW_FORMULA)
-                    .redirectErrorStream(true)
-                    .start()
+                val brewUpgrade = homebrewRunner(listOf("upgrade", COTOR_BREW_FORMULA))
+                val upgradeOutput = brewUpgrade.output
 
-                val upgradeOutput = brewUpgrade.inputStream.bufferedReader().use { it.readText() }
-                val upgradeExitCode = brewUpgrade.waitFor()
-
-                if (upgradeExitCode != 0) {
+                if (brewUpgrade.exitCode != 0) {
                     return DesktopScriptResult(
-                        exitCode = upgradeExitCode,
+                        exitCode = brewUpgrade.exitCode,
                         output = buildString {
                             appendLine("❌ Failed to upgrade Cotor via Homebrew.")
                             appendLine(upgradeOutput)
@@ -217,14 +212,15 @@ internal fun runPackagedDesktopAction(
     }
 }
 
-private fun runHomebrewCommand(vararg args: String): DesktopScriptResult {
-    val process = ProcessBuilder(listOf("brew") + args)
-        .redirectErrorStream(true)
-        .start()
-    val output = process.inputStream.bufferedReader().use { it.readText() }
-    val exitCode = process.waitFor()
-    return DesktopScriptResult(exitCode = exitCode, output = output)
-}
+private fun runHomebrewCommand(args: List<String>): DesktopScriptResult =
+    runDesktopCommand(
+        command = listOf("brew") + args,
+        timeoutSeconds = DESKTOP_LIFECYCLE_COMMAND_TIMEOUT_SECONDS,
+        outputLimitChars = DESKTOP_LIFECYCLE_OUTPUT_LIMIT_CHARS,
+        timeoutMessage = { effectiveTimeout ->
+            "Homebrew command timed out after ${effectiveTimeout}s: brew ${args.joinToString(" ")}"
+        }
+    )
 
 internal fun resolveDesktopInstallRoot(
     environment: Map<String, String> = System.getenv(),

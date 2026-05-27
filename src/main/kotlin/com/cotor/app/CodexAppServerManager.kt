@@ -8,6 +8,7 @@ package com.cotor.app
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
+import com.cotor.data.process.destroyProcessTree
 import com.cotor.data.process.resolveExecutablePath
 import java.net.HttpURLConnection
 import java.net.ServerSocket
@@ -175,10 +176,7 @@ class CodexAppServerManager {
     fun stop(companyId: String) {
         synchronized(this) {
             val managed = processes.remove(companyId) ?: return
-            managed.process.destroy()
-            if (managed.process.isAlive) {
-                managed.process.destroyForcibly()
-            }
+            destroyProcessTree(managed.process)
             managed.logDir?.let { logDir ->
                 runCatching {
                     Files.walk(logDir).sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }

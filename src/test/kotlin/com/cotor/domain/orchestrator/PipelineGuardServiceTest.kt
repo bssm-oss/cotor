@@ -52,4 +52,23 @@ class PipelineGuardServiceTest : FunSpec({
         guarded.metadata["failureCategory"] shouldBe "VALIDATION_FAILED"
         guarded.error shouldContain "Pipeline guard blocked"
     }
+
+    test("samples oversized output while preserving omitted-middle security checks") {
+        val guarded = service.apply(
+            stage = PipelineStage(id = "draft"),
+            result = AgentResult(
+                agentName = "worker",
+                isSuccess = true,
+                output = "a".repeat(110_000) + "\nsecret = \"sk-middle-secret\"\n" + "b".repeat(110_000),
+                error = null,
+                duration = 10,
+                metadata = emptyMap()
+            ),
+            context = context
+        )
+
+        guarded.isSuccess.shouldBeFalse()
+        guarded.metadata["pipelineGuardFindings"] shouldContain "GUARD_SCAN_TRUNCATED"
+        guarded.metadata["pipelineGuardFindings"] shouldContain "HARDCODED_SECRET"
+    }
 })

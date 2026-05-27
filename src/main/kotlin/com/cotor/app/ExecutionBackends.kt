@@ -9,6 +9,7 @@ package com.cotor.app
  */
 
 import com.cotor.data.http.CotorHttpClients
+import com.cotor.data.http.sendBoundedText
 import com.cotor.domain.executor.AgentExecutor
 import com.cotor.model.AgentConfig
 import com.cotor.model.AgentExecutionMetadata
@@ -20,7 +21,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.URI
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
+
+private const val CODEX_APP_SERVER_HEALTH_RESPONSE_LIMIT_CHARS = 64_000
+private const val CODEX_APP_SERVER_EXECUTION_RESPONSE_LIMIT_CHARS = 2_000_000
+private const val CODEX_APP_SERVER_ERROR_BODY_LIMIT_CHARS = 4_000
 
 data class ExecutionBackendRequest(
     val agent: AgentConfig,
@@ -122,13 +126,13 @@ class CodexAppServerBackend(
             val request = requestBuilder(baseUrl + config.healthCheckPath, config)
                 .GET()
                 .build()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-            val healthy = response.statusCode() in 200..299
+            val response = client.sendBoundedText(request, CODEX_APP_SERVER_HEALTH_RESPONSE_LIMIT_CHARS)
+            val healthy = response.statusCode in 200..299
             ExecutionBackendStatus(
                 kind = kind,
                 displayName = displayName,
                 health = if (healthy) "healthy" else "degraded",
-                message = if (healthy) "Connected to Codex app server." else "Health check returned HTTP ${response.statusCode()}",
+                message = if (healthy) "Connected to Codex app server." else "Health check returned HTTP ${response.statusCode}",
                 lifecycleState = if (config.launchMode == BackendLaunchMode.MANAGED) BackendLifecycleState.RUNNING else BackendLifecycleState.ATTACHED,
                 managed = config.launchMode == BackendLaunchMode.MANAGED,
                 port = config.port,
@@ -181,24 +185,35 @@ class CodexAppServerBackend(
                 workingDirectory = request.metadata.workingDirectory?.toString()
             )
             val body = json.encodeToString(RemoteExecutionRequest.serializer(), payload)
-            val response = client.send(
+            val response = client.sendBoundedText(
                 requestBuilder("$baseUrl/execute", config)
                     .header(HttpHeaders.ContentType, "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build(),
-                HttpResponse.BodyHandlers.ofString()
+                CODEX_APP_SERVER_EXECUTION_RESPONSE_LIMIT_CHARS
             )
-            if (response.statusCode() !in 200..299) {
+            if (response.statusCode !in 200..299) {
                 return@runCatching AgentResult(
                     agentName = request.agent.name,
                     isSuccess = false,
                     output = null,
-                    error = "Codex app server returned HTTP ${response.statusCode()}: ${response.body()}",
+                    error = "Codex app server returned HTTP ${response.statusCode}: " +
+                        response.diagnosticBody().take(CODEX_APP_SERVER_ERROR_BODY_LIMIT_CHARS),
                     duration = 0,
                     metadata = mapOf("backend" to kind.name)
                 )
             }
-            val decoded = json.decodeFromString(RemoteExecutionResponse.serializer(), response.body())
+            if (response.truncated) {
+                return@runCatching AgentResult(
+                    agentName = request.agent.name,
+                    isSuccess = false,
+                    output = null,
+                    error = "Codex app server response exceeded $CODEX_APP_SERVER_EXECUTION_RESPONSE_LIMIT_CHARS characters.",
+                    duration = 0,
+                    metadata = mapOf("backend" to kind.name)
+                )
+            }
+            val decoded = json.decodeFromString(RemoteExecutionResponse.serializer(), response.body)
             AgentResult(
                 agentName = request.agent.name,
                 isSuccess = decoded.success,

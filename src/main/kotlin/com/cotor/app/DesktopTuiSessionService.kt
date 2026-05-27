@@ -10,8 +10,10 @@ package com.cotor.app
 
 import com.cotor.data.config.ConfigRepository
 import com.cotor.data.config.YamlParser
+import com.cotor.data.process.destroyProcessTree
 import com.cotor.model.AgentConfig
 import com.cotor.model.CotorConfig
+import com.cotor.storage.writeTextAtomically
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,11 +32,9 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.setPosixFilePermissions
-import kotlin.io.path.writeText
 
 /**
  * Manages long-lived interactive TUI sessions for the native desktop shell.
@@ -47,10 +47,12 @@ class DesktopTuiSessionService(
     private val stateStore: DesktopStateStore,
     private val configRepository: ConfigRepository,
     private val yamlParser: YamlParser,
-    private val logger: Logger
+    private val logger: Logger,
+    private val ptyBridgeExecutable: String = "/usr/bin/python3"
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sessions = ConcurrentHashMap<String, RuntimeSession>()
+    private val failedSessions = ConcurrentHashMap<String, TuiSession>()
     private val workspaceSessions = ConcurrentHashMap<String, String>()
 
     suspend fun openSession(workspaceId: String, preferredAgent: String? = null): TuiSession {
@@ -59,8 +61,12 @@ class DesktopTuiSessionService(
             if (existing != null && existing.process.isAlive && shouldReuse(existing.session, preferredAgent)) {
                 return existing.snapshot()
             }
+            val failed = failedSessions.remove(existingId)
+            if (failed != null) {
+                workspaceSessions.remove(workspaceId, existingId)
+            }
             if (existing != null) {
-                runCatching { existing.process.destroy() }
+                destroyProcessTree(existing.process, graceMillis = 1_500)
                 sessions.remove(existingId)
                 workspaceSessions.remove(workspaceId, existingId)
             }
@@ -80,7 +86,6 @@ class DesktopTuiSessionService(
             repositoryRoot = Path.of(repository.localPath),
             preferredAgent = preferredAgent
         )
-        val isolatedConfigPath = writeIsolatedConfig(runtimeRoot, selectedAgent)
         val session = TuiSession(
             id = UUID.randomUUID().toString(),
             workspaceId = workspace.id,
@@ -93,17 +98,28 @@ class DesktopTuiSessionService(
             createdAt = now,
             updatedAt = now
         )
+        val isolatedConfigPath = runCatching {
+            writeIsolatedConfig(runtimeRoot, selectedAgent)
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            return rememberFailedTuiSession(session, listOf("desktop-tui-config"), error)
+        }
 
-        val ptyBridgePath = materializePtyBridge(runtimeRoot)
-        val process = ProcessBuilder(
-            buildPtyCommand(
-                bridgePath = ptyBridgePath,
-                configPath = isolatedConfigPath,
-                activeAgent = selectedAgent.name,
-                sessionHome = sessionHome,
-                transcriptDir = transcriptDir
-            )
+        val ptyBridgePath = runCatching {
+            materializePtyBridge(runtimeRoot)
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            return rememberFailedTuiSession(session, listOf("desktop-tui-pty-bridge"), error)
+        }
+        val ptyCommand = buildPtyCommand(
+            bridgePath = ptyBridgePath,
+            configPath = isolatedConfigPath,
+            activeAgent = selectedAgent.name,
+            sessionHome = sessionHome,
+            transcriptDir = transcriptDir
         )
+        val process = runCatching {
+            ProcessBuilder(ptyCommand)
             .directory(Path.of(repository.localPath).toFile())
             .apply {
                 // Present a real terminal environment so JLine and Mordant can
@@ -116,6 +132,10 @@ class DesktopTuiSessionService(
                 environment()["COTOR_LOG_LEVEL"] = "ERROR"
             }
             .start()
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            return rememberFailedTuiSession(session, ptyCommand, error)
+        }
 
         val runtime = RuntimeSession(
             session = session.copy(processId = process.pid(), status = TuiSessionStatus.RUNNING),
@@ -134,21 +154,25 @@ class DesktopTuiSessionService(
     }
 
     suspend fun getSession(sessionId: String): TuiSession {
-        val session = sessions[sessionId] ?: throw IllegalArgumentException("TUI session not found: $sessionId")
-        return session.snapshot()
+        sessions[sessionId]?.let { return it.snapshot() }
+        failedSessions[sessionId]?.let { return it }
+        throw IllegalArgumentException("TUI session not found: $sessionId")
     }
 
     suspend fun listSessions(): List<TuiSession> =
-        sessions.values
-            .map { it.snapshot() }
+        (sessions.values.map { it.snapshot() } + failedSessions.values)
             .sortedByDescending { it.updatedAt }
 
     suspend fun getDelta(sessionId: String, offset: Long): TuiSessionDelta {
-        val session = sessions[sessionId] ?: throw IllegalArgumentException("TUI session not found: $sessionId")
-        return session.delta(offset)
+        sessions[sessionId]?.let { return it.delta(offset) }
+        failedSessions[sessionId]?.let { return failedSessionDelta(it, offset) }
+        throw IllegalArgumentException("TUI session not found: $sessionId")
     }
 
     suspend fun sendInput(sessionId: String, input: String): TuiSession {
+        failedSessions[sessionId]?.let {
+            throw IllegalStateException("TUI session failed to start")
+        }
         val session = sessions[sessionId] ?: throw IllegalArgumentException("TUI session not found: $sessionId")
         if (!session.process.isAlive) {
             throw IllegalStateException("TUI session is no longer running")
@@ -167,6 +191,10 @@ class DesktopTuiSessionService(
     }
 
     suspend fun terminateSession(sessionId: String): TuiSession {
+        failedSessions.remove(sessionId)?.let { failed ->
+            workspaceSessions.remove(failed.workspaceId, sessionId)
+            return failed
+        }
         val session = sessions[sessionId] ?: throw IllegalArgumentException("TUI session not found: $sessionId")
         terminateRuntimeSession(session)
         val exitCode = runCatching { session.process.exitValue() }.getOrDefault(0)
@@ -179,6 +207,7 @@ class DesktopTuiSessionService(
     fun shutdown() {
         val activeSessions = sessions.values.toList()
         sessions.clear()
+        failedSessions.clear()
         workspaceSessions.clear()
         activeSessions.forEach(::terminateRuntimeSession)
         scope.cancel()
@@ -244,11 +273,7 @@ class DesktopTuiSessionService(
 
         val process = session.process
         if (process.isAlive) {
-            process.destroy()
-            if (!runCatching { process.waitFor(1500, TimeUnit.MILLISECONDS) }.getOrDefault(false)) {
-                process.destroyForcibly()
-                runCatching { process.waitFor(1500, TimeUnit.MILLISECONDS) }
-            }
+            destroyProcessTree(process, graceMillis = 1_500)
         }
     }
 
@@ -262,7 +287,7 @@ class DesktopTuiSessionService(
         // The desktop shell needs a true PTY master, not a buffered wrapper.
         // A tiny Python bridge keeps keypresses and ANSI redraws much closer to
         // the raw terminal semantics expected by JLine.
-        return listOf("/usr/bin/python3", bridgePath.toString(), "--") + buildCommand(
+        return listOf(ptyBridgeExecutable, bridgePath.toString(), "--") + buildCommand(
             configPath = configPath,
             activeAgent = activeAgent,
             sessionHome = sessionHome,
@@ -410,7 +435,7 @@ class DesktopTuiSessionService(
             pipelines = emptyList()
         )
         val configPath = runtimeRoot.resolve("desktop-tui.yaml")
-        configPath.writeText(yamlParser.serialize(isolatedConfig))
+        writeTextAtomically(configPath, yamlParser.serialize(isolatedConfig))
         return configPath
     }
 
@@ -441,6 +466,50 @@ class DesktopTuiSessionService(
     private fun shouldReuse(session: TuiSession, preferredAgent: String?): Boolean {
         val requested = preferredAgent?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return true
         return session.agentName.equals(requested, ignoreCase = true)
+    }
+
+    private fun rememberFailedTuiSession(session: TuiSession, command: List<String>, error: Throwable): TuiSession {
+        val failed = failedTuiSession(session, command, error)
+        failedSessions[failed.id] = failed
+        workspaceSessions[failed.workspaceId] = failed.id
+        logger.warn("Failed to start desktop TUI session {}", failed.id, error)
+        return failed
+    }
+
+    private fun failedTuiSession(session: TuiSession, command: List<String>, error: Throwable): TuiSession {
+        val now = System.currentTimeMillis()
+        val executable = command.firstOrNull().orEmpty()
+        val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.simpleName.orEmpty()
+        val transcript = buildString {
+            appendLine("Cotor desktop TUI failed to start.")
+            appendLine("Command: $executable")
+            append("Reason: $detail")
+        }
+        return session.copy(
+            status = TuiSessionStatus.FAILED,
+            transcript = transcript,
+            transcriptStartOffset = 0,
+            transcriptEndOffset = transcript.length.toLong(),
+            exitCode = if (detail.contains("Permission denied", ignoreCase = true)) 126 else 127,
+            updatedAt = now
+        )
+    }
+
+    private fun failedSessionDelta(session: TuiSession, offset: Long): TuiSessionDelta {
+        val endOffset = session.transcriptEndOffset
+        val startOffset = session.transcriptStartOffset
+        val mustReset = offset < startOffset || offset > endOffset
+        val effectiveOffset = if (mustReset) startOffset else offset
+        val relativeStart = (effectiveOffset - startOffset).toInt().coerceAtLeast(0)
+        return TuiSessionDelta(
+            sessionId = session.id,
+            status = session.status,
+            offset = effectiveOffset,
+            nextOffset = endOffset,
+            reset = mustReset,
+            chunk = session.transcript.substring(relativeStart),
+            exitCode = session.exitCode
+        )
     }
 
     private class RuntimeSession(

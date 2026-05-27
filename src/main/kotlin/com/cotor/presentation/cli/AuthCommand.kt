@@ -1,5 +1,6 @@
 package com.cotor.presentation.cli
 
+import com.cotor.data.process.destroyProcessTree
 import com.cotor.data.process.resolveExecutablePath
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.subcommands
@@ -71,20 +72,33 @@ private class CodexOAuthLoginCommand : CodexOAuthBaseCommand(
             ?: error("codex executable not found in PATH")
         val home = oauthHome()
         home.createDirectories()
-        val process = ProcessBuilder(codex, "login")
-            .directory(home.toFile())
-            .inheritIO()
-            .apply {
-                environment()["CODEX_HOME"] = home.toString()
-            }
-            .start()
-        val exitCode = process.waitFor()
+        val exitCode = runCodexOAuthLoginProcess(codex, home)
         if (exitCode != 0) {
             error("codex login failed with exit code $exitCode")
         }
         echo("Codex OAuth login completed.")
         echo("home: $home")
         echo("authFile: ${authFile()}")
+    }
+}
+
+internal fun runCodexOAuthLoginProcess(codex: String, home: Path): Int {
+    val process = ProcessBuilder(codex, "login")
+        .directory(home.toFile())
+        .inheritIO()
+        .apply {
+            environment()["CODEX_HOME"] = home.toString()
+        }
+        .start()
+    return try {
+        process.waitFor()
+    } catch (_: InterruptedException) {
+        destroyProcessTree(process)
+        runCatching { process.inputStream.close() }
+        runCatching { process.errorStream.close() }
+        runCatching { process.outputStream.close() }
+        Thread.currentThread().interrupt()
+        130
     }
 }
 

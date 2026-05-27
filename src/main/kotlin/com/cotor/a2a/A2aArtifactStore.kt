@@ -7,7 +7,6 @@ import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readText
-import kotlin.io.path.writeText
 
 class A2aArtifactStore(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() },
@@ -58,6 +57,6 @@ class A2aArtifactStore(
     private fun persist(artifacts: List<A2aArtifactRegistration>) {
         val root = dir()
         root.createDirectories()
-        file().writeText(json.encodeToString(ListSerializer(A2aArtifactRegistration.serializer()), artifacts))
+        writeA2aTextAtomically(file(), json.encodeToString(ListSerializer(A2aArtifactRegistration.serializer()), artifacts))
     }
 }

@@ -24,18 +24,40 @@ data class PipelineGuardResult(
         get() = findings.filter { it.severity == PipelineGuardSeverity.BLOCKING }
 }
 
+private const val MAX_PIPELINE_GUARD_SCAN_CHARS = 200_000
+private const val MAX_SECRET_ASSIGNMENT_WINDOWS_PER_KEYWORD = 2_048
+private const val SECRET_ASSIGNMENT_WINDOW_CHARS = 256
+
+private data class GuardTextSample(
+    val text: String,
+    val truncated: Boolean
+)
+
+private val secretAssignmentKeywords = listOf("apiKey", "api_key", "api-key", "secret", "password", "token")
+private val hardcodedSecretPattern = Regex("""(?i)(api[_-]?key|secret|password|token)\s*=\s*["'][^"']{8,}["']""")
+
 class PipelineGuardService {
     fun evaluate(
         stage: PipelineStage,
         result: AgentResult,
         context: PipelineContext
     ): PipelineGuardResult {
-        val text = listOfNotNull(result.output, result.error).joinToString("\n")
+        val sample = result.guardTextSample()
+        val text = sample.text
         val lower = text.lowercase()
         val findings = buildList {
+            if (sample.truncated) {
+                add(
+                    PipelineGuardFinding(
+                        code = "GUARD_SCAN_TRUNCATED",
+                        severity = PipelineGuardSeverity.WARNING,
+                        message = "Agent output was sampled before pipeline guard checks because it exceeded $MAX_PIPELINE_GUARD_SCAN_CHARS characters"
+                    )
+                )
+            }
             detectUncertainty(lower)?.let(::add)
             detectFakeData(lower)?.let(::add)
-            detectRiskyPatterns(text)?.let(::add)
+            detectRiskyPatterns(result)?.let(::add)
             detectMissingVerification(stage, result, lower)?.let(::add)
             detectWorktreeHygiene(result, context)?.let(::add)
         }
@@ -94,9 +116,10 @@ class PipelineGuardService {
         )
     }
 
-    private fun detectRiskyPatterns(text: String): PipelineGuardFinding? {
-        val hardcodedSecret = Regex("""(?i)(api[_-]?key|secret|password|token)\s*=\s*["'][^"']{8,}["']""")
-        if (!hardcodedSecret.containsMatchIn(text)) return null
+    private fun detectRiskyPatterns(result: AgentResult): PipelineGuardFinding? {
+        val hasHardcodedSecret = listOfNotNull(result.output, result.error)
+            .any { it.hasHardcodedSecretAssignment() }
+        if (!hasHardcodedSecret) return null
         return PipelineGuardFinding(
             code = "HARDCODED_SECRET",
             severity = PipelineGuardSeverity.BLOCKING,
@@ -135,5 +158,54 @@ class PipelineGuardService {
             )
         }
         return null
+    }
+
+    private fun String.hasHardcodedSecretAssignment(): Boolean {
+        for (keyword in secretAssignmentKeywords) {
+            var startIndex = 0
+            var scannedWindows = 0
+            while (scannedWindows < MAX_SECRET_ASSIGNMENT_WINDOWS_PER_KEYWORD) {
+                val keywordIndex = indexOf(keyword, startIndex = startIndex, ignoreCase = true)
+                if (keywordIndex < 0) break
+
+                val windowEnd = (keywordIndex + SECRET_ASSIGNMENT_WINDOW_CHARS).coerceAtMost(length)
+                if (hardcodedSecretPattern.containsMatchIn(substring(keywordIndex, windowEnd))) {
+                    return true
+                }
+
+                scannedWindows++
+                startIndex = keywordIndex + keyword.length
+            }
+        }
+        return false
+    }
+
+    private fun AgentResult.guardTextSample(): GuardTextSample {
+        val parts = listOfNotNull(output, error)
+        if (parts.isEmpty()) return GuardTextSample("", truncated = false)
+
+        val perPartBudget = (MAX_PIPELINE_GUARD_SCAN_CHARS / parts.size).coerceAtLeast(1)
+        var truncated = false
+        val sampled = parts.joinToString("\n") { part ->
+            val sample = part.sampleForGuardScan(perPartBudget)
+            truncated = truncated || sample.truncated
+            sample.text
+        }
+        return GuardTextSample(sampled, truncated)
+    }
+
+    private fun String.sampleForGuardScan(maxChars: Int): GuardTextSample {
+        if (length <= maxChars) return GuardTextSample(this, truncated = false)
+
+        val marker = "\n[cotor guard scan omitted middle]\n"
+        val bodyBudget = (maxChars - marker.length).coerceAtLeast(0)
+        val headChars = bodyBudget / 2
+        val tailChars = bodyBudget - headChars
+        val sampled = buildString {
+            append(take(headChars))
+            append(marker)
+            append(takeLast(tailChars))
+        }
+        return GuardTextSample(sampled, truncated = true)
     }
 }

@@ -1,16 +1,20 @@
 package com.cotor.app
 
+import com.cotor.storage.writeTextAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.TimeUnit
 import kotlin.io.path.createDirectories
+import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
-import kotlin.io.path.writeText
 
 @Serializable
 data class BrowserSkillCommand(
@@ -37,9 +41,10 @@ interface BrowserSkillRunner {
     suspend fun prewarm() {}
 }
 
-class LocalPlaywrightBrowserSkillRunner(
+class LocalPlaywrightBrowserSkillRunner internal constructor(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() },
-    private val commandAvailability: (String) -> Boolean = ::browserSkillCommandAvailable
+    private val commandAvailability: (String) -> Boolean = ::browserSkillCommandAvailable,
+    private val processRunner: LocalSkillProcessRunner = defaultLocalSkillProcessRunner
 ) : BrowserSkillRunner {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -47,51 +52,72 @@ class LocalPlaywrightBrowserSkillRunner(
     }
 
     override suspend fun execute(command: BrowserSkillCommand): BrowserSkillResult = withContext(Dispatchers.IO) {
+        val runtimeRoot = appHomeProvider()
+            .toAbsolutePath()
+            .normalize()
+            .resolve("runtime")
+        val screenshotPath = requireLocalBrowserRuntimeOutputPath(
+            rawPath = command.screenshotPath,
+            runtimeRoot = runtimeRoot,
+            label = "screenshotPath"
+        )
+        val tracePath = command.tracePath?.let {
+            requireLocalBrowserRuntimeOutputPath(
+                rawPath = it,
+                runtimeRoot = runtimeRoot,
+                label = "tracePath"
+            )
+        }
+        val normalizedCommand = command.copy(
+            screenshotPath = screenshotPath.toString(),
+            stepsJson = sanitizeBrowserSkillStepsJson(
+                stepsJson = command.stepsJson,
+                screenshotPath = screenshotPath.toString(),
+                runtimeRoot = runtimeRoot,
+                json = json
+            ),
+            tracePath = tracePath?.toString(),
+            maxRuntimeSeconds = normalizeLocalBrowserRuntimeSeconds(
+                command.maxRuntimeSeconds,
+                BROWSER_SKILL_MAX_RUNTIME_SECONDS
+            )
+        )
         require(commandAvailability("node") && commandAvailability("npm")) {
             "Browser skill execution requires node and npm so Playwright can run locally."
         }
-        val runtimeDir = appHomeProvider()
-            .resolve("runtime")
+        val runtimeDir = runtimeRoot
             .resolve("browser-skills")
         val inputDir = runtimeDir.resolve("inputs")
         val scriptPath = runtimeDir.resolve("browser-skill-runner.js")
         runtimeDir.createDirectories()
         inputDir.createDirectories()
         // Install phase runs with its own 120s minimum and must not be capped by the run-phase timeout.
-        ensurePlaywrightDependency(runtimeDir, command.maxRuntimeSeconds.coerceAtLeast(15))
-        scriptPath.writeText(browserSkillRunnerScript)
+        ensurePlaywrightDependency(runtimeDir, normalizedCommand.maxRuntimeSeconds)
+        writeTextAtomically(scriptPath, browserSkillRunnerScript)
         val inputPath = Files.createTempFile(inputDir, "browser-skill-command-", ".json")
-        inputPath.writeText(json.encodeToString(BrowserSkillCommand.serializer(), command))
-        withTimeout(command.maxRuntimeSeconds.coerceAtLeast(15) * 1_000L) {
-            var process: Process? = null
-            try {
-                process = ProcessBuilder("node", scriptPath.toString(), inputPath.toString())
-                    .directory(runtimeDir.toFile())
-                    .redirectErrorStream(true)
-                    .also { builder ->
-                        builder.environment()["NODE_PATH"] = runtimeDir.resolve("node_modules").toString()
-                    }
-                    .start()
-                val timeoutSeconds = command.maxRuntimeSeconds.coerceAtLeast(15).toLong()
-                val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-                if (!finished) {
-                    destroyProcessTree(process)
-                    error("Browser skill execution timed out after ${timeoutSeconds}s.")
-                }
-                val output = process.inputStream.bufferedReader().readText().trim()
-                if (process.exitValue() != 0) {
-                    error(output.ifBlank { "Browser skill execution failed with exit ${process.exitValue()}." })
-                }
-                runCatching {
-                    json.decodeFromString(BrowserSkillResult.serializer(), output.lines().last())
-                }.getOrElse { error ->
-                    throw IllegalStateException(
-                        "Browser skill execution did not return a valid result: ${error.message}. Output: $output"
-                    )
-                }
-            } finally {
-                process?.takeIf { it.isAlive }?.let(::destroyProcessTree)
+        try {
+            writeTextAtomically(inputPath, json.encodeToString(BrowserSkillCommand.serializer(), normalizedCommand))
+            val timeoutSeconds = normalizedCommand.maxRuntimeSeconds.toLong()
+            val result = processRunner.run(
+                command = listOf("node", scriptPath.toString(), inputPath.toString()),
+                workingDirectory = runtimeDir,
+                timeoutSeconds = timeoutSeconds,
+                timeoutMessage = "Browser skill execution timed out after ${timeoutSeconds}s.",
+                environment = mapOf("NODE_PATH" to runtimeDir.resolve("node_modules").toString())
+            )
+            val output = result.output.trim()
+            if (result.exitCode != 0) {
+                error(output.ifBlank { "Browser skill execution failed with exit ${result.exitCode}." })
             }
+            runCatching {
+                json.decodeFromString(BrowserSkillResult.serializer(), output.lines().last())
+            }.getOrElse { error ->
+                throw IllegalStateException(
+                    "Browser skill execution did not return a valid result: ${error.message}. Output: $output"
+                )
+            }
+        } finally {
+            inputPath.deleteIfExists()
         }
     }
 
@@ -105,36 +131,33 @@ class LocalPlaywrightBrowserSkillRunner(
         }
     }
 
-    private fun ensurePlaywrightDependency(runtimeDir: Path, timeoutSeconds: Int) {
-        val packageDir = runtimeDir.resolve("node_modules").resolve("playwright")
-        if (packageDir.exists()) {
-            return
-        }
-        val process = ProcessBuilder(
-            "npm",
-            "install",
-            "--silent",
-            "--no-audit",
-            "--no-fund",
-            "--prefix",
-            runtimeDir.toString(),
-            "playwright"
-        )
-            .redirectErrorStream(true)
-            .start()
-        val installTimeoutSeconds = timeoutSeconds.coerceAtLeast(120).toLong()
-        try {
-            val finished = process.waitFor(installTimeoutSeconds, TimeUnit.SECONDS)
-            if (!finished) {
-                destroyProcessTree(process)
-                error("Playwright dependency install timed out after ${installTimeoutSeconds}s.")
+    private suspend fun ensurePlaywrightDependency(runtimeDir: Path, timeoutSeconds: Int) {
+        withLocalSkillRuntimeMutationLock(runtimeDir) {
+            val packageDir = runtimeDir.resolve("node_modules").resolve("playwright")
+            if (packageDir.exists()) {
+                return@withLocalSkillRuntimeMutationLock
             }
-            val output = process.inputStream.bufferedReader().readText().trim()
-            if (process.exitValue() != 0) {
-                error(output.ifBlank { "Playwright dependency install failed with exit ${process.exitValue()}." })
+            val installTimeoutSeconds = timeoutSeconds.coerceAtLeast(120).toLong()
+            val result = processRunner.run(
+                command = listOf(
+                    "npm",
+                    "install",
+                    "--silent",
+                    "--no-audit",
+                    "--no-fund",
+                    "--prefix",
+                    runtimeDir.toString(),
+                    "playwright"
+                ),
+                workingDirectory = runtimeDir,
+                timeoutSeconds = installTimeoutSeconds,
+                timeoutMessage = "Playwright dependency install timed out after ${installTimeoutSeconds}s.",
+                environment = emptyMap()
+            )
+            val output = result.output.trim()
+            if (result.exitCode != 0) {
+                error(output.ifBlank { "Playwright dependency install failed with exit ${result.exitCode}." })
             }
-        } finally {
-            process.takeIf { it.isAlive }?.let(::destroyProcessTree)
         }
     }
 
@@ -186,9 +209,9 @@ class LocalPlaywrightBrowserSkillRunner(
               break;
             }
             case "screenshot":
-              fs.mkdirSync(path.dirname(step.path || input.screenshotPath), { recursive: true });
-              await page.screenshot({ path: step.path || input.screenshotPath, fullPage: true });
-              actions.push(`screenshot ${'$'}{step.path || input.screenshotPath}`);
+              fs.mkdirSync(path.dirname(input.screenshotPath), { recursive: true });
+              await page.screenshot({ path: input.screenshotPath, fullPage: true });
+              actions.push(`screenshot ${'$'}{input.screenshotPath}`);
               break;
           }
         }
@@ -238,13 +261,50 @@ class LocalPlaywrightBrowserSkillRunner(
 }
 
 private fun browserSkillCommandAvailable(command: String): Boolean =
-    runCatching {
-        val process = ProcessBuilder(command, "--version")
-            .redirectErrorStream(true)
-            .start()
-        try {
-            process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0
-        } finally {
-            process.takeIf { it.isAlive }?.let(::destroyProcessTree)
+    localCommandAvailable(command)
+
+internal fun normalizeLocalBrowserRuntimeSeconds(requestedSeconds: Int, maxSeconds: Int): Int =
+    requestedSeconds.coerceIn(LOCAL_BROWSER_MIN_RUNTIME_SECONDS, maxSeconds.coerceAtLeast(LOCAL_BROWSER_MIN_RUNTIME_SECONDS))
+
+internal fun requireLocalBrowserRuntimeOutputPath(rawPath: String, runtimeRoot: Path, label: String): Path {
+    val normalizedRoot = runtimeRoot.toAbsolutePath().normalize()
+    val normalizedPath = Path.of(rawPath).toAbsolutePath().normalize()
+    require(normalizedPath.startsWith(normalizedRoot)) {
+        "$label must stay under Cotor runtime directory: $normalizedRoot"
+    }
+    return normalizedPath
+}
+
+internal fun sanitizeBrowserSkillStepsJson(
+    stepsJson: String?,
+    screenshotPath: String,
+    runtimeRoot: Path,
+    json: Json = Json { ignoreUnknownKeys = true }
+): String? {
+    val raw = stepsJson?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    val parsed = json.parseToJsonElement(raw)
+    require(parsed is JsonArray) { "stepsJson must be a JSON array." }
+    val sanitizedSteps = parsed.mapIndexed { index, step ->
+        require(step is JsonObject) { "stepsJson[$index] must be a JSON object." }
+        val type = step["type"]?.jsonPrimitive?.contentOrNull?.trim()
+        if (type != "screenshot") {
+            step
+        } else {
+            step["path"]?.jsonPrimitive?.contentOrNull
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let {
+                    requireLocalBrowserRuntimeOutputPath(
+                        rawPath = it,
+                        runtimeRoot = runtimeRoot,
+                        label = "stepsJson[$index].path"
+                    )
+                }
+            JsonObject(step + ("path" to JsonPrimitive(screenshotPath)))
         }
-    }.getOrDefault(false)
+    }
+    return JsonArray(sanitizedSteps).toString()
+}
+
+private const val LOCAL_BROWSER_MIN_RUNTIME_SECONDS = 15
+private const val BROWSER_SKILL_MAX_RUNTIME_SECONDS = 300

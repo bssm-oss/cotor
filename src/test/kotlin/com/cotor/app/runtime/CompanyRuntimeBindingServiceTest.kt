@@ -86,6 +86,61 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.runtime.pendingIssueIds shouldContain issueId
     }
 
+    test("bind scopes runtime attention ids to the requested company") {
+        val appHome = Files.createTempDirectory("company-runtime-company-scope")
+        val companyId = "company-current"
+        val otherCompanyId = "company-other"
+        val issueId = "issue-current"
+        val otherIssueId = "issue-other"
+        val otherReviewId = "review-other"
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))),
+            actionStore = ActionStore { appHome },
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(
+                    testCompany(companyId),
+                    testCompany(otherCompanyId)
+                ),
+                issues = listOf(
+                    runtimeDispositionIssue(
+                        issueId = issueId,
+                        companyId = companyId,
+                        status = IssueStatus.BACKLOG
+                    ),
+                    runtimeDispositionIssue(
+                        issueId = otherIssueId,
+                        companyId = otherCompanyId,
+                        status = IssueStatus.BACKLOG
+                    ).copy(runtimeDisposition = CompanyIssueReadiness.RUNNABLE)
+                ),
+                reviewQueue = listOf(
+                    ReviewQueueItem(
+                        id = otherReviewId,
+                        companyId = otherCompanyId,
+                        issueId = otherIssueId,
+                        runId = "other-run",
+                        status = ReviewQueueStatus.FAILED_CHECKS,
+                        runtimeDisposition = CompanyIssueReadiness.WAITING_FOR_CI,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.runtime.pendingIssueIds shouldContain issueId
+        bound.runtime.pendingIssueIds shouldNotContain otherIssueId
+        bound.runtime.blockedIssueIds shouldNotContain otherIssueId
+        bound.runtime.reviewQueueAttentionIds shouldNotContain otherReviewId
+    }
+
     test("bind adds resumable and approval state from durable runs and provider snapshots") {
         val appHome = Files.createTempDirectory("company-runtime-binding")
         val runStore = DurableRuntimeStore(appHome.resolve("runtime"))
@@ -263,6 +318,60 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.runtime.blockedIssueIds shouldContain issueId
     }
 
+    test("bind uses action summaries for policy blocked counts without decoding full action logs") {
+        val appHome = Files.createTempDirectory("company-runtime-action-summary")
+        val companyId = "company-action-summary"
+        val runId = "action-summary-run"
+        val actionStore = ActionStore { appHome }
+        actionStore.append(
+            runId,
+            ActionExecutionRecord(
+                id = "action-blocked",
+                runId = runId,
+                request = ActionRequest(
+                    kind = ActionKind.GIT_PUBLISH,
+                    label = "git.publish:blocked",
+                    scope = ActionScope.COMPANY,
+                    subject = ActionSubject(runId = runId, companyId = companyId)
+                ),
+                status = ActionStatus.DENIED,
+                createdAt = 1L,
+                updatedAt = 2L
+            )
+        )
+        val actionPath = appHome.resolve("runtime").resolve("actions").resolve("$runId.json")
+        val originalModifiedAt = Files.getLastModifiedTime(actionPath)
+        Files.writeString(actionPath, "{not-json")
+        Files.setLastModifiedTime(actionPath, originalModifiedAt)
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))),
+            actionStore = actionStore,
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(
+                    Company(
+                        id = companyId,
+                        name = "Action Summary",
+                        rootPath = ".",
+                        repositoryId = "repo-action-summary",
+                        defaultBaseBranch = "main",
+                        backendKind = ExecutionBackendKind.LOCAL_COTOR,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.runtime.blockedByPolicyCount shouldBe 1
+    }
+
     test("bind falls back to pipeline id when issue durable run id is missing") {
         val appHome = Files.createTempDirectory("company-runtime-pipeline-fallback")
         val runStore = DurableRuntimeStore(appHome.resolve("runtime"))
@@ -320,6 +429,59 @@ class CompanyRuntimeBindingServiceTest : FunSpec({
         bound.issues.single().durableRunId shouldBe "actual-run-id"
         bound.issues.single().runtimeDisposition shouldBe "QUARANTINED"
         bound.runtime.blockedIssueIds shouldContain issueId
+    }
+
+    test("bind finds company durable runs from indexed checkpoint metadata") {
+        val appHome = Files.createTempDirectory("company-runtime-indexed-metadata")
+        val runStore = DurableRuntimeStore(appHome.resolve("runtime"))
+        val companyId = "company-indexed-metadata"
+        val runId = "indexed-company-run"
+        runStore.saveRun(
+            DurableRunSnapshot(
+                runId = runId,
+                pipelineName = "unbound-pipeline",
+                status = DurableRunStatus.WAITING_FOR_APPROVAL,
+                createdAt = 1L,
+                updatedAt = 2L,
+                checkpoints = listOf(
+                    CheckpointNode(
+                        ordinal = 1,
+                        stageId = "company-agent-execution",
+                        state = CheckpointNodeState.COMPLETED,
+                        createdAt = 1L,
+                        metadata = mapOf("companyId" to companyId)
+                    )
+                )
+            )
+        )
+        val service = CompanyRuntimeBindingService(
+            durableRuntimeService = DurableRuntimeService(runtimeStore = runStore),
+            actionStore = ActionStore { appHome },
+            policyEngine = PolicyEngine(PolicyStore { appHome }),
+            gitHubControlPlaneService = GitHubControlPlaneService(store = GitHubControlPlaneStore { appHome })
+        )
+
+        val bound = service.bind(
+            state = DesktopAppState(
+                companies = listOf(
+                    Company(
+                        id = companyId,
+                        name = "Indexed Metadata",
+                        rootPath = ".",
+                        repositoryId = "repo-indexed-metadata",
+                        defaultBaseBranch = "main",
+                        backendKind = ExecutionBackendKind.LOCAL_COTOR,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                )
+            ),
+            companyId = companyId,
+            runtime = CompanyRuntimeSnapshot(companyId = companyId, status = CompanyRuntimeStatus.RUNNING)
+        )
+
+        bound.runtime.pendingApprovalRunIds shouldContain runId
+        bound.runtime.waitingApprovalCount shouldBe 1
     }
 
     test("bind marks backlog issues runnable") {

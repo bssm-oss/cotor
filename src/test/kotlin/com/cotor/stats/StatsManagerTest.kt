@@ -16,6 +16,9 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import java.nio.file.Files
 import java.time.Instant
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class StatsManagerTest : FunSpec({
 
@@ -70,5 +73,73 @@ class StatsManagerTest : FunSpec({
 
         manager.clearStats("pipeline-a") shouldBe true
         manager.loadStats("pipeline-a").shouldBeNull()
+    }
+
+    test("recordExecution preserves concurrent writes for the same pipeline") {
+        val dir = Files.createTempDirectory("stats-concurrency-test")
+        val manager = StatsManager(dir.toString())
+        val executor = Executors.newFixedThreadPool(8)
+        val start = CountDownLatch(1)
+        val done = CountDownLatch(20)
+
+        try {
+            repeat(20) {
+                executor.submit {
+                    start.await(5, TimeUnit.SECONDS)
+                    manager.recordExecution(
+                        pipelineName = "pipeline-a",
+                        result = AggregatedResult(
+                            totalAgents = 1,
+                            successCount = 1,
+                            failureCount = 0,
+                            totalDuration = 100,
+                            results = emptyList(),
+                            aggregatedOutput = "done",
+                            timestamp = Instant.now()
+                        ),
+                        stages = emptyList()
+                    )
+                    done.countDown()
+                }
+            }
+
+            start.countDown()
+            done.await(10, TimeUnit.SECONDS) shouldBe true
+            manager.loadStats("pipeline-a")?.totalExecutions shouldBe 20
+        } finally {
+            executor.shutdownNow()
+            executor.awaitTermination(5, TimeUnit.SECONDS)
+        }
+    }
+
+    test("recordExecution caps stored execution history while preserving cumulative totals") {
+        val dir = Files.createTempDirectory("stats-retention-test")
+        val manager = StatsManager(dir.toString(), maxStoredExecutions = 3)
+
+        repeat(5) { index ->
+            manager.recordExecution(
+                pipelineName = "pipeline-a",
+                result = AggregatedResult(
+                    totalAgents = 1,
+                    successCount = 1,
+                    failureCount = 0,
+                    totalDuration = (index + 1) * 100L,
+                    results = emptyList(),
+                    aggregatedOutput = "done",
+                    timestamp = Instant.now()
+                ),
+                stages = listOf(StageExecution("stage-$index", 10, ExecutionStatus.SUCCESS, 0))
+            )
+        }
+
+        val stats = manager.loadStats("pipeline-a")
+        stats.shouldNotBeNull()
+        stats.totalExecutions shouldBe 5
+        stats.totalSuccesses shouldBe 5
+        stats.executions.size shouldBe 3
+        stats.executions.map { it.totalDuration } shouldBe listOf(300L, 400L, 500L)
+
+        val history = manager.getExecutionHistory("pipeline-a", 10)
+        history.map { it.totalDuration } shouldBe listOf(300L, 400L, 500L)
     }
 })

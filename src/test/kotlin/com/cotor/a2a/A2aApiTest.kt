@@ -5,6 +5,7 @@ import com.cotor.app.AgentRunStatus
 import com.cotor.app.DesktopAppService
 import com.cotor.app.DesktopTuiSessionService
 import com.cotor.app.cotorAppModule
+import io.ktor.client.HttpClient
 import io.kotest.core.annotation.Isolate
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -13,6 +14,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -81,6 +83,33 @@ class A2aApiTest : FunSpec({
         }
     )
 
+    suspend fun HttpClient.openSenderSession(envelope: A2aEnvelope) {
+        val response = post("/api/a2a/v1/sessions") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+            contentType(ContentType.Application.Json)
+            setBody(
+                json.encodeToString(
+                    A2aHelloRequest(
+                        agentId = envelope.from.agentId,
+                        roleName = envelope.from.roleName,
+                        executionAgentName = envelope.from.executionAgentName,
+                        tenant = envelope.tenant
+                    )
+                )
+            )
+        }
+        response.status shouldBe HttpStatusCode.OK
+    }
+
+    suspend fun HttpClient.postA2aMessage(envelope: A2aEnvelope): HttpResponse {
+        openSenderSession(envelope)
+        return post("/api/a2a/v1/messages") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+            contentType(ContentType.Application.Json)
+            setBody(json.encodeToString(envelope))
+        }
+    }
+
     test("auth missing returns unauthorized") {
         testApplication {
             application {
@@ -137,19 +166,11 @@ class A2aApiTest : FunSpec({
             }
             hello.status shouldBe HttpStatusCode.OK
 
-            val first = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope()))
-            }
+            val first = client.postA2aMessage(envelope())
             first.status shouldBe HttpStatusCode.OK
             first.bodyAsText() shouldContain "\"dedupeStatus\":\"accepted\""
 
-            val second = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope()))
-            }
+            val second = client.postA2aMessage(envelope())
             second.status shouldBe HttpStatusCode.OK
             second.bodyAsText() shouldContain "\"dedupeStatus\":\"already_processed\""
         }
@@ -174,21 +195,35 @@ class A2aApiTest : FunSpec({
                 tenant = A2aTenant(companyId = "company-2")
             )
 
-            val first = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(firstCompanyEnvelope))
-            }
-            val second = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(secondCompanyEnvelope))
-            }
+            val first = client.postA2aMessage(firstCompanyEnvelope)
+            val second = client.postA2aMessage(secondCompanyEnvelope)
 
             first.status shouldBe HttpStatusCode.OK
             second.status shouldBe HttpStatusCode.OK
             first.bodyAsText() shouldContain "\"dedupeStatus\":\"accepted\""
             second.bodyAsText() shouldContain "\"dedupeStatus\":\"accepted\""
+        }
+    }
+
+    test("message sender must have an active session for the message tenant") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/a2a/v1/messages") {
+                header(HttpHeaders.Authorization, "Bearer secret-token")
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(envelope(dedupeKey = "missing-sender-session")))
+            }
+
+            response.status shouldBe HttpStatusCode.BadRequest
+            response.bodyAsText() shouldContain "requires an active session for tenant.companyId company-1"
+            coVerify(exactly = 0) { desktopService.ingestA2aTaskAssignment(any(), any(), any(), any(), any(), any(), any()) }
         }
     }
 
@@ -220,7 +255,7 @@ class A2aApiTest : FunSpec({
             }
 
             response.status shouldBe HttpStatusCode.BadRequest
-            response.bodyAsText() shouldContain "not authorized for tenant.companyId company-2"
+            response.bodyAsText() shouldContain "requires an active session for tenant.companyId company-2"
             coVerify(exactly = 0) { desktopService.ingestA2aTaskAssignment(any(), any(), any(), any(), any(), any(), any()) }
         }
     }
@@ -244,11 +279,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(assignment))
-            }
+            val response = client.postA2aMessage(assignment)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -260,6 +291,63 @@ class A2aApiTest : FunSpec({
                     content = "Take ownership of the issue and report back with a handoff if blocked.",
                     issueId = "issue-1",
                     goalId = "goal-1"
+                )
+            }
+        }
+    }
+
+    test("message routing normalizes sender and tenant before authorization and ingestion") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val sessionResponse = client.post("/api/a2a/v1/sessions") {
+                header(HttpHeaders.Authorization, "Bearer secret-token")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    json.encodeToString(
+                        A2aHelloRequest(
+                            agentId = "agent-ceo",
+                            roleName = "CEO",
+                            tenant = A2aTenant(companyId = "company-1")
+                        )
+                    )
+                )
+            }
+            sessionResponse.status shouldBe HttpStatusCode.OK
+            val assignment = envelope(dedupeKey = " normalized-key ", type = " task.assign ").copy(
+                id = " normalized-message ",
+                tenant = A2aTenant(companyId = " company-1 "),
+                from = A2aParty(agentId = " agent-ceo ", roleName = " CEO "),
+                to = listOf(A2aParty(agentId = "agent-builder", roleName = "Builder")),
+                body = buildJsonObject {
+                    put("title", "Normalize envelope")
+                    put("message", "Route with canonical sender and tenant values.")
+                }
+            )
+
+            val response = client.post("/api/a2a/v1/messages") {
+                header(HttpHeaders.Authorization, "Bearer secret-token")
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(assignment))
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "normalized-message"
+            coVerify(exactly = 1) {
+                desktopService.ingestA2aTaskAssignment(
+                    companyId = "company-1",
+                    fromAgentName = "CEO",
+                    toAgentName = "Builder",
+                    title = "Normalize envelope",
+                    content = "Route with canonical sender and tenant values.",
+                    issueId = null,
+                    goalId = null
                 )
             }
         }
@@ -283,11 +371,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(accepted))
-            }
+            val response = client.postA2aMessage(accepted)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -350,11 +434,7 @@ class A2aApiTest : FunSpec({
             hello.status shouldBe HttpStatusCode.OK
             val sessionId = hello.bodyAsText().substringAfter("\"sessionId\":\"").substringBefore('"')
 
-            val sent = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "ack-key")))
-            }
+            val sent = client.postA2aMessage(envelope(dedupeKey = "ack-key"))
             sent.status shouldBe HttpStatusCode.OK
 
             val firstPull = client.get("/api/a2a/v1/messages/pull?session_id=$sessionId") {
@@ -481,11 +561,7 @@ class A2aApiTest : FunSpec({
                 )
             }
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(ttlMs = 1, ts = 1)))
-            }
+            val response = client.postA2aMessage(envelope(ttlMs = 1, ts = 1))
 
             response.status shouldBe HttpStatusCode.BadRequest
             response.bodyAsText() shouldContain "\"code\":\"expired_message\""
@@ -510,16 +586,8 @@ class A2aApiTest : FunSpec({
             hello.status shouldBe HttpStatusCode.OK
             val sessionId = hello.bodyAsText().substringAfter("\"sessionId\":\"").substringBefore('"')
 
-            client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "k1", type = "message.note")))
-            }
-            client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "k2", type = "message.handoff", ts = System.currentTimeMillis() + 1)))
-            }
+            client.postA2aMessage(envelope(dedupeKey = "k1", type = "message.note"))
+            client.postA2aMessage(envelope(dedupeKey = "k2", type = "message.handoff", ts = System.currentTimeMillis() + 1))
 
             val firstPull = client.get("/api/a2a/v1/messages/pull?session_id=$sessionId&limit=10") {
                 header(HttpHeaders.Authorization, "Bearer secret-token")
@@ -556,16 +624,8 @@ class A2aApiTest : FunSpec({
             hello.status shouldBe HttpStatusCode.OK
             val sessionId = hello.bodyAsText().substringAfter("\"sessionId\":\"").substringBefore('"')
 
-            client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "k3", type = "message.note", ts = System.currentTimeMillis() + 2)))
-            }
-            client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "k4", type = "message.handoff", ts = System.currentTimeMillis() + 3)))
-            }
+            client.postA2aMessage(envelope(dedupeKey = "k3", type = "message.note", ts = System.currentTimeMillis() + 2))
+            client.postA2aMessage(envelope(dedupeKey = "k4", type = "message.handoff", ts = System.currentTimeMillis() + 3))
 
             val skippedPull = client.get("/api/a2a/v1/messages/pull?session_id=$sessionId&after=1&limit=10") {
                 header(HttpHeaders.Authorization, "Bearer secret-token")
@@ -591,11 +651,7 @@ class A2aApiTest : FunSpec({
                 )
             }
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(type = "unknown.type", dedupeKey = "unknown-key")))
-            }
+            val response = client.postA2aMessage(envelope(type = "unknown.type", dedupeKey = "unknown-key"))
 
             response.status shouldBe HttpStatusCode.BadRequest
             response.bodyAsText() shouldContain "\"code\":\"unsupported_type\""
@@ -757,6 +813,89 @@ class A2aApiTest : FunSpec({
         }
     }
 
+    test("artifact registration validates link schemes and bounded fields") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val invalidUrl = client.post("/api/a2a/v1/artifacts") {
+                header(HttpHeaders.Authorization, "Bearer secret-token")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    json.encodeToString(
+                        A2aArtifactRegistrationRequest(
+                            tenant = A2aTenant(companyId = "company-1"),
+                            kind = "log",
+                            label = "bad-url",
+                            url = "javascript:alert(1)"
+                        )
+                    )
+                )
+            }
+            invalidUrl.status shouldBe HttpStatusCode.BadRequest
+            invalidUrl.bodyAsText() shouldContain "url must use http or https"
+
+            val longLabel = client.post("/api/a2a/v1/artifacts") {
+                header(HttpHeaders.Authorization, "Bearer secret-token")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    json.encodeToString(
+                        A2aArtifactRegistrationRequest(
+                            tenant = A2aTenant(companyId = "company-1"),
+                            kind = "log",
+                            label = "x".repeat(513)
+                        )
+                    )
+                )
+            }
+            longLabel.status shouldBe HttpStatusCode.BadRequest
+            longLabel.bodyAsText() shouldContain "label is too long"
+        }
+    }
+
+    test("artifact registration normalizes safe values without touching local files") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.post("/api/a2a/v1/artifacts") {
+                header(HttpHeaders.Authorization, "Bearer secret-token")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    json.encodeToString(
+                        A2aArtifactRegistrationRequest(
+                            tenant = A2aTenant(companyId = " company-1 "),
+                            kind = "LOG",
+                            label = "  build log  ",
+                            url = "https://example.com/a/../log.txt",
+                            localPath = "reports/../logs/build.txt",
+                            issueId = " issue-1 "
+                        )
+                    )
+                )
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            val body = response.bodyAsText()
+            body shouldContain "\"companyId\":\"company-1\""
+            body shouldContain "\"kind\":\"log\""
+            body shouldContain "\"label\":\"build log\""
+            body shouldContain "\"url\":\"https://example.com/log.txt\""
+            body shouldContain "\"localPath\":\"logs/build.txt\""
+            body shouldContain "\"issueId\":\"issue-1\""
+        }
+    }
+
     test("message.note is mirrored through canonical note ingestion") {
         testApplication {
             application {
@@ -767,11 +906,7 @@ class A2aApiTest : FunSpec({
                 )
             }
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "note-key", type = "message.note")))
-            }
+            val response = client.postA2aMessage(envelope(dedupeKey = "note-key", type = "message.note"))
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -806,11 +941,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(warningEnvelope))
-            }
+            val response = client.postA2aMessage(warningEnvelope)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -836,11 +967,7 @@ class A2aApiTest : FunSpec({
                 )
             }
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "handoff-key", type = "message.handoff")))
-            }
+            val response = client.postA2aMessage(envelope(dedupeKey = "handoff-key", type = "message.handoff"))
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -867,11 +994,7 @@ class A2aApiTest : FunSpec({
                 )
             }
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(envelope(dedupeKey = "escalation-key", type = "message.escalation")))
-            }
+            val response = client.postA2aMessage(envelope(dedupeKey = "escalation-key", type = "message.escalation"))
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -907,11 +1030,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(feedbackEnvelope))
-            }
+            val response = client.postA2aMessage(feedbackEnvelope)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -948,11 +1067,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(reviewVerdict))
-            }
+            val response = client.postA2aMessage(reviewVerdict)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -987,11 +1102,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(reviewVerdict))
-            }
+            val response = client.postA2aMessage(reviewVerdict)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -1023,11 +1134,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(reviewVerdict))
-            }
+            val response = client.postA2aMessage(reviewVerdict)
 
             response.status shouldBe HttpStatusCode.BadRequest
             response.bodyAsText() shouldContain "review.verdict requires correlation.reviewQueueItemId or body.queueItemId"
@@ -1054,11 +1161,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(reviewRequest))
-            }
+            val response = client.postA2aMessage(reviewRequest)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -1088,11 +1191,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(reviewRequest))
-            }
+            val response = client.postA2aMessage(reviewRequest)
 
             response.status shouldBe HttpStatusCode.BadRequest
             response.bodyAsText() shouldContain "review.request requires correlation.issueId or body.issueId"
@@ -1145,11 +1244,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(runUpdate))
-            }
+            val response = client.postA2aMessage(runUpdate)
 
             response.status shouldBe HttpStatusCode.OK
             coVerify(exactly = 1) {
@@ -1182,11 +1277,7 @@ class A2aApiTest : FunSpec({
                 }
             )
 
-            val response = client.post("/api/a2a/v1/messages") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                contentType(ContentType.Application.Json)
-                setBody(json.encodeToString(runUpdate))
-            }
+            val response = client.postA2aMessage(runUpdate)
 
             response.status shouldBe HttpStatusCode.BadRequest
             response.bodyAsText() shouldContain "run.update requires correlation.runId or body.runId"

@@ -14,7 +14,9 @@ import com.cotor.data.config.CotorProperties
 import com.cotor.provenance.EvidenceBundle
 import com.cotor.runtime.durable.DurableResumeCoordinator
 import com.cotor.runtime.durable.DurableRunSnapshot
+import com.cotor.runtime.durable.DurableRunSummary
 import com.cotor.runtime.durable.DurableRuntimeService
+import com.cotor.storage.writeTextAtomically
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
@@ -74,7 +76,6 @@ import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.createDirectories
-import kotlin.io.path.writeText
 
 /**
  * Lightweight localhost-only API used by the native macOS shell.
@@ -250,7 +251,10 @@ internal class DesktopAppServerInstanceGuard(
                 appHome = appHome.toString(),
                 startedAt = System.currentTimeMillis()
             )
-            metadataPath.writeText(json.encodeToString(DesktopAppServerInstanceMetadata.serializer(), metadata))
+            writeTextAtomically(
+                metadataPath,
+                json.encodeToString(DesktopAppServerInstanceMetadata.serializer(), metadata)
+            )
             channel = openedChannel
             lock = openedLock
             record = currentRecord
@@ -864,6 +868,11 @@ internal fun Application.cotorAppModule(
                 get("/runs") {
                     if (!requireToken(token)) return@get
                     call.respond(durableRuntimeService?.listRuns().orEmpty())
+                }
+
+                get("/run-summaries") {
+                    if (!requireToken(token)) return@get
+                    call.respond(durableRuntimeService?.listRunSummaries().orEmpty())
                 }
 
                 get("/runs/{runId}") {
@@ -2596,6 +2605,13 @@ private suspend fun handleMcpRequest(
                                 put("annotations", buildJsonObject { put("readOnlyHint", JsonPrimitive(true)) })
                             }
                         )
+                        add(
+                            buildJsonObject {
+                                put("uri", JsonPrimitive("cotor://durable-run-summaries"))
+                                put("name", JsonPrimitive("Durable Run Summaries"))
+                                put("annotations", buildJsonObject { put("readOnlyHint", JsonPrimitive(true)) })
+                            }
+                        )
                     }
                 )
             }
@@ -2614,6 +2630,10 @@ private suspend fun handleMcpRequest(
                 "cotor://durable-runs" -> mcpJson.encodeToString(
                     ListSerializer(DurableRunSnapshot.serializer()),
                     durableRuntimeService?.listRuns() ?: emptyList()
+                )
+                "cotor://durable-run-summaries" -> mcpJson.encodeToString(
+                    ListSerializer(DurableRunSummary.serializer()),
+                    durableRuntimeService?.listRunSummaries() ?: emptyList()
                 )
                 else -> return mcpError(id, -32602, "Unsupported resource: $uri")
             }

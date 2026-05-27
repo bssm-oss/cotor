@@ -141,6 +141,24 @@ data class DurableRunSnapshot(
 }
 
 @Serializable
+data class DurableRunSummary(
+    val runId: String,
+    val pipelineName: String,
+    val configPath: String? = null,
+    val replayMode: ReplayMode = ReplayMode.LIVE,
+    val sourceRunId: String? = null,
+    val sourceCheckpointId: String? = null,
+    val status: DurableRunStatus = DurableRunStatus.RUNNING,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val completedAt: Long? = null,
+    val importedLegacyCheckpoint: Boolean = false,
+    val checkpointCount: Int = 0,
+    val pendingApprovalCount: Int = 0,
+    val companyIds: List<String> = emptyList()
+)
+
+@Serializable
 data class DurableExecutionPlan(
     val runId: String,
     val replayMode: ReplayMode,

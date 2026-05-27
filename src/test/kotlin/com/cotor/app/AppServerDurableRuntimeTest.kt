@@ -6,6 +6,7 @@ import com.cotor.runtime.durable.DurableExecutionPlan
 import com.cotor.runtime.durable.DurableResumeCoordinator
 import com.cotor.runtime.durable.DurableRunSnapshot
 import com.cotor.runtime.durable.DurableRunStatus
+import com.cotor.runtime.durable.DurableRunSummary
 import com.cotor.runtime.durable.DurableRuntimeService
 import com.cotor.runtime.durable.ReplayMode
 import io.kotest.core.spec.style.FunSpec
@@ -46,9 +47,19 @@ class AppServerDurableRuntimeTest : FunSpec({
             )
         )
     )
+    val sampleSummary = DurableRunSummary(
+        runId = "run-1",
+        pipelineName = "sample",
+        replayMode = ReplayMode.LIVE,
+        status = DurableRunStatus.RUNNING,
+        createdAt = 1L,
+        updatedAt = 1L,
+        checkpointCount = 1
+    )
 
     test("durable runtime routes list and inspect runs") {
         every { durableRuntimeService.listRuns() } returns listOf(sampleRun)
+        every { durableRuntimeService.listRunSummaries() } returns listOf(sampleSummary)
         every { durableRuntimeService.inspectRun("run-1") } returns sampleRun
 
         testApplication {
@@ -67,6 +78,12 @@ class AppServerDurableRuntimeTest : FunSpec({
             }
             listResponse.status shouldBe HttpStatusCode.OK
             listResponse.bodyAsText().contains("run-1") shouldBe true
+
+            val summaryResponse = client.get("/api/app/durable-runtime/run-summaries") {
+                header("Authorization", "Bearer secret-token")
+            }
+            summaryResponse.status shouldBe HttpStatusCode.OK
+            summaryResponse.bodyAsText().contains("\"checkpointCount\":1") shouldBe true
 
             val inspectResponse = client.get("/api/app/durable-runtime/runs/run-1") {
                 header("Authorization", "Bearer secret-token")

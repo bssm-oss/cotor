@@ -9,6 +9,7 @@ package com.cotor.data.plugin
  */
 
 import com.cotor.data.http.CotorHttpClients
+import com.cotor.data.http.sendBoundedText
 import com.cotor.data.process.ProcessManager
 import com.cotor.model.*
 import com.cotor.security.NetworkEndpointPolicy
@@ -24,8 +25,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
+
+private const val OPENAI_RESPONSE_BODY_LIMIT_CHARS = 2_000_000
+private const val OPENAI_DIAGNOSTIC_BODY_LIMIT_CHARS = 4_000
 
 /**
  * OpenAI API plugin.
@@ -145,12 +148,15 @@ class OpenAIPlugin : AgentPlugin {
             .POST(HttpRequest.BodyPublishers.ofString(requestBody))
             .build()
 
-        val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-        val status = response.statusCode()
-        val body = response.body()
+        val response = http.sendBoundedText(request, OPENAI_RESPONSE_BODY_LIMIT_CHARS)
+        val status = response.statusCode
+        val body = response.body
 
         if (status !in 200..299) {
-            throw AgentExecutionException("OpenAI API failed: HTTP $status: ${body.take(1000)}")
+            throw AgentExecutionException("OpenAI API failed: HTTP $status: ${response.diagnosticBody().take(OPENAI_DIAGNOSTIC_BODY_LIMIT_CHARS)}")
+        }
+        if (response.truncated) {
+            throw AgentExecutionException("OpenAI API response exceeded $OPENAI_RESPONSE_BODY_LIMIT_CHARS characters")
         }
 
         val content = extractContent(body)

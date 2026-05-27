@@ -30,6 +30,8 @@ This first version is intentionally internal-only:
 - standardizes internal A2A envelopes
 - supports dedupe via `dedupeKey`
 - provides per-session inbox delivery and FIFO pull
+- requires the posting `from.agentId` to have an active session for the same tenant before `/messages` accepts an envelope
+- canonicalizes routing fields on ingress by trimming message id/type, `dedupeKey`, tenant ids, and party names
 - keeps pulled messages available until the client explicitly acknowledges a cursor with `/messages/ack`
 - mirrors selected `message.*` envelopes into existing company state
   - `AgentMessage`
@@ -78,6 +80,8 @@ Alongside A2A, this upgrade also hardens local and CI runtime behavior:
 
 - `401 Unauthorized`
   - missing or invalid desktop app token on `/api/a2a/v1/*`
+- `from.agentId requires an active session`
+  - call `POST /api/a2a/v1/sessions` for the sender and tenant before posting an envelope to `/messages`
 - `expired_message`
   - `ts + ttlMs` is already in the past
 - `already_processed`

@@ -67,6 +67,32 @@ class ActionExecutionServiceTest : FunSpec({
         snapshot!!.records.single().status shouldBe ActionStatus.DENIED
     }
 
+    test("action store summaries use compact index for company blocked counts") {
+        val appHome = Files.createTempDirectory("action-summary-index")
+        val actionStore = ActionStore { appHome }
+        actionStore.append("run-1", actionRecord("denied-1", "run-1", "company-1", ActionStatus.DENIED))
+        actionStore.append("run-1", actionRecord("waiting-1", "run-1", "company-1", ActionStatus.WAITING_FOR_APPROVAL))
+        actionStore.append("run-1", actionRecord("success-1", "run-1", "company-1", ActionStatus.SUCCEEDED))
+        actionStore.append("run-1", actionRecord("denied-2", "run-1", "company-2", ActionStatus.DENIED))
+
+        val summary = actionStore.listSummaries().single()
+
+        summary.runId shouldBe "run-1"
+        summary.recordCount shouldBe 4
+        summary.blockedByCompany shouldBe mapOf("company-1" to 2, "company-2" to 1)
+
+        actionStore.replace("run-1", "waiting-1") { record -> record.copy(status = ActionStatus.SUCCEEDED) }
+        actionStore.listSummaries().single().blockedByCompany shouldBe mapOf("company-1" to 1, "company-2" to 1)
+
+        val actionPath = appHome.resolve("runtime").resolve("actions").resolve("run-1.json")
+        val originalModifiedAt = Files.getLastModifiedTime(actionPath)
+        Files.writeString(actionPath, "{not-json")
+        Files.setLastModifiedTime(actionPath, originalModifiedAt)
+
+        actionStore.listSummaries().single().blockedByCompany shouldBe mapOf("company-1" to 1, "company-2" to 1)
+        actionStore.load("run-1") shouldBe null
+    }
+
     test("file and secret actions record precise durable side effect kinds") {
         val appHome = Files.createTempDirectory("action-execution-side-effects")
         val runtimeStore = DurableRuntimeStore(appHome.resolve("runtime"))
@@ -135,3 +161,23 @@ class ActionExecutionServiceTest : FunSpec({
         graph.edges.any { it.toRef == "pr:42" && it.relation == "published-pr" } shouldBe true
     }
 })
+
+private fun actionRecord(
+    id: String,
+    runId: String,
+    companyId: String,
+    status: ActionStatus
+): ActionExecutionRecord =
+    ActionExecutionRecord(
+        id = id,
+        runId = runId,
+        request = ActionRequest(
+            kind = ActionKind.GIT_PUBLISH,
+            label = "git.publish:$id",
+            scope = ActionScope.COMPANY,
+            subject = ActionSubject(runId = runId, companyId = companyId)
+        ),
+        status = status,
+        createdAt = 1L,
+        updatedAt = 2L
+    )

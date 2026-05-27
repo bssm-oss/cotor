@@ -15,12 +15,53 @@ import com.cotor.model.ProcessResult
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import java.nio.file.Files
 import java.nio.file.Path
 
 class CodexPluginTest : FunSpec({
+    test("passes codex prompt through stdin instead of argv") {
+        val plugin = CodexPlugin()
+        val fakeCodexHome = Files.createTempDirectory("codex-plugin-stdin-home")
+        var capturedCommand = emptyList<String>()
+        var capturedInput: String? = null
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult {
+                capturedCommand = command
+                capturedInput = input
+                val outputIndex = command.indexOf("--output-last-message")
+                Files.writeString(Path.of(command[outputIndex + 1]), "stdin-ok")
+                return ProcessResult(exitCode = 0, stdout = "", stderr = "", isSuccess = true)
+            }
+        }
+
+        val result = plugin.execute(
+            ExecutionContext(
+                agentName = "codex",
+                input = "large prompt with repo context",
+                timeout = 1_000,
+                parameters = mapOf("model" to "gpt-5.4"),
+                environment = mapOf("CODEX_HOME" to fakeCodexHome.toString())
+            ),
+            processManager
+        )
+
+        result.output shouldBe "stdin-ok"
+        capturedCommand.shouldNotContain("large prompt with repo context")
+        capturedCommand.last() shouldBe "-"
+        capturedInput shouldBe "large prompt with repo context"
+    }
+
     test("treats codex runs with a captured final message as successful even when stderr makes the exit code non-zero") {
         val plugin = CodexPlugin()
         val processManager = object : ProcessManager {
@@ -69,6 +110,47 @@ class CodexPluginTest : FunSpec({
 
         result.output shouldBe "final assistant message"
         result.processId shouldBe 1234L
+    }
+
+    test("caps captured codex final message files before returning plugin output") {
+        val plugin = CodexPlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult {
+                val outputIndex = command.indexOf("--output-last-message")
+                val outputFile = Path.of(command[outputIndex + 1])
+                Files.writeString(outputFile, "start-" + "x".repeat(2_100_000) + "-tail")
+                return ProcessResult(
+                    exitCode = 0,
+                    stdout = "",
+                    stderr = "",
+                    isSuccess = true
+                )
+            }
+        }
+
+        val result = plugin.execute(
+            ExecutionContext(
+                agentName = "codex",
+                input = "hello",
+                timeout = 1_000,
+                parameters = emptyMap(),
+                environment = emptyMap()
+            ),
+            processManager
+        )
+
+        val output = result.output.orEmpty()
+        (output.length < 2_001_000) shouldBe true
+        output shouldContain "start-"
+        output shouldContain "cotor truncated file output"
+        output.contains("-tail") shouldBe false
     }
 
     test("fails when codex returns non-zero and no final assistant message was captured") {
