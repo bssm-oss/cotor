@@ -62,6 +62,35 @@ class SecurityValidatorTest : FunSpec({
         }
     }
 
+    test("command validation allows markdown and comparison text in argv arguments") {
+        val validator = DefaultSecurityValidator(
+            SecurityConfig(allowedExecutables = setOf("graphify")),
+            LoggerFactory.getLogger("SecurityValidatorTest")
+        )
+
+        validator.validateCommand(
+            listOf(
+                "graphify",
+                "explain",
+                "Fix the bug where x > 0, render <div>, and preserve A | B markdown table text."
+            )
+        )
+    }
+
+    test("command validation rejects newline and nul bytes in argv arguments") {
+        val validator = DefaultSecurityValidator(
+            SecurityConfig(allowedExecutables = setOf("graphify")),
+            LoggerFactory.getLogger("SecurityValidatorTest")
+        )
+
+        shouldThrow<SecurityException> {
+            validator.validateCommand(listOf("graphify", "explain", "bad\nargument"))
+        }
+        shouldThrow<SecurityException> {
+            validator.validateCommand(listOf("graphify", "explain", "bad\u0000argument"))
+        }
+    }
+
     test("command validation checks resolved absolute path against allowed directories") {
         val blockedDir = Files.createTempDirectory("cotor-blocked-bin")
         val executable = blockedDir.resolve("qwen").toFile()

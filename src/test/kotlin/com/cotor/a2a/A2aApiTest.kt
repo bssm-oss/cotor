@@ -48,6 +48,15 @@ class A2aApiTest : FunSpec({
         val appHome = System.getProperty("cotor.desktop.app.home")?.let(java.nio.file.Paths::get)
         System.clearProperty("cotor.desktop.app.home")
         if (appHome != null && appHome.exists()) {
+            repeat(5) { attempt ->
+                val deleted = runCatching { appHome.deleteRecursively() }.isSuccess
+                if (deleted || !appHome.exists()) {
+                    return@afterTest
+                }
+                if (attempt < 4) {
+                    Thread.sleep(25)
+                }
+            }
             appHome.deleteRecursively()
         }
     }

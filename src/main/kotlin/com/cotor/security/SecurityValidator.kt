@@ -162,11 +162,10 @@ class DefaultSecurityValidator(
     }
 
     private fun containsInjectionPattern(input: String): Boolean {
-        val injectionPatterns = listOf("`", "$(", "\n", "\r", " ")
-
-        return injectionPatterns.any { pattern ->
-            input.contains(pattern)
-        }
+        // Commands are executed as argv lists, not through a shell. Shell
+        // metacharacters such as >, <, and | are valid prompt text in that
+        // model; the actual shell execution path is blocked separately above.
+        return input.any { it == '\u0000' || it == '\n' || it == '\r' }
     }
 
     private fun isShellInterpreter(executableName: String): Boolean {
@@ -175,7 +174,20 @@ class DefaultSecurityValidator(
 
     private fun isShellExecuteOption(arg: String): Boolean {
         val normalized = arg.trim().lowercase()
-        return normalized in setOf("/c", "-c", "--command", "-command",
-            "-encodedcommand", "-encodedarguments")
+        if (normalized in setOf(
+                "/c",
+                "-c",
+                "--command",
+                "-command",
+                "-encodedcommand",
+                "-encodedarguments"
+            )
+        ) {
+            return true
+        }
+        return normalized.startsWith("-") &&
+            !normalized.startsWith("--") &&
+            normalized.length > 2 &&
+            normalized.drop(1).contains('c')
     }
 }

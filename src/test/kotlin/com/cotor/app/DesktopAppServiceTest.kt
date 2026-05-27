@@ -15,10 +15,12 @@ import com.cotor.domain.executor.AgentExecutor
 import com.cotor.integrations.linear.LinearIssueMirror
 import com.cotor.integrations.linear.LinearTrackerAdapter
 import com.cotor.model.AgentConfig
+import com.cotor.model.AgentExecutionMetadata
 import com.cotor.model.AgentResult
 import com.cotor.model.OpenCodeDefaults
 import com.cotor.model.ProcessExecutionException
 import com.cotor.model.ProcessResult
+import com.cotor.model.RetryPolicy
 import com.cotor.testsupport.withDesktopServiceShutdown
 import io.kotest.common.ExperimentalKotest
 import io.kotest.core.annotation.Isolate
@@ -40,7 +42,9 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -1111,7 +1115,8 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore,
             gitWorkspaceService = mockk(relaxed = true),
             configRepository = mockk(relaxed = true),
-            agentExecutor = mockk(relaxed = true)
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
         )
         val company = service.createCompany(name = "HR Operator", rootPath = appHome.toString())
         val initial = stateStore.load()
@@ -6025,7 +6030,7 @@ class DesktopAppServiceTest : FunSpec({
         )
 
         service.prepareCompanyAutomationStateForTesting(company.id)
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         val runtime = stateStore.load().companyRuntimes.single { it.companyId == company.id }
         runtime.status shouldBe CompanyRuntimeStatus.STOPPED
@@ -6191,6 +6196,92 @@ class DesktopAppServiceTest : FunSpec({
                 process.destroyForcibly()
             }
         }
+    }
+
+    test("stopCompanyRuntime terminates a process that starts after task interruption") {
+        val appHome = Files.createTempDirectory("desktop-runtime-stop-late-process-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-stop-late-process-test").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
+        coEvery {
+            gitWorkspaceService.ensureWorktree(
+                repositoryRoot = any(),
+                taskId = any(),
+                taskTitle = any(),
+                agentName = any(),
+                baseBranch = any()
+            )
+        } returns WorktreeBinding(
+            branchName = "codex/cotor/late-process/opencode",
+            worktreePath = repoRoot
+        )
+        val executor = LateProcessStartAgentExecutor()
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = gitWorkspaceService,
+            configRepository = mockk(relaxed = true),
+            agentExecutor = executor,
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(
+            name = "Stop Late Process Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Stop a late process",
+            description = "Runtime stop should also cover process ids that appear after interruption.",
+            autonomyEnabled = false
+        )
+        val issue = service.listIssues(goal.id).first { it.kind == "execution" }
+        val workspace = stateStore.load().workspaces.first { it.id == issue.workspaceId }
+        val now = System.currentTimeMillis()
+        val task = AgentTask(
+            id = "task-late-process",
+            workspaceId = workspace.id,
+            issueId = issue.id,
+            title = issue.title,
+            prompt = "Start after stop.",
+            agents = listOf("opencode"),
+            status = DesktopTaskStatus.QUEUED,
+            createdAt = now,
+            updatedAt = now
+        )
+        stateStore.save(stateStore.load().copy(tasks = stateStore.load().tasks + task))
+
+        service.runTask(task.id)
+        withTimeout(5_000) { executor.executeEntered.await() }
+
+        val stopped = service.stopCompanyRuntime(company.id)
+        stopped.status shouldBe CompanyRuntimeStatus.STOPPED
+
+        executor.releaseProcessStart.complete(Unit)
+        val process = withTimeout(5_000) { executor.processStarted.await() }
+        try {
+            withTimeout(5_000) {
+                while (process.isAlive) {
+                    delay(25)
+                }
+            }
+        } finally {
+            executor.finish.complete(Unit)
+            if (process.isAlive) {
+                process.destroyForcibly()
+            }
+        }
+
+        withTimeout(5_000) {
+            while (stateStore.load().runs.any { it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.QUEUED }) {
+                delay(25)
+            }
+        }
+        val run = stateStore.load().runs.single { it.taskId == task.id }
+        val storedTask = stateStore.load().tasks.single { it.id == task.id }
+        run.status shouldBe AgentRunStatus.FAILED
+        run.error shouldContain "Execution was interrupted"
+        storedTask.status shouldBe DesktopTaskStatus.FAILED
     }
 
     test("company budgets can be saved, cleared, and survive runtime restarts") {
@@ -6507,7 +6598,7 @@ class DesktopAppServiceTest : FunSpec({
             commandAvailability = { command -> command == "opencode" || command == "codex" }
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         val definitions = service.listCompanyAgentDefinitions(company.id)
         definitions.map { it.agentCli }.distinct() shouldBe listOf("opencode")
@@ -6722,7 +6813,7 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         withTimeout(5_000) {
             while (true) {
@@ -6846,7 +6937,7 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         withTimeout(5_000) {
             while (true) {
@@ -6984,7 +7075,7 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         withTimeout(5_000) {
             while (true) {
@@ -7108,7 +7199,7 @@ class DesktopAppServiceTest : FunSpec({
             stateStore = stateStore
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         withTimeout(5_000) {
             while (true) {
@@ -9718,7 +9809,7 @@ class DesktopAppServiceTest : FunSpec({
             )
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         val refreshedState = stateStore.load()
         val refreshedGoal = refreshedState.goals.first { it.id == legacyFollowUpGoal.id }
@@ -12453,7 +12544,7 @@ class DesktopAppServiceTest : FunSpec({
             )
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         val settled = stateStore.load()
         val settledIssue = settled.issues.first { it.id == issue.id }
@@ -13020,7 +13111,7 @@ class DesktopAppServiceTest : FunSpec({
             )
         )
 
-        service.companyDashboard(company.id)
+        service.companyDashboardPrepared(company.id)
 
         val refreshed = stateStore.load()
         val refreshedQueue = refreshed.reviewQueue.first { it.id == queueItem.id }
@@ -13901,7 +13992,7 @@ class DesktopAppServiceTest : FunSpec({
         refreshedQueue.status shouldBe ReviewQueueStatus.CHANGES_REQUESTED
     }
 
-    test("company dashboard read requeues legacy blocked execution issues for dirty CEO merge conflicts while stopped") {
+    test("company dashboard prepared requeues legacy blocked execution issues for dirty CEO merge conflicts while stopped") {
         val appHome = Files.createTempDirectory("desktop-app-service-dashboard-merge-conflict-requeue")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-app-service-dashboard-merge-conflict-requeue-repo").resolve("repo"))
         val stateStore = DesktopStateStore { appHome }
@@ -14008,12 +14099,7 @@ class DesktopAppServiceTest : FunSpec({
             )
         )
 
-        service.companyDashboard(company.id)
-        withTimeout(2_000) {
-            while (stateStore.load().issues.first { it.id == executionIssue.id }.status != IssueStatus.PLANNED) {
-                delay(25)
-            }
-        }
+        service.companyDashboardPrepared(company.id)
 
         val refreshedState = stateStore.load()
         val refreshedExecution = refreshedState.issues.first { it.id == executionIssue.id }
@@ -15632,6 +15718,49 @@ private class FakeLinearTrackerAdapter : LinearTrackerAdapter {
         commentCalls += CommentCall(linearIssueId, body)
         return Result.success(Unit)
     }
+}
+
+private class LateProcessStartAgentExecutor : AgentExecutor {
+    val executeEntered = CompletableDeferred<Unit>()
+    val releaseProcessStart = CompletableDeferred<Unit>()
+    val processStarted = CompletableDeferred<Process>()
+    val finish = CompletableDeferred<Unit>()
+
+    override suspend fun executeAgent(
+        agent: AgentConfig,
+        input: String?,
+        metadata: AgentExecutionMetadata
+    ): AgentResult = withContext(NonCancellable) {
+        executeEntered.complete(Unit)
+        releaseProcessStart.await()
+        val process = ProcessBuilder("sleep", "30").start()
+        processStarted.complete(process)
+        metadata.onProcessStarted?.invoke(process.pid())
+        withTimeoutOrNull(5_000) {
+            while (process.isAlive && !finish.isCompleted) {
+                delay(25)
+            }
+        }
+        if (process.isAlive && finish.isCompleted) {
+            process.destroyForcibly()
+        }
+        AgentResult(
+            agentName = agent.name,
+            isSuccess = false,
+            output = null,
+            error = "Stopped during test.",
+            duration = 0,
+            metadata = emptyMap(),
+            processId = process.pid()
+        )
+    }
+
+    override suspend fun executeWithRetry(
+        agent: AgentConfig,
+        input: String?,
+        retryPolicy: RetryPolicy,
+        metadata: AgentExecutionMetadata
+    ): AgentResult = executeAgent(agent, input, metadata)
 }
 
 private class FakeGitProcessManager(

@@ -24,6 +24,10 @@ import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import org.slf4j.Logger
 import java.net.Authenticator
 import java.net.CookieHandler
@@ -41,6 +45,7 @@ import java.util.Optional
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.Flow
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSession
@@ -122,6 +127,28 @@ class GitWorkspaceServiceTest : FunSpec({
         first.branchName shouldContain "task-a-1"
         second.branchName shouldContain "task-b-2"
         processManager.remainingSteps() shouldBe 0
+    }
+
+    test("ensureWorktree serializes common git directory mutations for the same repository") {
+        val repositoryRoot = Files.createTempDirectory("git-workspace-concurrent-repo")
+        val processManager = ConcurrentGitMutationProcessManager()
+        val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
+
+        runBlocking {
+            (0 until 4).map { index ->
+                async {
+                    service.ensureWorktree(
+                        repositoryRoot = repositoryRoot,
+                        taskId = "task-$index",
+                        taskTitle = "Concurrent mutation $index",
+                        agentName = "codex",
+                        baseBranch = "master"
+                    )
+                }
+            }.awaitAll()
+        }
+
+        processManager.maxConcurrentWorktreeAdds.get() shouldBe 1
     }
 
     test("ensureWorktree creates new execution branches from origin when the remote base is newer") {
@@ -1877,6 +1904,44 @@ private fun HttpRequest.readBody(): String {
         }
     })
     return completed.join()
+}
+
+private class ConcurrentGitMutationProcessManager : ProcessManager {
+    val maxConcurrentWorktreeAdds = AtomicInteger(0)
+    private val activeWorktreeAdds = AtomicInteger(0)
+
+    override suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?
+    ): ProcessResult {
+        return when {
+            command == listOf("git", "rev-parse", "--verify", "HEAD") ->
+                ProcessResult(0, "abc1234567890\n", "", true)
+
+            command.take(4) == listOf("git", "show-ref", "--verify", "--quiet") ->
+                ProcessResult(1, "", "", false)
+
+            command == listOf("git", "config", "--get", "remote.origin.url") ->
+                ProcessResult(1, "", "", false)
+
+            command.size >= 3 && command[0] == "git" && command[1] == "worktree" && command[2] == "add" -> {
+                val active = activeWorktreeAdds.incrementAndGet()
+                maxConcurrentWorktreeAdds.updateAndGet { current -> maxOf(current, active) }
+                try {
+                    delay(25L)
+                    ProcessResult(0, "", "", true)
+                } finally {
+                    activeWorktreeAdds.decrementAndGet()
+                }
+            }
+
+            else -> error("Unexpected command: ${command.joinToString(" ")}")
+        }
+    }
 }
 
 private class FakeProcessManager(

@@ -9,10 +9,14 @@ import com.cotor.app.IssueStatus
 import com.cotor.app.ReviewQueueItem
 import com.cotor.policy.PolicyEngine
 import com.cotor.providers.github.GitHubControlPlaneService
+import com.cotor.providers.github.PullRequestSnapshot
+import com.cotor.runtime.actions.ActionLogSnapshot
 import com.cotor.runtime.actions.ActionStatus
 import com.cotor.runtime.actions.ActionStore
+import com.cotor.runtime.durable.DurableRunSnapshot
 import com.cotor.runtime.durable.DurableRunStatus
 import com.cotor.runtime.durable.DurableRuntimeService
+import java.util.concurrent.ConcurrentHashMap
 
 data class BoundCompanyRuntime(
     val runtime: CompanyRuntimeSnapshot,
@@ -24,8 +28,16 @@ class CompanyRuntimeBindingService(
     private val durableRuntimeService: DurableRuntimeService = DurableRuntimeService(),
     private val actionStore: ActionStore = ActionStore(),
     private val policyEngine: PolicyEngine = PolicyEngine(),
-    private val gitHubControlPlaneService: GitHubControlPlaneService = GitHubControlPlaneService()
+    private val gitHubControlPlaneService: GitHubControlPlaneService = GitHubControlPlaneService(),
+    private val cacheTtlMs: Long = 5_000L,
+    private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
+    private data class CachedValue<T>(val value: T, val storedAt: Long)
+
+    private val durableRunListCache = ConcurrentHashMap<String, CachedValue<List<DurableRunSnapshot>>>()
+    private val actionSnapshotListCache = ConcurrentHashMap<String, CachedValue<List<ActionLogSnapshot>>>()
+    private val githubPullRequestCache = ConcurrentHashMap<String, CachedValue<List<PullRequestSnapshot>>>()
+
     fun bind(state: DesktopAppState, companyId: String, runtime: CompanyRuntimeSnapshot): BoundCompanyRuntime {
         val boundRunIds = state.issues
             .filter { it.companyId == companyId }
@@ -45,7 +57,7 @@ class CompanyRuntimeBindingService(
             directRuns
         } else {
             (
-                directRuns + durableRuntimeService.listRuns().filter { run ->
+                directRuns + cachedDurableRuns(companyId).filter { run ->
                     run.runId in boundRunIds ||
                         run.pipelineName in boundPipelineIds ||
                         run.checkpoints.any { node -> node.metadata["companyId"] == companyId } ||
@@ -53,12 +65,12 @@ class CompanyRuntimeBindingService(
                 }
                 ).distinctBy { it.runId }
         }
-        val githubPullRequests = gitHubControlPlaneService.listPullRequests(companyId)
+        val githubPullRequests = cachedGithubPullRequests(companyId)
         val directActionLogs = boundRunIds.mapNotNull(actionStore::load)
         val actionLogs = if (boundRunIds.isNotEmpty() && directActionLogs.size == boundRunIds.size) {
             directActionLogs
         } else {
-            (directActionLogs + actionStore.listSnapshots()).distinctBy { it.runId }
+            (directActionLogs + cachedActionSnapshots(companyId)).distinctBy { it.runId }
         }
 
         val resumableRunIds = runs
@@ -202,10 +214,31 @@ class CompanyRuntimeBindingService(
                 pendingIssueIds = pendingIssueIds,
                 blockedIssueIds = blockedIssueIds,
                 reviewQueueAttentionIds = reviewQueueAttentionIds,
-                lastReconciliationAt = System.currentTimeMillis()
+                lastReconciliationAt = nowProvider()
             ),
             issues = boundIssues,
             reviewQueue = boundQueue
         )
+    }
+
+    private fun cachedDurableRuns(companyId: String): List<DurableRunSnapshot> =
+        cached(companyId, durableRunListCache) { durableRuntimeService.listRuns() }
+
+    private fun cachedActionSnapshots(companyId: String): List<ActionLogSnapshot> =
+        cached(companyId, actionSnapshotListCache) { actionStore.listSnapshots() }
+
+    private fun cachedGithubPullRequests(companyId: String): List<PullRequestSnapshot> =
+        cached(companyId, githubPullRequestCache) { gitHubControlPlaneService.listPullRequests(companyId) }
+
+    private fun <T> cached(
+        companyId: String,
+        cache: ConcurrentHashMap<String, CachedValue<List<T>>>,
+        loader: () -> List<T>
+    ): List<T> {
+        val now = nowProvider()
+        cache[companyId]?.takeIf { now - it.storedAt <= cacheTtlMs }?.let { return it.value }
+        val loaded = loader()
+        cache[companyId] = CachedValue(loaded, now)
+        return loaded
     }
 }

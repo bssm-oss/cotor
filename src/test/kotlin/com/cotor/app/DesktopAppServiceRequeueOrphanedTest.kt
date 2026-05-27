@@ -254,7 +254,10 @@ class DesktopAppServiceRequeueOrphanedTest : FunSpec({
 
             withTimeout(30_000) {
                 while (true) {
-                    if (stateStore.load().tasks.count { it.issueId == issue.id } == 2) {
+                    val current = stateStore.load()
+                    val currentIssue = current.issues.single { it.id == issue.id }
+                    val issueTasks = current.tasks.filter { it.issueId == issue.id }
+                    if (currentIssue.status != IssueStatus.BLOCKED || issueTasks.size > 1) {
                         return@withTimeout
                     }
                     delay(25)

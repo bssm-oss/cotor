@@ -2,6 +2,9 @@ package com.cotor.app
 
 import com.cotor.data.config.ConfigRepository
 import com.cotor.domain.executor.AgentExecutor
+import com.cotor.model.AgentConfig
+import com.cotor.model.SecurityException
+import com.cotor.security.SecurityValidator
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -90,6 +93,28 @@ class SkillRuntimeTest : FunSpec({
         result.output shouldContain "DesktopAppService"
         result.evidence.single().path shouldContain "GRAPH_REPORT.md"
         service.dashboard().skillRuns.first().status shouldBe "COMPLETED"
+    }
+
+    test("runSkill validates graphify process commands before launch") {
+        val appHome = Files.createTempDirectory("skill-graphify-security-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val validator = RecordingSecurityValidator(SecurityException("blocked by test validator"))
+        val service = skillRuntimeService(appHome, securityValidator = validator)
+        val company = service.createCompany(name = "Graph Security Co", rootPath = repoRoot.toString())
+        val engineeringLead = service.dashboard().companyAgentDefinitions.first {
+            it.companyId == company.id && it.title == "Engineering Lead"
+        }
+
+        val result = service.runSkill(
+            name = "graphify",
+            companyId = company.id,
+            agentId = engineeringLead.id,
+            parameters = mapOf("refresh" to "true")
+        )
+
+        result.status shouldBe "FAILED"
+        result.error shouldContain "blocked by test validator"
+        validator.commands shouldBe listOf(listOf("graphify", "update", "."))
     }
 
     test("runSkill executes browser-smoke with browser evidence") {
@@ -230,7 +255,8 @@ class SkillRuntimeTest : FunSpec({
 
 private fun skillRuntimeService(
     appHome: java.nio.file.Path,
-    browserRunner: BrowserSkillRunner = RecordingBrowserSkillRunner()
+    browserRunner: BrowserSkillRunner = RecordingBrowserSkillRunner(),
+    securityValidator: SecurityValidator = RecordingSecurityValidator()
 ): DesktopAppService {
     val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
     coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } answers { firstArg() }
@@ -240,8 +266,24 @@ private fun skillRuntimeService(
         configRepository = mockk<ConfigRepository>(relaxed = true),
         agentExecutor = mockk<AgentExecutor>(relaxed = true),
         commandAvailability = { command -> command in setOf("graphify", "node", "npm") },
-        browserSkillRunner = browserRunner
+        browserSkillRunner = browserRunner,
+        securityValidator = securityValidator
     )
+}
+
+private class RecordingSecurityValidator(
+    private val failure: Throwable? = null
+) : SecurityValidator {
+    val commands = mutableListOf<List<String>>()
+
+    override fun validate(agent: AgentConfig) = Unit
+
+    override fun validateCommand(command: List<String>) {
+        commands += command
+        failure?.let { throw it }
+    }
+
+    override fun validatePath(path: java.nio.file.Path) = Unit
 }
 
 private class RecordingBrowserSkillRunner : BrowserSkillRunner {

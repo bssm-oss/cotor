@@ -41,7 +41,9 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 - 회사/런타임 백엔드 오류:
   - `~/Library/Application Support/CotorDesktop/runtime/backend/company-runtime-errors.log`
 - 데스크톱 영속 상태:
-  - `~/Library/Application Support/CotorDesktop/state.json`
+  - `~/Library/Application Support/CotorDesktop/state.sqlite`
+  - 마이그레이션 뒤에도 롤백용 `state.json`과 `state.json.bak`은 보존됩니다.
+  - 긴급 롤백 때만 `COTOR_DESKTOP_STATE_BACKEND=json`으로 기존 JSON backend를 사용합니다.
 - 런타임 port/token/pid 파일:
   - `~/Library/Application Support/CotorDesktop/runtime/app-server.port`
   - `~/Library/Application Support/CotorDesktop/runtime/app-server.token`
@@ -67,12 +69,12 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 | --- | --- | --- |
 | `Cotor Desktop could not start its bundled app server.` | stale launcher/backend 상태, 오래된 설치 앱, packaged 앱 불일치 | `desktop-app.log`, `/health`, runtime pid/port 파일 |
 | 회사 `시작` / `중지`를 누르면 앱 전체가 끊긴 것처럼 보임 | 정상 request cancellation을 오프라인으로 잘못 해석 | `desktop-app.log`의 `cancelled` refresh 기록 |
-| 회사 런타임이 계속 실패하거나 같은 이슈가 반복 흔들림 | 영구적인 GitHub readiness 실패, merge conflict, blocked review 상태 | `state.json`, `company-runtime-errors.log`, 리뷰 큐 |
-| 회사 런타임은 `RUNNING`인데 오래 멈춘 것처럼 보임 | 죽었거나 stale인 `RUNNING` task/run 상태와 느린 idle backoff가 겹침 | `state.json`의 runtime `lastAction`, `adaptiveTickMs`, task/run `processId` |
-| 회사는 연결돼 있는데 비용이 오른 뒤 새 작업이 시작되지 않음 | 설정한 일/월 예상 비용 상한에 도달해서 회사 런타임이 스스로 pause 됨 | 회사 요약 배지, `state.json`의 `todaySpentCents` / `monthSpentCents` / `budgetPausedAt` |
+| 회사 런타임이 계속 실패하거나 같은 이슈가 반복 흔들림 | 영구적인 GitHub readiness 실패, merge conflict, blocked review 상태 | `state.sqlite`, `company-runtime-errors.log`, 리뷰 큐 |
+| 회사 런타임은 `RUNNING`인데 오래 멈춘 것처럼 보임 | 죽었거나 stale인 `RUNNING` task/run 상태와 느린 idle backoff가 겹침 | `state.sqlite`의 runtime `lastAction`, `adaptiveTickMs`, task/run `processId` |
+| 회사는 연결돼 있는데 비용이 오른 뒤 새 작업이 시작되지 않음 | 설정한 일/월 예상 비용 상한에 도달해서 회사 런타임이 스스로 pause 됨 | 회사 요약 배지, `state.sqlite`의 `todaySpentCents` / `monthSpentCents` / `budgetPausedAt` |
 | 회사 모드에 `The data is missing.`가 뜨고 live 업데이트가 멈춤 | 회사 dashboard/event payload를 너무 엄격하게 decode했거나, 설치된 앱/app-server가 현재 wire contract보다 오래됨 | 데스크톱 상태 배너, `desktop-app.log`, company dashboard/event 응답 |
-| 회사 이슈가 시작 직후 다시 `BLOCKED`로 떨어지고 Codex `model_not_found`가 보임 | 런타임이 `gpt-5.3-codex-spark` 같은 은퇴된 Codex 모델 id를 아직 호출하고 있음 | `state.json`의 run `error`, company automation trace, live `codex exec --model ...` 프로세스 |
-| QA 이슈가 `BLOCKED`가 됨 | QA가 `CHANGES_REQUESTED`를 반환했고, 보통 PR 증거/검증 문서가 실제 상태와 안 맞음 | GitHub PR review, `state.json`, 연결된 worktree 파일 |
+| 회사 이슈가 시작 직후 다시 `BLOCKED`로 떨어지고 Codex `model_not_found`가 보임 | 런타임이 `gpt-5.3-codex-spark` 같은 은퇴된 Codex 모델 id를 아직 호출하고 있음 | `state.sqlite`의 run `error`, company automation trace, live `codex exec --model ...` 프로세스 |
+| QA 이슈가 `BLOCKED`가 됨 | QA가 `CHANGES_REQUESTED`를 반환했고, 보통 PR 증거/검증 문서가 실제 상태와 안 맞음 | GitHub PR review, `state.sqlite`, 연결된 worktree 파일 |
 | CEO 승인 이후 머지가 끝나지 않음 | self-approval 제한, 실제 merge conflict, stale approval 상태 | GitHub PR 상태, `gh pr view`, runtime error log |
 | 로컬 `master`에 머지 결과가 안 보임 | 원격에서 merge는 됐지만 로컬 branch가 뒤처짐, 또는 실제 merge가 안 됨 | `git status -sb`, `git log --oneline --decorate -5`, `gh pr view` |
 | `cotor` 인터랙티브/TUI가 시작은 되는데 응답이 이상함 | 얇은 PATH, 인증되지 않은 AI CLI, 잘못된 starter 선택 | `interactive.log`, shell PATH, provider 인증 상태 |
@@ -144,7 +146,7 @@ open "/Applications/Cotor Desktop.app" || open "$HOME/Applications/Cotor Desktop
 
 아래를 봅니다.
 
-- `state.json`
+- `state.sqlite`
 - 회사 review queue 항목
 - `company-runtime-errors.log`
 - 선택한 회사의 blocked issue와 최신 PR
@@ -203,7 +205,7 @@ open "/Applications/Cotor Desktop.app" || open "$HOME/Applications/Cotor Desktop
 
 확인 위치:
 
-- `~/Library/Application Support/CotorDesktop/state.json`의 최신 failed run
+- `~/Library/Application Support/CotorDesktop/state.sqlite`의 최신 failed run
 - `~/Library/Application Support/CotorDesktop/runtime/backend/company-automation-trace.log`
 - live `codex exec --model ...` 프로세스를 보는 `ps`
 
@@ -222,7 +224,7 @@ open "/Applications/Cotor Desktop.app" || open "$HOME/Applications/Cotor Desktop
 아래에서 확인하세요.
 
 - 데스크톱 앱의 회사 요약 배지
-- `~/Library/Application Support/CotorDesktop/state.json`의 `todaySpentCents`, `monthSpentCents`, `budgetPausedAt`
+- `~/Library/Application Support/CotorDesktop/state.sqlite`의 `todaySpentCents`, `monthSpentCents`, `budgetPausedAt`
 - 선택한 회사 설정 패널의 현재 상한과 현재 예상 비용 표시
 
 복구 방법은 의도에 따라 다릅니다.

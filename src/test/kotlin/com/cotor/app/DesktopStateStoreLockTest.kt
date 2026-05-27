@@ -4,6 +4,9 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import kotlin.io.path.exists
@@ -34,8 +37,37 @@ class DesktopStateStoreLockTest : FunSpec({
             )
         }
 
-        appHome.resolve("state.json").exists() shouldBe true
+        appHome.resolve("state.sqlite").exists() shouldBe true
         appHome.resolve("state.lock.json").exists() shouldBe false
+    }
+
+    test("concurrent sqlite saves from separate store instances serialize inside one JVM") {
+        val appHome = Files.createTempDirectory("desktop-state-lock-same-jvm-home")
+
+        runBlocking {
+            (0 until 12).map { index ->
+                async(Dispatchers.Default) {
+                    DesktopStateStore { appHome }.save(
+                        DesktopAppState(
+                            companies = listOf(
+                                Company(
+                                    id = "company-$index",
+                                    name = "Company $index",
+                                    rootPath = "/tmp/company-$index",
+                                    repositoryId = "repo-$index",
+                                    defaultBaseBranch = "master",
+                                    createdAt = index.toLong(),
+                                    updatedAt = index.toLong()
+                                )
+                            )
+                        )
+                    )
+                }
+            }.awaitAll()
+        }
+
+        appHome.resolve("state.sqlite").exists() shouldBe true
+        DesktopStateStore { appHome }.load().companies.size shouldBe 1
     }
 
     test("save fails fast with diagnostics when another process holds state.lock") {
