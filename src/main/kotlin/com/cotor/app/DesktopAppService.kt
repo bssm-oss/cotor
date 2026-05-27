@@ -79,6 +79,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -95,8 +97,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -15032,23 +15032,34 @@ class DesktopAppService(
             definition.agentCli.equals("opencode", ignoreCase = true) && (companyId == null || definition.companyId == companyId)
         }
         if (opencodeDefinitions.isEmpty()) return
-        val availableModels = availableAgentModels("opencode")
         val legacyModels = setOf(
             "opencode/nemotron-3-super-free",
             "opencode/minimax-m2.5-free",
             "opencode/qwen3.6-plus-free"
         )
+        val normalizedModels = opencodeDefinitions.associate { definition ->
+            definition.id to OpenCodeDefaults.normalizeModel(definition.model)
+        }
+        val needsModelValidation = opencodeDefinitions.any { definition ->
+            val normalized = normalizedModels[definition.id]
+            normalized != null &&
+                normalized != OpenCodeDefaults.DEFAULT_MODEL &&
+                normalized !in legacyModels
+        }
+        val availableModels = if (needsModelValidation) availableAgentModels("opencode") else emptyList()
         val validModels = availableModels.toSet()
         val updatedAt = System.currentTimeMillis()
+        fun shouldMigrate(definition: CompanyAgentDefinition): Boolean {
+            val normalized = OpenCodeDefaults.normalizeModel(definition.model)
+            return normalized == null ||
+                normalized in legacyModels ||
+                (validModels.isNotEmpty() && normalized !in validModels)
+        }
         val nextDefinitions = state.companyAgentDefinitions.map { definition ->
             if (!definition.agentCli.equals("opencode", ignoreCase = true) || (companyId != null && definition.companyId != companyId)) {
                 definition
             } else {
-                val normalized = OpenCodeDefaults.normalizeModel(definition.model)
-                val shouldMigrate = normalized == null ||
-                    normalized in legacyModels ||
-                    (validModels.isNotEmpty() && normalized !in validModels)
-                if (shouldMigrate) {
+                if (shouldMigrate(definition)) {
                     definition.copy(model = OpenCodeDefaults.DEFAULT_MODEL, updatedAt = updatedAt)
                 } else {
                     definition
@@ -15062,11 +15073,7 @@ class DesktopAppService(
                 if (!definition.agentCli.equals("opencode", ignoreCase = true) || (companyId != null && definition.companyId != companyId)) {
                     definition
                 } else {
-                    val normalized = OpenCodeDefaults.normalizeModel(definition.model)
-                    val shouldMigrate = normalized == null ||
-                        normalized in legacyModels ||
-                        (validModels.isNotEmpty() && normalized !in validModels)
-                    if (shouldMigrate) {
+                    if (shouldMigrate(definition)) {
                         definition.copy(model = OpenCodeDefaults.DEFAULT_MODEL, updatedAt = updatedAt)
                     } else {
                         definition
@@ -20591,6 +20598,16 @@ class DesktopAppService(
                 if (current == null || current == defaults[key]) {
                     nextSettings[key] = setting
                     changed = true
+                } else if (key == CapabilityKey.SKILL_RUN && current.isLegacyRepositoryMappingSkillRun()) {
+                    val mergedAllowlist = (current.skillAllowlist + setting.skillAllowlist).distinct()
+                    if (mergedAllowlist != current.skillAllowlist) {
+                        nextSettings[key] = current.copy(
+                            skillAllowlist = mergedAllowlist,
+                            requiresEvidence = true,
+                            notes = current.notes ?: setting.notes
+                        )
+                        changed = true
+                    }
                 }
             }
         }
@@ -20618,6 +20635,12 @@ class DesktopAppService(
 
     private fun isRepositoryMappingAgentDefinition(definition: CompanyAgentDefinition): Boolean =
         definition.title.equals("Engineering Lead", ignoreCase = true)
+
+    private fun AgentCapabilitySetting.isLegacyRepositoryMappingSkillRun(): Boolean =
+        enabled &&
+            mode == CapabilityMode.AUTO &&
+            skillAllowlist.any { it.equals("graphify", ignoreCase = true) } &&
+            skillAllowlist.none { it.equals("browser-smoke", ignoreCase = true) }
 
     private fun repositoryMappingSkillSettings(rootPath: String): Map<CapabilityKey, AgentCapabilitySetting> {
         val repositoryRoot = Path.of(rootPath).toAbsolutePath().normalize().toString()

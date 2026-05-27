@@ -8,9 +8,9 @@ package com.cotor.stats
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
-import com.cotor.storage.writeTextAtomically
 import com.cotor.model.AggregatedResult
 import com.cotor.model.FailureCategory
+import com.cotor.storage.writeTextAtomically
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString

@@ -120,18 +120,18 @@ class DesktopTuiSessionService(
         )
         val process = runCatching {
             ProcessBuilder(ptyCommand)
-            .directory(Path.of(repository.localPath).toFile())
-            .apply {
-                // Present a real terminal environment so JLine and Mordant can
-                // enable interactive editing, ANSI styling, and prompt redraws.
-                environment()["TERM"] = "xterm-256color"
-                environment()["COTOR_DESKTOP_TUI"] = "1"
-                environment()["PATH"] = buildDesktopCliPath(environment()["PATH"])
-                // The interactive loop already prints user-facing failures, so
-                // suppress backend stack traces that would otherwise flood xterm.
-                environment()["COTOR_LOG_LEVEL"] = "ERROR"
-            }
-            .start()
+                .directory(Path.of(repository.localPath).toFile())
+                .apply {
+                    // Present a real terminal environment so JLine and Mordant can
+                    // enable interactive editing, ANSI styling, and prompt redraws.
+                    environment()["TERM"] = "xterm-256color"
+                    environment()["COTOR_DESKTOP_TUI"] = "1"
+                    environment()["PATH"] = buildDesktopCliPath(environment()["PATH"])
+                    // The interactive loop already prints user-facing failures, so
+                    // suppress backend stack traces that would otherwise flood xterm.
+                    environment()["COTOR_LOG_LEVEL"] = "ERROR"
+                }
+                .start()
         }.getOrElse { error ->
             if (error is CancellationException) throw error
             return rememberFailedTuiSession(session, ptyCommand, error)

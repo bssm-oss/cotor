@@ -1,9 +1,9 @@
 package com.cotor.security
 
-import java.net.URI
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.URI
 
 /**
  * Validates user-configurable HTTP endpoints before outbound clients use them.

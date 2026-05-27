@@ -8,8 +8,8 @@ package com.cotor.data.plugin
  * Read here first when tracing behavior that flows through this part of the codebase.
  */
 
-import com.cotor.data.http.CotorHttpClients
 import com.cotor.data.http.BoundedHttpTextResponse
+import com.cotor.data.http.CotorHttpClients
 import com.cotor.data.http.sendBoundedText
 import com.cotor.data.process.ProcessManager
 import com.cotor.data.process.destroyProcessTree
@@ -37,7 +37,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.IOException
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files

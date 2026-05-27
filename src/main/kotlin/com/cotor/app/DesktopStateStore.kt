@@ -50,8 +50,8 @@ class DesktopStateStore(
         private const val MAX_PERSISTED_RUN_OUTPUT_CHARS = 4000
         private const val MAX_PERSISTED_DIRECT_CHAT_CONVERSATIONS_PER_COMPANY = 25
         private const val MAX_PERSISTED_DIRECT_CHAT_MESSAGES_PER_CONVERSATION = 80
-        private const val MAX_PERSISTED_DIRECT_CHAT_MESSAGE_CHARS = 20_000
-        private const val MAX_PERSISTED_DIRECT_CHAT_SYSTEM_PROMPT_CHARS = 4_000
+        private const val MAX_PERSISTED_DIRECT_CHAT_MESSAGE_CHARS = 1_024
+        private const val MAX_PERSISTED_DIRECT_CHAT_SYSTEM_PROMPT_CHARS = 2_048
         private const val MAX_STATE_LOAD_LOG_BYTES = 1L * 1024L * 1024L
         private const val STATE_LOAD_LOG_DEDUP_WINDOW_MS = 30_000L
         private const val STATE_LOCK_TIMEOUT_MS = 3_000L
@@ -129,7 +129,8 @@ class DesktopStateStore(
         StateCollection("marketingRuns", ListSerializer(MarketingRunRecord.serializer()), DesktopAppState::marketingRuns) { state, value -> state.copy(marketingRuns = value) },
         StateCollection("skillRuns", ListSerializer(SkillRunRecord.serializer()), DesktopAppState::skillRuns) { state, value -> state.copy(skillRuns = value) },
         StateCollection("companyRuntimeWorkItems", ListSerializer(CompanyRuntimeWorkItem.serializer()), DesktopAppState::companyRuntimeWorkItems) { state, value -> state.copy(companyRuntimeWorkItems = value) },
-        StateCollection("problemSignals", ListSerializer(CompanyProblemSignal.serializer()), DesktopAppState::problemSignals) { state, value -> state.copy(problemSignals = value) }
+        StateCollection("problemSignals", ListSerializer(CompanyProblemSignal.serializer()), DesktopAppState::problemSignals) { state, value -> state.copy(problemSignals = value) },
+        StateCollection("directChatConversations", ListSerializer(DirectChatConversation.serializer()), DesktopAppState::directChatConversations) { state, value -> state.copy(directChatConversations = value) }
     )
 
     // A single process can finish multiple background runs nearly at once, so writes

@@ -12,7 +12,6 @@ import com.cotor.providers.github.GitHubControlPlaneService
 import com.cotor.providers.github.PullRequestSnapshot
 import com.cotor.runtime.actions.ActionLogSummary
 import com.cotor.runtime.actions.ActionStore
-import com.cotor.runtime.durable.DurableRunSnapshot
 import com.cotor.runtime.durable.DurableRunStatus
 import com.cotor.runtime.durable.DurableRunSummary
 import com.cotor.runtime.durable.DurableRuntimeService
@@ -107,10 +106,9 @@ class CompanyRuntimeBindingService(
                 issueId to task.id
             }
             .toMap()
-        val boundIssues = state.issues.map { issue ->
-            if (issue.companyId != companyId) {
-                issue
-            } else {
+        val boundIssues = state.issues
+            .filter { it.companyId == companyId }
+            .map { issue ->
                 val issuePullRequest = issue.pullRequestNumber?.let(providerBlockByPr::get)
                     ?: providerBlockByIssueId[issue.id]
                 val matchingRun = runs.firstOrNull { run ->
@@ -148,11 +146,9 @@ class CompanyRuntimeBindingService(
                     runtimeDisposition = runtimeDisposition
                 )
             }
-        }
-        val boundQueue = state.reviewQueue.map { item ->
-            if (item.companyId != companyId) {
-                item
-            } else {
+        val boundQueue = state.reviewQueue
+            .filter { it.companyId == companyId }
+            .map { item ->
                 val snapshot = item.pullRequestNumber?.let(providerBlockByPr::get)
                 val runtimeDisposition = when {
                     item.approvalPauseId != null -> CompanyIssueReadiness.WAITING_FOR_APPROVAL
@@ -172,7 +168,6 @@ class CompanyRuntimeBindingService(
                     runtimeDisposition = runtimeDisposition
                 )
             }
-        }
         val pendingIssueIds = boundIssues
             .filter { it.companyId == companyId }
             .filter { it.runtimeDisposition == CompanyIssueReadiness.RUNNABLE }
