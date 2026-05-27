@@ -78,7 +78,7 @@ class LocalPlaywrightBrowserSkillRunner(
                     destroyProcessTree(process)
                     error("Browser skill execution timed out after ${timeoutSeconds}s.")
                 }
-                val output = process.inputStream.bufferedReader().readText().trim()
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                 if (process.exitValue() != 0) {
                     error(output.ifBlank { "Browser skill execution failed with exit ${process.exitValue()}." })
                 }
@@ -129,7 +129,7 @@ class LocalPlaywrightBrowserSkillRunner(
                 destroyProcessTree(process)
                 error("Playwright dependency install timed out after ${installTimeoutSeconds}s.")
             }
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             if (process.exitValue() != 0) {
                 error(output.ifBlank { "Playwright dependency install failed with exit ${process.exitValue()}." })
             }

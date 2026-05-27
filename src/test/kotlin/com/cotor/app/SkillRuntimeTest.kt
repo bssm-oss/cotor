@@ -251,6 +251,78 @@ class SkillRuntimeTest : FunSpec({
         )
         runner.prewarm()
     }
+
+    test("marketing operator skillAllowlist includes video-plan skill") {
+        val appHome = Files.createTempDirectory("skill-mktg-vidplan-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val service = skillRuntimeService(appHome)
+        val company = service.createCompany(name = "Mktg VideoPlan Co", rootPath = repoRoot.toString())
+        val dashboard = service.dashboard()
+        val marketingAgent = dashboard.companyAgentDefinitions.first {
+            it.companyId == company.id && it.title == "Marketing Operator"
+        }
+        val profile = dashboard.agentCapabilityProfiles.first {
+            it.companyId == company.id && it.agentId == marketingAgent.id
+        }
+        val allowlist = profile.settings.getValue(CapabilityKey.SKILL_RUN).skillAllowlist
+
+        allowlist.contains("video-plan") shouldBe true
+        allowlist.contains("analytics-reporter") shouldBe true
+        allowlist.contains("social-publisher") shouldBe true
+    }
+
+    test("looksLikeOperatorSkillRequest matches Korean social and content keywords") {
+        val service = skillRuntimeService(Files.createTempDirectory("nlp-korean-kw-home"))
+
+        service.looksLikeOperatorSkillRequest("소셜 실행해줘") shouldBe true
+        service.looksLikeOperatorSkillRequest("블로그 실행해줘") shouldBe true
+        service.looksLikeOperatorSkillRequest("cms 돌려") shouldBe true
+        service.looksLikeOperatorSkillRequest("고객 타깃 실행") shouldBe true
+        service.looksLikeOperatorSkillRequest("콘텐츠 run") shouldBe true
+        service.looksLikeOperatorSkillRequest("소셜 요약해줘") shouldBe false
+        service.looksLikeOperatorSkillRequest("콘텐츠 보여줘") shouldBe false
+    }
+
+    test("prewarm is called eagerly when service starts") {
+        val appHome = Files.createTempDirectory("prewarm-startup-home")
+        val prewarmCalled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val runner = object : BrowserSkillRunner {
+            override suspend fun execute(command: BrowserSkillCommand): BrowserSkillResult =
+                error("not expected in this test")
+            override suspend fun prewarm() { prewarmCalled.set(true) }
+        }
+        skillRuntimeService(appHome, runner)
+        val deadline = System.currentTimeMillis() + 2_000L
+        while (!prewarmCalled.get() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20)
+        }
+        prewarmCalled.get() shouldBe true
+    }
+
+    test("resolveOperatorSkillAgent does not fall back to an unskilled agent when no allowlist match exists") {
+        val appHome = Files.createTempDirectory("skill-no-fallback-home")
+        val repoRoot = Files.createDirectories(appHome.resolve("repo"))
+        val service = skillRuntimeService(appHome)
+        val company = service.createCompany(name = "No Fallback Co", rootPath = repoRoot.toString())
+        val allAgents = service.listCompanyAgentDefinitions(company.id)
+        for (agent in allAgents) {
+            service.updateAgentCapabilities(
+                companyId = company.id,
+                agentId = agent.id,
+                settings = mapOf(
+                    CapabilityKey.SKILL_RUN to AgentCapabilitySetting(
+                        enabled = true,
+                        mode = CapabilityMode.AUTO,
+                        skillAllowlist = listOf("graphify")
+                    )
+                )
+            )
+        }
+
+        val agentId = service.resolveOperatorSkillAgent(company.id, "browser-smoke")
+
+        agentId shouldBe null
+    }
 })
 
 private fun skillRuntimeService(
