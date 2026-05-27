@@ -1037,7 +1037,12 @@ struct DesktopAPI {
                     addHeaders(to: &request)
                     request.httpBody = try JSONEncoder().encode(["message": message])
 
-                    let (bytes, _) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    if let httpResponse = response as? HTTPURLResponse,
+                       !(200...299).contains(httpResponse.statusCode) {
+                        continuation.finish(throwing: URLError(.badServerResponse))
+                        return
+                    }
                     var lineBuffer = Data()
                     for try await byte in bytes {
                         if Task.isCancelled { break }

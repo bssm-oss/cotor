@@ -23973,14 +23973,13 @@ class DesktopAppService(
     suspend fun getDirectChatConversation(id: String): DirectChatConversation? =
         stateStore.load().directChatConversations.firstOrNull { it.id == id }
 
-    suspend fun deleteDirectChatConversation(id: String, companyId: String) {
-        stateMutex.withLock {
+    suspend fun deleteDirectChatConversation(id: String, companyId: String): Boolean {
+        return stateMutex.withLock {
             val state = stateStore.load()
             val target = state.directChatConversations.firstOrNull { it.id == id }
-            if (target != null) {
-                require(target.companyId == companyId) {
-                    "Conversation $id does not belong to company $companyId"
-                }
+                ?: return@withLock false
+            require(target.companyId == companyId) {
+                "Conversation $id does not belong to company $companyId"
             }
             stateStore.save(
                 state.copy(
@@ -23988,6 +23987,7 @@ class DesktopAppService(
                         .filterNot { it.id == id && it.companyId == companyId }
                 )
             )
+            true
         }
     }
 
@@ -24048,18 +24048,19 @@ class DesktopAppService(
 
         val assistantMessageId = UUID.randomUUID().toString()
         val contentBuilder = StringBuilder()
-        var streamError: String? = null
+        var assistantSaved = false
 
         directChatService.streamChat(conversation, userMessage, assistantMessageId).collect { chunk ->
             emit(chunk)
             if (chunk.error != null) {
-                streamError = chunk.error
+                return@collect
             } else {
                 contentBuilder.append(chunk.content)
             }
-            if (chunk.done) {
+            if (chunk.done && !assistantSaved) {
                 val assistantContent = contentBuilder.toString()
                 if (assistantContent.isNotEmpty()) {
+                    assistantSaved = true
                     val assistantMsg = DirectChatMessage(
                         id = assistantMessageId,
                         role = "assistant",
