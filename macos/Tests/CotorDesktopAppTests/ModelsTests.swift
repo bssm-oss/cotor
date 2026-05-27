@@ -270,6 +270,7 @@ struct ModelsTests {
     @Test
     func companyEventLineDecoderDropsMalformedLineAndKeepsValidEventsDecodable() throws {
         let invalid = DesktopAPI.decodeCompanyEventLine("{not-json")
+        let heartbeat = DesktopAPI.decodeCompanyEventLine("   \n")
         let valid = DesktopAPI.decodeCompanyEventLine("""
         {
           "event": {
@@ -289,6 +290,7 @@ struct ModelsTests {
         """)
 
         #expect(invalid == nil)
+        #expect(heartbeat == nil)
         #expect(try #require(valid).event.companyId == "company-1")
     }
 

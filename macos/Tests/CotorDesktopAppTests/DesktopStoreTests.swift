@@ -13,6 +13,27 @@ struct DesktopStoreTests {
     }
 
     @Test
+    func companyEventStreamHeartbeatIsRecognizedAsKeepaliveOnly() {
+        let envelope = CompanyEventEnvelopePayload(
+            event: CompanyEventRecord(
+                id: "heartbeat-1",
+                companyId: "company",
+                type: "stream.heartbeat",
+                title: "Stream heartbeat",
+                detail: nil,
+                goalId: nil,
+                issueId: nil,
+                runId: nil,
+                createdAt: 1
+            ),
+            dashboard: nil,
+            companyDashboard: nil
+        )
+
+        #expect(isCompanyEventStreamHeartbeat(envelope))
+    }
+
+    @Test
     func selectedCompanyAgentPerformanceFiltersAndCountsScoreableAgents() {
         let store = DesktopStore()
         store.selectedCompanyID = "company"

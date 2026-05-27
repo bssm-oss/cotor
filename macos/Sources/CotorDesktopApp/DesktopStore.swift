@@ -89,6 +89,10 @@ func isExpectedCompanyEventStreamInterruption(_ error: Error) -> Bool {
         || message.contains("request timed out")
 }
 
+func isCompanyEventStreamHeartbeat(_ envelope: CompanyEventEnvelopePayload) -> Bool {
+    envelope.event.type == "stream.heartbeat"
+}
+
 /// Tracks the high-level backend/runtime state shown in the shell header.
 ///
 /// The visible text is derived later through the active app language so the same
@@ -4587,6 +4591,10 @@ final class DesktopStore: ObservableObject {
                                 self.shellMode == .company
                         }
                         guard shouldApply else { return }
+                        if isCompanyEventStreamHeartbeat(envelope) {
+                            reconnectDelaySeconds = 1
+                            continue
+                        }
                         await MainActor.run {
                             self.companyStreamStatusMessage = nil
                             if let companyDashboard = envelope.companyDashboard {
