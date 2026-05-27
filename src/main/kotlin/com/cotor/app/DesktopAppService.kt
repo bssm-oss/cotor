@@ -23993,6 +23993,7 @@ class DesktopAppService(
 
     fun streamDirectChatMessage(
         conversationId: String,
+        companyId: String,
         userMessage: String
     ): Flow<DirectChatStreamChunk> = flow {
         val conversation = getDirectChatConversation(conversationId)
@@ -24008,6 +24009,19 @@ class DesktopAppService(
                 )
                 return@flow
             }
+
+        if (conversation.companyId != companyId) {
+            emit(
+                DirectChatStreamChunk(
+                    conversationId = conversationId,
+                    messageId = UUID.randomUUID().toString(),
+                    content = "",
+                    done = true,
+                    error = "Conversation $conversationId does not belong to company $companyId"
+                )
+            )
+            return@flow
+        }
 
         val userMessageId = UUID.randomUUID().toString()
         val userMsg = DirectChatMessage(

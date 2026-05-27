@@ -1778,11 +1778,13 @@ internal fun Application.cotorAppModule(
 
                         post("/{conversationId}/messages") {
                             if (!requireToken(token)) return@post
+                            val companyId = call.parameters["companyId"]
+                                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
                             val conversationId = call.parameters["conversationId"]
                                 ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "conversationId is required"))
                             val request = call.receive<SendDirectChatMessageRequest>()
                             call.respondTextWriter(ContentType.parse("application/x-ndjson")) {
-                                desktopService.streamDirectChatMessage(conversationId, request.message).collect { chunk ->
+                                desktopService.streamDirectChatMessage(conversationId, companyId, request.message).collect { chunk ->
                                     write(streamJson.encodeToString(DirectChatStreamChunk.serializer(), chunk))
                                     write("\n")
                                     flush()

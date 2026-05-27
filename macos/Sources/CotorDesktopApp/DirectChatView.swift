@@ -309,7 +309,7 @@ struct DirectChatView: View {
     private func loadModels() async {
         let api = DesktopAPI()
         do {
-            let models = try await api.listDirectChatModels()
+            let models = try await api.listDirectChatModels(companyId: companyId)
             await MainActor.run { availableModels = models }
         } catch {
             // Ollama may not be running; silently ignore
