@@ -48,9 +48,40 @@ APP_VERSION=$(/usr/bin/grep -E '^[[:space:]]*version[[:space:]]*=' "$PROJECT_ROO
 
 # Path to the shaded JAR file (built via shadowJar)
 JAR_PATH="$PROJECT_ROOT/build/libs/cotor-${APP_VERSION}-all.jar"
+JAR_TOOL="${JAVA_HOME:+$JAVA_HOME/bin/}jar"
+BUILD_LOCK_DIR="$PROJECT_ROOT/build/.cotor-cli-build.lock"
 
-# Build the CLI if the shaded JAR is missing
-if [ ! -f "$JAR_PATH" ]; then
+release_build_lock() {
+    if [ "${COTOR_CLI_BUILD_LOCK_HELD:-}" = "1" ]; then
+        /bin/rm -rf "$BUILD_LOCK_DIR" >/dev/null 2>&1 || true
+        COTOR_CLI_BUILD_LOCK_HELD=0
+    fi
+}
+
+acquire_build_lock() {
+    /bin/mkdir -p "$PROJECT_ROOT/build" || exit 1
+    local waited=0
+    while ! /bin/mkdir "$BUILD_LOCK_DIR" 2>/dev/null; do
+        if [ "$waited" -eq 0 ]; then
+            echo "Waiting for another cotor CLI build to finish..."
+        fi
+        if [ "$waited" -ge 300 ]; then
+            echo "Error: timed out waiting for cotor CLI build lock at $BUILD_LOCK_DIR"
+            exit 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    COTOR_CLI_BUILD_LOCK_HELD=1
+    echo "$$" > "$BUILD_LOCK_DIR/pid" 2>/dev/null || true
+    trap release_build_lock TERM INT HUP EXIT
+}
+
+jar_is_valid() {
+    [ -f "$1" ] && "$JAR_TOOL" tf "$1" >/dev/null 2>&1
+}
+
+build_cli_jar() {
     echo "Building cotor CLI (./gradlew shadowJar)..."
     if [ -x "$PROJECT_ROOT/gradlew" ]; then
         if [ -f "$GRADLE_JAVA_HELPER" ]; then
@@ -58,23 +89,49 @@ if [ ! -f "$JAR_PATH" ]; then
             source "$GRADLE_JAVA_HELPER"
             configure_gradle_java || exit 1
             JAVA_CMD="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+            JAR_TOOL="${JAVA_HOME:+$JAVA_HOME/bin/}jar"
         fi
         (cd "$PROJECT_ROOT" && ./gradlew shadowJar) || exit 1
     else
         echo "Error: gradlew not found in $PROJECT_ROOT"
         exit 1
     fi
-fi
+}
 
-if [ ! -f "$JAR_PATH" ]; then
-    LATEST_JAR=$(/bin/ls -1t "$PROJECT_ROOT"/build/libs/cotor-*-all.jar 2>/dev/null | /usr/bin/head -n 1)
+select_latest_valid_jar() {
+    LATEST_JAR=""
+    for candidate in $(/bin/ls -1t "$PROJECT_ROOT"/build/libs/cotor-*-all.jar 2>/dev/null); do
+        if jar_is_valid "$candidate"; then
+            LATEST_JAR="$candidate"
+            break
+        fi
+    done
     if [ -n "$LATEST_JAR" ] && [ -f "$LATEST_JAR" ]; then
         JAR_PATH="$LATEST_JAR"
-    else
-        echo "Error: unable to locate shaded CLI jar under $PROJECT_ROOT/build/libs"
+        return 0
+    fi
+    return 1
+}
+
+acquire_build_lock
+
+if ! jar_is_valid "$JAR_PATH"; then
+    if [ -f "$JAR_PATH" ]; then
+        echo "Existing cotor CLI jar is invalid; rebuilding..."
+        /bin/rm -f "$JAR_PATH" || exit 1
+    fi
+    build_cli_jar
+fi
+
+if ! jar_is_valid "$JAR_PATH"; then
+    if ! select_latest_valid_jar; then
+        echo "Error: unable to locate a valid shaded CLI jar under $PROJECT_ROOT/build/libs"
         exit 1
     fi
 fi
+
+release_build_lock
+trap - TERM INT HUP EXIT
 
 if [ "${1:-}" = "app-server" ]; then
     APP_HOME="${COTOR_APP_HOME:-${HOME}/Library/Application Support/CotorDesktop}"
