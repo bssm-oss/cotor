@@ -8,6 +8,7 @@ data class ProviderCatalogEntry(
     val displayName: String,
     val command: String,
     val capabilities: List<CapabilityKey> = emptyList(),
+    val aliases: List<String> = emptyList(),
     val noNetworkScan: Boolean = true
 )
 
@@ -19,12 +20,29 @@ data class ProviderScanResult(
 )
 
 fun providerCatalog(): List<ProviderCatalogEntry> = listOf(
-    ProviderCatalogEntry("codex-cli", "Codex CLI", "codex", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
-    ProviderCatalogEntry("claude-code", "Claude Code", "claude", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
+    ProviderCatalogEntry(
+        "codex-cli",
+        "Codex CLI",
+        "codex",
+        listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL),
+        aliases = listOf("codex", "codex-exec", "codex-oauth")
+    ),
+    ProviderCatalogEntry(
+        "claude-code",
+        "Claude Code",
+        "claude",
+        listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL),
+        aliases = listOf("claude")
+    ),
+    ProviderCatalogEntry("gemini", "Gemini CLI", "gemini", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
+    ProviderCatalogEntry("copilot", "GitHub Copilot CLI", "copilot", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
+    ProviderCatalogEntry("cursor", "Cursor CLI", "cursor", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
     ProviderCatalogEntry("goose", "Goose", "goose", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
     ProviderCatalogEntry("opencode", "OpenCode", "opencode", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
-    ProviderCatalogEntry("ollama", "Ollama", "ollama", listOf(CapabilityKey.EXTERNAL_API_CALL)),
-    ProviderCatalogEntry("lm-studio", "LM Studio CLI", "lms", listOf(CapabilityKey.EXTERNAL_API_CALL)),
+    ProviderCatalogEntry("graphify", "Graphify", "graphify", listOf(CapabilityKey.KNOWLEDGE_GRAPH_READ, CapabilityKey.KNOWLEDGE_GRAPH_WRITE)),
+    ProviderCatalogEntry("qwen", "Qwen CLI", "qwen", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
+    ProviderCatalogEntry("ollama", "Ollama", "ollama", listOf(CapabilityKey.EXTERNAL_API_CALL), aliases = listOf("gemma4")),
+    ProviderCatalogEntry("lm-studio", "LM Studio CLI", "lms", listOf(CapabilityKey.EXTERNAL_API_CALL), aliases = listOf("lmstudio")),
     ProviderCatalogEntry("gh", "GitHub CLI", "gh", listOf(CapabilityKey.GITHUB_READ, CapabilityKey.GITHUB_PR_CREATE, CapabilityKey.GITHUB_PR_UPDATE)),
     ProviderCatalogEntry("git", "Git", "git", listOf(CapabilityKey.GIT_READ, CapabilityKey.GIT_WRITE)),
     ProviderCatalogEntry(
@@ -51,3 +69,13 @@ fun providerCatalog(): List<ProviderCatalogEntry> = listOf(
     ProviderCatalogEntry("uv", "uv", "uv", listOf(CapabilityKey.PACKAGE_INSTALL, CapabilityKey.TEST_RUN)),
     ProviderCatalogEntry("pip", "pip", "pip", listOf(CapabilityKey.PACKAGE_INSTALL))
 )
+
+fun ProviderCatalogEntry.matchesIdOrAlias(providerId: String): Boolean {
+    val normalized = providerId.trim()
+    if (normalized.isBlank()) return false
+    return id.equals(normalized, ignoreCase = true) ||
+        aliases.any { it.equals(normalized, ignoreCase = true) }
+}
+
+fun findProviderByIdOrAlias(providerId: String): ProviderCatalogEntry? =
+    providerCatalog().firstOrNull { it.matchesIdOrAlias(providerId) }

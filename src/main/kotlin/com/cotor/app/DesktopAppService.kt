@@ -4015,7 +4015,7 @@ class DesktopAppService(
     }
 
     fun testProvider(providerId: String): ProviderScanResult {
-        val provider = providerCatalog().firstOrNull { it.id.equals(providerId, ignoreCase = true) }
+        val provider = findProviderByIdOrAlias(providerId)
             ?: throw IllegalArgumentException("Provider not found: $providerId")
         val available = commandAvailability(provider.command)
         return ProviderScanResult(
