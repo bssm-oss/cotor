@@ -14,7 +14,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteIfExists
-import kotlin.io.path.exists
 
 @Serializable
 data class BrowserSkillCommand(
@@ -44,7 +43,9 @@ interface BrowserSkillRunner {
 class LocalPlaywrightBrowserSkillRunner internal constructor(
     private val appHomeProvider: () -> Path = { defaultDesktopAppHome() },
     private val commandAvailability: (String) -> Boolean = ::browserSkillCommandAvailable,
-    private val processRunner: LocalSkillProcessRunner = defaultLocalSkillProcessRunner
+    private val processRunner: LocalSkillProcessRunner = defaultLocalSkillProcessRunner,
+    private val playwrightDependencyResolver: LocalPlaywrightDependencyResolver =
+        LocalPlaywrightDependencyResolver(commandAvailability, processRunner)
 ) : BrowserSkillRunner {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -82,17 +83,17 @@ class LocalPlaywrightBrowserSkillRunner internal constructor(
                 BROWSER_SKILL_MAX_RUNTIME_SECONDS
             )
         )
-        require(commandAvailability("node") && commandAvailability("npm")) {
-            "Browser skill execution requires node and npm so Playwright can run locally."
-        }
         val runtimeDir = runtimeRoot
             .resolve("browser-skills")
         val inputDir = runtimeDir.resolve("inputs")
         val scriptPath = runtimeDir.resolve("browser-skill-runner.js")
         runtimeDir.createDirectories()
         inputDir.createDirectories()
-        // Install phase runs with its own 120s minimum and must not be capped by the run-phase timeout.
-        ensurePlaywrightDependency(runtimeDir, normalizedCommand.maxRuntimeSeconds)
+        val nodePath = playwrightDependencyResolver.requireNodePath(
+            runtimeDir = runtimeDir,
+            timeoutSeconds = normalizedCommand.maxRuntimeSeconds,
+            label = "Browser skill execution"
+        )
         writeTextAtomically(scriptPath, browserSkillRunnerScript)
         val inputPath = Files.createTempFile(inputDir, "browser-skill-command-", ".json")
         try {
@@ -103,7 +104,7 @@ class LocalPlaywrightBrowserSkillRunner internal constructor(
                 workingDirectory = runtimeDir,
                 timeoutSeconds = timeoutSeconds,
                 timeoutMessage = "Browser skill execution timed out after ${timeoutSeconds}s.",
-                environment = mapOf("NODE_PATH" to runtimeDir.resolve("node_modules").toString())
+                environment = mapOf("NODE_PATH" to nodePath.toString())
             )
             val output = result.output.trim()
             if (result.exitCode != 0) {
@@ -122,43 +123,10 @@ class LocalPlaywrightBrowserSkillRunner internal constructor(
     }
 
     override suspend fun prewarm(): Unit = withContext(Dispatchers.IO) {
-        if (commandAvailability("node") && commandAvailability("npm")) {
-            val runtimeDir = appHomeProvider()
-                .resolve("runtime")
-                .resolve("browser-skills")
-            runtimeDir.createDirectories()
-            ensurePlaywrightDependency(runtimeDir, 60)
-        }
-    }
-
-    private suspend fun ensurePlaywrightDependency(runtimeDir: Path, timeoutSeconds: Int) {
-        withLocalSkillRuntimeMutationLock(runtimeDir) {
-            val packageDir = runtimeDir.resolve("node_modules").resolve("playwright")
-            if (packageDir.exists()) {
-                return@withLocalSkillRuntimeMutationLock
-            }
-            val installTimeoutSeconds = timeoutSeconds.coerceAtLeast(120).toLong()
-            val result = processRunner.run(
-                command = listOf(
-                    "npm",
-                    "install",
-                    "--silent",
-                    "--no-audit",
-                    "--no-fund",
-                    "--prefix",
-                    runtimeDir.toString(),
-                    "playwright"
-                ),
-                workingDirectory = runtimeDir,
-                timeoutSeconds = installTimeoutSeconds,
-                timeoutMessage = "Playwright dependency install timed out after ${installTimeoutSeconds}s.",
-                environment = emptyMap()
-            )
-            val output = result.output.trim()
-            if (result.exitCode != 0) {
-                error(output.ifBlank { "Playwright dependency install failed with exit ${result.exitCode}." })
-            }
-        }
+        val runtimeDir = appHomeProvider()
+            .resolve("runtime")
+            .resolve("browser-skills")
+        playwrightDependencyResolver.prewarm(runtimeDir, 60)
     }
 
     private val browserSkillRunnerScript: String = """

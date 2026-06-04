@@ -50,6 +50,7 @@ APP_VERSION=$(/usr/bin/grep -E '^[[:space:]]*version[[:space:]]*=' "$PROJECT_ROO
 JAR_PATH="$PROJECT_ROOT/build/libs/cotor-${APP_VERSION}-all.jar"
 JAR_TOOL="${JAVA_HOME:+$JAVA_HOME/bin/}jar"
 BUILD_LOCK_DIR="$PROJECT_ROOT/build/.cotor-cli-build.lock"
+BUILD_LOCK_STALE_AFTER_SECONDS=30
 
 release_build_lock() {
     if [ "${COTOR_CLI_BUILD_LOCK_HELD:-}" = "1" ]; then
@@ -58,10 +59,55 @@ release_build_lock() {
     fi
 }
 
+lock_age_seconds() {
+    if [ ! -d "$BUILD_LOCK_DIR" ]; then
+        echo 0
+        return
+    fi
+    local modified
+    local now
+    modified=$(/usr/bin/stat -f %m "$BUILD_LOCK_DIR" 2>/dev/null || echo 0)
+    now=$(/bin/date +%s)
+    if [ "$modified" -gt 0 ] 2>/dev/null; then
+        echo $((now - modified))
+    else
+        echo 0
+    fi
+}
+
+recover_stale_build_lock_if_needed() {
+    if [ ! -d "$BUILD_LOCK_DIR" ]; then
+        return
+    fi
+
+    local pid
+    pid=$(/bin/cat "$BUILD_LOCK_DIR/pid" 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+        if kill -0 "$pid" 2>/dev/null; then
+            return
+        fi
+        echo "Recovering stale cotor CLI build lock from dead pid $pid."
+    else
+        local age
+        age=$(lock_age_seconds)
+        if [ "$age" -lt "$BUILD_LOCK_STALE_AFTER_SECONDS" ] 2>/dev/null; then
+            return
+        fi
+        echo "Recovering stale cotor CLI build lock with no pid after ${age}s."
+    fi
+
+    local stale_dir
+    stale_dir="${BUILD_LOCK_DIR}.stale.$$"
+    if /bin/mv "$BUILD_LOCK_DIR" "$stale_dir" 2>/dev/null; then
+        /bin/rm -rf "$stale_dir" >/dev/null 2>&1 || true
+    fi
+}
+
 acquire_build_lock() {
     /bin/mkdir -p "$PROJECT_ROOT/build" || exit 1
     local waited=0
     while ! /bin/mkdir "$BUILD_LOCK_DIR" 2>/dev/null; do
+        recover_stale_build_lock_if_needed
         if [ "$waited" -eq 0 ]; then
             echo "Waiting for another cotor CLI build to finish..."
         fi
@@ -100,12 +146,19 @@ build_cli_jar() {
 
 select_latest_valid_jar() {
     LATEST_JAR=""
-    for candidate in $(/bin/ls -1t "$PROJECT_ROOT"/build/libs/cotor-*-all.jar 2>/dev/null); do
+    local newest_mtime=0
+    local libs_dir="$PROJECT_ROOT/build/libs"
+    [ -d "$libs_dir" ] || return 1
+    while IFS= read -r -d '' candidate; do
         if jar_is_valid "$candidate"; then
-            LATEST_JAR="$candidate"
-            break
+            local candidate_mtime
+            candidate_mtime=$(/usr/bin/stat -f %m "$candidate" 2>/dev/null || echo 0)
+            if [ "$candidate_mtime" -ge "$newest_mtime" ] 2>/dev/null; then
+                newest_mtime="$candidate_mtime"
+                LATEST_JAR="$candidate"
+            fi
         fi
-    done
+    done < <(/usr/bin/find "$libs_dir" -type f -name 'cotor-*-all.jar' -print0 2>/dev/null)
     if [ -n "$LATEST_JAR" ] && [ -f "$LATEST_JAR" ]; then
         JAR_PATH="$LATEST_JAR"
         return 0
@@ -113,25 +166,40 @@ select_latest_valid_jar() {
     return 1
 }
 
-acquire_build_lock
-
-if ! jar_is_valid "$JAR_PATH"; then
-    if [ -f "$JAR_PATH" ]; then
-        echo "Existing cotor CLI jar is invalid; rebuilding..."
-        /bin/rm -f "$JAR_PATH" || exit 1
+select_existing_cli_jar() {
+    if jar_is_valid "$JAR_PATH"; then
+        return 0
     fi
-    build_cli_jar
-fi
-
-if ! jar_is_valid "$JAR_PATH"; then
-    if ! select_latest_valid_jar; then
-        echo "Error: unable to locate a valid shaded CLI jar under $PROJECT_ROOT/build/libs"
-        exit 1
+    if select_latest_valid_jar; then
+        if [ "$JAR_PATH" != "$PROJECT_ROOT/build/libs/cotor-${APP_VERSION}-all.jar" ]; then
+            echo "Using latest valid cotor CLI jar: $JAR_PATH"
+        fi
+        return 0
     fi
-fi
+    return 1
+}
 
-release_build_lock
-trap - TERM INT HUP EXIT
+if ! select_existing_cli_jar; then
+    acquire_build_lock
+
+    if ! select_existing_cli_jar; then
+        if [ -f "$JAR_PATH" ]; then
+            echo "Existing cotor CLI jar is invalid; rebuilding..."
+            /bin/rm -f "$JAR_PATH" || exit 1
+        fi
+        build_cli_jar
+    fi
+
+    if ! jar_is_valid "$JAR_PATH"; then
+        if ! select_latest_valid_jar; then
+            echo "Error: unable to locate a valid shaded CLI jar under $PROJECT_ROOT/build/libs"
+            exit 1
+        fi
+    fi
+
+    release_build_lock
+    trap - TERM INT HUP EXIT
+fi
 
 if [ "${1:-}" = "app-server" ]; then
     APP_HOME="${COTOR_APP_HOME:-${HOME}/Library/Application Support/CotorDesktop}"

@@ -220,6 +220,17 @@ struct SkillCatalogEntryRecord: Codable, Identifiable, Hashable {
     let dangerous: Bool
 }
 
+struct DirectChatProviderCatalogEntryRecord: Codable, Identifiable, Hashable {
+    let id: String
+    let providerId: String
+    let displayName: String
+    let iconSystemName: String
+    let defaultModel: String
+    let defaultBaseUrl: String
+    let allowsBaseUrl: Bool
+    let supportsModelDiscovery: Bool
+}
+
 struct CapabilitySimulationResultRecord: Codable, Hashable {
     let action: String
     let capability: String
@@ -1272,6 +1283,9 @@ struct CompanyEventEnvelopePayload: Codable {
     let event: CompanyEventRecord
     let dashboard: DashboardPayload?
     let companyDashboard: CompanyDashboardPayload?
+    let sequence: Int64?
+    let cursor: String?
+    let gapDetected: Bool?
 }
 
 struct CompanyDashboardPayload: Codable {

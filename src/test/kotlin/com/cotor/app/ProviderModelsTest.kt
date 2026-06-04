@@ -34,4 +34,18 @@ class ProviderModelsTest : FunSpec({
         findProviderByIdOrAlias(" ") shouldBe null
         findProviderByIdOrAlias("missing") shouldBe null
     }
+
+    test("direct chat provider catalog reuses provider aliases and UI defaults") {
+        val providers = directChatProviderCatalog()
+
+        providers.map { it.id }.distinct().size shouldBe providers.size
+        providers.first { it.id == "ollama" }.supportsModelDiscovery shouldBe true
+        providers.first { it.id == "lmstudio" }.providerId shouldBe "lm-studio"
+        providers.first { it.id == "claude-cli" }.allowsBaseUrl shouldBe false
+
+        findDirectChatProvider("lm-studio")?.id shouldBe "lmstudio"
+        findDirectChatProvider("lmstudio")?.id shouldBe "lmstudio"
+        findDirectChatProvider("claude")?.id shouldBe "claude-cli"
+        findDirectChatProvider("missing") shouldBe null
+    }
 })

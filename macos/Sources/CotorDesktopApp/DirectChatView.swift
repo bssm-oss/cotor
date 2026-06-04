@@ -16,6 +16,7 @@ struct DirectChatView: View {
     @State private var streamingMessageId: String? = nil
     @State private var streamingContent: String = ""
     @State private var availableModels: [DirectChatAvailableModel] = []
+    @State private var providerCatalog: [DirectChatProviderCatalogEntryRecord] = []
     @State private var isLoadingConversations: Bool = false
     @State private var errorMessage: String? = nil
     @State private var showNewChatSheet: Bool = false
@@ -36,11 +37,13 @@ struct DirectChatView: View {
             }
         }
         .task { await loadConversations() }
+        .task { await loadProviderCatalog() }
         .task { await loadModels() }
         .sheet(isPresented: $showNewChatSheet) {
             NewChatSheet(
                 companyId: companyId,
                 availableModels: availableModels,
+                providers: providerCatalog,
                 onCreated: { conversation in
                     conversations.insert(conversation, at: 0)
                     selectedConversationId = conversation.id
@@ -316,6 +319,16 @@ struct DirectChatView: View {
         }
     }
 
+    private func loadProviderCatalog() async {
+        let api = DesktopAPI()
+        do {
+            let providers = try await api.directChatProviders()
+            await MainActor.run { providerCatalog = providers }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
     private func sendMessage() async {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let conversationId = selectedConversationId else { return }
@@ -391,11 +404,6 @@ struct DirectChatView: View {
     }
 
     private func providerIcon(_ provider: String) -> String {
-        switch provider {
-        case "ollama": return "cpu.fill"
-        case "lmstudio": return "server.rack"
-        case "claude-cli": return "sparkles"
-        default: return "bubble.left.fill"
-        }
+        providerCatalog.first { $0.id == provider || $0.providerId == provider }?.iconSystemName ?? "bubble.left.fill"
     }
 }

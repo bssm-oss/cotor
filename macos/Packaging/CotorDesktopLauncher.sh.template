@@ -400,6 +400,9 @@ start_managed_backend() {
     [[ -n "${NO_COLOR:-}" ]] && backend_env+=("NO_COLOR=$NO_COLOR")
     [[ -n "${CODEX_HOME:-}" ]] && backend_env+=("CODEX_HOME=$CODEX_HOME")
     [[ -n "${COTOR_CODEX_OAUTH_HOME:-}" ]] && backend_env+=("COTOR_CODEX_OAUTH_HOME=$COTOR_CODEX_OAUTH_HOME")
+    if [[ -d "$RESOURCES_DIR/browser-skills/node_modules/playwright" ]]; then
+        backend_env+=("COTOR_BROWSER_SKILL_NODE_PATH=$RESOURCES_DIR/browser-skills/node_modules")
+    fi
 
     log_launcher "Launching bundled backend on port $SERVER_PORT."
     env "${backend_env[@]}" "$java_bin" -jar "$BACKEND_RUNTIME_JAR" app-server --port "$SERVER_PORT" >>"$LOG_FILE" 2>&1 &
