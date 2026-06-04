@@ -10805,7 +10805,7 @@ class DesktopAppServiceTest : FunSpec({
         seedWorkspace(stateStore, repoRoot)
         val gitWorkspaceService = mockk<GitWorkspaceService>()
         val agentExecutor = mockk<AgentExecutor>()
-        val capturedAgents = mutableListOf<AgentConfig>()
+        val builderAgentDispatched = CompletableDeferred<AgentConfig>()
         coEvery { gitWorkspaceService.resolveRepositoryRoot(any()) } answers { invocation.args[0] as Path }
         coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
         coEvery { gitWorkspaceService.detectRemoteUrl(any()) } returns "https://github.com/heodongun/cotor.git"
@@ -10819,8 +10819,10 @@ class DesktopAppServiceTest : FunSpec({
         coEvery { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) } returns PublishMetadata()
         coEvery { gitWorkspaceService.ensureGitHubPublishReady(any(), any()) } returns GitHubPublishReadiness(ready = true)
         coEvery { agentExecutor.executeAgent(any(), any(), any()) } answers {
-            capturedAgents += invocation.args[0] as AgentConfig
             val agent = invocation.args[0] as AgentConfig
+            if (agent.name == "/bin/echo" && !builderAgentDispatched.isCompleted) {
+                builderAgentDispatched.complete(agent)
+            }
             AgentResult(
                 agentName = agent.name,
                 isSuccess = true,
@@ -10867,14 +10869,9 @@ class DesktopAppServiceTest : FunSpec({
         service.updateIssueAssignee(issue.id, seededBuilder.id)
         service.runIssue(issue.id)
 
-        withTimeout(5_000) {
-            while (capturedAgents.none { it.name == "/bin/echo" }) {
-                delay(25)
-            }
-        }
+        val builderAgent = withTimeout(30_000) { builderAgentDispatched.await() }
 
         coVerify(atLeast = 1) { agentExecutor.executeAgent(any(), any(), any()) }
-        val builderAgent = capturedAgents.first { it.name == "/bin/echo" }
         builderAgent.pluginClass shouldBe "com.cotor.data.plugin.CommandPlugin"
         builderAgent.parameters["argvJson"] shouldBe """["/bin/echo","{input}"]"""
         service.stopCompanyRuntime(goal.companyId).status shouldBe CompanyRuntimeStatus.STOPPED
