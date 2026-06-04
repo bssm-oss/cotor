@@ -839,13 +839,21 @@ struct DesktopAPI {
         try await post(pathSegments: ["api", "app", "tui", "sessions", sessionId, "terminate"], body: EmptyPayload())
     }
 
-    func companyEvents(companyId: String) -> AsyncThrowingStream<CompanyEventEnvelopePayload, Error> {
+    func companyEvents(companyId: String, cursor: String? = nil) -> AsyncThrowingStream<CompanyEventEnvelopePayload, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var request = URLRequest(url: try makeURL(pathSegments: ["api", "app", "companies", companyId, "events"]))
+                    var request = URLRequest(
+                        url: try makeURL(
+                            pathSegments: ["api", "app", "companies", companyId, "events"],
+                            query: cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? []
+                        )
+                    )
                     request.httpMethod = "GET"
                     addHeaders(to: &request)
+                    if let cursor {
+                        request.setValue(cursor, forHTTPHeaderField: "Last-Event-ID")
+                    }
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
                         throw URLError(.badServerResponse)
@@ -1047,7 +1055,7 @@ struct DesktopAPI {
                     addHeaders(to: &request)
                     request.httpBody = try JSONEncoder().encode(["message": message])
 
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await session.bytes(for: request)
                     if let httpResponse = response as? HTTPURLResponse,
                        !(200...299).contains(httpResponse.statusCode) {
                         continuation.finish(throwing: URLError(.badServerResponse))

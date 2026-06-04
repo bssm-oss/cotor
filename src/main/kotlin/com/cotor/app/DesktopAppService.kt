@@ -119,6 +119,7 @@ import java.util.Comparator
 import java.util.UUID
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.io.path.exists
 
 private val TERMINAL_TASK_STATUSES = setOf(
@@ -159,6 +160,47 @@ private sealed interface CompanyAutomationTraceWriteRequest {
     data class Line(val value: String) : CompanyAutomationTraceWriteRequest
     data class Flush(val ack: CompletableDeferred<Unit>) : CompanyAutomationTraceWriteRequest
 }
+
+private data class CompanyEventPublishRequest(
+    val companyId: String,
+    val type: String,
+    val title: String,
+    val detail: String?,
+    val goalId: String?,
+    val issueId: String?,
+    val runId: String?,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+private data class CompanyContextSnapshotWrite(
+    val state: DesktopAppState,
+    val company: Company,
+    val projectContext: CompanyProjectContext
+)
+
+private data class CompanyMutationResult(
+    val company: Company,
+    val contextSnapshot: CompanyContextSnapshotWrite? = null
+)
+
+private data class GitHubSyncCandidate(
+    val item: ReviewQueueItem,
+    val worktreePath: Path,
+    val pullRequestNumber: Int
+)
+
+private data class GitHubSyncSideEffect(
+    val item: ReviewQueueItem,
+    val issue: CompanyIssue?,
+    val metadata: PublishMetadata
+)
+
+private data class GitHubSyncMutation(
+    val refreshedCount: Int,
+    val companyName: String,
+    val nextState: DesktopAppState?,
+    val sideEffects: List<GitHubSyncSideEffect>
+)
 
 @kotlinx.serialization.Serializable
 private data class CeoPlanningPayload(
@@ -298,6 +340,8 @@ class DesktopAppService(
         private const val COMPANY_TRACE_ROTATE_BYTES = 8L * 1024L * 1024L
         private const val COMPANY_TRACE_QUEUE_CAPACITY = 512
         private const val COMPANY_TRACE_FLUSH_TIMEOUT_MS = 5_000L
+        private const val COMPANY_EVENT_STREAM_BUFFER_CAPACITY = 2_048
+        private const val COMPANY_EVENT_REPLAY_CAPACITY = 1_024
         private const val COMPANY_RUNTIME_ERROR_ROTATE_BYTES = 2L * 1024L * 1024L
         private const val RECOVERABLE_RETRY_BASE_DELAY_MS = 30_000L
         private const val RECOVERABLE_RETRY_MAX_DELAY_MS = 5L * 60_000L
@@ -378,7 +422,15 @@ class DesktopAppService(
     private val recentSupersededPullRequestCleanupAt = ConcurrentHashMap<String, Long>()
     private val recentNoOpPullRequestRefreshAt = ConcurrentHashMap<String, Long>()
     private val recentPullRequestMetadataRefreshes = ConcurrentHashMap<String, CachedPullRequestMetadata>()
-    private val companyEventStream = MutableSharedFlow<CompanyEventEnvelope>(replay = 0, extraBufferCapacity = 64)
+    private val companyEventSequence = AtomicLong(0L)
+    private val companyEventReplayLock = Any()
+    private val companyEventReplayBuffers = ConcurrentHashMap<String, java.util.ArrayDeque<CompanyEventEnvelope>>()
+    private val companyEventRequests = Channel<CompanyEventPublishRequest>(Channel.UNLIMITED)
+    private val companyEventStream = MutableSharedFlow<CompanyEventEnvelope>(
+        replay = COMPANY_EVENT_REPLAY_CAPACITY,
+        extraBufferCapacity = COMPANY_EVENT_STREAM_BUFFER_CAPACITY,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
     private val recentAgentModelDiscoveries = ConcurrentHashMap<String, CachedAgentModels>()
     private val backendJson = Json { ignoreUnknownKeys = true }
     private val companyAutomationTraceQueue = Channel<CompanyAutomationTraceWriteRequest>(
@@ -393,6 +445,11 @@ class DesktopAppService(
                 }
                 is CompanyAutomationTraceWriteRequest.Flush -> request.ack.complete(Unit)
             }
+        }
+    }
+    private val companyEventPublisherJob = serviceScope.launch {
+        for (request in companyEventRequests) {
+            runCatching { publishCompanyEventRequest(request) }
         }
     }
     private val skillActionExecutionService = ActionExecutionService(
@@ -442,6 +499,7 @@ class DesktopAppService(
         recentNoOpPullRequestRefreshAt.clear()
         recentPullRequestMetadataRefreshes.clear()
         recentAgentModelDiscoveries.clear()
+        companyEventReplayBuffers.clear()
         serviceScope.cancel()
         liveServicesForTesting -= this
     }
@@ -1250,8 +1308,46 @@ class DesktopAppService(
         }
     }
 
-    fun companyEvents(companyId: String): Flow<CompanyEventEnvelope> =
-        companyEventStream.filter { it.event.companyId == companyId }
+    fun companyEvents(companyId: String, cursor: String? = null): Flow<CompanyEventEnvelope> = flow {
+        var lastEmittedSequence = cursor?.toLongOrNull()
+        if (lastEmittedSequence != null) {
+            replayedCompanyEvents(companyId, lastEmittedSequence).forEach { envelope ->
+                envelope.sequence?.let { lastEmittedSequence = it }
+                emit(envelope)
+            }
+        } else {
+            lastEmittedSequence = latestCompanyEventSequence(companyId)
+        }
+        companyEventStream
+            .filter { it.event.companyId == companyId }
+            .collect { envelope ->
+                val sequence = envelope.sequence
+                if (sequence == null || lastEmittedSequence == null || sequence > lastEmittedSequence!!) {
+                    emit(envelope)
+                    if (sequence != null) {
+                        lastEmittedSequence = sequence
+                    }
+                }
+            }
+    }
+
+    suspend fun companyEventGapSnapshot(companyId: String, afterSequence: Long?): CompanyEventEnvelope? {
+        val snapshot = buildCompanyEventDashboardSnapshot(companyId) ?: return null
+        return CompanyEventEnvelope(
+            event = CompanyEvent(
+                id = UUID.randomUUID().toString(),
+                companyId = companyId,
+                type = "stream.gap",
+                title = "Stream gap detected",
+                detail = afterSequence?.let { "The client missed company events after cursor $it." }
+                    ?: "The client missed company events before reconnecting.",
+                createdAt = System.currentTimeMillis()
+            ),
+            companyDashboard = snapshot,
+            sequence = afterSequence?.plus(1) ?: latestCompanyEventSequence(companyId),
+            gapDetected = true
+        )
+    }
 
     private suspend fun prepareCompanyAutomationState(companyId: String? = null) {
         migrateLegacyCompanyRosters(companyId)
@@ -4166,27 +4262,44 @@ class DesktopAppService(
     }
 
     suspend fun syncGitHubProvider(companyId: String): GitHubSyncResponse {
-        val refreshedCount = stateMutex.withLock {
+        val candidates = stateMutex.withLock {
+            val state = stateStore.load()
+            state.companies.firstOrNull { it.id == companyId }
+                ?: throw IllegalArgumentException("Company not found: $companyId")
+            state.reviewQueue
+                .filter { it.companyId == companyId }
+                .filter { it.pullRequestNumber != null && !it.worktreePath.isNullOrBlank() }
+                .mapNotNull { item ->
+                    GitHubSyncCandidate(
+                        item = item,
+                        worktreePath = Path.of(item.worktreePath?.takeIf { it.isNotBlank() } ?: return@mapNotNull null),
+                        pullRequestNumber = item.pullRequestNumber ?: return@mapNotNull null
+                    )
+                }
+        }
+
+        if (candidates.isEmpty()) {
+            return GitHubSyncResponse(
+                companyId = companyId,
+                syncedPullRequests = 0,
+                resumedRuntimeTick = false
+            )
+        }
+
+        val refreshedMetadata = withContext(Dispatchers.IO) {
+            val refreshedMetadata = candidates.mapNotNull { item ->
+                val refreshed = runCatching {
+                    gitWorkspaceService.refreshPullRequestMetadata(item.worktreePath, item.pullRequestNumber)
+                }.getOrNull() ?: return@mapNotNull null
+                item.item to refreshed
+            }
+            refreshedMetadata
+        }
+
+        val mutation = stateMutex.withLock {
             val state = stateStore.load()
             val company = state.companies.firstOrNull { it.id == companyId }
                 ?: throw IllegalArgumentException("Company not found: $companyId")
-            val candidates = state.reviewQueue
-                .filter { it.companyId == companyId }
-                .filter { it.pullRequestNumber != null && !it.worktreePath.isNullOrBlank() }
-
-            if (candidates.isEmpty()) {
-                return@withLock 0
-            }
-
-            val refreshedMetadata = candidates.mapNotNull { item ->
-                val worktreePath = item.worktreePath?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val pullRequestNumber = item.pullRequestNumber ?: return@mapNotNull null
-                val refreshed = runCatching {
-                    gitWorkspaceService.refreshPullRequestMetadata(Path.of(worktreePath), pullRequestNumber)
-                }.getOrNull() ?: return@mapNotNull null
-                item to refreshed
-            }
-
             val refreshedByIssueId = refreshedMetadata.associateBy { it.first.issueId }
             val mergedIssueIds = mutableSetOf<String>()
             val closedIssueIds = mutableSetOf<String>()
@@ -4279,40 +4392,6 @@ class DesktopAppService(
                 }
             }
 
-            refreshedMetadata.forEach { (item, metadata) ->
-                val checks = parseChecks(metadata.checksSummary)
-                gitHubControlPlaneService.recordSnapshot(
-                    snapshot = PullRequestSnapshot(
-                        number = metadata.pullRequestNumber ?: return@forEach,
-                        url = metadata.pullRequestUrl,
-                        state = metadata.pullRequestState,
-                        mergeability = metadata.mergeability,
-                        checksSummary = metadata.checksSummary,
-                        checks = checks,
-                        mergeRequirement = MergeRequirement(
-                            requiredChecks = checks.map { it.name },
-                            reviewDecision = metadata.reviewState
-                        ),
-                        mergeQueueState = MergeQueueState(
-                            state = when {
-                                metadata.pullRequestState.equals("MERGED", ignoreCase = true) -> "merged"
-                                metadata.mergeability.equals("DIRTY", ignoreCase = true) -> "blocked"
-                                else -> "ready"
-                            }
-                        ),
-                        companyId = companyId,
-                        issueId = item.issueId,
-                        runId = item.runId,
-                        branchName = item.branchName
-                    ),
-                    eventType = "sync",
-                    detail = "Synced PR #${metadata.pullRequestNumber ?: "unknown"} for company ${company.name}"
-                )
-                updatedIssues.firstOrNull { it.id == item.issueId }?.let { issue ->
-                    provenanceService.recordIssueRunLink(companyId = companyId, goalId = issue.goalId, issueId = issue.id, runId = item.runId)
-                }
-            }
-
             var nextState = state.copy(
                 issues = issuesWithApprovalSettled,
                 reviewQueue = updatedReviewQueue
@@ -4352,16 +4431,72 @@ class DesktopAppService(
             }
             nextState = applyVerificationProjection(nextState).withDerivedMetrics()
             stateStore.save(nextState)
-            knowledgeService.synchronizeFromState(nextState)
-            refreshedMetadata.size
+            GitHubSyncMutation(
+                refreshedCount = refreshedMetadata.size,
+                companyName = company.name,
+                nextState = nextState,
+                sideEffects = refreshedMetadata.map { (item, metadata) ->
+                    GitHubSyncSideEffect(
+                        item = item,
+                        issue = issuesWithApprovalSettled.firstOrNull { it.id == item.issueId },
+                        metadata = metadata
+                    )
+                }
+            )
         }
-        if (refreshedCount > 0) {
+
+        if (mutation.refreshedCount > 0) {
+            withContext(Dispatchers.IO) {
+                mutation.sideEffects.forEach { sideEffect ->
+                    val item = sideEffect.item
+                    val metadata = sideEffect.metadata
+                    val checks = parseChecks(metadata.checksSummary)
+                    gitHubControlPlaneService.recordSnapshot(
+                        snapshot = PullRequestSnapshot(
+                            number = metadata.pullRequestNumber ?: return@forEach,
+                            url = metadata.pullRequestUrl,
+                            state = metadata.pullRequestState,
+                            mergeability = metadata.mergeability,
+                            checksSummary = metadata.checksSummary,
+                            checks = checks,
+                            mergeRequirement = MergeRequirement(
+                                requiredChecks = checks.map { it.name },
+                                reviewDecision = metadata.reviewState
+                            ),
+                            mergeQueueState = MergeQueueState(
+                                state = when {
+                                    metadata.pullRequestState.equals("MERGED", ignoreCase = true) -> "merged"
+                                    metadata.mergeability.equals("DIRTY", ignoreCase = true) -> "blocked"
+                                    else -> "ready"
+                                }
+                            ),
+                            companyId = companyId,
+                            issueId = item.issueId,
+                            runId = item.runId,
+                            branchName = item.branchName
+                        ),
+                        eventType = "sync",
+                        detail = "Synced PR #${metadata.pullRequestNumber ?: "unknown"} for company ${mutation.companyName}"
+                    )
+                    sideEffect.issue?.let { issue ->
+                        provenanceService.recordIssueRunLink(
+                            companyId = companyId,
+                            goalId = issue.goalId,
+                            issueId = issue.id,
+                            runId = item.runId
+                        )
+                    }
+                }
+                mutation.nextState?.let { knowledgeService.synchronizeFromState(it) }
+            }
+        }
+        if (mutation.refreshedCount > 0) {
             runCatching { runCompanyRuntimeTick(companyId) }
         }
         return GitHubSyncResponse(
             companyId = companyId,
-            syncedPullRequests = refreshedCount,
-            resumedRuntimeTick = refreshedCount > 0
+            syncedPullRequests = mutation.refreshedCount,
+            resumedRuntimeTick = mutation.refreshedCount > 0
         )
     }
 
@@ -4851,126 +4986,161 @@ class DesktopAppService(
         operatorAutomationMode: OperatorAutomationMode? = null,
         dailyBudgetCents: Int? = null,
         monthlyBudgetCents: Int? = null
-    ): Company = stateMutex.withLock {
+    ): Company {
         // Company creation is the bridge from an arbitrary checkout on disk to the product's
         // higher-level operating model. The method normalizes the repo root, ensures a managed
         // repository/workspace exists, seeds default org roles, and records the first persisted
         // company snapshot in one serialized transaction.
-        val now = System.currentTimeMillis()
-        val loadedState = stateStore.load()
-        val initialBackendKind = initialCompanyBackendKind(loadedState)
         val requestedRoot = Path.of(rootPath).toAbsolutePath().normalize()
-        val repositoryRoot = runCatching {
-            gitWorkspaceService.ensureInitializedRepositoryRoot(
-                requestedRoot,
-                defaultBaseBranch
-            )
-        }.getOrElse { error ->
-            if (loadedState.repositories.any { sameRepositoryRoot(it.localPath, requestedRoot) }) {
-                requestedRoot
-            } else {
-                throw error
+        val loadedStateBeforeGit = stateStore.load()
+        val repositoryRoot = withContext(Dispatchers.IO) {
+            runCatching {
+                gitWorkspaceService.ensureInitializedRepositoryRoot(
+                    requestedRoot,
+                    defaultBaseBranch
+                )
+            }.getOrElse { error ->
+                if (loadedStateBeforeGit.repositories.any { sameRepositoryRoot(it.localPath, requestedRoot) }) {
+                    requestedRoot
+                } else {
+                    throw error
+                }
             }
         }
-        val repository = upsertRepositoryForPath(loadedState.repositories, repositoryRoot, now)
         val requestedBranch = defaultBaseBranch?.trim()?.takeIf { it.isNotBlank() }
-        val resolvedBranch = if (requestedBranch == null) {
-            repository.defaultBranch
+        val detectedDefaultBranch = withContext(Dispatchers.IO) {
+            runCatching { gitWorkspaceService.detectDefaultBranch(repositoryRoot) }.getOrNull()
+        }
+        val detectedRemoteUrl = withContext(Dispatchers.IO) {
+            runCatching { gitWorkspaceService.detectRemoteUrl(repositoryRoot) }.getOrNull()
+        }
+        val requestedBranchExists = if (requestedBranch == null) {
+            true
         } else {
-            val requestedBranchExists = runCatching {
-                gitWorkspaceService.hasLocalBranch(repositoryRoot, requestedBranch)
-            }.getOrDefault(true)
-            if (requestedBranchExists || repository.defaultBranch.isBlank()) {
-                requestedBranch
-            } else {
-                repository.defaultBranch
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    gitWorkspaceService.hasLocalBranch(repositoryRoot, requestedBranch)
+                }.getOrDefault(true)
             }
         }
-        val existing = loadedState.companies.firstOrNull {
-            Path.of(it.rootPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
-        }
-        if (existing != null) {
-            val refreshed = existing.copy(
-                name = name.trim().ifEmpty { existing.name },
+
+        val mutation = stateMutex.withLock {
+            val now = System.currentTimeMillis()
+            val loadedState = stateStore.load()
+            val initialBackendKind = initialCompanyBackendKind(loadedState)
+            val repository = upsertRepositoryForPath(
+                repositories = loadedState.repositories,
+                repositoryRoot = repositoryRoot,
+                now = now,
+                detectedDefaultBranch = detectedDefaultBranch ?: requestedBranch,
+                detectedRemoteUrl = detectedRemoteUrl
+            )
+            val resolvedBranch = if (requestedBranch == null) {
+                repository.defaultBranch
+            } else {
+                if (requestedBranchExists || repository.defaultBranch.isBlank()) {
+                    requestedBranch
+                } else {
+                    repository.defaultBranch
+                }
+            }
+            val existing = loadedState.companies.firstOrNull {
+                Path.of(it.rootPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
+            }
+            if (existing != null) {
+                val refreshed = existing.copy(
+                    name = name.trim().ifEmpty { existing.name },
+                    repositoryId = repository.id,
+                    defaultBaseBranch = resolvedBranch,
+                    autonomyEnabled = autonomyEnabled,
+                    operatorAutomationMode = operatorAutomationMode ?: existing.operatorAutomationMode,
+                    dailyBudgetCents = normalizeBudgetOverride(dailyBudgetCents, existing.dailyBudgetCents),
+                    monthlyBudgetCents = normalizeBudgetOverride(monthlyBudgetCents, existing.monthlyBudgetCents),
+                    updatedAt = now
+                )
+                val refreshedState = loadedState.copy(
+                    repositories = mergeRepository(loadedState.repositories, repository),
+                    companies = loadedState.companies.map { if (it.id == existing.id) refreshed else it }
+                )
+                val workspaceState = ensureCompanyWorkspace(refreshedState, refreshed, now).first
+                val nextState = workspaceState.recordCompanyActivity(
+                    companyId = refreshed.id,
+                    source = "company",
+                    title = "Updated company",
+                    detail = refreshed.name
+                ).withDerivedMetrics()
+                stateStore.save(nextState)
+                publishCompanyEvent(
+                    companyId = refreshed.id,
+                    type = "company.updated",
+                    title = "Updated company",
+                    detail = refreshed.name
+                )
+                return@withLock CompanyMutationResult(
+                    company = nextState.companies.firstOrNull { it.id == refreshed.id } ?: refreshed
+                )
+            }
+
+            val companyId = UUID.randomUUID().toString()
+            val company = Company(
+                id = companyId,
+                name = name.trim().ifEmpty { repositoryRoot.fileName.toString() },
+                rootPath = repositoryRoot.toString(),
                 repositoryId = repository.id,
                 defaultBaseBranch = resolvedBranch,
+                backendKind = initialBackendKind,
                 autonomyEnabled = autonomyEnabled,
-                operatorAutomationMode = operatorAutomationMode ?: existing.operatorAutomationMode,
-                dailyBudgetCents = normalizeBudgetOverride(dailyBudgetCents, existing.dailyBudgetCents),
-                monthlyBudgetCents = normalizeBudgetOverride(monthlyBudgetCents, existing.monthlyBudgetCents),
+                operatorAutomationMode = operatorAutomationMode ?: OperatorAutomationMode.AGENT_APPROVED,
+                dailyBudgetCents = dailyBudgetCents?.takeIf { it > 0 },
+                monthlyBudgetCents = monthlyBudgetCents?.takeIf { it > 0 },
+                createdAt = now,
                 updatedAt = now
             )
-            val refreshedState = loadedState.copy(
-                repositories = mergeRepository(loadedState.repositories, repository),
-                companies = loadedState.companies.map { if (it.id == existing.id) refreshed else it }
+            val context = CompanyProjectContext(
+                id = UUID.randomUUID().toString(),
+                companyId = companyId,
+                name = company.name,
+                slug = slugify(company.name),
+                contextDocPath = companyContextRoot(company).resolve("projects/default.md").toString(),
+                lastUpdatedAt = now
             )
-            val workspaceState = ensureCompanyWorkspace(refreshedState, refreshed, now).first
+            val seededDefinitions = seedCompanyAgentDefinitions(companyId, now)
+            val seededCapabilityProfiles = seedCompanyAgentCapabilityProfiles(company, seededDefinitions, now)
+            val baseState = loadedState.copy(
+                repositories = mergeRepository(loadedState.repositories, repository),
+                companies = loadedState.companies + company,
+                projectContexts = loadedState.projectContexts + context,
+                companyAgentDefinitions = loadedState.companyAgentDefinitions + seededDefinitions,
+                agentCapabilityProfiles = loadedState.agentCapabilityProfiles + seededCapabilityProfiles,
+                companyRuntimes = loadedState.companyRuntimes + CompanyRuntimeSnapshot(companyId = companyId, backendKind = company.backendKind)
+            )
+            val workspaceState = ensureCompanyWorkspace(baseState, company, now).first
             val nextState = workspaceState.recordCompanyActivity(
-                companyId = refreshed.id,
+                companyId = companyId,
+                projectContextId = context.id,
                 source = "company",
-                title = "Updated company",
-                detail = refreshed.name
+                title = "Created company",
+                detail = company.name
             ).withDerivedMetrics()
             stateStore.save(nextState)
             publishCompanyEvent(
-                companyId = refreshed.id,
-                type = "company.updated",
-                title = "Updated company",
-                detail = refreshed.name
+                companyId = company.id,
+                type = "company.created",
+                title = "Created company",
+                detail = company.name
             )
-            return@withLock nextState.companies.firstOrNull { it.id == refreshed.id } ?: refreshed
+            CompanyMutationResult(
+                company = nextState.companies.firstOrNull { it.id == company.id } ?: company,
+                contextSnapshot = CompanyContextSnapshotWrite(nextState, company, context)
+            )
         }
 
-        val companyId = UUID.randomUUID().toString()
-        val company = Company(
-            id = companyId,
-            name = name.trim().ifEmpty { repositoryRoot.fileName.toString() },
-            rootPath = repositoryRoot.toString(),
-            repositoryId = repository.id,
-            defaultBaseBranch = resolvedBranch,
-            backendKind = initialBackendKind,
-            autonomyEnabled = autonomyEnabled,
-            operatorAutomationMode = operatorAutomationMode ?: OperatorAutomationMode.AGENT_APPROVED,
-            dailyBudgetCents = dailyBudgetCents?.takeIf { it > 0 },
-            monthlyBudgetCents = monthlyBudgetCents?.takeIf { it > 0 },
-            createdAt = now,
-            updatedAt = now
-        )
-        val context = CompanyProjectContext(
-            id = UUID.randomUUID().toString(),
-            companyId = companyId,
-            name = company.name,
-            slug = slugify(company.name),
-            contextDocPath = companyContextRoot(company).resolve("projects/default.md").toString(),
-            lastUpdatedAt = now
-        )
-        val seededDefinitions = seedCompanyAgentDefinitions(companyId, now)
-        val seededCapabilityProfiles = seedCompanyAgentCapabilityProfiles(company, seededDefinitions, now)
-        val baseState = loadedState.copy(
-            repositories = mergeRepository(loadedState.repositories, repository),
-            companies = loadedState.companies + company,
-            projectContexts = loadedState.projectContexts + context,
-            companyAgentDefinitions = loadedState.companyAgentDefinitions + seededDefinitions,
-            agentCapabilityProfiles = loadedState.agentCapabilityProfiles + seededCapabilityProfiles,
-            companyRuntimes = loadedState.companyRuntimes + CompanyRuntimeSnapshot(companyId = companyId, backendKind = company.backendKind)
-        )
-        val workspaceState = ensureCompanyWorkspace(baseState, company, now).first
-        val nextState = workspaceState.recordCompanyActivity(
-            companyId = companyId,
-            projectContextId = context.id,
-            source = "company",
-            title = "Created company",
-            detail = company.name
-        ).withDerivedMetrics()
-        stateStore.save(nextState)
-        writeCompanyContextSnapshot(nextState, company, context)
-        publishCompanyEvent(
-            companyId = company.id,
-            type = "company.created",
-            title = "Created company",
-            detail = company.name
-        )
-        nextState.companies.firstOrNull { it.id == company.id } ?: company
+        mutation.contextSnapshot?.let { snapshot ->
+            withContext(Dispatchers.IO) {
+                writeCompanyContextSnapshot(snapshot.state, snapshot.company, snapshot.projectContext)
+            }
+        }
+        return mutation.company
     }
 
     private fun initialCompanyBackendKind(state: DesktopAppState): ExecutionBackendKind {
@@ -15650,39 +15820,85 @@ class DesktopAppService(
         issueId: String? = null,
         runId: String? = null
     ) {
-        val snapshot = runCatching {
-            companyDashboardSnapshot(runBlocking { stateStore.load() }.withDerivedMetrics(), companyId)
-        }.getOrNull()
-        companyEventStream.tryEmit(
-            CompanyEventEnvelope(
-                event = CompanyEvent(
-                    id = UUID.randomUUID().toString(),
-                    companyId = companyId,
-                    type = type,
-                    title = title,
-                    detail = detail,
-                    goalId = goalId,
-                    issueId = issueId,
-                    runId = runId,
-                    createdAt = System.currentTimeMillis()
-                ),
-                companyDashboard = snapshot
-            )
+        val request = CompanyEventPublishRequest(
+            companyId = companyId,
+            type = type,
+            title = title,
+            detail = detail,
+            goalId = goalId,
+            issueId = issueId,
+            runId = runId
         )
+        val sendResult = companyEventRequests.trySend(request)
+        if (!sendResult.isSuccess) {
+            serviceScope.launch {
+                runCatching { companyEventRequests.send(request) }
+            }
+        }
     }
 
-    private suspend fun upsertRepositoryForPath(
+    private suspend fun publishCompanyEventRequest(request: CompanyEventPublishRequest) {
+        val envelope = CompanyEventEnvelope(
+            event = CompanyEvent(
+                id = UUID.randomUUID().toString(),
+                companyId = request.companyId,
+                type = request.type,
+                title = request.title,
+                detail = request.detail,
+                goalId = request.goalId,
+                issueId = request.issueId,
+                runId = request.runId,
+                createdAt = request.createdAt
+            ),
+            companyDashboard = buildCompanyEventDashboardSnapshot(request.companyId),
+            sequence = companyEventSequence.incrementAndGet()
+        )
+        companyEventStream.emit(envelope)
+        rememberCompanyEvent(envelope)
+    }
+
+    private suspend fun buildCompanyEventDashboardSnapshot(companyId: String): CompanyDashboardResponse? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                companyDashboardSnapshot(stateStore.load().withDerivedMetrics(), companyId)
+            }.getOrNull()
+        }
+
+    private fun rememberCompanyEvent(envelope: CompanyEventEnvelope) {
+        synchronized(companyEventReplayLock) {
+            val buffer = companyEventReplayBuffers.computeIfAbsent(envelope.event.companyId) { java.util.ArrayDeque() }
+            buffer.addLast(envelope)
+            while (buffer.size > COMPANY_EVENT_REPLAY_CAPACITY) {
+                buffer.removeFirst()
+            }
+        }
+    }
+
+    private fun replayedCompanyEvents(companyId: String, afterSequence: Long?): List<CompanyEventEnvelope> =
+        synchronized(companyEventReplayLock) {
+            companyEventReplayBuffers[companyId]
+                ?.filter { envelope ->
+                    val sequence = envelope.sequence
+                    sequence != null && (afterSequence == null || sequence > afterSequence)
+                }
+                .orEmpty()
+        }
+
+    private fun latestCompanyEventSequence(companyId: String): Long? =
+        synchronized(companyEventReplayLock) {
+            companyEventReplayBuffers[companyId]?.lastOrNull()?.sequence
+        }
+
+    private fun upsertRepositoryForPath(
         repositories: List<ManagedRepository>,
         repositoryRoot: Path,
-        now: Long
+        now: Long,
+        detectedDefaultBranch: String? = null,
+        detectedRemoteUrl: String? = null
     ): ManagedRepository {
         val existing = repositories.firstOrNull { sameRepositoryRoot(it.localPath, repositoryRoot) }
-        val defaultBranch = runCatching {
-            gitWorkspaceService.detectDefaultBranch(repositoryRoot)
-        }.getOrElse { existing?.defaultBranch ?: "main" }
-        val remoteUrl = runCatching {
-            gitWorkspaceService.detectRemoteUrl(repositoryRoot)
-        }.getOrNull() ?: existing?.remoteUrl
+        val defaultBranch = detectedDefaultBranch ?: existing?.defaultBranch ?: "main"
+        val remoteUrl = detectedRemoteUrl ?: existing?.remoteUrl
         return if (existing != null) {
             existing.copy(
                 name = repositoryRoot.fileName.toString(),

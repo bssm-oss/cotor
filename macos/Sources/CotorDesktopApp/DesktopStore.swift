@@ -4582,9 +4582,10 @@ final class DesktopStore: ObservableObject {
                     self.companyEventTask = nil
                 }
             }
+            var lastEventCursor: String? = nil
             while !Task.isCancelled {
                 do {
-                    for try await envelope in api.companyEvents(companyId: companyID) {
+                    for try await envelope in api.companyEvents(companyId: companyID, cursor: lastEventCursor) {
                         let shouldApply = await MainActor.run { () -> Bool in
                             self.companyEventStreamGeneration == generation &&
                                 self.selectedCompanyID == companyID &&
@@ -4594,6 +4595,11 @@ final class DesktopStore: ObservableObject {
                         if isCompanyEventStreamHeartbeat(envelope) {
                             reconnectDelaySeconds = 1
                             continue
+                        }
+                        if let cursor = envelope.cursor {
+                            lastEventCursor = cursor
+                        } else if let sequence = envelope.sequence {
+                            lastEventCursor = String(sequence)
                         }
                         await MainActor.run {
                             self.companyStreamStatusMessage = nil
