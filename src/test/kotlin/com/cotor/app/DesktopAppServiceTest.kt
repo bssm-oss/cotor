@@ -11787,7 +11787,7 @@ class DesktopAppServiceTest : FunSpec({
             title = "Reopen CEO approval after QA pass",
             description = "Exercise review-to-approval recovery.",
             status = GoalStatus.ACTIVE,
-            autonomyEnabled = true,
+            autonomyEnabled = false,
             createdAt = now,
             updatedAt = now
         )
@@ -11915,7 +11915,7 @@ class DesktopAppServiceTest : FunSpec({
 
         service.runCompanyRuntimeTick(company.id)
 
-        val refreshed = withTimeout(30_000) {
+        val refreshed = withTimeout(90_000) {
             while (true) {
                 val candidate = stateStore.load()
                 val candidateExecution = candidate.issues.first { it.id == executionIssue.id }

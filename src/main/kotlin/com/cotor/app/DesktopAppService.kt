@@ -156,6 +156,36 @@ private sealed interface CompanyAutomationTraceWriteRequest {
     data class Flush(val ack: CompletableDeferred<Unit>) : CompanyAutomationTraceWriteRequest
 }
 
+private data class CompanyContextSnapshotWrite(
+    val state: DesktopAppState,
+    val company: Company,
+    val projectContext: CompanyProjectContext
+)
+
+private data class CompanyMutationResult(
+    val company: Company,
+    val contextSnapshot: CompanyContextSnapshotWrite? = null
+)
+
+private data class GitHubSyncCandidate(
+    val item: ReviewQueueItem,
+    val worktreePath: Path,
+    val pullRequestNumber: Int
+)
+
+private data class GitHubSyncSideEffect(
+    val item: ReviewQueueItem,
+    val issue: CompanyIssue?,
+    val metadata: PublishMetadata
+)
+
+private data class GitHubSyncMutation(
+    val refreshedCount: Int,
+    val companyName: String,
+    val nextState: DesktopAppState?,
+    val sideEffects: List<GitHubSyncSideEffect>
+)
+
 @kotlinx.serialization.Serializable
 private data class CeoPlanningPayload(
     val goalSummary: String,
@@ -2097,13 +2127,14 @@ class DesktopAppService(
             }
             val tickIsStale = runtime?.lastTickAt?.let { now - it > 5_000 } ?: true
             val loopMissing = companyRuntimeJobs[activeCompanyId]?.isActive != true
+            val tickAlreadyRunning = companyRuntimeTickMutexes[activeCompanyId]?.isLocked == true
 
             if (hasPendingIssues && runtime?.status == CompanyRuntimeStatus.RUNNING && runtime.manuallyStoppedAt == null) {
                 if (loopMissing) {
                     ensureCompanyRuntimeLoop(activeCompanyId)
                 }
                 wakeCompanyRuntime(activeCompanyId)
-                if (tickIsStale) {
+                if (tickIsStale && !tickAlreadyRunning) {
                     runCatching { runCompanyRuntimeTick(activeCompanyId) }
                 }
             }
@@ -4847,38 +4878,45 @@ class DesktopAppService(
         dailyBudgetCents: Int? = null,
         monthlyBudgetCents: Int? = null
     ): Company {
-        val now = System.currentTimeMillis()
+        // Company creation is the bridge from an arbitrary checkout on disk to the product's
+        // higher-level operating model. The method normalizes the repo root, ensures a managed
+        // repository/workspace exists, seeds default org roles, and records the first persisted
+        // company snapshot in one serialized transaction.
         val requestedRoot = Path.of(rootPath).toAbsolutePath().normalize()
-        val stateBeforeRepositoryInit = stateStore.load()
-        val repositoryRoot = runCatching {
-            gitWorkspaceService.ensureInitializedRepositoryRoot(
-                requestedRoot,
-                defaultBaseBranch
-            )
-        }.getOrElse { error ->
-            if (stateBeforeRepositoryInit.repositories.any { sameRepositoryRoot(it.localPath, requestedRoot) }) {
-                requestedRoot
-            } else {
-                throw error
+        val loadedStateBeforeGit = stateStore.load()
+        val repositoryRoot = withContext(Dispatchers.IO) {
+            runCatching {
+                gitWorkspaceService.ensureInitializedRepositoryRoot(
+                    requestedRoot,
+                    defaultBaseBranch
+                )
+            }.getOrElse { error ->
+                if (loadedStateBeforeGit.repositories.any { sameRepositoryRoot(it.localPath, requestedRoot) }) {
+                    requestedRoot
+                } else {
+                    throw error
+                }
             }
         }
-        val detectedDefaultBranch = runCatching {
-            gitWorkspaceService.detectDefaultBranch(repositoryRoot)
-        }.getOrNull()
-        val detectedRemoteUrl = runCatching {
-            gitWorkspaceService.detectRemoteUrl(repositoryRoot)
-        }.getOrNull()
         val requestedBranch = defaultBaseBranch?.trim()?.takeIf { it.isNotBlank() }
-        val requestedBranchExists = requestedBranch?.let {
-            runCatching {
-                gitWorkspaceService.hasLocalBranch(repositoryRoot, requestedBranch)
-            }.getOrDefault(true)
-        } ?: true
+        val detectedDefaultBranch = withContext(Dispatchers.IO) {
+            runCatching { gitWorkspaceService.detectDefaultBranch(repositoryRoot) }.getOrNull()
+        }
+        val detectedRemoteUrl = withContext(Dispatchers.IO) {
+            runCatching { gitWorkspaceService.detectRemoteUrl(repositoryRoot) }.getOrNull()
+        }
+        val requestedBranchExists = if (requestedBranch == null) {
+            true
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    gitWorkspaceService.hasLocalBranch(repositoryRoot, requestedBranch)
+                }.getOrDefault(true)
+            }
+        }
 
         val mutation = stateMutex.withLock {
-            // Company creation is the bridge from an arbitrary checkout on disk to the product's
-            // higher-level operating model. Git and filesystem discovery happen before this lock;
-            // this block only applies the resulting state transition.
+            val now = System.currentTimeMillis()
             val loadedState = stateStore.load()
             val initialBackendKind = initialCompanyBackendKind(loadedState)
             val repository = upsertRepositoryForPath(
@@ -4890,10 +4928,12 @@ class DesktopAppService(
             )
             val resolvedBranch = if (requestedBranch == null) {
                 repository.defaultBranch
-            } else if (requestedBranchExists || repository.defaultBranch.isBlank()) {
-                requestedBranch
             } else {
-                repository.defaultBranch
+                if (requestedBranchExists || repository.defaultBranch.isBlank()) {
+                    requestedBranch
+                } else {
+                    repository.defaultBranch
+                }
             }
             val existing = loadedState.companies.firstOrNull {
                 Path.of(it.rootPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
