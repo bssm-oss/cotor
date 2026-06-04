@@ -608,10 +608,6 @@ class DesktopAppService(
 
     suspend fun dashboard(): DashboardResponse {
         pruneRuntimeCaches()
-        // Every dashboard read is also a chance to heal background loops after an app-server
-        // restart. The read path stays cheap, but it nudges the automation layer back into the
-        // expected steady state before serializing the full desktop snapshot.
-        queueAutomationRefresh()
         val state = stateStore.load().withDerivedMetrics()
         val orgProfiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
         val boundIssuesById = mutableMapOf<String, CompanyIssue>()
@@ -663,7 +659,6 @@ class DesktopAppService(
 
     suspend fun companyDashboard(companyId: String? = null): CompanyDashboardResponse {
         pruneRuntimeCaches()
-        queueAutomationRefresh(companyId)
         val state = stateStore.load().withDerivedMetrics()
         return companyDashboardSnapshot(state, companyId).redactedForApi()
     }
@@ -683,6 +678,13 @@ class DesktopAppService(
         val state = stateStore.load().withDerivedMetrics()
         return companyDashboardSnapshot(state, companyId).redactedForApi()
     }
+
+    suspend fun opsMetrics(): OpsMetricSnapshot =
+        computeOpsMetrics(
+            stateStore.loadGoals(),
+            stateStore.loadIssues(),
+            stateStore.loadReviewQueue()
+        )
 
     suspend fun agentPerformance(companyId: String): List<AgentPerformanceSnapshot> {
         val state = stateStore.load().withDerivedMetrics()
@@ -1125,6 +1127,9 @@ class DesktopAppService(
         state: DesktopAppState,
         companyId: String? = null
     ): CompanyDashboardResponse {
+        val scopedCompanies = state.companies
+            .filter { companyId == null || it.id == companyId }
+            .sortedByDescending { it.updatedAt }
         val filteredGoals = state.goals
             .filter { companyId == null || it.companyId == companyId }
             .sortedByDescending { it.updatedAt }
@@ -1149,8 +1154,16 @@ class DesktopAppService(
         val scopedIssues = boundRuntime?.issues?.filter { it.id in filteredIssueIds } ?: filteredIssues
         val scopedReviewQueue = (boundRuntime?.reviewQueue ?: state.reviewQueue)
             .filter { companyId == null || it.companyId == companyId || it.issueId in filteredIssueIds }
+        val scopedOrgProfiles = orgProfiles
+            .filter { companyId == null || it.companyId == companyId }
+        val scopedBackendStatuses = if (companyId == null) {
+            computeBackendStatuses(state)
+        } else {
+            val scopedBackendKind = scopedCompanies.firstOrNull()?.backendKind
+            computeBackendStatuses(state).filter { it.kind == scopedBackendKind }
+        }
         return CompanyDashboardResponse(
-            companies = state.companies.sortedByDescending { it.updatedAt },
+            companies = scopedCompanies,
             companyAgentDefinitions = state.companyAgentDefinitions
                 .filter { companyId == null || it.companyId == companyId }
                 .sortedWith(compareBy<CompanyAgentDefinition> { it.displayOrder }.thenBy { it.title.lowercase() }),
@@ -1165,8 +1178,7 @@ class DesktopAppService(
             tasks = filteredTasks,
             issueDependencies = state.issueDependencies.filter { it.issueId in filteredIssueIds || it.dependsOnIssueId in filteredIssueIds },
             reviewQueue = scopedReviewQueue.sortedByDescending { it.updatedAt },
-            orgProfiles = orgProfiles
-                .filter { companyId == null || it.companyId == companyId },
+            orgProfiles = scopedOrgProfiles,
             workflowTopologies = computeWorkflowTopologies(state, orgProfiles)
                 .filter { companyId == null || it.companyId == companyId },
             goalDecisions = state.goalDecisions
@@ -1174,9 +1186,8 @@ class DesktopAppService(
                 .sortedByDescending { it.createdAt },
             runningAgentSessions = computeRunningAgentSessions(state, orgProfiles)
                 .filter { companyId == null || it.companyId == companyId },
-            backendStatuses = computeBackendStatuses(state)
-                .filter { companyId == null || state.companies.firstOrNull { company -> company.id == companyId }?.backendKind == it.kind },
-            opsMetrics = state.opsMetrics,
+            backendStatuses = scopedBackendStatuses,
+            opsMetrics = computeOpsMetrics(filteredGoals, scopedIssues, scopedReviewQueue),
             runtime = if (companyId == null) {
                 state.runtime
             } else {
@@ -1211,7 +1222,6 @@ class DesktopAppService(
     }
 
     suspend fun listWorkflowTopologies(companyId: String? = null): List<WorkflowTopologySnapshot> {
-        queueAutomationRefresh(companyId)
         val state = stateStore.load().withDerivedMetrics()
         val orgProfiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
         return computeWorkflowTopologies(state, orgProfiles)
@@ -1219,7 +1229,6 @@ class DesktopAppService(
     }
 
     suspend fun listGoalDecisions(companyId: String? = null): List<GoalOrchestrationDecision> {
-        queueAutomationRefresh(companyId)
         return stateStore.load().goalDecisions
             .filter { companyId == null || it.companyId == companyId }
             .sortedByDescending { it.createdAt }
@@ -16399,16 +16408,8 @@ class DesktopAppService(
                     if (now - lastLiveChunkMs < 750L) return@handler
                     lastLiveChunkMs = now
                     val sanitized = line.take(200).replace(Regex("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]"), "")
-                    runBlocking {
-                        val existing = stateStore.load().runs.firstOrNull { it.id == startedRun.id }
-                            ?: return@runBlocking
-                        replaceRun(
-                            existing.copy(
-                                liveActivity = sanitized,
-                                lastLogLine = sanitized,
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        )
+                    serviceScope.launch {
+                        updateRunLiveActivity(startedRun.id, sanitized)
                     }
                 }
             )
@@ -16941,12 +16942,34 @@ class DesktopAppService(
         }
     }
 
-    private suspend fun touchActiveRunWithoutProcess(runId: String) {
-        stateMutex.withLock {
-            val state = stateStore.load()
-            val now = System.currentTimeMillis()
+    private suspend fun updateRunLiveActivity(runId: String, sanitizedLine: String) {
+        val now = System.currentTimeMillis()
+        stateStore.updateRuns { runs ->
             var changed = false
-            val nextRuns = state.runs.map { run ->
+            val nextRuns = runs.map { run ->
+                if (
+                    run.id == runId &&
+                    (run.status == AgentRunStatus.RUNNING || run.status == AgentRunStatus.QUEUED)
+                ) {
+                    changed = true
+                    run.copy(
+                        liveActivity = sanitizedLine,
+                        lastLogLine = sanitizedLine,
+                        updatedAt = now
+                    )
+                } else {
+                    run
+                }
+            }
+            if (changed) nextRuns else runs
+        }
+    }
+
+    private suspend fun touchActiveRunWithoutProcess(runId: String) {
+        val now = System.currentTimeMillis()
+        stateStore.updateRuns { runs ->
+            var changed = false
+            val nextRuns = runs.map { run ->
                 if (run.id == runId && run.status == AgentRunStatus.RUNNING) {
                     changed = true
                     run.copy(updatedAt = now)
@@ -16954,9 +16977,7 @@ class DesktopAppService(
                     run
                 }
             }
-            if (changed) {
-                stateStore.save(state.copy(runs = nextRuns))
-            }
+            if (changed) nextRuns else runs
         }
     }
 
@@ -23915,13 +23936,17 @@ class DesktopAppService(
     private fun DesktopAppState.withDerivedMetrics(): DesktopAppState {
         val derivedCompanyRuntimes = computeCompanyRuntimes()
         return copy(
-            opsMetrics = computeOpsMetrics(),
+            opsMetrics = computeOpsMetrics(goals, issues, reviewQueue),
             runtime = computeRuntimeSnapshot(derivedCompanyRuntimes),
             companyRuntimes = derivedCompanyRuntimes
         )
     }
 
-    private fun DesktopAppState.computeOpsMetrics(): OpsMetricSnapshot =
+    private fun computeOpsMetrics(
+        goals: List<CompanyGoal>,
+        issues: List<CompanyIssue>,
+        reviewQueue: List<ReviewQueueItem>
+    ): OpsMetricSnapshot =
         OpsMetricSnapshot(
             openGoals = goals.count { it.status != GoalStatus.COMPLETED },
             activeIssues = issues.count {

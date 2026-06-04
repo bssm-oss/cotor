@@ -542,6 +542,111 @@ class DesktopStateStoreTest : FunSpec({
         store.load().tasks.first { it.id == "task-0" }.status shouldBe DesktopTaskStatus.COMPLETED
     }
 
+    test("updateRuns rewrites only the runs sqlite collection") {
+        val appHome = Files.createTempDirectory("desktop-state-store-runs-fast-update-home")
+        val store = DesktopStateStore { appHome }
+        val state = DesktopAppState(
+            tasks = listOf(
+                AgentTask(
+                    id = "task-1",
+                    workspaceId = "workspace-1",
+                    title = "Task",
+                    prompt = "prompt",
+                    agents = listOf("codex"),
+                    status = DesktopTaskStatus.RUNNING,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            ),
+            runs = listOf(
+                AgentRun(
+                    id = "run-1",
+                    taskId = "task-1",
+                    workspaceId = "workspace-1",
+                    repositoryId = "repo-1",
+                    agentName = "codex",
+                    branchName = "branch",
+                    worktreePath = "/tmp/worktree",
+                    status = AgentRunStatus.RUNNING,
+                    createdAt = 1L,
+                    updatedAt = 1L
+                )
+            )
+        )
+
+        store.save(state)
+        val taskUpdatedAt = readSqliteCollectionUpdatedAt(appHome, "tasks")
+        val runsUpdatedAt = readSqliteCollectionUpdatedAt(appHome, "runs")
+        Thread.sleep(5L)
+        store.updateRuns { runs ->
+            runs.map { run ->
+                if (run.id == "run-1") run.copy(liveActivity = "building", updatedAt = 2L) else run
+            }
+        }
+
+        readSqliteCollectionUpdatedAt(appHome, "tasks") shouldBe taskUpdatedAt
+        (readSqliteCollectionUpdatedAt(appHome, "runs") > runsUpdatedAt) shouldBe true
+        store.loadRuns().single().liveActivity shouldBe "building"
+        store.load().runs.single().liveActivity shouldBe "building"
+    }
+
+    test("json backend updateRuns writes a runs chunk without rewriting the full snapshot") {
+        val previousBackend = System.getProperty("cotor.desktop.state.backend")
+        System.setProperty("cotor.desktop.state.backend", "json")
+        try {
+            val appHome = Files.createTempDirectory("desktop-state-store-json-runs-fast-update-home")
+            val store = DesktopStateStore { appHome }
+            val state = DesktopAppState(
+                tasks = listOf(
+                    AgentTask(
+                        id = "task-json",
+                        workspaceId = "workspace-json",
+                        title = "JSON task",
+                        prompt = "prompt",
+                        agents = listOf("codex"),
+                        status = DesktopTaskStatus.RUNNING,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                ),
+                runs = listOf(
+                    AgentRun(
+                        id = "run-json",
+                        taskId = "task-json",
+                        workspaceId = "workspace-json",
+                        repositoryId = "repo-json",
+                        agentName = "codex",
+                        branchName = "branch-json",
+                        worktreePath = "/tmp/worktree-json",
+                        status = AgentRunStatus.RUNNING,
+                        createdAt = 1L,
+                        updatedAt = 1L
+                    )
+                )
+            )
+
+            store.save(state)
+            val statePath = appHome.resolve("state.json")
+            val stateUpdatedAt = Files.getLastModifiedTime(statePath).toMillis()
+            Thread.sleep(5L)
+            store.updateRuns { runs ->
+                runs.map { run ->
+                    if (run.id == "run-json") run.copy(lastLogLine = "chunked", updatedAt = 2L) else run
+                }
+            }
+
+            Files.getLastModifiedTime(statePath).toMillis() shouldBe stateUpdatedAt
+            appHome.resolve("state.collections").resolve("runs.json").readText() shouldContain "chunked"
+            store.load().runs.single().lastLogLine shouldBe "chunked"
+        } finally {
+            if (previousBackend == null) {
+                System.clearProperty("cotor.desktop.state.backend")
+            } else {
+                System.setProperty("cotor.desktop.state.backend", previousBackend)
+            }
+        }
+    }
+
     test("lenient recovery preserves workflow pipelines, agent context entries, and agent messages") {
         val appHome = Files.createTempDirectory("desktop-state-store-lenient-preserve-home")
         val store = DesktopStateStore { appHome }

@@ -134,6 +134,7 @@ The current macOS shell has two top-level modes.
   - CEO chat intake: a vague chat request can be confirmed into one CEO-owned goal, a clarified brief, and assigned downstream issues without creating a GitHub repository
 - company activity feed with live event-driven updates
 - live company updates use the company event stream plus a focused company dashboard snapshot, not a heavyweight full refresh on every event; malformed NDJSON event lines are dropped per line so one bad optional payload does not kill the stream
+- dashboard and metrics reads are side-effect free: they do not queue automation refresh work, and `/api/app/metrics` uses a lightweight metrics projection instead of building the full dashboard payload
 - issue execution detail cards now show agent CLI, selected model, backend kind, process id, assigned prompt, stdout/stderr, branch, PR link, and publish summary for each issue-linked run
 - async detail and memory snapshot refreshes ignore stale responses if the selected issue/task changes before the request completes
 - if the live company stream disconnects, the UI keeps the last company snapshot and shows `Live company updates disconnected. Re-syncing...` while it recovers
@@ -169,6 +170,7 @@ The current macOS shell has two top-level modes.
 
 Current company-first routes:
 
+- `GET /api/app/metrics`
 - `GET /api/app/companies`
 - `POST /api/app/companies`
 - `GET /api/app/companies/{companyId}`
@@ -197,6 +199,7 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
 - `POST /api/app/companies/{companyId}/runtime/stop`
+- `GET /api/app/company/metrics`
 - `GET /api/app/runtime/cleanup/preview`
 - `POST /api/app/runtime/cleanup`
 - `GET /api/app/marketing/policies`

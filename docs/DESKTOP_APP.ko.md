@@ -138,6 +138,7 @@ cotor delete
 - CEO 채팅 인테이크: 대충 쓴 채팅 요청도 확인 후 CEO 소유 목표, 정리된 브리프, 담당 하위 이슈로 만들며 GitHub 저장소를 자동 생성하지 않음
 - 이벤트 기반으로 바로 갱신되는 회사 활동 피드
 - 회사 live update는 무거운 전체 refresh 대신 company event stream + 회사 전용 dashboard snapshot으로 상태를 반영하며, 잘못된 NDJSON event line 하나는 버리고 stream은 계속 유지
+- dashboard와 metrics 조회는 부수 효과가 없는 read path입니다. 조회만으로 자동화 refresh 작업을 큐잉하지 않으며, `/api/app/metrics`는 전체 dashboard payload를 만들지 않고 가벼운 metrics projection만 반환합니다.
 - 이슈 실행 상세 카드는 이제 각 issue-linked run마다 에이전트 CLI, 선택 모델, 백엔드 종류, 프로세스 ID, 할당 프롬프트, stdout/stderr, 브랜치, PR 링크, 퍼블리시 요약을 함께 보여줌
 - 비동기 상세 정보와 메모리 스냅샷 요청은 완료 전에 선택된 issue/task가 바뀌면 오래된 응답을 적용하지 않음
 - 회사 실시간 stream이 끊기면 마지막 snapshot은 유지한 채 `회사 실시간 업데이트 연결이 끊어졌습니다. 다시 동기화하는 중...` 메시지를 보여주며 복구
@@ -176,6 +177,7 @@ cotor delete
 
 현재 company-first 라우트:
 
+- `GET /api/app/metrics`
 - `GET /api/app/companies`
 - `POST /api/app/companies`
 - `GET /api/app/companies/{companyId}`
@@ -204,6 +206,7 @@ cotor delete
 - `GET /api/app/companies/{companyId}/runtime`
 - `POST /api/app/companies/{companyId}/runtime/start`
 - `POST /api/app/companies/{companyId}/runtime/stop`
+- `GET /api/app/company/metrics`
 - `GET /api/app/runtime/cleanup/preview`
 - `POST /api/app/runtime/cleanup`
 - `GET /api/app/marketing/policies`

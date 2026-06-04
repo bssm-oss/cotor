@@ -473,6 +473,11 @@ internal fun Application.cotorAppModule(
                 call.respond(desktopService.dashboard().redactedForApi())
             }
 
+            get("/metrics") {
+                if (!requireToken(token)) return@get
+                call.respond(desktopService.opsMetrics())
+            }
+
             route("/settings/backends") {
                 get {
                     if (!requireToken(token)) return@get
@@ -1252,7 +1257,7 @@ internal fun Application.cotorAppModule(
 
                 get("/metrics") {
                     if (!requireToken(token)) return@get
-                    call.respond(desktopService.dashboard().opsMetrics)
+                    call.respond(desktopService.opsMetrics())
                 }
 
                 post("/linear/sync") {

@@ -337,6 +337,36 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("metrics route uses the fast metrics path without loading the dashboard") {
+        coEvery { desktopService.opsMetrics() } returns OpsMetricSnapshot(
+            openGoals = 2,
+            activeIssues = 3,
+            blockedIssues = 1,
+            readyToMergeCount = 4,
+            mergedCount = 5,
+            lastUpdatedAt = 6L
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/metrics") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            response.bodyAsText() shouldContain "\"openGoals\":2"
+            coVerify(exactly = 1) { desktopService.opsMetrics() }
+            coVerify(exactly = 0) { desktopService.dashboard() }
+        }
+    }
+
     test("clone repository route returns bad request for invalid remote URL") {
         coEvery { desktopService.cloneRepository("file:///tmp/local-repo") } throws
             IllegalArgumentException("Use an existing GitHub repository URL without credentials, for example https://github.com/owner/repo.git")
