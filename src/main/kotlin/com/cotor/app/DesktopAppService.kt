@@ -2169,13 +2169,14 @@ class DesktopAppService(
             }
             val tickIsStale = runtime?.lastTickAt?.let { now - it > 5_000 } ?: true
             val loopMissing = companyRuntimeJobs[activeCompanyId]?.isActive != true
+            val tickAlreadyRunning = companyRuntimeTickMutexes[activeCompanyId]?.isLocked == true
 
             if (hasPendingIssues && runtime?.status == CompanyRuntimeStatus.RUNNING && runtime.manuallyStoppedAt == null) {
                 if (loopMissing) {
                     ensureCompanyRuntimeLoop(activeCompanyId)
                 }
                 wakeCompanyRuntime(activeCompanyId)
-                if (tickIsStale) {
+                if (tickIsStale && !tickAlreadyRunning) {
                     runCatching { runCompanyRuntimeTick(activeCompanyId) }
                 }
             }

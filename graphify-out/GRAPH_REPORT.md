@@ -1,7 +1,7 @@
 # Graph Report - cotor-async-event-stream-and-locks  (2026-06-04)
 
 ## Corpus Check
-- 380 files · ~639,716 words
+- 380 files · ~639,724 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
