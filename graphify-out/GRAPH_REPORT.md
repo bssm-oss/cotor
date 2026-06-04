@@ -1,7 +1,7 @@
-# Graph Report - cotor-qa-gradle-coverage-20260604  (2026-06-04)
+# Graph Report - cotor-agent-execution-await-yeK1tg  (2026-06-04)
 
 ## Corpus Check
-- 380 files · ~638,736 words
+- 380 files · ~638,728 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -349,12 +349,12 @@
 ## Surprising Connections (you probably didn't know these)
 - `makeFallbackIcon()` --calls--> `Line`  [INFERRED]
   macos/Tools/generate-desktop-icon.swift → src/main/kotlin/com/cotor/app/DesktopAppService.kt
-- `language` --calls--> `userFacingIssueKind()`  [INFERRED]
-  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
-- `language` --calls--> `userFacingDecisionTitle()`  [INFERRED]
-  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
-- `language` --calls--> `localizedSourceKind()`  [INFERRED]
-  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `userFacingIssueKind()` --calls--> `language`  [INFERRED]
+  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
+- `userFacingDecisionTitle()` --calls--> `language`  [INFERRED]
+  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
+- `localizedSourceKind()` --calls--> `language`  [INFERRED]
+  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
 - `preparedBrandMark()` --calls--> `Data`  [INFERRED]
   macos/Tools/generate-desktop-icon.swift → macos/Sources/CotorDesktopApp/DesktopAPI.swift
 
