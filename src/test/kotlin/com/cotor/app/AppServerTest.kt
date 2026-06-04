@@ -176,6 +176,14 @@ class AppServerTest : FunSpec({
             }
             readResponse.status shouldBe HttpStatusCode.OK
 
+            val readOnlyMcpResponse = client.post("/api/app/mcp") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"jsonrpc":"2.0","id":1,"method":"initialize"}""")
+            }
+            readOnlyMcpResponse.status shouldBe HttpStatusCode.OK
+            readOnlyMcpResponse.bodyAsText() shouldContain "cotor-readonly"
+
             val writeResponse = client.post("/api/app/companies") {
                 header("Authorization", "Bearer secret-token")
                 header("Content-Type", "application/json")

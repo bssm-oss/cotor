@@ -9282,8 +9282,7 @@ class DesktopAppService(
             if (
                 existingPlanningIssue != null &&
                 existingPlanningIssue.status == IssueStatus.BLOCKED &&
-                listOf(existingPlanningIssue.transitionReason, existingPlanningIssue.providerBlockReason)
-                    .any { it?.contains(CEO_PLANNING_INVALID_OUTPUT) == true }
+                isRecoverableBlockedCeoPlanningIssue(existingPlanningIssue)
             ) {
                 val recoveredState = recoverBlockedCeoPlanningIssueFromArtifacts(
                     state = state,
@@ -13165,7 +13164,9 @@ class DesktopAppService(
     }
 
     private fun failureSignals(task: AgentTask, run: AgentRun?): List<String> {
-        if (task.status != DesktopTaskStatus.FAILED && task.status != DesktopTaskStatus.PARTIAL) {
+        val taskFailed = task.status == DesktopTaskStatus.FAILED || task.status == DesktopTaskStatus.PARTIAL
+        val runFailed = run?.status == AgentRunStatus.FAILED
+        if (!taskFailed && !runFailed) {
             return emptyList()
         }
         return buildList {
@@ -21362,15 +21363,8 @@ class DesktopAppService(
         finalStatus != DesktopTaskStatus.COMPLETED &&
             failureSignals(task, run).any(::isOpenCodeInterruptedBeforePlanningText)
 
-    private fun deterministicCeoPlanningFallbackReason(
-        task: AgentTask,
-        run: AgentRun?,
-        finalStatus: DesktopTaskStatus
-    ): String? {
-        if (finalStatus == DesktopTaskStatus.COMPLETED) {
-            return null
-        }
-        val matchingSignal = failureSignals(task, run).firstOrNull { signal ->
+    private fun ceoPlanningFallbackProviderSignal(signals: Iterable<String>): String? =
+        signals.firstOrNull { signal ->
             val lower = signal.lowercase()
             lower.contains("opencode_rate_limit") ||
                 lower.contains("opencode_permission_blocked") ||
@@ -21385,8 +21379,25 @@ class DesktopAppService(
                 lower.contains("stdout 0 bytes") ||
                 lower.contains("empty stdout") ||
                 lower.contains("execution timeout after") ||
-                lower.contains("timed out waiting for")
-        } ?: return null
+                lower.contains("timed out waiting for") ||
+                lower.contains("deterministic fallback planner")
+        }
+
+    private fun isRecoverableBlockedCeoPlanningIssue(issue: CompanyIssue): Boolean =
+        listOfNotNull(issue.transitionReason, issue.providerBlockReason).any { signal ->
+            signal.contains(CEO_PLANNING_INVALID_OUTPUT) ||
+                ceoPlanningFallbackProviderSignal(listOf(signal)) != null
+        }
+
+    private fun deterministicCeoPlanningFallbackReason(
+        task: AgentTask,
+        run: AgentRun?,
+        finalStatus: DesktopTaskStatus
+    ): String? {
+        if (finalStatus == DesktopTaskStatus.COMPLETED) {
+            return null
+        }
+        val matchingSignal = ceoPlanningFallbackProviderSignal(failureSignals(task, run)) ?: return null
         return "CEO planning provider did not produce a plan (${matchingSignal.take(220)}); Cotor used the deterministic fallback planner."
     }
 
@@ -21568,7 +21579,8 @@ class DesktopAppService(
                 it.status == IssueStatus.DONE || it.status == IssueStatus.CANCELED
             }
             if (unresolvedNonPlanning.isNotEmpty()) {
-                if (finalStatus != DesktopTaskStatus.COMPLETED) {
+                val fallbackReason = deterministicCeoPlanningFallbackReason(task, primaryRun, finalStatus)
+                if (finalStatus != DesktopTaskStatus.COMPLETED && fallbackReason == null) {
                     val blockedPlanningIssue = currentIssue.copy(
                         status = IssueStatus.BLOCKED,
                         transitionReason = "CEO planning task ended with ${finalStatus.name}; existing downstream issues were not treated as proof of successful planning.",
@@ -21581,12 +21593,13 @@ class DesktopAppService(
                     )
                     return@withLock
                 }
-                if (currentIssue.transitionReason?.contains(CEO_PLANNING_INVALID_OUTPUT) == true) {
+                if (fallbackReason == null && currentIssue.transitionReason?.contains(CEO_PLANNING_INVALID_OUTPUT) == true) {
                     return@withLock
                 }
                 val updatedPlanningIssue = currentIssue.copy(
                     status = IssueStatus.DONE,
-                    transitionReason = "CEO planning lane already produced downstream issues for this goal.",
+                    transitionReason = fallbackReason ?: "CEO planning lane already produced downstream issues for this goal.",
+                    providerBlockReason = if (fallbackReason != null) null else currentIssue.providerBlockReason,
                     updatedAt = now
                 )
                 stateStore.save(

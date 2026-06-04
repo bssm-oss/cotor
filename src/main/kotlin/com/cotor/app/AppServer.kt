@@ -23,6 +23,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.call
@@ -397,7 +398,11 @@ internal fun Application.cotorAppModule(
     routing {
         if (readOnlyMode) {
             intercept(ApplicationCallPipeline.Call) {
-                if (call.request.path().startsWith("/api/app") && call.request.httpMethod in readOnlyDeniedMethods) {
+                if (
+                    call.request.path().startsWith("/api/app") &&
+                    call.request.httpMethod in readOnlyDeniedMethods &&
+                    !isReadOnlyMcpJsonRpcRequest(call)
+                ) {
                     call.respond(HttpStatusCode.Forbidden, mapOf("error" to "App server is running in read-only mode"))
                     finish()
                 }
@@ -2780,6 +2785,10 @@ internal fun requiresBoundHostToken(host: String): Boolean {
 }
 
 private val readOnlyDeniedMethods = setOf(HttpMethod.Post, HttpMethod.Put, HttpMethod.Patch, HttpMethod.Delete)
+
+private fun isReadOnlyMcpJsonRpcRequest(call: ApplicationCall): Boolean =
+    call.request.httpMethod == HttpMethod.Post &&
+        call.request.path() == "/api/app/mcp"
 
 private fun constantTimeEquals(actual: String, expected: String): Boolean {
     val actualBytes = actual.toByteArray(StandardCharsets.UTF_8)
