@@ -103,6 +103,7 @@ tasks.register("formatCheck") {
 tasks.test {
     useJUnitPlatform()
     maxParallelForks = 1
+    maxHeapSize = "2g"
     reports.junitXml.apply {
         includeSystemOutLog.set(false)
         includeSystemErrLog.set(false)
@@ -129,6 +130,17 @@ tasks.jacocoTestReport {
 
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
+    onlyIf {
+        val hasCommandLineTestFilter = gradle.startParameter.taskRequests.any { request ->
+            request.args.any { arg -> arg == "--tests" || arg.startsWith("--tests=") }
+        }
+        if (hasCommandLineTestFilter) {
+            logger.lifecycle("Skipping JaCoCo coverage verification for filtered test run.")
+            false
+        } else {
+            true
+        }
+    }
     violationRules {
         rule {
             element = "BUNDLE"
