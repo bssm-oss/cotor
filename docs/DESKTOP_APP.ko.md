@@ -112,8 +112,10 @@ cotor delete
 - **Homebrew / packaged install**
   - 패키지 안에 들어 있는 데스크톱 번들을 복사합니다.
   - 런타임 시점에 Gradle/Swift 재빌드는 하지 않습니다.
+  - 브라우저 스킬은 번들을 `COTOR_PREBUNDLE_PLAYWRIGHT=1`로 빌드했을 때 포함된 Playwright를 사용합니다. 런타임 `npm install`은 `COTOR_BROWSER_SKILL_ALLOW_NPM_INSTALL=1`을 명시적으로 설정한 경우에만 허용됩니다.
 - **소스 체크아웃**
   - 로컬에서 번들을 다시 빌드한 뒤 설치합니다.
+  - 소스 빌드는 `COTOR_PREBUNDLE_PLAYWRIGHT=1`로 Playwright를 미리 포함하거나 `COTOR_BROWSER_SKILL_NODE_PATH`로 기존 의존성 경로를 지정할 수 있습니다.
 
 ## 현재 셸 모델
 
@@ -206,6 +208,7 @@ cotor delete
 - `POST /api/app/companies/{companyId}/runtime/stop`
 - `GET /api/app/runtime/cleanup/preview`
 - `POST /api/app/runtime/cleanup`
+- `GET /api/app/direct-chat/providers`
 - `GET /api/app/marketing/policies`
 - `POST /api/app/marketing/policies`
 - `PATCH /api/app/marketing/policies/{policyId}`

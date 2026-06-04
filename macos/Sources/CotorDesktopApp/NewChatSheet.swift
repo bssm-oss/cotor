@@ -9,6 +9,7 @@ import SwiftUI
 struct NewChatSheet: View {
     let companyId: String
     let availableModels: [DirectChatAvailableModel]
+    let providers: [DirectChatProviderCatalogEntryRecord]
     let onCreated: (DirectChatConversation) -> Void
 
     @State private var title: String = ""
@@ -20,14 +21,13 @@ struct NewChatSheet: View {
     @State private var error: String? = nil
     @Environment(\.dismiss) private var dismiss
 
-    private let providers: [(id: String, label: String, icon: String)] = [
-        ("ollama", "Ollama (local)", "cpu.fill"),
-        ("lmstudio", "LM Studio (local)", "server.rack"),
-        ("claude-cli", "Claude CLI", "sparkles")
-    ]
+    private var selectedProviderEntry: DirectChatProviderCatalogEntryRecord? {
+        providers.first { $0.id == selectedProvider } ?? providers.first
+    }
 
-    private var ollamaModels: [String] {
-        availableModels.filter { $0.provider == "ollama" }.map { $0.id }
+    private var selectedProviderModels: [String] {
+        guard let provider = selectedProviderEntry else { return [] }
+        return availableModels.filter { $0.provider == provider.id }.map { $0.id }
     }
 
     var body: some View {
@@ -41,7 +41,7 @@ struct NewChatSheet: View {
                     providerSection
                     modelSection
                     systemPromptSection
-                    if selectedProvider != "claude-cli" {
+                    if selectedProviderEntry?.allowsBaseUrl == true {
                         baseUrlSection
                     }
                     if let error {
@@ -59,6 +59,8 @@ struct NewChatSheet: View {
         }
         .frame(width: 400, height: 480)
         .background(ShellPalette.panel)
+        .onAppear { applyProviderDefaultsIfNeeded() }
+        .onChange(of: providers) { _, _ in applyProviderDefaultsIfNeeded() }
     }
 
     // MARK: - Header / Footer
@@ -83,7 +85,7 @@ struct NewChatSheet: View {
                 Task { await createConversation() }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(customModel.isEmpty || isCreating)
+            .disabled(providers.isEmpty || customModel.isEmpty || isCreating)
             .keyboardShortcut(.return, modifiers: .command)
         }
         .padding(16)
@@ -99,16 +101,16 @@ struct NewChatSheet: View {
                 .foregroundColor(ShellPalette.text)
 
             ForEach(providers, id: \.id) { provider in
-                Button(action: { selectedProvider = provider.id }) {
+                Button(action: { selectProvider(provider) }) {
                     HStack {
-                        Image(systemName: provider.icon)
+                        Image(systemName: provider.iconSystemName)
                             .frame(width: 20)
                             .foregroundColor(
                                 selectedProvider == provider.id
                                     ? ShellPalette.accent
                                     : ShellPalette.muted
                             )
-                        Text(provider.label)
+                        Text(provider.displayName)
                             .foregroundColor(ShellPalette.text)
                         Spacer()
                         if selectedProvider == provider.id {
@@ -126,6 +128,12 @@ struct NewChatSheet: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            if providers.isEmpty {
+                Text("Provider catalog unavailable")
+                    .font(.caption)
+                    .foregroundColor(ShellPalette.muted)
+            }
         }
     }
 
@@ -136,15 +144,15 @@ struct NewChatSheet: View {
                 .fontWeight(.medium)
                 .foregroundColor(ShellPalette.text)
 
-            if selectedProvider == "ollama" && !ollamaModels.isEmpty {
+            if selectedProviderEntry?.supportsModelDiscovery == true && !selectedProviderModels.isEmpty {
                 Picker("Model", selection: $customModel) {
-                    ForEach(ollamaModels, id: \.self) { Text($0) }
+                    ForEach(selectedProviderModels, id: \.self) { Text($0) }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .onAppear {
-                    if !ollamaModels.contains(customModel),
-                       let first = ollamaModels.first {
+                    if !selectedProviderModels.contains(customModel),
+                       let first = selectedProviderModels.first {
                         customModel = first
                     }
                 }
@@ -159,11 +167,7 @@ struct NewChatSheet: View {
     }
 
     private var modelPlaceholder: String {
-        switch selectedProvider {
-        case "ollama": return "gemma3"
-        case "claude-cli": return "claude"
-        default: return "model-name"
-        }
+        selectedProviderEntry?.defaultModel ?? "model-name"
     }
 
     private var systemPromptSection: some View {
@@ -209,8 +213,8 @@ struct NewChatSheet: View {
                 companyId: companyId,
                 title: title,
                 model: customModel,
-                provider: selectedProvider,
-                baseUrl: baseUrl,
+                provider: selectedProviderEntry?.id ?? selectedProvider,
+                baseUrl: selectedProviderEntry?.allowsBaseUrl == true ? baseUrl : "",
                 systemPrompt: systemPrompt
             )
             await MainActor.run { onCreated(conversation) }
@@ -220,5 +224,24 @@ struct NewChatSheet: View {
                 isCreating = false
             }
         }
+    }
+
+    private func applyProviderDefaultsIfNeeded() {
+        guard let provider = selectedProviderEntry else { return }
+        if selectedProvider != provider.id {
+            selectedProvider = provider.id
+        }
+        if customModel.isEmpty || customModel == "model-name" {
+            customModel = provider.defaultModel
+        }
+        if baseUrl.isEmpty {
+            baseUrl = provider.defaultBaseUrl
+        }
+    }
+
+    private func selectProvider(_ provider: DirectChatProviderCatalogEntryRecord) {
+        selectedProvider = provider.id
+        customModel = provider.defaultModel
+        baseUrl = provider.defaultBaseUrl
     }
 }

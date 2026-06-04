@@ -27,7 +27,10 @@ struct DesktopStoreTests {
                 createdAt: 1
             ),
             dashboard: nil,
-            companyDashboard: nil
+            companyDashboard: nil,
+            sequence: nil,
+            cursor: nil,
+            gapDetected: nil
         )
 
         #expect(isCompanyEventStreamHeartbeat(envelope))
