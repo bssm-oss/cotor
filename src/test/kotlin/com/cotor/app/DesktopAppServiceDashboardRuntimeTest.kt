@@ -19,6 +19,103 @@ class DesktopAppServiceDashboardRuntimeTest : FunSpec({
         DesktopAppService.shutdownAllForTesting()
     }
 
+    test("company dashboard read only scopes companies and metrics to the selected company") {
+        val appHome = Files.createTempDirectory("desktop-dashboard-scoped-payload-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true),
+            configRepository = mockk<ConfigRepository>(relaxed = true),
+            agentExecutor = mockk<AgentExecutor>(relaxed = true)
+        )
+        val now = System.currentTimeMillis()
+        val selectedCompany = Company(
+            id = "company-selected",
+            name = "Selected Company",
+            rootPath = "/tmp/selected",
+            repositoryId = "repo-selected",
+            defaultBaseBranch = "master",
+            createdAt = now,
+            updatedAt = now
+        )
+        val otherCompany = selectedCompany.copy(
+            id = "company-other",
+            name = "Other Company",
+            rootPath = "/tmp/other",
+            repositoryId = "repo-other"
+        )
+        val selectedGoal = CompanyGoal(
+            id = "goal-selected",
+            companyId = selectedCompany.id,
+            title = "Selected goal",
+            description = "Selected goal",
+            status = GoalStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now
+        )
+        val otherGoal = selectedGoal.copy(
+            id = "goal-other",
+            companyId = otherCompany.id,
+            title = "Other goal"
+        )
+        val selectedIssue = CompanyIssue(
+            id = "issue-selected",
+            companyId = selectedCompany.id,
+            goalId = selectedGoal.id,
+            workspaceId = "workspace-selected",
+            title = "Selected issue",
+            description = "Selected issue",
+            status = IssueStatus.IN_PROGRESS,
+            createdAt = now,
+            updatedAt = now
+        )
+        val otherIssue = selectedIssue.copy(
+            id = "issue-other",
+            companyId = otherCompany.id,
+            goalId = otherGoal.id,
+            title = "Other issue",
+            status = IssueStatus.BLOCKED
+        )
+        stateStore.save(
+            DesktopAppState(
+                companies = listOf(selectedCompany, otherCompany),
+                goals = listOf(selectedGoal, otherGoal),
+                issues = listOf(selectedIssue, otherIssue),
+                reviewQueue = listOf(
+                    ReviewQueueItem(
+                        id = "review-selected",
+                        companyId = selectedCompany.id,
+                        issueId = selectedIssue.id,
+                        runId = "run-selected",
+                        status = ReviewQueueStatus.READY_TO_MERGE,
+                        createdAt = now,
+                        updatedAt = now
+                    ),
+                    ReviewQueueItem(
+                        id = "review-other",
+                        companyId = otherCompany.id,
+                        issueId = otherIssue.id,
+                        runId = "run-other",
+                        status = ReviewQueueStatus.MERGED,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                )
+            )
+        )
+
+        val dashboard = service.companyDashboardReadOnly(selectedCompany.id)
+
+        dashboard.companies.map { it.id } shouldContainExactly listOf(selectedCompany.id)
+        dashboard.goals.map { it.id } shouldContainExactly listOf(selectedGoal.id)
+        dashboard.issues.map { it.id } shouldContainExactly listOf(selectedIssue.id)
+        dashboard.opsMetrics.openGoals shouldBe 1
+        dashboard.opsMetrics.activeIssues shouldBe 1
+        dashboard.opsMetrics.blockedIssues shouldBe 0
+        dashboard.opsMetrics.readyToMergeCount shouldBe 1
+        dashboard.opsMetrics.mergedCount shouldBe 0
+    }
+
     test("company dashboard keeps manually stopped autonomous runtimes stopped") {
         val appHome = Files.createTempDirectory("desktop-dashboard-runtime-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-dashboard-runtime-test").resolve("repo"))

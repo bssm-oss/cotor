@@ -9670,7 +9670,7 @@ class DesktopAppServiceTest : FunSpec({
 
         withTimeout(5_000) {
             while (true) {
-                service.companyDashboard(company.id)
+                service.companyDashboardPrepared(company.id)
                 val current = stateStore.load()
                 val followUps = current.goals.filter { it.companyId == company.id && it.operatingPolicy.orEmpty().startsWith("auto-follow-up:") }
                 if (followUps.count { it.status == GoalStatus.ACTIVE } <= 1) {

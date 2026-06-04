@@ -70,7 +70,9 @@ class DesktopStateStore(
     private data class CachedState(
         val state: DesktopAppState,
         val lastModifiedAtMillis: Long,
-        val sizeInBytes: Long
+        val sizeInBytes: Long,
+        val collectionsRevisionModifiedAtMillis: Long?,
+        val collectionsRevisionSizeInBytes: Long?
     )
 
     private data class SqliteCachedState(
@@ -86,6 +88,18 @@ class DesktopStateStore(
     ) {
         fun encode(state: DesktopAppState, json: Json): String =
             json.encodeToString(serializer, read(state))
+
+        fun encodeValue(value: T, json: Json): String =
+            json.encodeToString(serializer, value)
+
+        fun decodeValue(payload: String, json: Json): T =
+            json.decodeFromString(serializer, payload)
+
+        fun value(state: DesktopAppState): T =
+            read(state)
+
+        fun applyValue(state: DesktopAppState, value: T): DesktopAppState =
+            write(state, value)
 
         fun apply(state: DesktopAppState, payload: String, json: Json): DesktopAppState =
             write(state, json.decodeFromString(serializer, payload))
@@ -133,6 +147,9 @@ class DesktopStateStore(
         StateCollection("directChatConversations", ListSerializer(DirectChatConversation.serializer()), DesktopAppState::directChatConversations) { state, value -> state.copy(directChatConversations = value) }
     )
 
+    private val stateCollectionsByName: Map<String, StateCollection<*>> =
+        stateCollections.associateBy { it.name }
+
     // A single process can finish multiple background runs nearly at once, so writes
     // need to be serialized even though the backing file is small.
     private val mutex = Mutex()
@@ -154,54 +171,170 @@ class DesktopStateStore(
             loadSqlite()
         }
 
+    suspend fun loadGoals(): List<CompanyGoal> =
+        loadCollection("goals", emptyList())
+
+    suspend fun loadIssues(): List<CompanyIssue> =
+        loadCollection("issues", emptyList())
+
+    suspend fun loadReviewQueue(): List<ReviewQueueItem> =
+        loadCollection("reviewQueue", emptyList())
+
+    suspend fun loadRuns(): List<AgentRun> =
+        loadCollection("runs", emptyList())
+
+    suspend fun updateRuns(transform: (List<AgentRun>) -> List<AgentRun>): List<AgentRun> =
+        updateCollection("runs", emptyList(), transform)
+
+    private suspend fun <T> loadCollection(name: String, defaultValue: T): T =
+        if (useJsonBackend()) {
+            loadJsonCollection(name, defaultValue)
+        } else {
+            loadSqliteCollection(name, defaultValue)
+        }
+
+    private suspend fun <T> updateCollection(name: String, defaultValue: T, transform: (T) -> T): T =
+        if (useJsonBackend()) {
+            updateJsonCollection(name, defaultValue, transform)
+        } else {
+            updateSqliteCollection(name, defaultValue, transform)
+        }
+
     private suspend fun loadJson(): DesktopAppState = withContext(Dispatchers.IO) {
         val stateFile = stateFile()
+        withStateFileLock {
+            loadJsonStateLocked(stateFile)
+        }
+    }
+
+    private fun loadJsonStateLocked(stateFile: Path = stateFile()): DesktopAppState {
+        cleanupStateTempFiles(stateFile.parent)
         if (!stateFile.exists()) {
-            return@withContext withStateFileLock {
-                cleanupStateTempFiles(stateFile.parent)
-                DesktopAppState()
-            }
+            return loadJsonStateFromChunksLocked() ?: DesktopAppState()
         }
         val backupFile = backupStateFile()
         currentFingerprint(stateFile)?.let { fingerprint ->
+            val revisionFingerprint = jsonCollectionsRevisionFingerprint()
             cachedState
                 ?.takeIf {
                     it.lastModifiedAtMillis == fingerprint.first &&
-                        it.sizeInBytes == fingerprint.second
+                        it.sizeInBytes == fingerprint.second &&
+                        it.collectionsRevisionModifiedAtMillis == revisionFingerprint?.first &&
+                        it.collectionsRevisionSizeInBytes == revisionFingerprint?.second
                 }
-                ?.let { return@withContext it.state }
+                ?.let { return it.state }
         }
+        val raw = runCatching { stateFile.readText() }.getOrElse { return loadJsonStateFromChunksLocked() ?: DesktopAppState() }
+        decodeState(raw)?.also { decoded ->
+            val compacted = normalizeStateForPersistence(decoded)
+            val chunked = applyJsonCollectionChunksLocked(compacted)
+            if (raw != json.encodeToString(DesktopAppState.serializer(), compacted)) {
+                saveJsonLocked(chunked)
+            } else {
+                updateCache(stateFile, chunked)
+            }
+            return chunked
+        }
+        if (backupFile.exists()) {
+            val backupRaw = runCatching { backupFile.readText() }.getOrNull()
+            decodeState(backupRaw.orEmpty())?.also { recovered ->
+                val compacted = applyJsonCollectionChunksLocked(normalizeStateForPersistence(recovered))
+                saveJsonLocked(compacted)
+                return compacted
+            }
+        }
+        return loadJsonStateFromChunksLocked() ?: DesktopAppState()
+    }
 
-        withStateFileLock {
-            cleanupStateTempFiles(stateFile.parent)
-            currentFingerprint(stateFile)?.let { fingerprint ->
-                cachedState
-                    ?.takeIf {
-                        it.lastModifiedAtMillis == fingerprint.first &&
-                            it.sizeInBytes == fingerprint.second
-                    }
-                    ?.let { return@withStateFileLock it.state }
-            }
-            val raw = runCatching { stateFile.readText() }.getOrElse { return@withStateFileLock DesktopAppState() }
-            decodeState(raw)?.also { decoded ->
-                val compacted = normalizeStateForPersistence(decoded)
-                if (raw != json.encodeToString(DesktopAppState.serializer(), compacted)) {
-                    saveJsonLocked(compacted)
-                } else {
-                    updateCache(stateFile, compacted)
-                }
-                return@withStateFileLock compacted
-            } ?: DesktopAppState()
-            if (backupFile.exists()) {
-                val backupRaw = runCatching { backupFile.readText() }.getOrNull()
-                decodeState(backupRaw.orEmpty())?.also { recovered ->
-                    val compacted = normalizeStateForPersistence(recovered)
-                    saveJsonLocked(compacted)
-                    return@withStateFileLock compacted
-                }
-            }
-            DesktopAppState()
+    private fun loadJsonStateFromChunksLocked(): DesktopAppState? {
+        val dir = jsonCollectionsDir()
+        if (!dir.exists()) {
+            return null
         }
+        return applyJsonCollectionChunksLocked(DesktopAppState())
+    }
+
+    private fun applyJsonCollectionChunksLocked(state: DesktopAppState): DesktopAppState {
+        var nextState = state
+        var sawChunk = false
+        stateCollections.forEach { collection ->
+            val chunkFile = jsonCollectionFile(collection.name)
+            if (!chunkFile.exists()) {
+                return@forEach
+            }
+            sawChunk = true
+            val payload = runCatching { chunkFile.readText() }.getOrNull() ?: return@forEach
+            nextState = runCatching { collection.apply(nextState, payload, json) }
+                .onFailure { error ->
+                    appendStateLoadLog(
+                        "Recovered JSON state without invalid collection ${collection.name}: " +
+                            (error.message ?: error::class.simpleName.orEmpty())
+                    )
+                }
+                .getOrDefault(nextState)
+        }
+        return if (sawChunk) normalizeStateForPersistence(nextState) else state
+    }
+
+    private suspend fun <T> loadJsonCollection(name: String, defaultValue: T): T = withContext(Dispatchers.IO) {
+        withStateFileLock {
+            val collection = stateCollection<T>(name)
+            readJsonCollectionLocked(collection, defaultValue)
+        }
+    }
+
+    private suspend fun <T> updateJsonCollection(
+        name: String,
+        defaultValue: T,
+        transform: (T) -> T
+    ): T {
+        val collection = stateCollection<T>(name)
+        return mutex.withLock {
+            withContext(Dispatchers.IO) {
+                withStateFileLock {
+                    val currentValue = readJsonCollectionLocked(collection, defaultValue)
+                    val nextValue = transform(currentValue)
+                    writeJsonCollectionLocked(collection, nextValue)
+                    val revisionFingerprint = jsonCollectionsRevisionFingerprint()
+                    cachedState = cachedState?.let { cached ->
+                        cached.copy(
+                            state = collection.applyValue(cached.state, nextValue),
+                            collectionsRevisionModifiedAtMillis = revisionFingerprint?.first,
+                            collectionsRevisionSizeInBytes = revisionFingerprint?.second
+                        )
+                    }
+                    nextValue
+                }
+            }
+        }
+    }
+
+    private fun <T> readJsonCollectionLocked(collection: StateCollection<T>, defaultValue: T): T {
+        cleanupStateTempFiles(stateFile().parent)
+        val chunkFile = jsonCollectionFile(collection.name)
+        if (chunkFile.exists()) {
+            val payload = runCatching { chunkFile.readText() }.getOrNull()
+            if (payload != null) {
+                runCatching { return collection.decodeValue(payload, json) }
+                    .onFailure { error ->
+                        appendStateLoadLog(
+                            "Recovered JSON state without invalid collection ${collection.name}: " +
+                                (error.message ?: error::class.simpleName.orEmpty())
+                        )
+                    }
+            }
+        }
+        val state = loadJsonStateLocked()
+        return runCatching { collection.value(state) }.getOrDefault(defaultValue)
+    }
+
+    private fun <T> writeJsonCollectionLocked(collection: StateCollection<T>, value: T) {
+        val chunkFile = jsonCollectionFile(collection.name)
+        chunkFile.parent?.createDirectories()
+        val payload = collection.encodeValue(value, json)
+        writeOwnerOnlyTextAtomically(chunkFile, payload)
+        enforceOwnerOnlyPermissions(chunkFile)
+        touchJsonCollectionsRevisionLocked()
     }
 
     override suspend fun save(state: DesktopAppState) {
@@ -228,6 +361,12 @@ class DesktopStateStore(
 
     private fun sqliteStateFile(): Path = appHome().resolve("state.sqlite")
 
+    private fun jsonCollectionsDir(): Path = appHome().resolve("state.collections")
+
+    private fun jsonCollectionFile(name: String): Path = jsonCollectionsDir().resolve("$name.json")
+
+    private fun jsonCollectionsRevisionFile(): Path = jsonCollectionsDir().resolve(".revision")
+
     private fun lockFile(): Path = appHome().resolve("state.lock")
 
     private fun lockMetadataFile(): Path = appHome().resolve("state.lock.json")
@@ -246,7 +385,19 @@ class DesktopStateStore(
         enforceOwnerOnlyPermissions(file)
         writeOwnerOnlyTextAtomically(backupFile, payload)
         enforceOwnerOnlyPermissions(backupFile)
+        writeJsonCollectionChunksLocked(compactedState)
         updateCache(file, compactedState)
+    }
+
+    private fun writeJsonCollectionChunksLocked(state: DesktopAppState) {
+        jsonCollectionsDir().createDirectories()
+        stateCollections.forEach { collection ->
+            val chunkFile = jsonCollectionFile(collection.name)
+            val payload = collection.encode(state, json)
+            writeOwnerOnlyTextAtomically(chunkFile, payload)
+            enforceOwnerOnlyPermissions(chunkFile)
+        }
+        touchJsonCollectionsRevisionLocked()
     }
 
     private suspend fun loadSqlite(): DesktopAppState = withContext(Dispatchers.IO) {
@@ -264,6 +415,41 @@ class DesktopStateStore(
         }
     }
 
+    private suspend fun <T> loadSqliteCollection(name: String, defaultValue: T): T = withContext(Dispatchers.IO) {
+        withStateFileLock {
+            cleanupStateTempFiles(appHome())
+            sqliteConnection().use { connection ->
+                ensureSqliteSchema(connection)
+                migrateJsonStateIfNeeded(connection)
+                val collection = stateCollection<T>(name)
+                readSqliteCollection(connection, collection, defaultValue)
+            }
+        }
+    }
+
+    private suspend fun <T> updateSqliteCollection(
+        name: String,
+        defaultValue: T,
+        transform: (T) -> T
+    ): T {
+        val collection = stateCollection<T>(name)
+        return mutex.withLock {
+            withContext(Dispatchers.IO) {
+                withStateFileLock {
+                    cleanupStateTempFiles(appHome())
+                    sqliteConnection().use { connection ->
+                        ensureSqliteSchema(connection)
+                        migrateJsonStateIfNeeded(connection)
+                        val currentValue = readSqliteCollection(connection, collection, defaultValue)
+                        val nextValue = transform(currentValue)
+                        writeSqliteCollection(connection, collection, nextValue)
+                        nextValue
+                    }
+                }
+            }
+        }
+    }
+
     private suspend fun saveSqlite(state: DesktopAppState) {
         mutex.withLock {
             withContext(Dispatchers.IO) {
@@ -275,6 +461,81 @@ class DesktopStateStore(
                     }
                 }
             }
+        }
+    }
+
+    private fun <T> readSqliteCollection(
+        connection: Connection,
+        collection: StateCollection<T>,
+        defaultValue: T
+    ): T {
+        connection.prepareStatement("SELECT payload FROM state_collections WHERE name = ?").use { statement ->
+            statement.setString(1, collection.name)
+            statement.executeQuery().use { result ->
+                if (!result.next()) {
+                    return defaultValue
+                }
+                val payload = result.getString(1)
+                return runCatching { collection.decodeValue(payload, json) }
+                    .onFailure { error ->
+                        appendStateLoadLog(
+                            "Recovered SQLite state without invalid collection ${collection.name}: " +
+                                (error.message ?: error::class.simpleName.orEmpty())
+                        )
+                    }
+                    .getOrDefault(defaultValue)
+            }
+        }
+    }
+
+    private fun <T> writeSqliteCollection(
+        connection: Connection,
+        collection: StateCollection<T>,
+        value: T
+    ) {
+        val payload = collection.encodeValue(value, json)
+        val hash = sha256(payload)
+        val existingHash = connection.prepareStatement(
+            "SELECT payload_sha256 FROM state_collections WHERE name = ?"
+        ).use { statement ->
+            statement.setString(1, collection.name)
+            statement.executeQuery().use { result ->
+                if (result.next()) result.getString(1) else null
+            }
+        }
+        if (existingHash == hash) {
+            return
+        }
+        val now = System.currentTimeMillis()
+        connection.autoCommit = false
+        try {
+            connection.prepareStatement(
+                """
+                INSERT INTO state_collections(name, payload, payload_sha256, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    payload = excluded.payload,
+                    payload_sha256 = excluded.payload_sha256,
+                    updated_at = excluded.updated_at
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, collection.name)
+                statement.setString(2, payload)
+                statement.setString(3, hash)
+                statement.setLong(4, now)
+                statement.executeUpdate()
+            }
+            val nextRevision = sqliteRevision(connection) + 1L
+            setSqliteMeta(connection, "revision", nextRevision.toString())
+            connection.commit()
+            cachedSqliteState = cachedSqliteState?.let { cached ->
+                SqliteCachedState(collection.applyValue(cached.state, value), nextRevision)
+            }
+        } catch (error: Throwable) {
+            runCatching { connection.rollback() }
+            throw error
+        } finally {
+            connection.autoCommit = true
         }
     }
 
@@ -464,6 +725,11 @@ class DesktopStateStore(
         MessageDigest.getInstance("SHA-256")
             .digest(value.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> stateCollection(name: String): StateCollection<T> =
+        stateCollectionsByName[name] as? StateCollection<T>
+            ?: error("Unknown desktop state collection: $name")
 
     private fun useJsonBackend(): Boolean {
         val configured = System.getenv("COTOR_DESKTOP_STATE_BACKEND")
@@ -714,12 +980,25 @@ class DesktopStateStore(
             Files.getLastModifiedTime(file).toMillis() to Files.size(file)
         }
 
+    private fun jsonCollectionsRevisionFingerprint(): Pair<Long, Long>? =
+        currentFingerprint(jsonCollectionsRevisionFile())
+
+    private fun touchJsonCollectionsRevisionLocked() {
+        val file = jsonCollectionsRevisionFile()
+        file.parent?.createDirectories()
+        writeOwnerOnlyTextAtomically(file, System.currentTimeMillis().toString())
+        enforceOwnerOnlyPermissions(file)
+    }
+
     private fun updateCache(file: Path, state: DesktopAppState) {
         currentFingerprint(file)?.let { fingerprint ->
+            val revisionFingerprint = jsonCollectionsRevisionFingerprint()
             cachedState = CachedState(
                 state = state,
                 lastModifiedAtMillis = fingerprint.first,
-                sizeInBytes = fingerprint.second
+                sizeInBytes = fingerprint.second,
+                collectionsRevisionModifiedAtMillis = revisionFingerprint?.first,
+                collectionsRevisionSizeInBytes = revisionFingerprint?.second
             )
         }
     }
