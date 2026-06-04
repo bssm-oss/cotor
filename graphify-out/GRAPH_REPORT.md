@@ -349,12 +349,12 @@
 ## Surprising Connections (you probably didn't know these)
 - `makeFallbackIcon()` --calls--> `Line`  [INFERRED]
   macos/Tools/generate-desktop-icon.swift → src/main/kotlin/com/cotor/app/DesktopAppService.kt
-- `userFacingIssueKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `userFacingDecisionTitle()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
-- `localizedSourceKind()` --calls--> `language`  [INFERRED]
-  macos/Sources/CotorDesktopApp/ContentView.swift → macos/Sources/CotorDesktopApp/Localization.swift
+- `language` --calls--> `userFacingIssueKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `userFacingDecisionTitle()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
+- `language` --calls--> `localizedSourceKind()`  [INFERRED]
+  macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/ContentView.swift
 - `preparedBrandMark()` --calls--> `Data`  [INFERRED]
   macos/Tools/generate-desktop-icon.swift → macos/Sources/CotorDesktopApp/DesktopAPI.swift
 
