@@ -384,6 +384,10 @@ struct DesktopAPI {
         try await get(path: "api/app/skills")
     }
 
+    func directChatProviders() async throws -> [DirectChatProviderCatalogEntryRecord] {
+        try await get(path: "api/app/direct-chat/providers")
+    }
+
     func runSkill(
         name: String,
         companyId: String,
@@ -839,13 +843,25 @@ struct DesktopAPI {
         try await post(pathSegments: ["api", "app", "tui", "sessions", sessionId, "terminate"], body: EmptyPayload())
     }
 
-    func companyEvents(companyId: String) -> AsyncThrowingStream<CompanyEventEnvelopePayload, Error> {
+    func companyEvents(companyId: String, cursor: String? = nil) -> AsyncThrowingStream<CompanyEventEnvelopePayload, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var request = URLRequest(url: try makeURL(pathSegments: ["api", "app", "companies", companyId, "events"]))
+                    var queryItems: [URLQueryItem] = []
+                    if let cursor, !cursor.isEmpty {
+                        queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+                    }
+                    var request = URLRequest(
+                        url: try makeURL(
+                            pathSegments: ["api", "app", "companies", companyId, "events"],
+                            query: queryItems
+                        )
+                    )
                     request.httpMethod = "GET"
                     addHeaders(to: &request)
+                    if let cursor, !cursor.isEmpty {
+                        request.setValue(cursor, forHTTPHeaderField: "Last-Event-ID")
+                    }
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
                         throw URLError(.badServerResponse)
@@ -1047,7 +1063,7 @@ struct DesktopAPI {
                     addHeaders(to: &request)
                     request.httpBody = try JSONEncoder().encode(["message": message])
 
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await session.bytes(for: request)
                     if let httpResponse = response as? HTTPURLResponse,
                        !(200...299).contains(httpResponse.statusCode) {
                         continuation.finish(throwing: URLError(.badServerResponse))

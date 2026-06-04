@@ -549,6 +549,17 @@ class AppServerTest : FunSpec({
                 command = "gh"
             )
         )
+        every { desktopService.directChatProviderCatalog() } returns listOf(
+            DirectChatProviderCatalogEntry(
+                id = "ollama",
+                providerId = "ollama",
+                displayName = "Ollama (local)",
+                iconSystemName = "cpu.fill",
+                defaultModel = "gemma3",
+                defaultBaseUrl = "http://127.0.0.1:11434",
+                supportsModelDiscovery = true
+            )
+        )
         every { desktopService.scanProviders() } returns listOf(
             ProviderScanResult(
                 provider = ProviderCatalogEntry(
@@ -582,6 +593,9 @@ class AppServerTest : FunSpec({
             val list = client.get("/api/app/providers") {
                 header("Authorization", "Bearer secret-token")
             }
+            val directChatProviders = client.get("/api/app/direct-chat/providers") {
+                header("Authorization", "Bearer secret-token")
+            }
             val response = client.post("/api/app/providers/scan") {
                 header("Authorization", "Bearer secret-token")
             }
@@ -591,6 +605,9 @@ class AppServerTest : FunSpec({
 
             list.status shouldBe HttpStatusCode.OK
             list.bodyAsText() shouldContain "GitHub CLI"
+            directChatProviders.status shouldBe HttpStatusCode.OK
+            directChatProviders.bodyAsText() shouldContain "Ollama (local)"
+            directChatProviders.bodyAsText() shouldContain "cpu.fill"
             response.status shouldBe HttpStatusCode.OK
             response.bodyAsText() shouldContain "opencode"
             response.bodyAsText() shouldContain "\"available\":true"
@@ -2773,7 +2790,7 @@ class AppServerTest : FunSpec({
     }
 
     test("company event stream includes the company dashboard snapshot when authorized") {
-        every { desktopService.companyEvents("company-1") } returns flowOf(
+        every { desktopService.companyEvents("company-1", null) } returns flowOf(
             CompanyEventEnvelope(
                 event = CompanyEvent(
                     id = "event-1",
@@ -2811,6 +2828,7 @@ class AppServerTest : FunSpec({
                 )
             )
         )
+        coEvery { desktopService.companyEventGapSnapshot("company-1", any()) } returns null
 
         testApplication {
             application {
@@ -2840,6 +2858,56 @@ class AppServerTest : FunSpec({
             response.bodyAsText() shouldContain "\"backendKind\":\"LOCAL_COTOR\""
             response.bodyAsText() shouldContain "\"backendHealth\":\"unknown\""
             response.bodyAsText() shouldContain "\"backendLifecycleState\":\"STOPPED\""
+        }
+    }
+
+    test("company event stream forwards cursor and emits a gap snapshot before newer events") {
+        every { desktopService.companyEvents("company-1", "41") } returns flowOf(
+            CompanyEventEnvelope(
+                event = CompanyEvent(
+                    id = "event-43",
+                    companyId = "company-1",
+                    type = "runtime.updated",
+                    title = "Runtime updated",
+                    createdAt = 43L
+                ),
+                sequence = 43L,
+                cursor = "43"
+            )
+        )
+        coEvery { desktopService.companyEventGapSnapshot("company-1", 41L) } returns CompanyEventEnvelope(
+            event = CompanyEvent(
+                id = "gap-42",
+                companyId = "company-1",
+                type = "stream.gap",
+                title = "Recovered company event stream",
+                createdAt = 42L
+            ),
+            sequence = 42L,
+            cursor = "42",
+            gapDetected = true
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val response = client.get("/api/app/companies/company-1/events?cursor=41") {
+                header("Authorization", "Bearer secret-token")
+            }
+
+            response.status shouldBe HttpStatusCode.OK
+            val body = response.bodyAsText()
+            body shouldContain "\"type\":\"stream.gap\""
+            body shouldContain "\"gapDetected\":true"
+            body shouldContain "\"sequence\":42"
+            body shouldContain "\"sequence\":43"
+            coVerify(exactly = 1) { desktopService.companyEventGapSnapshot("company-1", 41L) }
         }
     }
 })

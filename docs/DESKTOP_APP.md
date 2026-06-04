@@ -109,8 +109,10 @@ Behavior depends on the install layout:
 - Homebrew / packaged install
   - `cotor install` and `cotor update` copy the packaged desktop bundle from the install root
   - no Gradle or Swift rebuild happens at runtime
+  - browser skills use prebundled Playwright when the bundle was built with `COTOR_PREBUNDLE_PLAYWRIGHT=1`; runtime `npm install` is disabled unless `COTOR_BROWSER_SKILL_ALLOW_NPM_INSTALL=1` is explicitly set
 - Source checkout
   - `cotor install` and `cotor update` rebuild the desktop bundle locally, then install it
+  - source builds can prebundle Playwright with `COTOR_PREBUNDLE_PLAYWRIGHT=1` or point the backend at an existing dependency with `COTOR_BROWSER_SKILL_NODE_PATH`
 
 ## Current Shell Model
 
@@ -202,6 +204,7 @@ Current company-first routes:
 - `GET /api/app/company/metrics`
 - `GET /api/app/runtime/cleanup/preview`
 - `POST /api/app/runtime/cleanup`
+- `GET /api/app/direct-chat/providers`
 - `GET /api/app/marketing/policies`
 - `POST /api/app/marketing/policies`
 - `PATCH /api/app/marketing/policies/{policyId}`

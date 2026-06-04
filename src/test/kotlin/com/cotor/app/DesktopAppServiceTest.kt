@@ -13365,6 +13365,7 @@ class DesktopAppServiceTest : FunSpec({
         val stateStore = DesktopStateStore { appHome }
         val gitWorkspaceService = mockk<GitWorkspaceService>(relaxed = true)
         coEvery { gitWorkspaceService.ensureInitializedRepositoryRoot(any(), any()) } returns repoRoot
+        coEvery { gitWorkspaceService.detectDefaultBranch(any()) } returns "master"
         coEvery { gitWorkspaceService.commentOnPullRequest(any(), 22, any(), any(), any()) } returns Unit
         coEvery {
             gitWorkspaceService.syncBaseBranchAfterMerge(any(), "master")

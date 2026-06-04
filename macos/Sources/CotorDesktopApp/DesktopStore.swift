@@ -2,93 +2,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-
-// MARK: - File Overview
-// DesktopStore belongs to the native macOS client layer for the Cotor desktop application.
-// It collects declarations centered on desktop store so the native shell code stays easier to navigate.
-// Start with this file when tracing how the desktop client presents, stores, or moves state in this area.
-
-func parseCodexArguments(_ raw: String) -> [String] {
-    var args: [String] = []
-    var current = ""
-    var quote: Character?
-    var escaping = false
-
-    for character in raw {
-        if escaping {
-            current.append(character)
-            escaping = false
-            continue
-        }
-
-        if character == "\\" {
-            escaping = true
-            continue
-        }
-
-        if let activeQuote = quote {
-            if character == activeQuote {
-                quote = nil
-            } else {
-                current.append(character)
-            }
-            continue
-        }
-
-        if character == "\"" || character == "'" {
-            quote = character
-            continue
-        }
-
-        if character.isWhitespace {
-            if !current.isEmpty {
-                args.append(current)
-                current = ""
-            }
-        } else {
-            current.append(character)
-        }
-    }
-
-    if escaping {
-        current.append("\\")
-    }
-    if !current.isEmpty {
-        args.append(current)
-    }
-    return args
-}
-
-func isExpectedCompanyEventStreamInterruption(_ error: Error) -> Bool {
-    if error is CancellationError {
-        return true
-    }
-    if let urlError = error as? URLError {
-        switch urlError.code {
-        case .cancelled, .networkConnectionLost, .timedOut:
-            return true
-        default:
-            return false
-        }
-    }
-    let nsError = error as NSError
-    if nsError.domain == NSURLErrorDomain {
-        switch nsError.code {
-        case NSURLErrorCancelled, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut:
-            return true
-        default:
-            return false
-        }
-    }
-    let message = error.localizedDescription
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .lowercased()
-    return message == "cancelled"
-        || message == "canceled"
-        || message.contains("network connection was lost")
-        || message.contains("request timed out")
-}
-
 func isCompanyEventStreamHeartbeat(_ envelope: CompanyEventEnvelopePayload) -> Bool {
     envelope.event.type == "stream.heartbeat"
 }
@@ -110,233 +23,6 @@ enum AppShellMode: String, CaseIterable, Identifiable {
     case tui
 
     var id: String { rawValue }
-}
-
-struct ChatGoalProposal: Equatable {
-    let title: String
-    let description: String
-}
-
-struct ChatCompanyRequestProposal: Equatable {
-    let title: String
-    let request: String
-    let ceoBrief: String
-}
-
-struct ChatIssueProposal: Equatable {
-    let goalId: String
-    let title: String
-    let description: String
-}
-
-struct ChatMergeProposal: Equatable {
-    let summary: String
-}
-
-struct ChatAgentProposal: Equatable {
-    let title: String
-    let agentCli: String
-    let model: String?
-    let roleSummary: String
-    let specialties: [String]
-    let collaborationInstructions: String?
-    let memoryNotes: String?
-    let enabled: Bool
-}
-
-enum ChatRuntimeAction: String, Equatable {
-    case start
-    case stop
-}
-
-struct ChatRuntimeProposal: Equatable {
-    let action: ChatRuntimeAction
-    let summary: String
-}
-
-enum ChatBackendAction: String, Equatable {
-    case start
-    case stop
-    case restart
-}
-
-struct ChatBackendProposal: Equatable {
-    let action: ChatBackendAction
-    let summary: String
-}
-
-struct ChatExecutionProposal: Equatable {
-    let summary: String
-}
-
-struct ChatDelegationProposal: Equatable {
-    let summary: String
-}
-
-struct ChatGoalDecompositionProposal: Equatable {
-    let summary: String
-}
-
-enum ChatGoalAutonomyMode: String, Equatable {
-    case enable
-    case disable
-}
-
-struct ChatGoalAutonomyProposal: Equatable {
-    let mode: ChatGoalAutonomyMode
-    let summary: String
-}
-
-enum ChatReviewStage: String, Equatable {
-    case qa
-    case ceo
-}
-
-struct ChatReviewProposal: Equatable {
-    let stage: ChatReviewStage
-    let verdict: String
-    let feedback: String?
-}
-
-enum OperatorChatRole: String, Equatable {
-    case user
-    case assistant
-    case system
-}
-
-enum OperatorChatCommandKind: String, Equatable {
-    case sendPrompt
-    case confirmFullAuto
-    case confirmHrStaffing
-    case confirmCompanyDelete
-    case confirmMerge
-    case cancelConfirmation
-    case chooseCompanyFolder
-}
-
-struct OperatorChatCommand: Identifiable, Equatable {
-    let id: String
-    let title: String
-    let prompt: String
-    let kind: OperatorChatCommandKind
-    let destructive: Bool
-
-    init(
-        id: String? = nil,
-        title: String,
-        prompt: String,
-        kind: OperatorChatCommandKind = .sendPrompt,
-        destructive: Bool = false
-    ) {
-        self.id = id ?? "\(kind.rawValue)-\(title)-\(prompt)"
-        self.title = title
-        self.prompt = prompt
-        self.kind = kind
-        self.destructive = destructive
-    }
-}
-
-struct OperatorChatPendingPrompt: Equatable {
-    let question: String
-    let resumePrompt: String
-}
-
-struct OperatorChatMessage: Identifiable, Equatable {
-    let id: String
-    let role: OperatorChatRole
-    let text: String
-    let createdAt: Date
-    let commands: [OperatorChatCommand]
-
-    init(
-        id: String = UUID().uuidString,
-        role: OperatorChatRole,
-        text: String,
-        createdAt: Date = Date(),
-        commands: [OperatorChatCommand] = []
-    ) {
-        self.id = id
-        self.role = role
-        self.text = text
-        self.createdAt = createdAt
-        self.commands = commands
-    }
-}
-
-func operatorAutomationModeDisplayName(_ mode: String, language: AppLanguage) -> String {
-    switch (language, mode.uppercased()) {
-    case (.english, "FULL_AUTO"):
-        return "Full auto"
-    case (.english, "AGENT_APPROVED"):
-        return "Internal approval"
-    case (.english, "ASK_ME"):
-        return "Confirm first"
-    case (.korean, "FULL_AUTO"):
-        return "완전 자동"
-    case (.korean, "AGENT_APPROVED"):
-        return "내부 승인"
-    case (.korean, "ASK_ME"):
-        return "확인 후 실행"
-    default:
-        return mode.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-}
-
-func operatorActionStatusDisplayName(_ status: String, language: AppLanguage) -> String {
-    switch (language, status.uppercased()) {
-    case (.english, "USER_CONFIRMATION_REQUIRED"):
-        return "Needs confirmation"
-    case (.english, "AGENT_APPROVAL_REQUESTED"):
-        return "Internal approval pending"
-    case (.english, "READY"):
-        return "Ready"
-    case (.english, "ATTENTION"):
-        return "Needs attention"
-    case (.english, "NOOP"):
-        return "Nothing changed"
-    case (.korean, "USER_CONFIRMATION_REQUIRED"):
-        return "확인 필요"
-    case (.korean, "AGENT_APPROVAL_REQUESTED"):
-        return "내부 승인 대기"
-    case (.korean, "READY"):
-        return "준비됨"
-    case (.korean, "ATTENTION"):
-        return "확인 필요"
-    case (.korean, "NOOP"):
-        return "변경 없음"
-    default:
-        return DesktopStrings.status(status, language: language)
-    }
-}
-
-func sanitizeOperatorUserText(_ text: String, language: AppLanguage) -> String {
-    var sanitized = text
-    let replacements = [
-        "FULL_AUTO": operatorAutomationModeDisplayName("FULL_AUTO", language: language),
-        "AGENT_APPROVED": operatorAutomationModeDisplayName("AGENT_APPROVED", language: language),
-        "ASK_ME": operatorAutomationModeDisplayName("ASK_ME", language: language),
-        "USER_CONFIRMATION_REQUIRED": operatorActionStatusDisplayName("USER_CONFIRMATION_REQUIRED", language: language),
-        "AGENT_APPROVAL_REQUESTED": operatorActionStatusDisplayName("AGENT_APPROVAL_REQUESTED", language: language),
-        "STOPPED": DesktopStrings.status("STOPPED", language: language),
-        "RUNNING": DesktopStrings.status("RUNNING", language: language)
-    ]
-    for (raw, replacement) in replacements {
-        sanitized = sanitized.replacingOccurrences(of: raw, with: replacement)
-    }
-    sanitized = sanitized.replacingOccurrences(
-        of: #"\bruntime=[^,\s.;)]+"#,
-        with: "",
-        options: .regularExpression
-    )
-    sanitized = sanitized.replacingOccurrences(
-        of: #"\bbackend=[^,\s.;)]+"#,
-        with: "",
-        options: .regularExpression
-    )
-    return sanitized
-        .replacingOccurrences(of: " ,", with: ",")
-        .replacingOccurrences(of: "  ", with: " ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 /// Main view model for the macOS shell.
@@ -529,7 +215,7 @@ final class DesktopStore: ObservableObject {
     }
 
     var preferredCliAgent: String {
-        preferredAgent(from: availableCliAgents) ?? preferredAgent(from: dashboard.settings.availableAgents) ?? ""
+        preferredDesktopAgent(from: availableCliAgents) ?? preferredDesktopAgent(from: dashboard.settings.availableAgents) ?? ""
     }
 
     var resolvedNewCompanyAgentCli: String {
@@ -1291,64 +977,13 @@ final class DesktopStore: ObservableObject {
     }
 
     private func applyCompanyDashboard(_ snapshot: CompanyDashboardPayload, companyId: String) {
-        let currentCompanyIssueIDs = Set(dashboard.issues.filter { $0.companyId == companyId }.map(\.id))
-        let mergedTasks = dashboard.tasks.filter { task in
-            guard let issueId = task.issueId else { return true }
-            return !currentCompanyIssueIDs.contains(issueId)
-        } + snapshot.tasks
-        let mergedCompanyAgentDefinitions = dashboard.companyAgentDefinitions.filter { $0.companyId != companyId } + snapshot.companyAgentDefinitions
-        let mergedAgentCapabilityProfiles = dashboard.agentCapabilityProfiles.filter { $0.companyId != companyId } + snapshot.agentCapabilityProfiles
-        let mergedProjectContexts = dashboard.projectContexts.filter { $0.companyId != companyId } + snapshot.projectContexts
-        let mergedGoals = dashboard.goals.filter { $0.companyId != companyId } + snapshot.goals
-        let mergedIssues = dashboard.issues.filter { $0.companyId != companyId } + snapshot.issues
-        let mergedReviewQueue = dashboard.reviewQueue.filter { $0.companyId != companyId } + snapshot.reviewQueue
-        let mergedOrgProfiles = dashboard.orgProfiles.filter { $0.companyId != companyId } + snapshot.orgProfiles
-        let mergedWorkflowTopologies = dashboard.workflowTopologies.filter { $0.companyId != companyId } + snapshot.workflowTopologies
-        let mergedGoalDecisions = dashboard.goalDecisions.filter { $0.companyId != companyId } + snapshot.goalDecisions
-        let mergedRunningAgentSessions = dashboard.runningAgentSessions.filter { $0.companyId != companyId } + snapshot.runningAgentSessions
-        let mergedActivity = dashboard.activity.filter { $0.companyId != companyId } + snapshot.activity
-        let mergedCompanyRuntimes = dashboard.companyRuntimes.filter { $0.companyId != companyId } + [snapshot.runtime]
-        let mergedContextEntries = dashboard.agentContextEntries.filter { $0.companyId != companyId } + snapshot.agentContextEntries
-        let mergedAgentMessages = dashboard.agentMessages.filter { $0.companyId != companyId } + snapshot.agentMessages
-        let mergedMarketingPolicies = marketingDelegationPolicies.filter { $0.companyId != companyId } + snapshot.marketingDelegationPolicies
-        let mergedMarketingRuns = marketingRuns.filter { $0.companyId != companyId } + snapshot.marketingRuns
-        let mergedSkillRuns = skillRuns.filter { $0.companyId != companyId } + snapshot.skillRuns
-        let mergedAgentPerformance = dashboard.agentPerformance.filter { performance in
-            !snapshot.companyAgentDefinitions.contains { $0.id == performance.agentId }
-        } + snapshot.agentPerformance
-        let mergedBackendStatuses = mergeBackendStatuses(current: dashboard.backendStatuses, incoming: snapshot.backendStatuses)
-
-        dashboard = DashboardPayload(
-            repositories: dashboard.repositories,
-            workspaces: dashboard.workspaces,
-            tasks: mergedTasks.sorted { $0.updatedAt > $1.updatedAt },
-            settings: dashboard.settings,
-            companies: snapshot.companies.sorted { $0.updatedAt > $1.updatedAt },
-            companyAgentDefinitions: mergedCompanyAgentDefinitions.sorted {
-                if $0.displayOrder == $1.displayOrder {
-                    return $0.title < $1.title
-                }
-                return $0.displayOrder < $1.displayOrder
-            },
-            agentCapabilityProfiles: mergedAgentCapabilityProfiles.sorted { $0.updatedAt > $1.updatedAt },
-            projectContexts: mergedProjectContexts.sorted { $0.lastUpdatedAt > $1.lastUpdatedAt },
-            goals: mergedGoals.sorted { $0.updatedAt > $1.updatedAt },
-            issues: mergedIssues.sorted { $0.updatedAt > $1.updatedAt },
-            reviewQueue: mergedReviewQueue.sorted { $0.updatedAt > $1.updatedAt },
-            orgProfiles: mergedOrgProfiles.sorted { $0.roleName < $1.roleName },
-            workflowTopologies: mergedWorkflowTopologies.sorted { $0.updatedAt > $1.updatedAt },
-            goalDecisions: mergedGoalDecisions.sorted { $0.createdAt > $1.createdAt },
-            runningAgentSessions: mergedRunningAgentSessions.sorted { $0.updatedAt > $1.updatedAt },
-            backendStatuses: mergedBackendStatuses,
-            opsMetrics: snapshot.opsMetrics,
-            activity: mergedActivity.sorted { $0.createdAt > $1.createdAt },
-            companyRuntimes: mergedCompanyRuntimes.sorted { ($0.lastTickAt ?? 0) > ($1.lastTickAt ?? 0) },
-            agentContextEntries: mergedContextEntries.sorted { $0.createdAt > $1.createdAt },
-            agentMessages: mergedAgentMessages.sorted { $0.createdAt > $1.createdAt },
-            marketingDelegationPolicies: mergedMarketingPolicies.sorted { $0.name < $1.name },
-            marketingRuns: mergedMarketingRuns.sorted { $0.createdAt > $1.createdAt },
-            skillRuns: mergedSkillRuns.sorted { $0.updatedAt > $1.updatedAt },
-            agentPerformance: mergedAgentPerformance
+        dashboard = DashboardPayloadMerger.applyingCompanySnapshot(
+            current: dashboard,
+            snapshot: snapshot,
+            companyId: companyId,
+            currentMarketingPolicies: marketingDelegationPolicies,
+            currentMarketingRuns: marketingRuns,
+            currentSkillRuns: skillRuns
         )
         marketingDelegationPolicies = dashboard.marketingDelegationPolicies
         marketingRuns = dashboard.marketingRuns
@@ -1358,15 +993,6 @@ final class DesktopStore: ObservableObject {
         reconcileCompanySelection()
         syncIssueComposerState()
         syncBackendFormState()
-    }
-
-    private func mergeBackendStatuses(
-        current: [ExecutionBackendStatusPayload],
-        incoming: [ExecutionBackendStatusPayload]
-    ) -> [ExecutionBackendStatusPayload] {
-        guard !incoming.isEmpty else { return current }
-        let incomingKinds = Set(incoming.map(\.kind))
-        return current.filter { !incomingKinds.contains($0.kind) } + incoming
     }
 
     private func syncDefaultCompanyAgentSkillsIfNeeded() {
@@ -1588,11 +1214,11 @@ final class DesktopStore: ObservableObject {
         }
 
         if workflowLeadAgent.isEmpty || !availableAgents.contains(workflowLeadAgent) {
-            workflowLeadAgent = preferredAgent(from: availableAgents) ?? ""
+            workflowLeadAgent = preferredDesktopAgent(from: availableAgents) ?? ""
         }
 
         if newCompanyAgentCli.isEmpty || !cliAgents.contains(newCompanyAgentCli) {
-            selectNewCompanyAgentCli(preferredAgent(from: cliAgents) ?? preferredAgent(from: availableAgents) ?? "")
+            selectNewCompanyAgentCli(preferredDesktopAgent(from: cliAgents) ?? preferredDesktopAgent(from: availableAgents) ?? "")
         }
         if newCompanyAgentModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            let defaultModel = defaultModel(for: newCompanyAgentCli),
@@ -1607,32 +1233,6 @@ final class DesktopStore: ObservableObject {
         let validSelection = Set(agentSelection.filter { availableAgents.contains($0) })
         agentSelection = validSelection.isEmpty ? [workflowLeadAgent] : validSelection
         agentSelection.insert(workflowLeadAgent)
-    }
-
-    private func preferredAgent(from agents: [String]) -> String? {
-        let normalized = agents.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        if let opencode = normalized.first(where: { $0.caseInsensitiveCompare("opencode") == .orderedSame }) {
-            return opencode
-        }
-        if let gemma4 = normalized.first(where: { $0.caseInsensitiveCompare("gemma4") == .orderedSame }) {
-            return gemma4
-        }
-        if let ollama = normalized.first(where: { $0.caseInsensitiveCompare("ollama") == .orderedSame }) {
-            return ollama
-        }
-        if let lmstudio = normalized.first(where: { $0.caseInsensitiveCompare("lmstudio") == .orderedSame }) {
-            return lmstudio
-        }
-        if let qwen = normalized.first(where: { $0.caseInsensitiveCompare("qwen") == .orderedSame }) {
-            return qwen
-        }
-        if let codexOAuth = normalized.first(where: { $0.caseInsensitiveCompare("codex-oauth") == .orderedSame }) {
-            return codexOAuth
-        }
-        if let codex = normalized.first(where: { $0.caseInsensitiveCompare("codex") == .orderedSame }) {
-            return codex
-        }
-        return normalized.first
     }
 
     private func syncBackendFormState() {
@@ -1994,102 +1594,17 @@ final class DesktopStore: ObservableObject {
     }
 
     func chatGoalProposal(from draft: String) -> ChatGoalProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalizedDraft = strippedLeadingSlashCommand(
-            from: strippedLeadingListPrefix(from: trimmedDraft),
-            commands: ["goal", "objective", "목표"]
-        )
-        let firstLine = normalizedDraft
-            .split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty }
-
-        let rawTitle = firstLine ?? String(normalizedDraft.prefix(80))
-        let normalizedTitle = rawTitle
-            .replacingOccurrences(
-                of: #"^([\-*•]\s+|\d+[.)]\s+)"#,
-                with: "",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"^(goal\s*:\s*|목표\s*:\s*)"#,
-                with: "",
-                options: [.regularExpression, .caseInsensitive]
-            )
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallbackTitle = normalizedDraft
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = normalizedTitle.isEmpty ? String(fallbackTitle.prefix(80)) : normalizedTitle
-        guard !title.isEmpty else { return nil }
-
-        return ChatGoalProposal(title: title, description: normalizedDraft)
+        OperatorChatProposalParser.goal(from: draft)
     }
 
     func chatCompanyRequestProposal(from draft: String) -> ChatCompanyRequestProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let firstLine = trimmedDraft
-            .split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty }
-        let rawTitle = firstLine ?? String(trimmedDraft.prefix(96))
-        let normalizedTitle = rawTitle
-            .replacingOccurrences(
-                of: #"^([\-*•]\s+|\d+[.)]\s+)"#,
-                with: "",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"^(goal|objective|request|ask|목표|요청|할일)\s*:\s*"#,
-                with: "",
-                options: [.regularExpression, .caseInsensitive]
-            )
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallbackTitle = trimmedDraft
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = normalizedTitle.isEmpty ? String(fallbackTitle.prefix(96)) : String(normalizedTitle.prefix(96))
-        guard !title.isEmpty else { return nil }
-
         let companyName = selectedCompany?.name ?? language("selected company", "선택한 회사")
-        let ceoBrief = language(
-            "CEO will restate this as a clear outcome, create success criteria, split it into assigned issues, and keep QA/CEO review gates visible for \(companyName).",
-            "CEO가 이 요청을 명확한 결과물로 다시 정리하고, 성공 기준을 만들고, 담당 이슈로 나눈 뒤 \(companyName)의 QA/CEO 검토 단계를 보이게 유지합니다."
-        )
-        return ChatCompanyRequestProposal(title: title, request: trimmedDraft, ceoBrief: ceoBrief)
+        return OperatorChatProposalParser.companyRequest(from: draft, companyName: companyName, language: language)
     }
 
     func chatIssueProposal(from draft: String) -> ChatIssueProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
         let goalId = selectedGoalID ?? selectedIssue?.goalId
-        guard let goalId else { return nil }
-        let firstLine = trimmedDraft
-            .split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty }
-        let rawTitle = firstLine ?? String(trimmedDraft.prefix(80))
-        let normalizedTitle = rawTitle
-            .replacingOccurrences(
-                of: #"^([\-*•]\s+|\d+[.)]\s+)"#,
-                with: "",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"^(issue\s*:\s*|task\s*:\s*|ticket\s*:\s*|이슈\s*:\s*)"#,
-                with: "",
-                options: [.regularExpression, .caseInsensitive]
-            )
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallbackTitle = trimmedDraft
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = normalizedTitle.isEmpty ? String(fallbackTitle.prefix(80)) : normalizedTitle
-        guard !title.isEmpty else { return nil }
-
-        return ChatIssueProposal(goalId: goalId, title: title, description: trimmedDraft)
+        return OperatorChatProposalParser.issue(from: draft, goalId: goalId)
     }
 
     func applyChatGoalProposal(_ proposal: ChatGoalProposal) async -> GoalRecord? {
@@ -2209,144 +1724,41 @@ final class DesktopStore: ObservableObject {
     }
 
     func chatReviewProposal(from draft: String, kind: String) -> ChatReviewProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-
-        let verdict: String
-        if normalized.contains(" changes requested ") ||
-            normalized.contains(" request changes ") ||
-            normalized.contains(" changes needed ") ||
-            normalized.contains(" reject ") ||
-            normalized.contains(" rejected ") ||
-            normalized.contains(" fail ") ||
-            normalized.contains(" failed ") {
-            verdict = "CHANGES_REQUESTED"
-        } else if kind == "qa" {
-            verdict = "PASS"
-        } else {
-            verdict = "APPROVE"
-        }
-
-        return ChatReviewProposal(
-            stage: kind == "qa" ? .qa : .ceo,
-            verdict: verdict,
-            feedback: trimmedDraft
-        )
+        OperatorChatProposalParser.review(from: draft, kind: kind)
     }
 
     func chatMergeProposal(from draft: String) -> ChatMergeProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-        let mergeSignals = [" merge ", " ship it ", " merge it ", " land it ", " merge now ", " approve and merge "]
-        guard mergeSignals.contains(where: { normalized.contains($0) }) else { return nil }
-        return ChatMergeProposal(summary: trimmedDraft)
+        OperatorChatProposalParser.merge(from: draft)
     }
 
     func chatRuntimeProposal(from draft: String) -> ChatRuntimeProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-
-        if [" stop runtime ", " pause runtime ", " stop company ", " stop the runtime ", " runtime off "].contains(where: { normalized.contains($0) }) {
-            return ChatRuntimeProposal(action: .stop, summary: trimmedDraft)
-        }
-        if [" start runtime ", " resume runtime ", " start company ", " start the runtime ", " runtime on "].contains(where: { normalized.contains($0) }) {
-            return ChatRuntimeProposal(action: .start, summary: trimmedDraft)
-        }
-        return nil
+        OperatorChatProposalParser.runtime(from: draft)
     }
 
     func chatAgentProposal(from draft: String) -> ChatAgentProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-        let agentSignals = [" agent ", " qa agent", " reviewer ", " review agent", " tester "]
-        guard agentSignals.contains(where: { normalized.contains($0) }) else { return nil }
-
         let workflowLead = workflowLeadAgent.trimmingCharacters(in: .whitespacesAndNewlines)
-        let preferredCli = preferredAgent(from: dashboard.settings.availableAgents) ?? (workflowLead.isEmpty ? nil : workflowLead) ?? "opencode"
-        if normalized.contains(" qa ") || normalized.contains(" review ") || normalized.contains(" test ") || normalized.contains(" verification ") {
-            return ChatAgentProposal(
-                title: language("QA Agent", "QA 에이전트"),
-                agentCli: preferredCli,
-                model: nil,
-                roleSummary: language("Own verification, review-queue decisions, and regression feedback for delivered work.", "전달된 작업에 대한 검증, 리뷰 큐 판정, 회귀 피드백을 담당합니다."),
-                specialties: ["qa", "review", "verification"],
-                collaborationInstructions: trimmedDraft,
-                memoryNotes: trimmedDraft,
-                enabled: true
-            )
-        }
-
-        return ChatAgentProposal(
-            title: language("New Agent", "새 에이전트"),
-            agentCli: preferredCli,
-            model: nil,
-            roleSummary: trimmedDraft,
-            specialties: ["general"],
-            collaborationInstructions: trimmedDraft,
-            memoryNotes: trimmedDraft,
-            enabled: true
-        )
+        let preferredCli = preferredDesktopAgent(from: dashboard.settings.availableAgents) ?? (workflowLead.isEmpty ? nil : workflowLead) ?? "opencode"
+        return OperatorChatProposalParser.agent(from: draft, preferredCli: preferredCli, language: language)
     }
 
     func chatBackendProposal(from draft: String) -> ChatBackendProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-
-        if [" restart backend ", " reboot backend ", " restart app server ", " restart codex backend "].contains(where: { normalized.contains($0) }) {
-            return ChatBackendProposal(action: .restart, summary: trimmedDraft)
-        }
-        if [" stop backend ", " stop app server ", " backend off ", " stop codex backend "].contains(where: { normalized.contains($0) }) {
-            return ChatBackendProposal(action: .stop, summary: trimmedDraft)
-        }
-        if [" start backend ", " start app server ", " backend on ", " start codex backend "].contains(where: { normalized.contains($0) }) {
-            return ChatBackendProposal(action: .start, summary: trimmedDraft)
-        }
-        return nil
+        OperatorChatProposalParser.backend(from: draft)
     }
 
     func chatExecutionProposal(from draft: String) -> ChatExecutionProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-        let signals = [" run this issue ", " execute this issue ", " start this issue ", " work on this issue ", " run selected issue "]
-        guard signals.contains(where: { normalized.contains($0) }) else { return nil }
-        return ChatExecutionProposal(summary: trimmedDraft)
+        OperatorChatProposalParser.execution(from: draft)
     }
 
     func chatDelegationProposal(from draft: String) -> ChatDelegationProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-        let signals = [" delegate this issue ", " assign this issue ", " route this issue ", " delegate selected issue ", " assign selected issue "]
-        guard signals.contains(where: { normalized.contains($0) }) else { return nil }
-        return ChatDelegationProposal(summary: trimmedDraft)
+        OperatorChatProposalParser.delegation(from: draft)
     }
 
     func chatGoalDecompositionProposal(from draft: String) -> ChatGoalDecompositionProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-        let signals = [" break this goal ", " decompose this goal ", " split this goal ", " generate issues for this goal ", " break selected goal "]
-        guard signals.contains(where: { normalized.contains($0) }) else { return nil }
-        return ChatGoalDecompositionProposal(summary: trimmedDraft)
+        OperatorChatProposalParser.goalDecomposition(from: draft)
     }
 
     func chatGoalAutonomyProposal(from draft: String) -> ChatGoalAutonomyProposal? {
-        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty else { return nil }
-        let normalized = " " + trimmedDraft.lowercased() + " "
-        if [" enable autonomy ", " turn autonomy on ", " enable auto mode ", " make this goal autonomous "].contains(where: { normalized.contains($0) }) {
-            return ChatGoalAutonomyProposal(mode: .enable, summary: trimmedDraft)
-        }
-        if [" disable autonomy ", " turn autonomy off ", " disable auto mode ", " make this goal manual "].contains(where: { normalized.contains($0) }) {
-            return ChatGoalAutonomyProposal(mode: .disable, summary: trimmedDraft)
-        }
-        return nil
+        OperatorChatProposalParser.goalAutonomy(from: draft)
     }
 
     func applyChatReviewProposal(_ proposal: ChatReviewProposal) async -> ReviewQueueItemRecord? {
@@ -4130,18 +3542,6 @@ final class DesktopStore: ObservableObject {
         marketingPolicyMaxRuntimeSeconds = "900"
     }
 
-    private func splitAgentMeta(_ raw: String) -> [String] {
-        raw
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private func trimmedOptional(_ raw: String) -> String? {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
-    }
-
     private func runWithEmbeddedBackendRecovery<T: Sendable>(_ action: @Sendable () async throws -> T) async throws -> T {
         do {
             return try await action()
@@ -4575,7 +3975,8 @@ final class DesktopStore: ObservableObject {
         let generation = companyEventStreamGeneration
         companyEventTask = Task { [weak self] in
             guard let self else { return }
-            var reconnectDelaySeconds = 1
+            var reconnectBackoff = CompanyEventStreamBackoff()
+            var lastEventCursor: String? = nil
             defer {
                 Task { @MainActor [weak self] in
                     guard let self, self.companyEventStreamGeneration == generation else { return }
@@ -4584,7 +3985,7 @@ final class DesktopStore: ObservableObject {
             }
             while !Task.isCancelled {
                 do {
-                    for try await envelope in api.companyEvents(companyId: companyID) {
+                    for try await envelope in api.companyEvents(companyId: companyID, cursor: lastEventCursor) {
                         let shouldApply = await MainActor.run { () -> Bool in
                             self.companyEventStreamGeneration == generation &&
                                 self.selectedCompanyID == companyID &&
@@ -4592,8 +3993,13 @@ final class DesktopStore: ObservableObject {
                         }
                         guard shouldApply else { return }
                         if isCompanyEventStreamHeartbeat(envelope) {
-                            reconnectDelaySeconds = 1
+                            reconnectBackoff.reset()
                             continue
+                        }
+                        if let cursor = envelope.cursor, !cursor.isEmpty {
+                            lastEventCursor = cursor
+                        } else if let sequence = envelope.sequence {
+                            lastEventCursor = String(sequence)
                         }
                         await MainActor.run {
                             self.companyStreamStatusMessage = nil
@@ -4609,7 +4015,7 @@ final class DesktopStore: ObservableObject {
                                 self.syncBackendFormState()
                             }
                         }
-                        reconnectDelaySeconds = 1
+                        reconnectBackoff.reset()
                         if envelope.companyDashboard == nil && envelope.dashboard == nil {
                             await self.refreshCompanyDashboard(restartEventStream: false)
                         }
@@ -4623,8 +4029,8 @@ final class DesktopStore: ObservableObject {
                     }
                     guard shouldReconnect else { return }
                     await self.refreshCompanyDashboard(restartEventStream: false)
-                    try? await Task.sleep(for: .seconds(reconnectDelaySeconds))
-                    reconnectDelaySeconds = min(reconnectDelaySeconds * 2, 15)
+                    try? await Task.sleep(for: reconnectBackoff.sleepDuration)
+                    reconnectBackoff.advance()
                 } catch is CancellationError {
                     return
                 } catch {
@@ -4644,8 +4050,8 @@ final class DesktopStore: ObservableObject {
                     }
                     guard shouldRetry else { return }
                     await self.refreshCompanyDashboard(restartEventStream: false)
-                    try? await Task.sleep(for: .seconds(reconnectDelaySeconds))
-                    reconnectDelaySeconds = min(reconnectDelaySeconds * 2, 15)
+                    try? await Task.sleep(for: reconnectBackoff.sleepDuration)
+                    reconnectBackoff.advance()
                 }
             }
         }

@@ -109,6 +109,25 @@ SVG_RENDER_PNG="$STAGING_ROOT/cotor.svg.png"
 
 mkdir -p "$APP_MACOS" "$APP_BACKEND" "$APP_RESOURCES" "$ICONSET_DIR"
 
+prebundle_playwright_if_requested() {
+    if [[ "${COTOR_PREBUNDLE_PLAYWRIGHT:-0}" != "1" ]]; then
+        return
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "❌ COTOR_PREBUNDLE_PLAYWRIGHT=1 requires npm on PATH."
+        exit 1
+    fi
+    local browser_resource_dir="$APP_RESOURCES/browser-skills"
+    mkdir -p "$browser_resource_dir"
+    echo "🌐 Prebundling Playwright for browser skills..."
+    npm install \
+        --silent \
+        --no-audit \
+        --no-fund \
+        --prefix "$browser_resource_dir" \
+        playwright@1.52.0
+}
+
 echo "🎨 Generating app icon..."
 if [[ -f "$PREBUILT_ICON_PNG" ]]; then
     cp "$PREBUILT_ICON_PNG" "$ICON_PNG"
@@ -155,6 +174,8 @@ if [[ -n "$RESOURCE_BUNDLES" ]]; then
         cp -R "$bundle_path" "$APP_RESOURCES/"
     done <<< "$RESOURCE_BUNDLES"
 fi
+
+prebundle_playwright_if_requested
 
 sed \
     -e "s#__EXECUTABLE__#CotorDesktopLauncher#g" \

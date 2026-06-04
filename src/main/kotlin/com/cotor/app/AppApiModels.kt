@@ -363,7 +363,10 @@ data class DurableApproveRequest(
 data class CompanyEventEnvelope(
     val event: CompanyEvent,
     val dashboard: DashboardResponse? = null,
-    val companyDashboard: CompanyDashboardResponse? = null
+    val companyDashboard: CompanyDashboardResponse? = null,
+    val sequence: Long? = null,
+    val cursor: String? = sequence?.toString(),
+    val gapDetected: Boolean = false
 )
 
 @Serializable

@@ -44,7 +44,6 @@ import com.cotor.policy.PolicyDecision
 import com.cotor.policy.PolicyEngine
 import com.cotor.provenance.EvidenceBundle
 import com.cotor.provenance.ProvenanceService
-import com.cotor.providers.github.CheckSnapshot
 import com.cotor.providers.github.GitHubControlPlaneService
 import com.cotor.providers.github.GitHubSyncResponse
 import com.cotor.providers.github.MergeQueueState
@@ -85,10 +84,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -298,6 +294,8 @@ class DesktopAppService(
         private const val COMPANY_TRACE_ROTATE_BYTES = 8L * 1024L * 1024L
         private const val COMPANY_TRACE_QUEUE_CAPACITY = 512
         private const val COMPANY_TRACE_FLUSH_TIMEOUT_MS = 5_000L
+        private const val COMPANY_EVENT_STREAM_BUFFER_CAPACITY = 2_048
+        private const val COMPANY_EVENT_REPLAY_CAPACITY = 1_024
         private const val COMPANY_RUNTIME_ERROR_ROTATE_BYTES = 2L * 1024L * 1024L
         private const val RECOVERABLE_RETRY_BASE_DELAY_MS = 30_000L
         private const val RECOVERABLE_RETRY_MAX_DELAY_MS = 5L * 60_000L
@@ -378,7 +376,18 @@ class DesktopAppService(
     private val recentSupersededPullRequestCleanupAt = ConcurrentHashMap<String, Long>()
     private val recentNoOpPullRequestRefreshAt = ConcurrentHashMap<String, Long>()
     private val recentPullRequestMetadataRefreshes = ConcurrentHashMap<String, CachedPullRequestMetadata>()
-    private val companyEventStream = MutableSharedFlow<CompanyEventEnvelope>(replay = 0, extraBufferCapacity = 64)
+    private val companyEventStreamService = CompanyEventStreamService(
+        scope = serviceScope,
+        snapshotProvider = { companyId ->
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    companyDashboardSnapshot(stateStore.load().withDerivedMetrics(), companyId)
+                }.getOrNull()
+            }
+        },
+        replayCapacity = COMPANY_EVENT_REPLAY_CAPACITY,
+        streamBufferCapacity = COMPANY_EVENT_STREAM_BUFFER_CAPACITY
+    )
     private val recentAgentModelDiscoveries = ConcurrentHashMap<String, CachedAgentModels>()
     private val backendJson = Json { ignoreUnknownKeys = true }
     private val companyAutomationTraceQueue = Channel<CompanyAutomationTraceWriteRequest>(
@@ -407,7 +416,7 @@ class DesktopAppService(
     }
     private val localExecutionBackend = LocalCotorBackend(agentExecutor)
     private val codexAppServerBackend = CodexAppServerBackend(backendJson)
-    private val directChatService = DirectChatService()
+    private val directChatService = DesktopDirectChatService(stateStore, stateMutex)
 
     private enum class RecoverableRetryMode {
         NONE,
@@ -424,6 +433,17 @@ class DesktopAppService(
         val canAutoRetry: Boolean
             get() = mode == RecoverableRetryMode.WAITING || mode == RecoverableRetryMode.READY
     }
+
+    private data class CompanyContextSnapshotWrite(
+        val state: DesktopAppState,
+        val company: Company,
+        val projectContext: CompanyProjectContext
+    )
+
+    private data class CompanyMutationResult(
+        val company: Company,
+        val contextSnapshot: CompanyContextSnapshotWrite? = null
+    )
 
     init {
         liveServicesForTesting += this
@@ -442,6 +462,7 @@ class DesktopAppService(
         recentNoOpPullRequestRefreshAt.clear()
         recentPullRequestMetadataRefreshes.clear()
         recentAgentModelDiscoveries.clear()
+        companyEventStreamService.clearReplay()
         serviceScope.cancel()
         liveServicesForTesting -= this
     }
@@ -1259,8 +1280,11 @@ class DesktopAppService(
         }
     }
 
-    fun companyEvents(companyId: String): Flow<CompanyEventEnvelope> =
-        companyEventStream.filter { it.event.companyId == companyId }
+    fun companyEvents(companyId: String, cursor: String? = null): Flow<CompanyEventEnvelope> =
+        companyEventStreamService.events(companyId, cursor)
+
+    suspend fun companyEventGapSnapshot(companyId: String, afterSequence: Long?): CompanyEventEnvelope? =
+        companyEventStreamService.gapSnapshot(companyId, afterSequence)
 
     private suspend fun prepareCompanyAutomationState(companyId: String? = null) {
         migrateLegacyCompanyRosters(companyId)
@@ -2104,14 +2128,6 @@ class DesktopAppService(
         runtimeWakeSignal(companyId).tryEmit(Unit)
     }
 
-    private fun finalTaskStatus(runs: List<AgentRun>): DesktopTaskStatus = when {
-        runs.isEmpty() -> DesktopTaskStatus.FAILED
-        runs.all { it.status == AgentRunStatus.COMPLETED } -> DesktopTaskStatus.COMPLETED
-        runs.any { it.status == AgentRunStatus.COMPLETED } &&
-            runs.any { it.status == AgentRunStatus.FAILED } -> DesktopTaskStatus.PARTIAL
-        else -> DesktopTaskStatus.FAILED
-    }
-
     private fun isProcessAlive(processId: Long?): Boolean {
         if (processId == null) {
             return false
@@ -2383,6 +2399,8 @@ class DesktopAppService(
     fun capabilityCatalog(): List<CapabilityCatalogEntry> = com.cotor.app.capabilityCatalog()
 
     fun providerCatalog(): List<ProviderCatalogEntry> = com.cotor.app.providerCatalog()
+
+    fun directChatProviderCatalog(): List<DirectChatProviderCatalogEntry> = com.cotor.app.directChatProviderCatalog()
 
     fun skillCatalog(): List<SkillCatalogEntry> = com.cotor.app.skillCatalog()
 
@@ -4175,19 +4193,35 @@ class DesktopAppService(
     }
 
     suspend fun syncGitHubProvider(companyId: String): GitHubSyncResponse {
-        val refreshedCount = stateMutex.withLock {
+        data class PullRequestSnapshotEffect(
+            val snapshot: PullRequestSnapshot,
+            val detail: String
+        )
+        data class ProvenanceLinkEffect(
+            val goalId: String?,
+            val issueId: String,
+            val runId: String?
+        )
+
+        val candidates = stateMutex.withLock {
             val state = stateStore.load()
-            val company = state.companies.firstOrNull { it.id == companyId }
+            state.companies.firstOrNull { it.id == companyId }
                 ?: throw IllegalArgumentException("Company not found: $companyId")
-            val candidates = state.reviewQueue
+            state.reviewQueue
                 .filter { it.companyId == companyId }
                 .filter { it.pullRequestNumber != null && !it.worktreePath.isNullOrBlank() }
+        }
 
-            if (candidates.isEmpty()) {
-                return@withLock 0
-            }
+        if (candidates.isEmpty()) {
+            return GitHubSyncResponse(
+                companyId = companyId,
+                syncedPullRequests = 0,
+                resumedRuntimeTick = false
+            )
+        }
 
-            val refreshedMetadata = candidates.mapNotNull { item ->
+        val refreshedMetadata = withContext(Dispatchers.IO) {
+            candidates.mapNotNull { item ->
                 val worktreePath = item.worktreePath?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val pullRequestNumber = item.pullRequestNumber ?: return@mapNotNull null
                 val refreshed = runCatching {
@@ -4195,6 +4229,23 @@ class DesktopAppService(
                 }.getOrNull() ?: return@mapNotNull null
                 item to refreshed
             }
+        }
+
+        if (refreshedMetadata.isEmpty()) {
+            return GitHubSyncResponse(
+                companyId = companyId,
+                syncedPullRequests = 0,
+                resumedRuntimeTick = false
+            )
+        }
+
+        val snapshotEffects = mutableListOf<PullRequestSnapshotEffect>()
+        val provenanceEffects = mutableListOf<ProvenanceLinkEffect>()
+        var stateForKnowledgeSync: DesktopAppState? = null
+        val refreshedCount = stateMutex.withLock {
+            val state = stateStore.load()
+            val company = state.companies.firstOrNull { it.id == companyId }
+                ?: throw IllegalArgumentException("Company not found: $companyId")
 
             val refreshedByIssueId = refreshedMetadata.associateBy { it.first.issueId }
             val mergedIssueIds = mutableSetOf<String>()
@@ -4290,7 +4341,14 @@ class DesktopAppService(
 
             refreshedMetadata.forEach { (item, metadata) ->
                 val checks = parseChecks(metadata.checksSummary)
-                gitHubControlPlaneService.recordSnapshot(
+                updatedIssues.firstOrNull { it.id == item.issueId }?.let { issue ->
+                    provenanceEffects += ProvenanceLinkEffect(
+                        goalId = issue.goalId,
+                        issueId = issue.id,
+                        runId = item.runId
+                    )
+                }
+                snapshotEffects += PullRequestSnapshotEffect(
                     snapshot = PullRequestSnapshot(
                         number = metadata.pullRequestNumber ?: return@forEach,
                         url = metadata.pullRequestUrl,
@@ -4314,12 +4372,8 @@ class DesktopAppService(
                         runId = item.runId,
                         branchName = item.branchName
                     ),
-                    eventType = "sync",
                     detail = "Synced PR #${metadata.pullRequestNumber ?: "unknown"} for company ${company.name}"
                 )
-                updatedIssues.firstOrNull { it.id == item.issueId }?.let { issue ->
-                    provenanceService.recordIssueRunLink(companyId = companyId, goalId = issue.goalId, issueId = issue.id, runId = item.runId)
-                }
             }
 
             var nextState = state.copy(
@@ -4361,8 +4415,29 @@ class DesktopAppService(
             }
             nextState = applyVerificationProjection(nextState).withDerivedMetrics()
             stateStore.save(nextState)
-            knowledgeService.synchronizeFromState(nextState)
+            stateForKnowledgeSync = nextState
             refreshedMetadata.size
+        }
+        snapshotEffects.forEach { effect ->
+            gitHubControlPlaneService.recordSnapshot(
+                snapshot = effect.snapshot,
+                eventType = "sync",
+                detail = effect.detail
+            )
+        }
+        provenanceEffects.forEach { effect ->
+            val runId = effect.runId ?: return@forEach
+            provenanceService.recordIssueRunLink(
+                companyId = companyId,
+                goalId = effect.goalId,
+                issueId = effect.issueId,
+                runId = runId
+            )
+        }
+        stateForKnowledgeSync?.let { state ->
+            withContext(Dispatchers.IO) {
+                knowledgeService.synchronizeFromState(state)
+            }
         }
         if (refreshedCount > 0) {
             runCatching { runCompanyRuntimeTick(companyId) }
@@ -4495,21 +4570,6 @@ class DesktopAppService(
             ?.approvalPauses
             ?.firstOrNull { it.status.name == "PENDING" }
             ?.id
-
-    private fun providerBlockReasonForIssue(
-        nextStatus: IssueStatus,
-        run: AgentRun?
-    ): String? {
-        if (nextStatus != IssueStatus.BLOCKED && nextStatus != IssueStatus.WAITING_FOR_APPROVAL) {
-            return null
-        }
-        return run?.publish?.checksSummary
-            ?.takeIf { it.isNotBlank() }
-            ?: run?.publish?.error
-                ?.takeIf { it.isNotBlank() }
-            ?: run?.error
-                ?.takeIf { it.isNotBlank() }
-    }
 
     private fun classifyBlockedReason(
         issue: CompanyIssue,
@@ -4697,9 +4757,6 @@ class DesktopAppService(
         }
     }
 
-    private fun issueAttentionSeverity(status: IssueStatus): String =
-        if (status == IssueStatus.BLOCKED || status == IssueStatus.WAITING_FOR_APPROVAL) "warning" else "info"
-
     private fun syntheticCompanyRunPipeline(issue: CompanyIssue?): Pair<Pipeline, PipelineStage> {
         val stage = PipelineStage(id = "company-agent-execution", type = StageType.EXECUTION)
         val name = issue?.kind?.takeIf { it.isNotBlank() }?.let { "company-$it-run" } ?: "company-execution-run"
@@ -4732,68 +4789,6 @@ class DesktopAppService(
         }
         return context
     }
-
-    private fun parseChecks(summary: String?): List<CheckSnapshot> {
-        if (summary.isNullOrBlank()) {
-            return emptyList()
-        }
-        return summary.split(';')
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .map { token ->
-                val name = token.substringBefore('=').trim()
-                val statusPart = token.substringAfter('=', "UNKNOWN").trim()
-                val status = statusPart.substringBefore('/').trim()
-                val conclusion = statusPart.substringAfter('/', "").trim().ifBlank { null }
-                CheckSnapshot(
-                    name = name,
-                    status = status,
-                    conclusion = conclusion
-                )
-            }
-    }
-
-    private fun checksFailing(summary: String?): Boolean {
-        if (summary.isNullOrBlank()) return false
-        val checks = parseChecks(summary)
-        return when {
-            checks.isNotEmpty() -> checks.any { check ->
-                check.status.equals("COMPLETED", ignoreCase = true) &&
-                    !check.conclusion.equals("SUCCESS", ignoreCase = true)
-            }
-            else -> summary.contains("FAILURE", ignoreCase = true) ||
-                summary.contains("ERROR", ignoreCase = true)
-        }
-    }
-
-    private fun checksExplicitlyPassing(summary: String?): Boolean {
-        if (summary.isNullOrBlank()) return false
-        val checks = parseChecks(summary)
-        return when {
-            checks.isNotEmpty() -> checks.all { check ->
-                !check.status.equals("COMPLETED", ignoreCase = true) ||
-                    check.conclusion.equals("SUCCESS", ignoreCase = true)
-            }
-            else -> !checksFailing(summary)
-        }
-    }
-
-    private fun recoveredReviewQueueStatus(item: ReviewQueueItem): ReviewQueueStatus =
-        when {
-            item.ceoVerdict.equals("APPROVE", ignoreCase = true) -> ReviewQueueStatus.READY_FOR_CEO
-            item.qaVerdict.equals("PASS", ignoreCase = true) -> ReviewQueueStatus.READY_FOR_CEO
-            else -> ReviewQueueStatus.AWAITING_QA
-        }
-
-    private fun recoveredIssueStatus(issue: CompanyIssue, queueItem: ReviewQueueItem? = null): IssueStatus =
-        when {
-            issue.ceoVerdict.equals("APPROVE", ignoreCase = true) -> IssueStatus.READY_FOR_CEO
-            issue.qaVerdict.equals("PASS", ignoreCase = true) -> IssueStatus.READY_FOR_CEO
-            queueItem?.ceoVerdict.equals("APPROVE", ignoreCase = true) -> IssueStatus.READY_FOR_CEO
-            queueItem?.qaVerdict.equals("PASS", ignoreCase = true) -> IssueStatus.READY_FOR_CEO
-            issue.pullRequestUrl != null || issue.pullRequestNumber != null -> IssueStatus.IN_REVIEW
-            else -> issue.status
-        }
 
     private fun applyVerificationProjection(state: DesktopAppState): DesktopAppState {
         val issuesById = state.issues.associateBy { it.id }
@@ -4860,126 +4855,152 @@ class DesktopAppService(
         operatorAutomationMode: OperatorAutomationMode? = null,
         dailyBudgetCents: Int? = null,
         monthlyBudgetCents: Int? = null
-    ): Company = stateMutex.withLock {
-        // Company creation is the bridge from an arbitrary checkout on disk to the product's
-        // higher-level operating model. The method normalizes the repo root, ensures a managed
-        // repository/workspace exists, seeds default org roles, and records the first persisted
-        // company snapshot in one serialized transaction.
+    ): Company {
         val now = System.currentTimeMillis()
-        val loadedState = stateStore.load()
-        val initialBackendKind = initialCompanyBackendKind(loadedState)
         val requestedRoot = Path.of(rootPath).toAbsolutePath().normalize()
+        val stateBeforeRepositoryInit = stateStore.load()
         val repositoryRoot = runCatching {
             gitWorkspaceService.ensureInitializedRepositoryRoot(
                 requestedRoot,
                 defaultBaseBranch
             )
         }.getOrElse { error ->
-            if (loadedState.repositories.any { sameRepositoryRoot(it.localPath, requestedRoot) }) {
+            if (stateBeforeRepositoryInit.repositories.any { sameRepositoryRoot(it.localPath, requestedRoot) }) {
                 requestedRoot
             } else {
                 throw error
             }
         }
-        val repository = upsertRepositoryForPath(loadedState.repositories, repositoryRoot, now)
+        val detectedDefaultBranch = runCatching {
+            gitWorkspaceService.detectDefaultBranch(repositoryRoot)
+        }.getOrNull()
+        val detectedRemoteUrl = runCatching {
+            gitWorkspaceService.detectRemoteUrl(repositoryRoot)
+        }.getOrNull()
         val requestedBranch = defaultBaseBranch?.trim()?.takeIf { it.isNotBlank() }
-        val resolvedBranch = if (requestedBranch == null) {
-            repository.defaultBranch
-        } else {
-            val requestedBranchExists = runCatching {
+        val requestedBranchExists = requestedBranch?.let {
+            runCatching {
                 gitWorkspaceService.hasLocalBranch(repositoryRoot, requestedBranch)
             }.getOrDefault(true)
-            if (requestedBranchExists || repository.defaultBranch.isBlank()) {
+        } ?: true
+
+        val mutation = stateMutex.withLock {
+            // Company creation is the bridge from an arbitrary checkout on disk to the product's
+            // higher-level operating model. Git and filesystem discovery happen before this lock;
+            // this block only applies the resulting state transition.
+            val loadedState = stateStore.load()
+            val initialBackendKind = initialCompanyBackendKind(loadedState)
+            val repository = upsertRepositoryForPath(
+                repositories = loadedState.repositories,
+                repositoryRoot = repositoryRoot,
+                now = now,
+                detectedDefaultBranch = detectedDefaultBranch ?: requestedBranch,
+                detectedRemoteUrl = detectedRemoteUrl
+            )
+            val resolvedBranch = if (requestedBranch == null) {
+                repository.defaultBranch
+            } else if (requestedBranchExists || repository.defaultBranch.isBlank()) {
                 requestedBranch
             } else {
                 repository.defaultBranch
             }
-        }
-        val existing = loadedState.companies.firstOrNull {
-            Path.of(it.rootPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
-        }
-        if (existing != null) {
-            val refreshed = existing.copy(
-                name = name.trim().ifEmpty { existing.name },
+            val existing = loadedState.companies.firstOrNull {
+                Path.of(it.rootPath).toAbsolutePath().normalize() == repositoryRoot.toAbsolutePath().normalize()
+            }
+            if (existing != null) {
+                val refreshed = existing.copy(
+                    name = name.trim().ifEmpty { existing.name },
+                    repositoryId = repository.id,
+                    defaultBaseBranch = resolvedBranch,
+                    autonomyEnabled = autonomyEnabled,
+                    operatorAutomationMode = operatorAutomationMode ?: existing.operatorAutomationMode,
+                    dailyBudgetCents = normalizeBudgetOverride(dailyBudgetCents, existing.dailyBudgetCents),
+                    monthlyBudgetCents = normalizeBudgetOverride(monthlyBudgetCents, existing.monthlyBudgetCents),
+                    updatedAt = now
+                )
+                val refreshedState = loadedState.copy(
+                    repositories = mergeRepository(loadedState.repositories, repository),
+                    companies = loadedState.companies.map { if (it.id == existing.id) refreshed else it }
+                )
+                val workspaceState = ensureCompanyWorkspace(refreshedState, refreshed, now).first
+                val nextState = workspaceState.recordCompanyActivity(
+                    companyId = refreshed.id,
+                    source = "company",
+                    title = "Updated company",
+                    detail = refreshed.name
+                ).withDerivedMetrics()
+                stateStore.save(nextState)
+                publishCompanyEvent(
+                    companyId = refreshed.id,
+                    type = "company.updated",
+                    title = "Updated company",
+                    detail = refreshed.name
+                )
+                return@withLock CompanyMutationResult(
+                    company = nextState.companies.firstOrNull { it.id == refreshed.id } ?: refreshed
+                )
+            }
+
+            val companyId = UUID.randomUUID().toString()
+            val company = Company(
+                id = companyId,
+                name = name.trim().ifEmpty { repositoryRoot.fileName.toString() },
+                rootPath = repositoryRoot.toString(),
                 repositoryId = repository.id,
                 defaultBaseBranch = resolvedBranch,
+                backendKind = initialBackendKind,
                 autonomyEnabled = autonomyEnabled,
-                operatorAutomationMode = operatorAutomationMode ?: existing.operatorAutomationMode,
-                dailyBudgetCents = normalizeBudgetOverride(dailyBudgetCents, existing.dailyBudgetCents),
-                monthlyBudgetCents = normalizeBudgetOverride(monthlyBudgetCents, existing.monthlyBudgetCents),
+                operatorAutomationMode = operatorAutomationMode ?: OperatorAutomationMode.AGENT_APPROVED,
+                dailyBudgetCents = dailyBudgetCents?.takeIf { it > 0 },
+                monthlyBudgetCents = monthlyBudgetCents?.takeIf { it > 0 },
+                createdAt = now,
                 updatedAt = now
             )
-            val refreshedState = loadedState.copy(
-                repositories = mergeRepository(loadedState.repositories, repository),
-                companies = loadedState.companies.map { if (it.id == existing.id) refreshed else it }
+            val context = CompanyProjectContext(
+                id = UUID.randomUUID().toString(),
+                companyId = companyId,
+                name = company.name,
+                slug = slugify(company.name),
+                contextDocPath = companyContextRoot(company).resolve("projects/default.md").toString(),
+                lastUpdatedAt = now
             )
-            val workspaceState = ensureCompanyWorkspace(refreshedState, refreshed, now).first
+            val seededDefinitions = seedCompanyAgentDefinitions(companyId, now)
+            val seededCapabilityProfiles = seedCompanyAgentCapabilityProfiles(company, seededDefinitions, now)
+            val baseState = loadedState.copy(
+                repositories = mergeRepository(loadedState.repositories, repository),
+                companies = loadedState.companies + company,
+                projectContexts = loadedState.projectContexts + context,
+                companyAgentDefinitions = loadedState.companyAgentDefinitions + seededDefinitions,
+                agentCapabilityProfiles = loadedState.agentCapabilityProfiles + seededCapabilityProfiles,
+                companyRuntimes = loadedState.companyRuntimes + CompanyRuntimeSnapshot(companyId = companyId, backendKind = company.backendKind)
+            )
+            val workspaceState = ensureCompanyWorkspace(baseState, company, now).first
             val nextState = workspaceState.recordCompanyActivity(
-                companyId = refreshed.id,
+                companyId = companyId,
+                projectContextId = context.id,
                 source = "company",
-                title = "Updated company",
-                detail = refreshed.name
+                title = "Created company",
+                detail = company.name
             ).withDerivedMetrics()
             stateStore.save(nextState)
             publishCompanyEvent(
-                companyId = refreshed.id,
-                type = "company.updated",
-                title = "Updated company",
-                detail = refreshed.name
+                companyId = company.id,
+                type = "company.created",
+                title = "Created company",
+                detail = company.name
             )
-            return@withLock nextState.companies.firstOrNull { it.id == refreshed.id } ?: refreshed
+            val persistedCompany = nextState.companies.firstOrNull { it.id == company.id } ?: company
+            CompanyMutationResult(
+                company = persistedCompany,
+                contextSnapshot = CompanyContextSnapshotWrite(nextState, company, context)
+            )
         }
-
-        val companyId = UUID.randomUUID().toString()
-        val company = Company(
-            id = companyId,
-            name = name.trim().ifEmpty { repositoryRoot.fileName.toString() },
-            rootPath = repositoryRoot.toString(),
-            repositoryId = repository.id,
-            defaultBaseBranch = resolvedBranch,
-            backendKind = initialBackendKind,
-            autonomyEnabled = autonomyEnabled,
-            operatorAutomationMode = operatorAutomationMode ?: OperatorAutomationMode.AGENT_APPROVED,
-            dailyBudgetCents = dailyBudgetCents?.takeIf { it > 0 },
-            monthlyBudgetCents = monthlyBudgetCents?.takeIf { it > 0 },
-            createdAt = now,
-            updatedAt = now
-        )
-        val context = CompanyProjectContext(
-            id = UUID.randomUUID().toString(),
-            companyId = companyId,
-            name = company.name,
-            slug = slugify(company.name),
-            contextDocPath = companyContextRoot(company).resolve("projects/default.md").toString(),
-            lastUpdatedAt = now
-        )
-        val seededDefinitions = seedCompanyAgentDefinitions(companyId, now)
-        val seededCapabilityProfiles = seedCompanyAgentCapabilityProfiles(company, seededDefinitions, now)
-        val baseState = loadedState.copy(
-            repositories = mergeRepository(loadedState.repositories, repository),
-            companies = loadedState.companies + company,
-            projectContexts = loadedState.projectContexts + context,
-            companyAgentDefinitions = loadedState.companyAgentDefinitions + seededDefinitions,
-            agentCapabilityProfiles = loadedState.agentCapabilityProfiles + seededCapabilityProfiles,
-            companyRuntimes = loadedState.companyRuntimes + CompanyRuntimeSnapshot(companyId = companyId, backendKind = company.backendKind)
-        )
-        val workspaceState = ensureCompanyWorkspace(baseState, company, now).first
-        val nextState = workspaceState.recordCompanyActivity(
-            companyId = companyId,
-            projectContextId = context.id,
-            source = "company",
-            title = "Created company",
-            detail = company.name
-        ).withDerivedMetrics()
-        stateStore.save(nextState)
-        writeCompanyContextSnapshot(nextState, company, context)
-        publishCompanyEvent(
-            companyId = company.id,
-            type = "company.created",
-            title = "Created company",
-            detail = company.name
-        )
-        nextState.companies.firstOrNull { it.id == company.id } ?: company
+        mutation.contextSnapshot?.let { snapshot ->
+            withContext(Dispatchers.IO) {
+                writeCompanyContextSnapshot(snapshot.state, snapshot.company, snapshot.projectContext)
+            }
+        }
+        return mutation.company
     }
 
     private fun initialCompanyBackendKind(state: DesktopAppState): ExecutionBackendKind {
@@ -14026,6 +14047,18 @@ class DesktopAppService(
                         reviewIssue != null &&
                             latestReviewTask != null &&
                             qaReviewResultMatchesQueue(reviewIssue, executionIssue, queueItem)
+                    val reviewResultPendingTaskSync =
+                        reviewIssue != null &&
+                            latestReviewTask != null &&
+                            latestReviewTask.status in setOf(
+                                DesktopTaskStatus.COMPLETED,
+                                DesktopTaskStatus.FAILED,
+                                DesktopTaskStatus.PARTIAL
+                            ) &&
+                            !reviewResultAlreadyReflected
+                    if (reviewResultPendingTaskSync) {
+                        return@forEach
+                    }
                     val reviewAssigneeMismatch =
                         reviewIssue != null &&
                             qaProfile != null &&
@@ -15169,37 +15202,6 @@ class DesktopAppService(
         )
     }
 
-    private fun requiresGitHubPullRequest(issue: CompanyIssue?, state: DesktopAppState): Boolean {
-        if (!requiresCodePublish(issue)) {
-            return false
-        }
-        return when (issue?.requiresPullRequest) {
-            false -> false
-            true -> true
-            null -> {
-                if (state.backendSettings.codePublishMode != CodePublishMode.REQUIRE_GITHUB_PR) {
-                    return false
-                }
-                val company = issue?.companyId?.let { companyId ->
-                    state.companies.firstOrNull { it.id == companyId }
-                }
-                val repository = issue?.let { repositoryForIssue(it, state) }
-                if (
-                    company?.operatorAutomationMode == OperatorAutomationMode.FULL_AUTO &&
-                    repository?.remoteUrl.isNullOrBlank()
-                ) {
-                    return false
-                }
-                true
-            }
-        }
-    }
-
-    private fun repositoryForIssue(issue: CompanyIssue, state: DesktopAppState): ManagedRepository? {
-        val workspace = state.workspaces.firstOrNull { it.id == issue.workspaceId } ?: return null
-        return state.repositories.firstOrNull { it.id == workspace.repositoryId }
-    }
-
     private fun effectiveBackendConfig(company: Company?, state: DesktopAppState): BackendConnectionConfig {
         val kind = company?.backendKind ?: state.backendSettings.defaultBackendKind
         val base = state.backendSettings.backends.firstOrNull { it.kind == kind } ?: BackendConnectionConfig(kind = kind)
@@ -15660,39 +15662,29 @@ class DesktopAppService(
         issueId: String? = null,
         runId: String? = null
     ) {
-        val snapshot = runCatching {
-            companyDashboardSnapshot(runBlocking { stateStore.load() }.withDerivedMetrics(), companyId)
-        }.getOrNull()
-        companyEventStream.tryEmit(
-            CompanyEventEnvelope(
-                event = CompanyEvent(
-                    id = UUID.randomUUID().toString(),
-                    companyId = companyId,
-                    type = type,
-                    title = title,
-                    detail = detail,
-                    goalId = goalId,
-                    issueId = issueId,
-                    runId = runId,
-                    createdAt = System.currentTimeMillis()
-                ),
-                companyDashboard = snapshot
-            )
+        companyEventStreamService.publish(
+            companyId = companyId,
+            type = type,
+            title = title,
+            detail = detail,
+            goalId = goalId,
+            issueId = issueId,
+            runId = runId
         )
     }
 
-    private suspend fun upsertRepositoryForPath(
+    private fun upsertRepositoryForPath(
         repositories: List<ManagedRepository>,
         repositoryRoot: Path,
-        now: Long
+        now: Long,
+        detectedDefaultBranch: String? = null,
+        detectedRemoteUrl: String? = null
     ): ManagedRepository {
         val existing = repositories.firstOrNull { sameRepositoryRoot(it.localPath, repositoryRoot) }
-        val defaultBranch = runCatching {
-            gitWorkspaceService.detectDefaultBranch(repositoryRoot)
-        }.getOrElse { existing?.defaultBranch ?: "main" }
-        val remoteUrl = runCatching {
-            gitWorkspaceService.detectRemoteUrl(repositoryRoot)
-        }.getOrNull() ?: existing?.remoteUrl
+        val defaultBranch = detectedDefaultBranch?.takeIf { it.isNotBlank() }
+            ?: existing?.defaultBranch
+            ?: "main"
+        val remoteUrl = detectedRemoteUrl?.takeIf { it.isNotBlank() } ?: existing?.remoteUrl
         return if (existing != null) {
             existing.copy(
                 name = repositoryRoot.fileName.toString(),
@@ -17105,143 +17097,6 @@ class DesktopAppService(
         }
     }
 
-    private fun isValidationOnlyExecutionFollowUpTitle(title: String): Boolean {
-        return isValidationOnlyExecutionFollowUpText(title)
-    }
-
-    private fun isValidationOnlyExecutionFollowUpText(
-        title: String,
-        description: String = ""
-    ): Boolean {
-        val normalized = listOf(title, description)
-            .joinToString("\n")
-            .trim()
-            .lowercase()
-        if (normalized.isBlank()) return false
-        val validationSignals = listOf(
-            "re-run validation",
-            "rerun validation",
-            "revalidate",
-            "validate",
-            "validation",
-            "residual risk",
-            "summarize any residual risk",
-            "summarize any residual risks",
-            "capture any residual risk",
-            "capture residual risk"
-        )
-        val implementationSignals = listOf(
-            "implement",
-            "implementation",
-            "fix ",
-            "patch",
-            "build ",
-            "create ",
-            "add ",
-            "deliver ",
-            "ship ",
-            "feature",
-            "page",
-            "screen",
-            "endpoint",
-            "component"
-        )
-        return validationSignals.any(normalized::contains) && implementationSignals.none(normalized::contains)
-    }
-
-    private fun isPrReuseHandoffExecutionText(
-        title: String,
-        description: String = ""
-    ): Boolean {
-        val normalized = listOf(title, description)
-            .joinToString("\n")
-            .trim()
-            .lowercase()
-        if (normalized.isBlank()) return false
-        val handoffSignals = listOf(
-            "hand the result back",
-            "hand back",
-            "report back",
-            "summarize what the ceo should decide next",
-            "summarize what ceo should decide next",
-            "decide next",
-            "decision cycle",
-            "next decision cycle",
-            "another decision cycle",
-            "summarize the current pr",
-            "report the current pr"
-        )
-        val implementationSignals = listOf(
-            "implement",
-            "implementation",
-            "fix ",
-            "patch",
-            "build ",
-            "create ",
-            "add ",
-            "deliver ",
-            "ship ",
-            "feature",
-            "page",
-            "screen",
-            "endpoint",
-            "component"
-        )
-        return handoffSignals.any(normalized::contains) && implementationSignals.none(normalized::contains)
-    }
-
-    private fun isMergeConflictRemediationText(
-        title: String,
-        description: String = ""
-    ): Boolean {
-        val normalized = listOf(title, description)
-            .joinToString("\n")
-            .trim()
-            .lowercase()
-        if (normalized.isBlank()) return false
-        return normalized.contains("merge conflict") ||
-            normalized.contains("merges cleanly") ||
-            normalized.contains("resolve the conflict") ||
-            normalized.contains("resolve conflicts") ||
-            normalized.contains("rebase")
-    }
-
-    private fun inferExecutionIntent(
-        kind: String,
-        title: String,
-        description: String = "",
-        plannedCodeProducing: Boolean? = null
-    ): ExecutionIntent? {
-        if (!kind.equals("execution", ignoreCase = true)) {
-            return null
-        }
-        return when {
-            isMergeConflictRemediationText(title, description) -> ExecutionIntent.MERGE_CONFLICT_REMEDIATION
-            isValidationOnlyExecutionFollowUpText(title, description) -> ExecutionIntent.VALIDATION_ONLY
-            isPrReuseHandoffExecutionText(title, description) -> ExecutionIntent.PR_REUSE_HANDOFF
-            plannedCodeProducing == false -> ExecutionIntent.PR_REUSE_HANDOFF
-            else -> ExecutionIntent.CODE_CHANGE
-        }
-    }
-
-    private fun requiresCodePublish(issue: CompanyIssue?): Boolean {
-        if (issue == null) return true
-        issue.executionIntent?.let { intent ->
-            return when (intent) {
-                ExecutionIntent.CODE_CHANGE, ExecutionIntent.MERGE_CONFLICT_REMEDIATION -> true
-                ExecutionIntent.VALIDATION_ONLY, ExecutionIntent.PR_REUSE_HANDOFF -> false
-            }
-        }
-        if (issue.kind.equals("execution", ignoreCase = true) && isValidationOnlyExecutionFollowUpTitle(issue.title)) {
-            return false
-        }
-        issue.codeProducing?.let { return it }
-        return when (issue.kind.lowercase()) {
-            "review", "approval", "planning", "infra" -> false
-            else -> true
-        }
-    }
-
     private fun runDeterministicReviewVerdictIfAvailable(
         issue: CompanyIssue?,
         state: DesktopAppState,
@@ -17516,40 +17371,6 @@ class DesktopAppService(
 
     private fun markdownPathRegex(): Regex =
         Regex("""(?<![\w./-])([\w./-]+\.md)(?![\w./-])""")
-
-    private fun inferIssueRequiresPullRequest(title: String, description: String): Boolean? {
-        val text = "$title\n$description".lowercase()
-        val disablesRemotePublish = listOf(
-            "no external deployment",
-            "no external publishing",
-            "no github pr",
-            "without github pr",
-            "do not create a github pr",
-            "do not open a github pr",
-            "do not perform external publishing",
-            "do not push",
-            "remote push",
-            "원격 push",
-            "원격 푸시",
-            "외부 배포",
-            "github pr",
-            "깃허브 pr"
-        ).any { marker -> marker in text }
-        if (disablesRemotePublish && listOf("하지 말", "금지", "no ", "without", "do not").any { it in text }) {
-            return false
-        }
-        val explicitlyRequiresPr = listOf(
-            "open a github pr",
-            "create a github pr",
-            "github pull request",
-            "pull request",
-            "pr을",
-            "pr를",
-            "pr "
-        ).any { marker -> marker in text } &&
-            listOf("필수", "must", "required", "open", "create").any { marker -> marker in text }
-        return if (explicitlyRequiresPr) true else null
-    }
 
     private fun buildCeoChatIntakeDraft(company: Company, rawMessage: String): CeoChatIntakeDraft {
         val compactMessage = rawMessage
@@ -24204,153 +24025,27 @@ class DesktopAppService(
         provider: String,
         baseUrl: String = "",
         systemPrompt: String = ""
-    ): DirectChatConversation = stateMutex.withLock {
-        val state = stateStore.load()
-        val now = System.currentTimeMillis()
-        val conversation = DirectChatConversation(
-            id = UUID.randomUUID().toString(),
-            companyId = companyId,
-            title = title.trim().ifEmpty { model },
-            model = model,
-            provider = provider,
-            baseUrl = baseUrl,
-            systemPrompt = systemPrompt,
-            messages = emptyList(),
-            createdAt = now,
-            updatedAt = now
-        )
-        stateStore.save(
-            state.copy(directChatConversations = state.directChatConversations + conversation)
-        )
-        conversation
-    }
+    ): DirectChatConversation =
+        directChatService.createConversation(companyId, title, model, provider, baseUrl, systemPrompt)
 
     suspend fun listDirectChatConversations(companyId: String): List<DirectChatConversation> =
-        stateStore.load().directChatConversations.filter { it.companyId == companyId }
+        directChatService.listConversations(companyId)
 
     suspend fun getDirectChatConversation(id: String): DirectChatConversation? =
-        stateStore.load().directChatConversations.firstOrNull { it.id == id }
+        directChatService.getConversation(id)
 
-    suspend fun deleteDirectChatConversation(id: String, companyId: String): Boolean {
-        return stateMutex.withLock {
-            val state = stateStore.load()
-            val target = state.directChatConversations.firstOrNull { it.id == id }
-                ?: return@withLock false
-            require(target.companyId == companyId) {
-                "Conversation $id does not belong to company $companyId"
-            }
-            stateStore.save(
-                state.copy(
-                    directChatConversations = state.directChatConversations
-                        .filterNot { it.id == id && it.companyId == companyId }
-                )
-            )
-            true
-        }
-    }
+    suspend fun deleteDirectChatConversation(id: String, companyId: String): Boolean =
+        directChatService.deleteConversation(id, companyId)
 
     fun streamDirectChatMessage(
         conversationId: String,
         companyId: String,
         userMessage: String
-    ): Flow<DirectChatStreamChunk> = flow {
-        val conversation = getDirectChatConversation(conversationId)
-            ?: run {
-                emit(
-                    DirectChatStreamChunk(
-                        conversationId = conversationId,
-                        messageId = UUID.randomUUID().toString(),
-                        content = "",
-                        done = true,
-                        error = "Conversation not found: $conversationId"
-                    )
-                )
-                return@flow
-            }
-
-        if (conversation.companyId != companyId) {
-            emit(
-                DirectChatStreamChunk(
-                    conversationId = conversationId,
-                    messageId = UUID.randomUUID().toString(),
-                    content = "",
-                    done = true,
-                    error = "Conversation $conversationId does not belong to company $companyId"
-                )
-            )
-            return@flow
-        }
-
-        val userMessageId = UUID.randomUUID().toString()
-        val userMsg = DirectChatMessage(
-            id = userMessageId,
-            role = "user",
-            content = userMessage,
-            createdAt = System.currentTimeMillis()
-        )
-
-        // Save user message to state
-        stateMutex.withLock {
-            val state = stateStore.load()
-            val now = System.currentTimeMillis()
-            stateStore.save(
-                state.copy(
-                    directChatConversations = state.directChatConversations.map { conv ->
-                        if (conv.id == conversationId) {
-                            conv.copy(messages = conv.messages + userMsg, updatedAt = now)
-                        } else {
-                            conv
-                        }
-                    }
-                )
-            )
-        }
-
-        val assistantMessageId = UUID.randomUUID().toString()
-        val contentBuilder = StringBuilder()
-        var assistantSaved = false
-
-        directChatService.streamChat(conversation, userMessage, assistantMessageId).collect { chunk ->
-            emit(chunk)
-            if (chunk.error != null) {
-                return@collect
-            } else {
-                contentBuilder.append(chunk.content)
-            }
-            if (chunk.done && !assistantSaved) {
-                val assistantContent = contentBuilder.toString()
-                if (assistantContent.isNotEmpty()) {
-                    assistantSaved = true
-                    val assistantMsg = DirectChatMessage(
-                        id = assistantMessageId,
-                        role = "assistant",
-                        content = assistantContent,
-                        createdAt = System.currentTimeMillis()
-                    )
-                    stateMutex.withLock {
-                        val state = stateStore.load()
-                        val now = System.currentTimeMillis()
-                        stateStore.save(
-                            state.copy(
-                                directChatConversations = state.directChatConversations.map { conv ->
-                                    if (conv.id == conversationId) {
-                                        conv.copy(messages = conv.messages + assistantMsg, updatedAt = now)
-                                    } else {
-                                        conv
-                                    }
-                                }
-                            )
-                        )
-                    }
-                }
-            }
-        }
-    }
+    ): Flow<DirectChatStreamChunk> =
+        directChatService.streamMessage(conversationId, companyId, userMessage)
 
     suspend fun listDirectChatModels(baseUrl: String = "http://127.0.0.1:11434"): List<DirectChatAvailableModel> =
-        withContext(Dispatchers.IO) {
-            directChatService.listAvailableModels(baseUrl)
-        }
+        directChatService.listModels(baseUrl)
 }
 
 internal fun defaultCommandAvailability(command: String): Boolean {
