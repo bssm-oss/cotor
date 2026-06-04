@@ -4,6 +4,7 @@ import com.cotor.runtime.actions.ActionInterceptor
 import com.cotor.runtime.actions.ActionInterceptorDecision
 import com.cotor.runtime.actions.ActionKind
 import com.cotor.runtime.actions.ActionRequest
+import com.cotor.runtime.actions.ActionScope
 import java.net.URI
 import java.nio.file.Path
 
@@ -214,15 +215,26 @@ class AgentCapabilityGuard(
         else -> false
     }
 
-    private fun ActionRequest.requiresScopedSubject(): Boolean = when (kind) {
-        ActionKind.GIT_PUBLISH,
-        ActionKind.GITHUB_REVIEW,
-        ActionKind.GITHUB_COMMENT,
-        ActionKind.GITHUB_MERGE,
-        ActionKind.WEB_PUBLISH,
-        ActionKind.SOCIAL_POST_CREATE,
-        ActionKind.MARKETING_ANALYTICS_READ -> true
-        else -> false
+    private fun ActionRequest.requiresScopedSubject(): Boolean {
+        if (scope == ActionScope.RUN) {
+            return false
+        }
+        return when (kind) {
+            ActionKind.SHELL_EXEC,
+            ActionKind.FILE_WRITE,
+            ActionKind.AGENT_EXEC,
+            ActionKind.SKILL_RUN,
+            ActionKind.GIT_WORKTREE,
+            ActionKind.GIT_PUBLISH,
+            ActionKind.GITHUB_REVIEW,
+            ActionKind.GITHUB_COMMENT,
+            ActionKind.GITHUB_MERGE,
+            ActionKind.SECRET_READ,
+            ActionKind.WEB_PUBLISH,
+            ActionKind.SOCIAL_POST_CREATE,
+            ActionKind.MARKETING_ANALYTICS_READ -> true
+            else -> false
+        }
     }
 
     private fun ActionRequest.hasRecordedApproval(): Boolean =

@@ -230,8 +230,18 @@ struct CotorDesktopApp: App {
     }
 }
 
+@MainActor
 final class DesktopAppLifecycleDelegate: NSObject, NSApplicationDelegate {
     private var terminationInFlight = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        bringApplicationToForeground(notification.object as? NSApplication ?? NSApp)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        bringApplicationToForeground(sender)
+        return true
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
@@ -251,6 +261,12 @@ final class DesktopAppLifecycleDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return .terminateLater
+    }
+
+    private func bringApplicationToForeground(_ application: NSApplication) {
+        application.setActivationPolicy(.regular)
+        application.activate(ignoringOtherApps: true)
+        application.windows.first?.makeKeyAndOrderFront(nil)
     }
 }
 

@@ -38,7 +38,6 @@ import com.cotor.model.Pipeline
 import com.cotor.model.PipelineContext
 import com.cotor.model.PipelineStage
 import com.cotor.model.ProcessExecutionException
-import com.cotor.model.SecurityConfig
 import com.cotor.model.StageType
 import com.cotor.policy.PolicyDecision
 import com.cotor.policy.PolicyEngine
@@ -64,6 +63,7 @@ import com.cotor.runtime.durable.DurableRuntimeStore
 import com.cotor.runtime.durable.ReplayMode
 import com.cotor.security.DefaultSecurityValidator
 import com.cotor.security.SecurityValidator
+import com.cotor.security.defaultSecurityConfig
 import com.cotor.verification.VerificationBundle
 import com.cotor.verification.VerificationBundleService
 import kotlinx.coroutines.CancellationException
@@ -304,7 +304,7 @@ class DesktopAppService(
     private val autonomousDiscoveryService: AutonomousDiscoveryService = AutonomousDiscoveryService(),
     private val companyRuntimeRetention: CompanyRuntimeRetention = CompanyRuntimeRetention(),
     private val securityValidator: SecurityValidator = DefaultSecurityValidator(
-        SecurityConfig(useWhitelist = false, enablePathValidation = false),
+        defaultSecurityConfig(),
         org.slf4j.LoggerFactory.getLogger("Cotor")
     ),
     private val marketingBrowserRunner: MarketingBrowserRunner = LocalPlaywrightMarketingBrowserRunner(

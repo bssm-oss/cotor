@@ -94,7 +94,7 @@ case "$MODE" in
   --debug|debug)
     stop_running_app
     build_bundle
-    lldb -- "$APP_BUNDLE/Contents/MacOS/CotorDesktopLauncher"
+    lldb -- "$APP_BUNDLE/Contents/MacOS/CotorDesktopBinary"
     ;;
   --logs|logs)
     stop_running_app

@@ -62,6 +62,8 @@ class QaVerificationPlugin : AgentPlugin {
 
         val stdin = if (context.parameters["stdin"]?.lowercase() == "true") context.input else null
 
+        // AgentExecutor wraps the process manager with mandatory command validation,
+        // so autodetected and explicit QA commands share the same execution guard.
         val result = processManager.executeProcess(
             command = argv,
             input = stdin,

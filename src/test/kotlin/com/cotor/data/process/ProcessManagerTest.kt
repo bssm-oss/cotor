@@ -15,6 +15,7 @@ import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.mockk
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -91,6 +92,56 @@ class ProcessManagerTest : FunSpec({
 
         result.isSuccess shouldBe true
         result.stdout.trim() shouldBe "fake-node:$tool"
+    }
+
+    test("sanitizeProcessEnvironment keeps safe parent keys and strips parent secrets") {
+        val sanitized = sanitizeProcessEnvironment(
+            parentEnvironment = mapOf(
+                "HOME" to "/tmp/cotor-home",
+                "PATH" to "/usr/bin:/bin",
+                "OPENAI_API_KEY" to "secret-openai",
+                "GITHUB_TOKEN" to "secret-github",
+                "SAFE_PARENT_PROBE" to "parent-value"
+            ),
+            environment = mapOf(
+                "SAFE_EXPLICIT_PROBE" to "explicit-value",
+                "GH_TOKEN" to "secret-gh",
+                "COTOR_APP_TOKEN" to "app-token",
+                "COTOR_A2A_TOKEN" to "scoped-a2a-token"
+            )
+        )
+
+        sanitized["HOME"] shouldBe "/tmp/cotor-home"
+        sanitized["PATH"] shouldBe "/usr/bin:/bin"
+        sanitized["SAFE_PARENT_PROBE"] shouldBe null
+        sanitized["OPENAI_API_KEY"] shouldBe null
+        sanitized["GITHUB_TOKEN"] shouldBe null
+        sanitized["SAFE_EXPLICIT_PROBE"] shouldBe "explicit-value"
+        sanitized["GH_TOKEN"] shouldBe null
+        sanitized["COTOR_APP_TOKEN"] shouldBe null
+        sanitized["COTOR_A2A_TOKEN"] shouldBe "scoped-a2a-token"
+    }
+
+    test("executeProcess strips secret environment overrides before launch") {
+        val processManager = CoroutineProcessManager(mockk<Logger>(relaxed = true))
+
+        val result = processManager.executeProcess(
+            command = listOf("/usr/bin/env"),
+            input = null,
+            environment = mapOf(
+                "OPENAI_API_KEY" to "secret-openai",
+                "GITHUB_TOKEN" to "secret-github",
+                "SAFE_EXPLICIT_PROBE" to "explicit-value"
+            ),
+            timeout = 5_000
+        )
+
+        result.isSuccess shouldBe true
+        result.stdout shouldContain "SAFE_EXPLICIT_PROBE=explicit-value"
+        result.stdout shouldNotContain "OPENAI_API_KEY="
+        result.stdout shouldNotContain "GITHUB_TOKEN="
+        result.stdout shouldNotContain "secret-openai"
+        result.stdout shouldNotContain "secret-github"
     }
 
     test("executeProcess times out even when the child keeps pipes open") {

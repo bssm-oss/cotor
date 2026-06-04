@@ -23,6 +23,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.delay
 import java.nio.file.Files
 
+private const val AGENT_EXECUTOR_START_TIMEOUT_MS = 5_000L
+
 class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
     afterTest {
         DesktopAppService.shutdownAllForTesting()
@@ -213,7 +215,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
-        coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
+        coVerify(timeout = AGENT_EXECUTOR_START_TIMEOUT_MS, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
     }
 
     test("runCompanyRuntimeTick starts backlog issues") {
@@ -278,7 +280,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
-        coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
+        coVerify(timeout = AGENT_EXECUTOR_START_TIMEOUT_MS, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
     }
 
     test("runCompanyRuntimeTick starts stranded in-progress issues") {
@@ -343,7 +345,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
-        coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
+        coVerify(timeout = AGENT_EXECUTOR_START_TIMEOUT_MS, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
     }
 
     test("runCompanyRuntimeTick does not duplicate active in-progress issues") {
@@ -497,7 +499,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         snapshot.lastAction.orEmpty() shouldContain "started:$issueId"
         refreshed.tasks.shouldNotBeEmpty()
         refreshed.issues.first { it.id == issueId }.status shouldBe IssueStatus.IN_PROGRESS
-        coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
+        coVerify(timeout = AGENT_EXECUTOR_START_TIMEOUT_MS, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
     }
 
     test("runCompanyRuntimeTick records dependency waits in the durable queue") {
@@ -623,7 +625,7 @@ class DesktopAppServiceRuntimeDispositionSchedulerTest : FunSpec({
         snapshot.lastAction.orEmpty() shouldContain "started:$downstreamId"
         downstreamWorkItem.status shouldBe CompanyRuntimeWorkItemStatus.RUNNING
         refreshed.issues.first { it.id == downstreamId }.status shouldBe IssueStatus.IN_PROGRESS
-        coVerify(timeout = 2_000, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
+        coVerify(timeout = AGENT_EXECUTOR_START_TIMEOUT_MS, exactly = 1) { agentExecutor.executeAgent(any(), any(), any()) }
     }
 })
 

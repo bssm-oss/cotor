@@ -291,7 +291,7 @@
 - [ ] app boot 시 dashboard가 로드되거나 명확한 offline 상태를 보여준다.
 - [ ] 앱을 foreground/background로 전환해도 선택 company와 shell mode가 유지된다.
 - [ ] 앱 창 resize 시 Company summary, sidebar, board, detail drawer가 겹치거나 잘리지 않는다.
-- [ ] 마지막 desktop window를 닫으면 launcher-managed backend가 종료된다.
+- [ ] 마지막 desktop window를 닫으면 embedded backend가 종료된다.
 - [ ] backend process가 죽으면 desktop이 기존 snapshot을 유지하고 reconnect 상태를 보여준다.
 - [ ] backend를 다시 띄우면 수동 새로고침 또는 자동 reconnect 후 최신 snapshot으로 복구된다.
 

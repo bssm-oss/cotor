@@ -4,11 +4,21 @@ import com.cotor.model.SecurityConfig
 import com.cotor.model.SecurityException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import kotlin.io.path.createSymbolicLinkPointingTo
 
 class SecurityValidatorTest : FunSpec({
+    test("default security config is defensive for direct service construction") {
+        val config = defaultSecurityConfig()
+
+        config.useWhitelist shouldBe true
+        config.enablePathValidation shouldBe true
+        config.allowedExecutables.contains("opencode") shouldBe true
+        config.allowedExecutables.contains("graphify") shouldBe true
+    }
+
     test("command whitelist accepts absolute executable path by basename") {
         val validator = DefaultSecurityValidator(
             SecurityConfig(allowedExecutables = setOf("qwen")),

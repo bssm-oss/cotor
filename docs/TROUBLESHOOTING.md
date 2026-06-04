@@ -93,8 +93,8 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 
 - stale bundled runtime files from a previous launch
 - old installed app bundle that does not match the current CLI/runtime behavior
-- packaged app launcher and in-app backend management disagreeing about who owns the backend
-- launcher/backend/client token drift when `COTOR_APP_TOKEN` was changed between app launches
+- packaged app executable and embedded backend management disagreeing about who owns the backend
+- backend/client token drift when `COTOR_APP_TOKEN` was changed between app launches
 
 ### 4.3 Confirm
 
@@ -441,7 +441,7 @@ Treat the problem as a fresh bug if a current build still shows any of these:
 - company `Start` / `Stop` flips the global app connection state
 - the same blocked issue reopens forever after a permanent publish-readiness failure
 - QA or CEO results get reapplied repeatedly from stale task sync
-- last desktop window closes but bundled backend stays alive
+- last desktop window closes but the embedded backend stays alive
 - current interactive mode silently fans out to multiple agents without explicit user choice
 
 When reporting it, include:

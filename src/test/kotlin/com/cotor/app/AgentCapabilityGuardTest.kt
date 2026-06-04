@@ -2,6 +2,7 @@ package com.cotor.app
 
 import com.cotor.runtime.actions.ActionKind
 import com.cotor.runtime.actions.ActionRequest
+import com.cotor.runtime.actions.ActionScope
 import com.cotor.runtime.actions.ActionSubject
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -371,18 +372,48 @@ class AgentCapabilityGuardTest : FunSpec({
         recordedPublishApproval.requiresApproval shouldBe false
     }
 
-    test("unscoped generic agent execution stays outside company capability authority") {
+    test("unscoped global agent execution is denied while pipeline run scope remains independent") {
         val guard = AgentCapabilityGuard(DesktopStateStore { Files.createTempDirectory("capability-guard-unscoped-home") })
 
-        val decision = guard.before(
+        val globalDecision = guard.before(
             ActionRequest(
                 kind = ActionKind.AGENT_EXEC,
                 label = "agent.exec:pipeline"
             )
         )
+        val runDecision = guard.before(
+            ActionRequest(
+                kind = ActionKind.AGENT_EXEC,
+                label = "agent.exec:pipeline-run",
+                scope = ActionScope.RUN
+            )
+        )
 
-        decision.allow shouldBe true
-        decision.requireApproval shouldBe false
+        globalDecision.allow shouldBe false
+        globalDecision.reason shouldBe "Capability SHELL_EXEC cannot evaluate agent.exec without company and agent subject metadata."
+        runDecision.allow shouldBe true
+        runDecision.requireApproval shouldBe false
+    }
+
+    test("unscoped global execution file skill and worktree actions are denied") {
+        val guard = AgentCapabilityGuard(DesktopStateStore { Files.createTempDirectory("capability-guard-unscoped-actions-home") })
+
+        listOf(
+            ActionKind.SHELL_EXEC,
+            ActionKind.FILE_WRITE,
+            ActionKind.SKILL_RUN,
+            ActionKind.GIT_WORKTREE,
+            ActionKind.SECRET_READ
+        ).forEach { kind ->
+            val decision = guard.before(
+                ActionRequest(
+                    kind = kind,
+                    label = "${kind.wireValue}:unscoped"
+                )
+            )
+
+            decision.allow shouldBe false
+        }
     }
 
     test("repository scoped company agent execution honors path allowlists") {

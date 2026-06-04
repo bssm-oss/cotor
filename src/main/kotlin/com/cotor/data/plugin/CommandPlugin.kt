@@ -67,8 +67,6 @@ class CommandPlugin : AgentPlugin {
         if (argvTemplate.isEmpty()) {
             throw IllegalArgumentException("argvJson must contain at least one element (the executable)")
         }
-        context.validateCommand?.invoke(argvTemplate)
-
         val argv = argvTemplate.map { token ->
             if (token.contains("{input}")) {
                 token.replace("{input}", context.input.orEmpty())
