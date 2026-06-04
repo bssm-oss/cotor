@@ -563,6 +563,13 @@ internal fun Application.cotorAppModule(
                 }
             }
 
+            route("/direct-chat") {
+                get("/providers") {
+                    if (!requireToken(token)) return@get
+                    call.respond(desktopService.directChatProviderCatalog())
+                }
+            }
+
             route("/skills") {
                 get {
                     if (!requireToken(token)) return@get
@@ -1951,9 +1958,11 @@ internal fun Application.cotorAppModule(
                             writeCompanyEventStream(
                                 events = desktopService.companyEvents(companyId, cursor),
                                 companyId = companyId,
-                                afterSequence = cursor?.toLongOrNull(),
-                                desktopService = desktopService,
-                                streamJson = streamJson
+                                streamJson = streamJson,
+                                initialCursor = cursor,
+                                gapResolver = { afterSequence ->
+                                    desktopService.companyEventGapSnapshot(companyId, afterSequence)
+                                }
                             )
                         }
                     }
@@ -2849,12 +2858,12 @@ private suspend fun RoutingContext.respondDesktopRequest(block: suspend () -> An
 private suspend fun Writer.writeCompanyEventStream(
     events: Flow<CompanyEventEnvelope>,
     companyId: String,
-    afterSequence: Long?,
-    desktopService: DesktopAppService,
-    streamJson: Json
+    streamJson: Json,
+    initialCursor: String? = null,
+    gapResolver: suspend (Long?) -> CompanyEventEnvelope? = { null }
 ) = coroutineScope {
     val channel = events.produceIn(this)
-    var lastSequence = afterSequence
+    var lastSequence = initialCursor?.toLongOrNull()
     try {
         while (currentCoroutineContext().isActive) {
             val next = withTimeoutOrNull(COMPANY_EVENT_STREAM_HEARTBEAT_MS) {
@@ -2872,7 +2881,8 @@ private suspend fun Writer.writeCompanyEventStream(
                                 title = "Stream heartbeat",
                                 createdAt = System.currentTimeMillis()
                             ),
-                            sequence = lastSequence
+                            sequence = lastSequence,
+                            cursor = lastSequence?.toString()
                         )
                     )
                 )
@@ -2882,12 +2892,16 @@ private suspend fun Writer.writeCompanyEventStream(
             }
             val envelope = next.getOrNull() ?: break
             val sequence = envelope.sequence
-            if (sequence != null && lastSequence != null && sequence > lastSequence!! + 1) {
-                desktopService.companyEventGapSnapshot(companyId, lastSequence)?.let { gapEnvelope ->
-                    write(streamJson.encodeToString(CompanyEventEnvelope.serializer(), gapEnvelope))
+            if (sequence != null && lastSequence != null && sequence > lastSequence + 1) {
+                val gapSnapshot = gapResolver(lastSequence)
+                if (gapSnapshot != null) {
+                    write(streamJson.encodeToString(CompanyEventEnvelope.serializer(), gapSnapshot))
                     write("\n")
                     flush()
-                    lastSequence = gapEnvelope.sequence ?: lastSequence
+                    lastSequence = gapSnapshot.sequence ?: lastSequence
+                    if (sequence <= (lastSequence ?: Long.MIN_VALUE)) {
+                        continue
+                    }
                 }
             }
             write(streamJson.encodeToString(CompanyEventEnvelope.serializer(), envelope))

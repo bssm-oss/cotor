@@ -384,6 +384,10 @@ struct DesktopAPI {
         try await get(path: "api/app/skills")
     }
 
+    func directChatProviders() async throws -> [DirectChatProviderCatalogEntryRecord] {
+        try await get(path: "api/app/direct-chat/providers")
+    }
+
     func runSkill(
         name: String,
         companyId: String,
@@ -843,15 +847,19 @@ struct DesktopAPI {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    var queryItems: [URLQueryItem] = []
+                    if let cursor, !cursor.isEmpty {
+                        queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+                    }
                     var request = URLRequest(
                         url: try makeURL(
                             pathSegments: ["api", "app", "companies", companyId, "events"],
-                            query: cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? []
+                            query: queryItems
                         )
                     )
                     request.httpMethod = "GET"
                     addHeaders(to: &request)
-                    if let cursor {
+                    if let cursor, !cursor.isEmpty {
                         request.setValue(cursor, forHTTPHeaderField: "Last-Event-ID")
                     }
                     let (bytes, response) = try await session.bytes(for: request)

@@ -19,6 +19,18 @@ data class ProviderScanResult(
     val message: String
 )
 
+@Serializable
+data class DirectChatProviderCatalogEntry(
+    val id: String,
+    val providerId: String,
+    val displayName: String,
+    val iconSystemName: String,
+    val defaultModel: String,
+    val defaultBaseUrl: String = "",
+    val allowsBaseUrl: Boolean = true,
+    val supportsModelDiscovery: Boolean = false
+)
+
 fun providerCatalog(): List<ProviderCatalogEntry> = listOf(
     ProviderCatalogEntry(
         "codex-cli",
@@ -79,3 +91,43 @@ fun ProviderCatalogEntry.matchesIdOrAlias(providerId: String): Boolean {
 
 fun findProviderByIdOrAlias(providerId: String): ProviderCatalogEntry? =
     providerCatalog().firstOrNull { it.matchesIdOrAlias(providerId) }
+
+fun directChatProviderCatalog(): List<DirectChatProviderCatalogEntry> = listOf(
+    DirectChatProviderCatalogEntry(
+        id = "ollama",
+        providerId = "ollama",
+        displayName = "Ollama (local)",
+        iconSystemName = "cpu.fill",
+        defaultModel = "gemma3",
+        defaultBaseUrl = "http://127.0.0.1:11434",
+        allowsBaseUrl = true,
+        supportsModelDiscovery = true
+    ),
+    DirectChatProviderCatalogEntry(
+        id = "lmstudio",
+        providerId = "lm-studio",
+        displayName = "LM Studio (local)",
+        iconSystemName = "server.rack",
+        defaultModel = "model-name",
+        defaultBaseUrl = "http://127.0.0.1:1234",
+        allowsBaseUrl = true
+    ),
+    DirectChatProviderCatalogEntry(
+        id = "claude-cli",
+        providerId = "claude-code",
+        displayName = "Claude CLI",
+        iconSystemName = "sparkles",
+        defaultModel = "claude",
+        allowsBaseUrl = false
+    )
+)
+
+fun findDirectChatProvider(providerId: String): DirectChatProviderCatalogEntry? {
+    val normalized = providerId.trim()
+    if (normalized.isBlank()) return null
+    return directChatProviderCatalog().firstOrNull { entry ->
+        entry.id.equals(normalized, ignoreCase = true) ||
+            entry.providerId.equals(normalized, ignoreCase = true) ||
+            findProviderByIdOrAlias(entry.providerId)?.matchesIdOrAlias(normalized) == true
+    }
+}

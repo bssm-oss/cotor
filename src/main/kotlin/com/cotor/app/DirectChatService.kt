@@ -113,19 +113,16 @@ class DirectChatService(
         userMessage: String,
         messageId: String
     ): Flow<DirectChatStreamChunk> = flow {
-        val provider = conversation.provider
-        val defaultBase = when (provider) {
-            "ollama" -> "http://127.0.0.1:11434"
-            "lmstudio" -> "http://127.0.0.1:1234"
-            else -> ""
-        }
+        val provider = findDirectChatProvider(conversation.provider)
+        val providerId = provider?.id ?: conversation.provider
+        val defaultBase = provider?.defaultBaseUrl.orEmpty()
         val effectiveBase = if (defaultBase.isBlank()) {
             defaultBase
         } else {
             validateAndNormalizeBaseUrl(conversation.baseUrl, defaultBase)
         }
 
-        when (provider) {
+        when (providerId) {
             "ollama" -> streamOllama(conversation, userMessage, messageId, effectiveBase)
                 .collect { emit(it) }
             "lmstudio" -> streamLmStudio(conversation, userMessage, messageId, effectiveBase)
@@ -138,7 +135,7 @@ class DirectChatService(
                     messageId = messageId,
                     content = "",
                     done = true,
-                    error = "Unknown provider: $provider"
+                    error = "Unknown provider: ${conversation.provider}"
                 )
             )
         }
