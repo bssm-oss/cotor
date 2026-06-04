@@ -93,8 +93,8 @@ curl -H "Authorization: Bearer $COTOR_APP_TOKEN" http://127.0.0.1:8787/health
 
 - 이전 실행의 stale runtime 파일
 - 현재 CLI/런타임 동작과 맞지 않는 오래된 설치 앱
-- packaged 앱 launcher와 앱 내부 backend 관리 주체가 서로 충돌
-- 앱 실행 사이에 `COTOR_APP_TOKEN`이 바뀌어 launcher/backend/client token이 어긋남
+- packaged 앱 executable과 앱 내부 backend 관리 주체가 서로 충돌
+- 앱 실행 사이에 `COTOR_APP_TOKEN`이 바뀌어 backend/client token이 어긋남
 
 ### 4.3 확인
 
@@ -441,7 +441,7 @@ Exit code 0이면 CLI는 정상입니다. 모델 에러로 실패하면 Cotor �
 - 회사 `시작` / `중지`가 앱 전체 연결 상태를 흔듦
 - 영구적인 publish-readiness 실패 뒤 같은 blocked issue가 무한 재오픈
 - QA나 CEO 결과가 stale task sync 때문에 반복 재적용
-- 마지막 데스크톱 창을 닫았는데 번들 backend가 남아 있음
+- 마지막 데스크톱 창을 닫았는데 embedded backend가 남아 있음
 - 현재 interactive 모드가 명시적 선택 없이 여러 에이전트로 fan-out
 
 리포트할 때는 아래를 같이 남기세요.

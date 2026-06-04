@@ -25,6 +25,7 @@ import com.cotor.runtime.durable.DurableRuntimeService
 import com.cotor.security.SecurityValidator
 import kotlinx.coroutines.*
 import org.slf4j.Logger
+import java.nio.file.Path
 import java.time.Instant
 
 /**
@@ -212,6 +213,11 @@ class DefaultAgentExecutor(
                         metadata.workingDirectory?.let { put("worktreePath", it.toAbsolutePath().normalize().toString()) }
                     }
                 )
+                val commandValidatingProcessManager = CommandValidatingProcessManager(
+                    delegate = processManager,
+                    validateCommand = securityValidator::validateCommand
+                )
+
                 val pluginOutput = actionExecutionService.run(
                     request = actionRequest,
                     onSuccess = { output ->
@@ -224,7 +230,7 @@ class DefaultAgentExecutor(
                     }
                 ) {
                     withTimeout(agent.timeout) {
-                        plugin.execute(context, processManager)
+                        plugin.execute(context, commandValidatingProcessManager)
                     }
                 }
                 val duration = System.currentTimeMillis() - startTime
@@ -324,5 +330,96 @@ class DefaultAgentExecutor(
         }
 
         return lastResult ?: throw IllegalStateException("No result after retries")
+    }
+}
+
+private class CommandValidatingProcessManager(
+    private val delegate: ProcessManager,
+    private val validateCommand: (List<String>) -> Unit
+) : ProcessManager {
+    override suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?
+    ): ProcessResult {
+        validateCommand(command)
+        return delegate.executeProcess(
+            command = command,
+            input = input,
+            environment = environment,
+            timeout = timeout,
+            workingDirectory = workingDirectory,
+            onStart = onStart
+        )
+    }
+
+    override suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?,
+        onStdoutChunk: ((String) -> Unit)?
+    ): ProcessResult {
+        validateCommand(command)
+        return delegate.executeProcess(
+            command = command,
+            input = input,
+            environment = environment,
+            timeout = timeout,
+            workingDirectory = workingDirectory,
+            onStart = onStart,
+            onStdoutChunk = onStdoutChunk
+        )
+    }
+
+    override suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?,
+        onStdoutChunk: ((String) -> Unit)?,
+        onStderrChunk: ((String) -> Unit)?
+    ): ProcessResult {
+        validateCommand(command)
+        return delegate.executeProcess(
+            command = command,
+            input = input,
+            environment = environment,
+            timeout = timeout,
+            workingDirectory = workingDirectory,
+            onStart = onStart,
+            onStdoutChunk = onStdoutChunk,
+            onStderrChunk = onStderrChunk
+        )
+    }
+
+    override suspend fun executeProcessWithInputFile(
+        command: List<String>,
+        inputFile: Path,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?,
+        onStdoutChunk: ((String) -> Unit)?,
+        onStderrChunk: ((String) -> Unit)?
+    ): ProcessResult {
+        validateCommand(command)
+        return delegate.executeProcessWithInputFile(
+            command = command,
+            inputFile = inputFile,
+            environment = environment,
+            timeout = timeout,
+            workingDirectory = workingDirectory,
+            onStart = onStart,
+            onStdoutChunk = onStdoutChunk,
+            onStderrChunk = onStderrChunk
+        )
     }
 }

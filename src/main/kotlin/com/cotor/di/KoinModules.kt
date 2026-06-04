@@ -26,7 +26,6 @@ import com.cotor.data.plugin.PluginLoader
 import com.cotor.data.plugin.ReflectionPluginLoader
 import com.cotor.data.process.CoroutineProcessManager
 import com.cotor.data.process.ProcessManager
-import com.cotor.data.process.resolveExecutablePath
 import com.cotor.data.registry.AgentRegistry
 import com.cotor.data.registry.InMemoryAgentRegistry
 import com.cotor.domain.aggregator.DefaultResultAggregator
@@ -59,6 +58,7 @@ import com.cotor.runtime.durable.DurableRuntimeService
 import com.cotor.runtime.durable.DurableRuntimeStore
 import com.cotor.security.DefaultSecurityValidator
 import com.cotor.security.SecurityValidator
+import com.cotor.security.defaultSecurityConfig
 import com.cotor.stats.StatsManager
 import com.cotor.validation.output.DefaultOutputValidator
 import com.cotor.validation.output.OutputValidator
@@ -67,10 +67,6 @@ import com.cotor.verification.VerificationBundleService
 import org.koin.dsl.module
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import java.io.File
-import java.nio.file.Files
-import java.nio.file.Path
-import kotlin.io.path.Path
 
 /**
  * Main Koin module for Cotor system
@@ -140,14 +136,7 @@ val cotorModule = module {
     single { DesktopTuiSessionService(get(), get(), get(), get()) }
 
     // Security
-    single<SecurityConfig> {
-        val allowedExecutables = defaultAllowedExecutables()
-        SecurityConfig(
-            useWhitelist = true,
-            allowedExecutables = allowedExecutables,
-            allowedDirectories = defaultAllowedDirectories(allowedExecutables)
-        )
-    }
+    single<SecurityConfig> { defaultSecurityConfig() }
     single<SecurityValidator> { DefaultSecurityValidator(get(), get()) }
 
     // Domain Layer
@@ -200,40 +189,4 @@ fun initializeCotor() {
     org.koin.core.context.startKoin {
         modules(cotorModule)
     }
-}
-
-private fun defaultAllowedExecutables(): Set<String> = setOf(
-    "python3", "node", "java", "git", "gh", "lsof",
-    "claude", "codex", "copilot", "gemini", "cursor-cli", "opencode", "qwen", "graphify"
-)
-
-private fun defaultAllowedDirectories(allowedExecutables: Set<String>): List<Path> {
-    val pathDirectories = System.getenv("PATH")
-        .orEmpty()
-        .split(File.pathSeparator)
-        .mapNotNull { it.trim().takeIf(String::isNotBlank) }
-        .map { Path(it).toAbsolutePath().normalize() }
-    val executableDirectories = allowedExecutables.mapNotNull { executable ->
-        runCatching { resolveExecutablePath(executable)?.parent }.getOrNull()
-    }
-    val userHome = Path(System.getProperty("user.home")).toAbsolutePath().normalize()
-    val conventionalDirectories = listOf(
-        Path("/usr/bin"),
-        Path("/bin"),
-        Path("/usr/sbin"),
-        Path("/sbin"),
-        Path("/usr/local/bin"),
-        Path("/usr/local/Cellar"),
-        Path("/usr/local/opt"),
-        Path("/opt/homebrew/bin"),
-        Path("/opt/homebrew/Cellar"),
-        Path("/opt/homebrew/opt"),
-        Path("/opt/cotor"),
-        userHome.resolve("Library").resolve("Python"),
-        userHome.resolve("Library").resolve("Application Support").resolve("CotorDesktop")
-    )
-    return (pathDirectories + executableDirectories + conventionalDirectories)
-        .map { it.toAbsolutePath().normalize() }
-        .filter { Files.exists(it) }
-        .distinct()
 }

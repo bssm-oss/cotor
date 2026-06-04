@@ -178,7 +178,7 @@ fi
 prebundle_playwright_if_requested
 
 sed \
-    -e "s#__EXECUTABLE__#CotorDesktopLauncher#g" \
+    -e "s#__EXECUTABLE__#CotorDesktopBinary#g" \
     -e "s#__VERSION__#$VERSION#g" \
     -e "s#__BUILD__#$BUILD_NUMBER#g" \
     "$PACKAGING_ROOT/Info.plist.template" > "$APP_CONTENTS/Info.plist"

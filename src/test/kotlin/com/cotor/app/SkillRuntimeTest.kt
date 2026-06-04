@@ -9,6 +9,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.coEvery
 import io.mockk.mockk
 import java.nio.file.Files
@@ -115,6 +116,31 @@ class SkillRuntimeTest : FunSpec({
         result.status shouldBe "FAILED"
         result.error shouldContain "blocked by test validator"
         validator.commands shouldBe listOf(listOf("graphify", "update", "."))
+    }
+
+    test("local skill process strips secret environment overrides before launch") {
+        val appHome = Files.createTempDirectory("skill-process-env-home")
+
+        val result = runLocalSkillProcess(
+            command = listOf("/usr/bin/env"),
+            workingDirectory = appHome,
+            timeoutSeconds = 5,
+            timeoutMessage = "env probe timed out",
+            environment = mapOf(
+                "GITHUB_TOKEN" to "secret-github",
+                "OPENAI_API_KEY" to "secret-openai",
+                "SAFE_LOCAL_SKILL_PROBE" to "local-value",
+                "COTOR_A2A_TOKEN" to "scoped-a2a-token"
+            )
+        )
+
+        result.exitCode shouldBe 0
+        result.output shouldContain "SAFE_LOCAL_SKILL_PROBE=local-value"
+        result.output shouldContain "COTOR_A2A_TOKEN=scoped-a2a-token"
+        result.output shouldNotContain "GITHUB_TOKEN="
+        result.output shouldNotContain "OPENAI_API_KEY="
+        result.output shouldNotContain "secret-github"
+        result.output shouldNotContain "secret-openai"
     }
 
     test("runSkill executes browser-smoke with browser evidence") {

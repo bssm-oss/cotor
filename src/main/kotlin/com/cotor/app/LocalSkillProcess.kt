@@ -5,6 +5,7 @@ import com.cotor.data.process.buildEffectivePath
 import com.cotor.data.process.cleanupSurvivingDescendants
 import com.cotor.data.process.destroyProcessTree
 import com.cotor.data.process.resolveExecutablePath
+import com.cotor.data.process.sanitizeProcessEnvironment
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
@@ -48,7 +49,7 @@ internal fun runLocalSkillProcess(
 ): LocalSkillProcessResult {
     require(command.isNotEmpty()) { "command is required" }
     require(timeoutSeconds > 0) { "timeoutSeconds must be positive" }
-    val processEnvironment = System.getenv().toMutableMap().apply { putAll(environment) }
+    val processEnvironment = sanitizeProcessEnvironment(environment)
     val resolvedCommand = resolveLocalSkillCommand(command, processEnvironment)
     val process = try {
         ProcessBuilder(resolvedCommand)
@@ -56,7 +57,8 @@ internal fun runLocalSkillProcess(
             .redirectErrorStream(true)
             .also { builder ->
                 val builderEnvironment = builder.environment()
-                builderEnvironment.putAll(environment)
+                builderEnvironment.clear()
+                builderEnvironment.putAll(processEnvironment)
                 val resolvedExecutable = resolvedCommand.firstOrNull()
                     ?.let { runCatching { Path.of(it) }.getOrNull() }
                 val effectivePath = buildEffectivePath(

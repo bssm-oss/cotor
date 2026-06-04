@@ -10,30 +10,28 @@ import io.kotest.matchers.shouldBe
 import java.nio.file.Path
 
 class CommandPluginTest : FunSpec({
-    test("command plugin validates argv template before execution") {
-        val processManager = RecordingProcessManager()
+    test("command plugin delegates command guarding to the provided process manager") {
+        val processManager = BlockingProcessManager()
         val plugin = CommandPlugin()
 
-        shouldThrow<IllegalStateException> {
+        val error = shouldThrow<IllegalStateException> {
             plugin.execute(
                 ExecutionContext(
                     agentName = "command",
                     input = null,
                     parameters = mapOf("argvJson" to "[\"sh\",\"-c\",\"id\"]"),
                     environment = emptyMap(),
-                    timeout = 1000,
-                    validateCommand = { throw IllegalStateException("blocked") }
+                    timeout = 1000
                 ),
                 processManager
             )
         }
 
-        processManager.commands.size shouldBe 0
+        error.message shouldBe "blocked by process manager guard"
     }
 
-    test("command plugin validates template while passing substituted input as literal argv") {
+    test("command plugin passes substituted input as literal argv") {
         val processManager = RecordingProcessManager()
-        val validatedCommands = mutableListOf<List<String>>()
         val plugin = CommandPlugin()
 
         plugin.execute(
@@ -42,13 +40,11 @@ class CommandPluginTest : FunSpec({
                 input = "literal ; | < > input",
                 parameters = mapOf("argvJson" to "[\"/opt/homebrew/bin/qwen\",\"{input}\"]"),
                 environment = emptyMap(),
-                timeout = 1000,
-                validateCommand = { validatedCommands += it }
+                timeout = 1000
             ),
             processManager
         )
 
-        validatedCommands.single().shouldContainExactly(listOf("/opt/homebrew/bin/qwen", "{input}"))
         processManager.commands.single().shouldContainExactly(listOf("/opt/homebrew/bin/qwen", "literal ; | < > input"))
     }
 })
@@ -66,5 +62,18 @@ private class RecordingProcessManager : ProcessManager {
     ): ProcessResult {
         commands += command
         return ProcessResult(exitCode = 0, stdout = "ok", stderr = "", isSuccess = true)
+    }
+}
+
+private class BlockingProcessManager : ProcessManager {
+    override suspend fun executeProcess(
+        command: List<String>,
+        input: String?,
+        environment: Map<String, String>,
+        timeout: Long,
+        workingDirectory: Path?,
+        onStart: ((Long) -> Unit)?
+    ): ProcessResult {
+        throw IllegalStateException("blocked by process manager guard")
     }
 }

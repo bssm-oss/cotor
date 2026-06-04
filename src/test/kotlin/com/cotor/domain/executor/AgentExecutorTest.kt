@@ -15,10 +15,13 @@ import com.cotor.model.AgentConfig
 import com.cotor.model.ExecutionContext
 import com.cotor.model.PluginExecutionOutput
 import com.cotor.model.ProcessExecutionException
+import com.cotor.model.ProcessResult
+import com.cotor.model.SecurityException
 import com.cotor.security.SecurityValidator
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -170,5 +173,113 @@ class AgentExecutorTest : FunSpec({
         result.isSuccess shouldBe true
         result.output shouldBe "validated"
         verify(exactly = 1) { mockSecurityValidator.validateCommand(listOf("git", "status")) }
+    }
+
+    test("should validate plugin process commands centrally before execution") {
+        val processManager = mockk<ProcessManager>()
+        val pluginLoader = mockk<PluginLoader>()
+        val securityValidator = mockk<SecurityValidator>()
+        val executor = DefaultAgentExecutor(
+            processManager,
+            pluginLoader,
+            securityValidator,
+            mockk<Logger>(relaxed = true)
+        )
+        val agentConfig = AgentConfig(
+            name = "qa-agent",
+            pluginClass = "com.example.ProcessCallingPlugin",
+            timeout = 5000
+        )
+        val plugin = mockk<AgentPlugin>()
+        coEvery { plugin.execute(any(), any()) } coAnswers {
+            secondArg<ProcessManager>().executeProcess(
+                command = listOf("git", "status"),
+                input = null,
+                environment = emptyMap(),
+                timeout = 1000
+            ).let { PluginExecutionOutput(it.stdout, it.processId) }
+        }
+        every { plugin.validateInput(any()) } returns com.cotor.model.ValidationResult.Success
+        every { pluginLoader.loadPlugin(any()) } returns plugin
+        every { securityValidator.validate(any()) } just runs
+        every { securityValidator.validateCommand(any()) } just runs
+        coEvery {
+            processManager.executeProcess(
+                command = listOf("git", "status"),
+                input = null,
+                environment = emptyMap(),
+                timeout = 1000,
+                workingDirectory = null,
+                onStart = null
+            )
+        } returns ProcessResult(
+            exitCode = 0,
+            stdout = "clean",
+            stderr = "",
+            isSuccess = true,
+            processId = 42L
+        )
+
+        val result = executor.executeAgent(agentConfig, null)
+
+        result.isSuccess shouldBe true
+        result.output shouldBe "clean"
+        result.processId shouldBe 42L
+        verify(exactly = 1) { securityValidator.validateCommand(listOf("git", "status")) }
+        coVerify(exactly = 1) {
+            processManager.executeProcess(
+                command = listOf("git", "status"),
+                input = null,
+                environment = emptyMap(),
+                timeout = 1000,
+                workingDirectory = null,
+                onStart = null
+            )
+        }
+    }
+
+    test("should block plugin process execution when central command validation rejects it") {
+        val processManager = mockk<ProcessManager>()
+        val pluginLoader = mockk<PluginLoader>()
+        val securityValidator = mockk<SecurityValidator>()
+        val executor = DefaultAgentExecutor(
+            processManager,
+            pluginLoader,
+            securityValidator,
+            mockk<Logger>(relaxed = true)
+        )
+        val agentConfig = AgentConfig(
+            name = "unsafe-agent",
+            pluginClass = "com.example.UnsafePlugin",
+            timeout = 5000
+        )
+        val plugin = mockk<AgentPlugin>()
+        coEvery { plugin.execute(any(), any()) } coAnswers {
+            secondArg<ProcessManager>().executeProcess(
+                command = listOf("rm", "-rf", "/tmp/cotor-test"),
+                input = null,
+                environment = emptyMap(),
+                timeout = 1000
+            ).let { PluginExecutionOutput(it.stdout, it.processId) }
+        }
+        every { plugin.validateInput(any()) } returns com.cotor.model.ValidationResult.Success
+        every { pluginLoader.loadPlugin(any()) } returns plugin
+        every { securityValidator.validate(any()) } just runs
+        every { securityValidator.validateCommand(listOf("rm", "-rf", "/tmp/cotor-test")) } throws SecurityException("blocked command")
+
+        val result = executor.executeAgent(agentConfig, null)
+
+        result.isSuccess shouldBe false
+        result.error?.contains("blocked command") shouldBe true
+        coVerify(exactly = 0) {
+            processManager.executeProcess(
+                command = any(),
+                input = any(),
+                environment = any(),
+                timeout = any(),
+                workingDirectory = any(),
+                onStart = any()
+            )
+        }
     }
 })

@@ -191,7 +191,8 @@ class CoroutineProcessManager(
         onStdoutChunk: ((String) -> Unit)?,
         onStderrChunk: ((String) -> Unit)?
     ): ProcessResult = withContext(Dispatchers.IO) {
-        val resolvedCommand = resolveProcessCommand(command)
+        val processEnvironment = sanitizeProcessEnvironment(environment)
+        val resolvedCommand = resolveProcessCommand(command, processEnvironment)
         val processBuilder = ProcessBuilder(resolvedCommand)
             .redirectErrorStream(false)
 
@@ -203,16 +204,19 @@ class CoroutineProcessManager(
             processBuilder.directory(it.toFile())
         }
 
-        // Set environment variables
-        processBuilder.environment().putAll(environment)
+        // Replace the inherited process environment so ambient developer
+        // secrets cannot leak into agent subprocesses.
+        val builderEnvironment = processBuilder.environment()
+        builderEnvironment.clear()
+        builderEnvironment.putAll(processEnvironment)
         val resolvedExecutable = resolvedCommand.firstOrNull()?.let { runCatching { Path.of(it) }.getOrNull() }
         val effectivePath = buildEffectivePath(
-            inheritedPath = processBuilder.environment()["PATH"],
+            inheritedPath = builderEnvironment["PATH"],
             overridePath = environment["PATH"],
             resolvedExecutable = resolvedExecutable
         )
         if (effectivePath.isNotBlank()) {
-            processBuilder.environment()["PATH"] = effectivePath
+            builderEnvironment["PATH"] = effectivePath
         }
 
         logger.debug("Starting process: ${redactedCommandForLogs(resolvedCommand)}")
@@ -483,10 +487,10 @@ fun resolveExecutablePath(
     }
 }
 
-private fun resolveProcessCommand(command: List<String>): List<String> {
+private fun resolveProcessCommand(command: List<String>, environment: Map<String, String>): List<String> {
     if (command.isEmpty()) {
         return command
     }
-    val executable = resolveExecutablePath(command.first())?.toString() ?: command.first()
+    val executable = resolveExecutablePath(command.first(), environment = environment)?.toString() ?: command.first()
     return listOf(executable) + command.drop(1)
 }
