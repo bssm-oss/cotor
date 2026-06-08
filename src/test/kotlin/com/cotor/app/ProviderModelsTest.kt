@@ -1,5 +1,6 @@
 package com.cotor.app
 
+import com.cotor.model.LocalModelDefaults
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.shouldBe
@@ -39,8 +40,12 @@ class ProviderModelsTest : FunSpec({
         val providers = directChatProviderCatalog()
 
         providers.map { it.id }.distinct().size shouldBe providers.size
-        providers.first { it.id == "ollama" }.supportsModelDiscovery shouldBe true
-        providers.first { it.id == "lmstudio" }.providerId shouldBe "lm-studio"
+        val ollama = providers.first { it.id == "ollama" }
+        val lmStudio = providers.first { it.id == "lmstudio" }
+        ollama.supportsModelDiscovery shouldBe true
+        ollama.defaultModel shouldBe LocalModelDefaults.GEMMA4_MODEL
+        lmStudio.providerId shouldBe "lm-studio"
+        lmStudio.defaultModel shouldBe LocalModelDefaults.GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL
         providers.first { it.id == "claude-cli" }.allowsBaseUrl shouldBe false
 
         findDirectChatProvider("lm-studio")?.id shouldBe "lmstudio"

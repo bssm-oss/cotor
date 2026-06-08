@@ -19,6 +19,18 @@ class SecurityValidatorTest : FunSpec({
         config.allowedExecutables.contains("graphify") shouldBe true
     }
 
+    test("default executable directory expansion includes symlink target directory") {
+        val targetDir = Files.createTempDirectory("cotor-codex-package")
+        val binDir = Files.createTempDirectory("cotor-codex-bin")
+        val executable = targetDir.resolve("codex.js").toFile()
+        executable.writeText("#!/usr/bin/env node\n")
+        executable.setExecutable(true)
+        val link = binDir.resolve("codex")
+        link.createSymbolicLinkPointingTo(executable.toPath())
+
+        executableAllowedDirectories(link).toSet() shouldBe setOf(binDir, targetDir)
+    }
+
     test("command whitelist accepts absolute executable path by basename") {
         val validator = DefaultSecurityValidator(
             SecurityConfig(allowedExecutables = setOf("qwen")),

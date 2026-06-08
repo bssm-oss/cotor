@@ -84,6 +84,49 @@ class AppServerTest : FunSpec({
         }
     }
 
+    test("update status route returns installed app and Homebrew metadata when authorized") {
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService,
+                    desktopUpdateStatusProvider = {
+                        DesktopUpdateStatusResponse(
+                            health = HealthResponse(
+                                ok = true,
+                                service = "cotor-app-server",
+                                owner = "cotor-desktop",
+                                version = "1.0.6",
+                                build = "20260608082842"
+                            ),
+                            backendOwner = "cotor-desktop",
+                            currentVersion = "1.0.6",
+                            currentBuild = "20260608082842",
+                            sourceCommit = "abc1234",
+                            installedAppPath = "/Applications/Cotor Desktop.app",
+                            updateAvailable = true,
+                            checkedAtEpochMillis = 1_783_050_000_000,
+                            status = "UPDATE_AVAILABLE",
+                            message = "A newer Homebrew formula is available. Run cotor update --verify."
+                        )
+                    }
+                )
+            }
+
+            val response = client.get("/api/app/update-status") {
+                header("Authorization", "Bearer secret-token")
+            }
+            val body = response.bodyAsText()
+
+            response.status shouldBe HttpStatusCode.OK
+            body shouldContain "\"backendOwner\":\"cotor-desktop\""
+            body shouldContain "\"installedAppPath\":\"/Applications/Cotor Desktop.app\""
+            body shouldContain "\"updateAvailable\":true"
+            body shouldContain "\"updateCommand\":\"cotor update --verify\""
+        }
+    }
+
     test("file origin terminal preflight is allowed for bearer-protected TUI routes") {
         testApplication {
             application {
@@ -555,7 +598,7 @@ class AppServerTest : FunSpec({
                 providerId = "ollama",
                 displayName = "Ollama (local)",
                 iconSystemName = "cpu.fill",
-                defaultModel = "gemma3",
+                defaultModel = "gemma4:12b",
                 defaultBaseUrl = "http://127.0.0.1:11434",
                 supportsModelDiscovery = true
             )

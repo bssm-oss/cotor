@@ -119,7 +119,7 @@ private enum MeetingRoomSurface: CaseIterable, Identifiable {
 }
 
 struct CompanySidebarDisclosureState {
-    var isCompanyDraftExpanded = false
+    var isCompanyDraftExpanded = true
     var isAdvancedSettingsExpanded = false
     var isAgentAdvancedDetailsExpanded = false
 }
@@ -1052,9 +1052,9 @@ private struct SidebarView: View {
 
     private var companySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            companySelectionSection
-            companyQuickActionsSection
             companyDraftSection
+            companyQuickActionsSection
+            companySelectionSection
             if store.selectedCompany != nil {
                 advancedCompanySettingsSection
             }
@@ -1142,6 +1142,16 @@ private struct SidebarView: View {
                         .pickerStyle(.menu)
                     }
 
+                    Button {
+                        Task { await store.createCompany() }
+                    } label: {
+                        Label(l("Create Company", "회사 생성"), systemImage: "building.2.crop.circle")
+                            .frame(maxWidth: .infinity)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(ShellTopBarButtonStyle(prominent: true))
+                    .disabled(store.newCompanyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.newCompanyRootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text(l("Optional cost guardrails (USD)", "선택 사항: 비용 상한 (USD)"))
                             .font(.system(size: 11, weight: .semibold))
@@ -1162,7 +1172,7 @@ private struct SidebarView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle(
                 title: l("Quick Actions", "빠른 동작"),
-                subtitle: l("Create from the draft and control the selected company runtime from one compact area.", "초안으로 회사를 만들고 선택한 회사 런타임을 한곳에서 빠르게 제어합니다.")
+                subtitle: l("Control the selected company runtime from one compact area.", "선택한 회사 런타임을 한곳에서 빠르게 제어합니다.")
             )
 
             companySubpanel {
@@ -1201,16 +1211,6 @@ private struct SidebarView: View {
                             .foregroundStyle(ShellPalette.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-
-                    Button {
-                        Task { await store.createCompany() }
-                    } label: {
-                        Label(l("Create Company", "회사 생성"), systemImage: "building.2.crop.circle")
-                            .frame(maxWidth: .infinity)
-                            .lineLimit(1)
-                    }
-                    .buttonStyle(ShellTopBarButtonStyle(prominent: true))
-                    .disabled(store.newCompanyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.newCompanyRootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     if let company = store.selectedCompany, shouldShowGitHubQuickConnect(for: company) {
                         companyGitHubQuickConnectPrompt(company: company)

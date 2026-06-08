@@ -165,7 +165,7 @@ class AgentCommandTest : FunSpec({
         added.exists() shouldBe true
         added.readText() shouldContain "pluginClass: com.cotor.data.plugin.LocalModelPlugin"
         added.readText() shouldContain "baseUrl: \"http://127.0.0.1:11434\""
-        added.readText() shouldContain "model: \"gemma4:e2b\""
+        added.readText() shouldContain "model: \"gemma4:12b\""
         added.readText() shouldContain "provider: \"ollama\""
     }
 

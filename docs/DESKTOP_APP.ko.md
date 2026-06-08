@@ -16,6 +16,7 @@ cotor install
 
 - Homebrew 패키지에는 `Cotor Desktop.app` 번들이 함께 들어 있습니다.
 - `cotor install`, `cotor update`는 Homebrew prefix 안에서 재빌드하지 않고, 패키지된 번들을 그대로 재사용합니다.
+- `cotor update --verify`, `cotor upgrade --verify`는 설치본 smoke check도 함께 실행합니다. 이 check는 codesign 검증, 설치 앱 실행, `/health` 확인으로 구성됩니다.
 - packaged install에서 로컬 config가 없을 때 `cotor` 인터랙티브 starter config는 `~/.cotor/interactive/default/cotor.yaml` 아래에 생성됩니다.
 - packaged 설치와 첫 실행 규칙은 [HOMEBREW_INSTALL.md](HOMEBREW_INSTALL.md)를 보면 됩니다.
 
@@ -29,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/bssm-oss/cotor/master/shell/brew-in
 
 ```bash
 cotor install
-cotor update
+cotor update --verify
 cotor delete
 ```
 
@@ -101,20 +102,26 @@ open "/Applications/Cotor Desktop.app" || open "$HOME/Applications/Cotor Desktop
 마지막 데스크톱 창을 닫으면 앱도 종료되고 번들 백엔드도 같이 내려갑니다.
 
 ```bash
-cotor update
+cotor update --verify
+cotor upgrade --verify
 cotor delete
 ```
 
 `cotor delete`는 표준 `/Applications`, `~/Applications`, 다운로드 산출물을 지웁니다. `COTOR_DESKTOP_INSTALL_ROOT`가 설정되어 있으면 그 override 설치 루트의 `Cotor Desktop.app`도 함께 제거합니다.
+CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --verify` 뒤에
+`shell/test-installed-desktop-app.sh`를 실행하면 같은 설치 앱, codesign, 실행, `/health`
+경로를 확인할 수 있습니다.
 
 ### 설치 레이아웃별 차이
 
 - **Homebrew / packaged install**
   - 패키지 안에 들어 있는 데스크톱 번들을 복사합니다.
+  - `cotor update --verify`는 Homebrew formula를 업그레이드한 뒤 번들 앱 복사와 설치 앱 검증까지 수행합니다.
   - 런타임 시점에 Gradle/Swift 재빌드는 하지 않습니다.
   - 브라우저 스킬은 번들을 `COTOR_PREBUNDLE_PLAYWRIGHT=1`로 빌드했을 때 포함된 Playwright를 사용합니다. 런타임 `npm install`은 `COTOR_BROWSER_SKILL_ALLOW_NPM_INSTALL=1`을 명시적으로 설정한 경우에만 허용됩니다.
 - **소스 체크아웃**
   - 로컬에서 번들을 다시 빌드한 뒤 설치합니다.
+  - `shell/update-desktop-app.sh --verify`는 재빌드, 재설치, codesign 검증, 설치 앱 실행, `/health` 확인을 한 번에 수행합니다.
   - 소스 빌드는 `COTOR_PREBUNDLE_PLAYWRIGHT=1`로 Playwright를 미리 포함하거나 `COTOR_BROWSER_SKILL_NODE_PATH`로 기존 의존성 경로를 지정할 수 있습니다.
 
 ## 현재 셸 모델
@@ -180,6 +187,7 @@ cotor delete
 현재 company-first 라우트:
 
 - `GET /api/app/metrics`
+- `GET /api/app/update-status`
 - `GET /api/app/companies`
 - `POST /api/app/companies`
 - `GET /api/app/companies/{companyId}`

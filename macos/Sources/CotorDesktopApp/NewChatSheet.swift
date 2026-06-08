@@ -14,7 +14,7 @@ struct NewChatSheet: View {
 
     @State private var title: String = ""
     @State private var selectedProvider: String = "ollama"
-    @State private var customModel: String = "gemma3"
+    @State private var customModel: String = ""
     @State private var systemPrompt: String = ""
     @State private var baseUrl: String = ""
     @State private var isCreating: Bool = false
@@ -231,7 +231,7 @@ struct NewChatSheet: View {
         if selectedProvider != provider.id {
             selectedProvider = provider.id
         }
-        if customModel.isEmpty || customModel == "model-name" {
+        if customModel.isEmpty || customModel == "model-name" || customModel == "gemma3" {
             customModel = provider.defaultModel
         }
         if baseUrl.isEmpty {

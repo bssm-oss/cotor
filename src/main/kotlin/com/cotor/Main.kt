@@ -39,7 +39,7 @@ fun main(args: Array<String>) {
         // Simple mode - just run pipeline directly
         if (!args[0].startsWith("-")) {
             when (args[0]) {
-                "hello", "help", "init", "list", "status", "version", "run", "validate", "test", "dash", "interactive", "template", "resume", "checkpoint", "stats", "doctor", "web", "lint", "explain", "plugin", "agent", "company", "auth", "app-server", "install", "update", "delete", "completion", "policy", "capability", "provider", "skill", "browser", "video", "evidence", "github", "knowledge", "verification", "runtime", "mcp" -> {
+                "hello", "help", "init", "list", "status", "version", "run", "validate", "test", "dash", "interactive", "template", "resume", "checkpoint", "stats", "doctor", "web", "lint", "explain", "plugin", "agent", "company", "auth", "app-server", "install", "update", "upgrade", "delete", "completion", "policy", "capability", "provider", "skill", "browser", "video", "evidence", "github", "knowledge", "verification", "runtime", "mcp" -> {
                     // Use full CLI for these commands
                 }
                 else -> {
@@ -90,6 +90,7 @@ fun main(args: Array<String>) {
                 McpCommand(),
                 InstallCommand(),
                 UpdateCommand(),
+                UpgradeCommand(),
                 DeleteCommand(),
                 VersionCommand(),
                 CompletionCommand()

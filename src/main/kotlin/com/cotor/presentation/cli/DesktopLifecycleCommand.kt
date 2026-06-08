@@ -10,6 +10,8 @@ package com.cotor.presentation.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.option
 import java.nio.file.Path
 import kotlin.io.path.exists
 
@@ -21,6 +23,7 @@ data class DesktopScriptResult(
 internal typealias DesktopScriptRunner = (Path, String) -> DesktopScriptResult
 internal typealias PackagedDesktopActionRunner = (DesktopInstallLayout, DesktopInstallAction) -> DesktopScriptResult
 internal typealias DesktopLayoutResolver = () -> DesktopInstallLayout?
+internal typealias DesktopVerificationRunner = (DesktopInstallLayout) -> DesktopScriptResult
 internal typealias OsNameProvider = () -> String
 
 internal abstract class DesktopLifecycleCommand(
@@ -29,9 +32,15 @@ internal abstract class DesktopLifecycleCommand(
     private val action: DesktopInstallAction,
     private val scriptRunner: DesktopScriptRunner = ::runDesktopScript,
     private val packagedActionRunner: PackagedDesktopActionRunner = ::runPackagedDesktopAction,
+    private val verificationRunner: DesktopVerificationRunner = ::runInstalledDesktopAppVerification,
     private val layoutResolver: DesktopLayoutResolver = ::detectDesktopInstallLayout,
     private val osNameProvider: OsNameProvider = { System.getProperty("os.name") }
 ) : CliktCommand(name = commandName, help = commandHelp) {
+    private val verify by option(
+        "--verify",
+        help = "After install or update, launch the installed desktop app and verify codesign plus /health."
+    ).flag(default = false)
+
     override fun run() {
         if (!isMacOs(osNameProvider())) {
             echo("This command currently supports macOS only.")
@@ -61,12 +70,30 @@ internal abstract class DesktopLifecycleCommand(
             echo("cotor ${action.actionLabel} failed.")
             throw ProgramResult(result.exitCode)
         }
+
+        if (verify && action != DesktopInstallAction.DELETE) {
+            val verification = verificationRunner(layout)
+            if (verification.output.isNotBlank()) {
+                val lines = verification.output.lines()
+                lines.forEachIndexed { index, line ->
+                    val isTrailingEmptyLine = index == lines.lastIndex && line.isEmpty()
+                    if (!isTrailingEmptyLine) {
+                        echo(line)
+                    }
+                }
+            }
+            if (verification.exitCode != 0) {
+                echo("cotor desktop verification failed.")
+                throw ProgramResult(verification.exitCode)
+            }
+        }
     }
 }
 
 internal class InstallCommand(
     scriptRunner: DesktopScriptRunner = ::runDesktopScript,
     packagedActionRunner: PackagedDesktopActionRunner = ::runPackagedDesktopAction,
+    verificationRunner: DesktopVerificationRunner = ::runInstalledDesktopAppVerification,
     layoutResolver: DesktopLayoutResolver = ::detectDesktopInstallLayout,
     osNameProvider: OsNameProvider = { System.getProperty("os.name") }
 ) : DesktopLifecycleCommand(
@@ -75,6 +102,7 @@ internal class InstallCommand(
     action = DesktopInstallAction.INSTALL,
     scriptRunner = scriptRunner,
     packagedActionRunner = packagedActionRunner,
+    verificationRunner = verificationRunner,
     layoutResolver = layoutResolver,
     osNameProvider = osNameProvider
 )
@@ -82,6 +110,7 @@ internal class InstallCommand(
 internal class UpdateCommand(
     scriptRunner: DesktopScriptRunner = ::runDesktopScript,
     packagedActionRunner: PackagedDesktopActionRunner = ::runPackagedDesktopAction,
+    verificationRunner: DesktopVerificationRunner = ::runInstalledDesktopAppVerification,
     layoutResolver: DesktopLayoutResolver = ::detectDesktopInstallLayout,
     osNameProvider: OsNameProvider = { System.getProperty("os.name") }
 ) : DesktopLifecycleCommand(
@@ -90,6 +119,24 @@ internal class UpdateCommand(
     action = DesktopInstallAction.UPDATE,
     scriptRunner = scriptRunner,
     packagedActionRunner = packagedActionRunner,
+    verificationRunner = verificationRunner,
+    layoutResolver = layoutResolver,
+    osNameProvider = osNameProvider
+)
+
+internal class UpgradeCommand(
+    scriptRunner: DesktopScriptRunner = ::runDesktopScript,
+    packagedActionRunner: PackagedDesktopActionRunner = ::runPackagedDesktopAction,
+    verificationRunner: DesktopVerificationRunner = ::runInstalledDesktopAppVerification,
+    layoutResolver: DesktopLayoutResolver = ::detectDesktopInstallLayout,
+    osNameProvider: OsNameProvider = { System.getProperty("os.name") }
+) : DesktopLifecycleCommand(
+    commandName = "upgrade",
+    commandHelp = "Upgrade Cotor through Homebrew or update the source-installed desktop app.",
+    action = DesktopInstallAction.UPDATE,
+    scriptRunner = scriptRunner,
+    packagedActionRunner = packagedActionRunner,
+    verificationRunner = verificationRunner,
     layoutResolver = layoutResolver,
     osNameProvider = osNameProvider
 )
@@ -97,6 +144,7 @@ internal class UpdateCommand(
 internal class DeleteCommand(
     scriptRunner: DesktopScriptRunner = ::runDesktopScript,
     packagedActionRunner: PackagedDesktopActionRunner = ::runPackagedDesktopAction,
+    verificationRunner: DesktopVerificationRunner = ::runInstalledDesktopAppVerification,
     layoutResolver: DesktopLayoutResolver = ::detectDesktopInstallLayout,
     osNameProvider: OsNameProvider = { System.getProperty("os.name") }
 ) : DesktopLifecycleCommand(
@@ -105,6 +153,7 @@ internal class DeleteCommand(
     action = DesktopInstallAction.DELETE,
     scriptRunner = scriptRunner,
     packagedActionRunner = packagedActionRunner,
+    verificationRunner = verificationRunner,
     layoutResolver = layoutResolver,
     osNameProvider = osNameProvider
 )

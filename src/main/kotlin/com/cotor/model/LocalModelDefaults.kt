@@ -4,7 +4,10 @@ package com.cotor.model
  * Defaults for local OpenAI-compatible and Ollama model servers.
  */
 object LocalModelDefaults {
-    const val GEMMA4_MODEL = "gemma4:e2b"
+    const val GEMMA4_12B_OLLAMA_MODEL = "gemma4:12b"
+    const val GEMMA4_12B_HUGGING_FACE_MODEL = "google/gemma-4-12B"
+    const val GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL = "google/gemma-4-12B-it"
+    const val GEMMA4_MODEL = GEMMA4_12B_OLLAMA_MODEL
     const val OLLAMA_BASE_URL = "http://127.0.0.1:11434"
     const val LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
 
@@ -30,7 +33,17 @@ object LocalModelDefaults {
 
     fun preferredInstalledGemmaModels(models: List<String>): List<String> {
         val normalized = models.mapNotNull(::normalizeModel).distinct()
-        val gemma4Models = normalized.filter(::isGemma4Model)
+        val preferredGemma4Models = listOf(
+            GEMMA4_12B_OLLAMA_MODEL,
+            GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL,
+            GEMMA4_12B_HUGGING_FACE_MODEL
+        )
+        val preferredMatches = preferredGemma4Models.mapNotNull { preferred ->
+            normalized.firstOrNull { it.equals(preferred, ignoreCase = true) }
+        }
+        val gemma4Models = preferredMatches + normalized.filter { model ->
+            isGemma4Model(model) && preferredMatches.none { it.equals(model, ignoreCase = true) }
+        }
         val otherGemmaModels = normalized.filter { isGemmaFamilyModel(it) && !isGemma4Model(it) }
         return gemma4Models + otherGemmaModels
     }

@@ -38,6 +38,9 @@ struct SettingsView: View {
                 .padding(24)
             }
         }
+        .task {
+            await store.refreshDesktopUpdateStatus()
+        }
     }
 
     private var hero: some View {
@@ -411,10 +414,87 @@ struct SettingsView: View {
             title: store.text(.desktopInstaller),
             subtitle: store.text(.desktopInstallerSubtitle)
         ) {
-            valueRow(store.text(.installer), "cotor install / cotor update / cotor delete")
+            HStack(spacing: 10) {
+                updateStatusBadge(store.desktopUpdateStatus)
+                Spacer()
+                Button {
+                    Task { await store.refreshDesktopUpdateStatus() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ShellPalette.text)
+                .background(
+                    RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                        .fill(ShellPalette.panelAlt)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                        .stroke(ShellPalette.border)
+                )
+                .disabled(store.isRefreshingDesktopUpdateStatus)
+                .help(store.language("Check desktop update status", "데스크톱 업데이트 상태 확인"))
+            }
+
+            if let status = store.desktopUpdateStatus {
+                valueRow(store.language("Health", "상태"), status.health.ok ? "ok" : "failed")
+                valueRow(store.language("Backend", "백엔드"), "\(status.backendOwner) / \(status.currentVersion) / \(status.currentBuild)")
+                if let sourceCommit = status.sourceCommit, !sourceCommit.isEmpty {
+                    valueRow(store.language("Source commit", "소스 커밋"), sourceCommit)
+                }
+                valueRow(store.language("Installed app", "설치된 앱"), status.installedAppPath ?? store.language("Not found", "찾을 수 없음"))
+                valueRow(store.language("Brew formula", "Brew formula"), status.brewFormula)
+                valueRow(store.language("Update command", "업데이트 명령"), status.updateCommand)
+                if !status.message.isEmpty {
+                    valueRow(store.language("Update note", "업데이트 메모"), status.message)
+                }
+            } else {
+                valueRow(store.language("Update status", "업데이트 상태"), store.language("Not checked yet", "아직 확인 안 됨"))
+            }
+
+            valueRow(store.text(.installer), "cotor install / cotor update --verify / cotor upgrade --verify / cotor delete")
             valueRow(store.text(.appLocation), "/Applications/Cotor Desktop.app or ~/Applications/Cotor Desktop.app")
             valueRow(store.text(.downloadArchive), "~/Downloads/Cotor-Desktop-macOS.dmg")
         }
+    }
+
+    private func updateStatusBadge(_ status: DesktopUpdateStatusPayload?) -> some View {
+        let text: String
+        let color: Color
+        if store.isRefreshingDesktopUpdateStatus {
+            text = store.language("Checking", "확인 중")
+            color = ShellPalette.muted
+        } else if status?.updateAvailable == true {
+            text = store.language("Update available", "업데이트 있음")
+            color = ShellPalette.warning
+        } else if status?.updateAvailable == false {
+            text = store.language("Up to date", "최신 상태")
+            color = ShellPalette.success
+        } else {
+            text = store.language("Unknown", "확인 필요")
+            color = ShellPalette.muted
+        }
+
+        return HStack(spacing: 7) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(text.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(ShellPalette.text)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .fill(ShellPalette.panelAlt)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .stroke(color.opacity(0.55), lineWidth: 1)
+        )
     }
 
     @ViewBuilder

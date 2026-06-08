@@ -100,8 +100,13 @@ Run `cotor install` after `brew install` to copy `Cotor Desktop.app` into Applic
 Update:
 
 ```bash
-brew upgrade bssm-oss/cotor/cotor
+cotor update --verify
+# or: cotor upgrade --verify
 ```
+
+For packaged installs, `cotor update --verify` upgrades the Homebrew formula,
+copies the bundled desktop app into Applications, verifies codesign, launches
+the installed app, and checks `/health`.
 
 ### Direct DMG Download
 
@@ -150,7 +155,8 @@ After `brew install cotor`, install the packaged desktop app with:
 
 ```bash
 cotor install    # Install bundled app from Homebrew package
-cotor update     # Reinstall bundled app from Homebrew package
+cotor update --verify
+cotor upgrade --verify
 cotor delete     # Remove app
 ```
 
@@ -160,6 +166,8 @@ that starter intentionally falls back to `example-agent` echo mode instead of fa
 If you run `cotor` inside a repo that already contains `./cotor.yaml`, that local config still wins.
 
 From a source checkout, the same commands still rebuild the desktop app locally before installing it.
+The Settings screen shows the current backend owner, build, source commit when
+available, health, installed app path, and whether Homebrew reports an update.
 
 Current desktop model:
 

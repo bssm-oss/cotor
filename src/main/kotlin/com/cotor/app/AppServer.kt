@@ -374,7 +374,8 @@ internal fun Application.cotorAppModule(
     durableResumeCoordinator: DurableResumeCoordinator? = null,
     controlToken: String? = null,
     readOnlyMode: Boolean = false,
-    shutdownHandler: (() -> Unit)? = null
+    shutdownHandler: (() -> Unit)? = null,
+    desktopUpdateStatusProvider: () -> DesktopUpdateStatusResponse = ::desktopUpdateStatusResponse
 ) {
     val ktorJson = Json {
         encodeDefaults = true
@@ -436,6 +437,11 @@ internal fun Application.cotorAppModule(
             get("/health") {
                 if (!requireToken(token)) return@get
                 call.respond(appServerHealthResponse())
+            }
+
+            get("/update-status") {
+                if (!requireToken(token)) return@get
+                call.respond(desktopUpdateStatusProvider())
             }
 
             get("/help-guide") {
@@ -2403,6 +2409,7 @@ internal fun Application.cotorAppModule(
         durableRuntimeService = null,
         durableResumeCoordinator = null,
         controlToken = null,
+        desktopUpdateStatusProvider = ::desktopUpdateStatusResponse,
         shutdownHandler = shutdownHandler
     )
 }
@@ -2422,6 +2429,7 @@ internal fun Application.cotorAppModule(
         durableRuntimeService = null,
         durableResumeCoordinator = null,
         controlToken = null,
+        desktopUpdateStatusProvider = ::desktopUpdateStatusResponse,
         shutdownHandler = shutdownHandler
     )
 }
@@ -2786,7 +2794,7 @@ private fun isBearerTokenMatch(header: String?, expected: String): Boolean {
     return constantTimeEquals(actual, expected)
 }
 
-private fun appServerHealthResponse(): HealthResponse =
+internal fun appServerHealthResponse(): HealthResponse =
     HealthResponse(ok = true, service = "cotor-app-server").copy(
         owner = "cotor-desktop",
         version = CotorProperties.version,

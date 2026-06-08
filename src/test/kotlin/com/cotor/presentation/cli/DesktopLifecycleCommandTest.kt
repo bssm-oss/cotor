@@ -117,6 +117,55 @@ class DesktopLifecycleCommandTest : FunSpec({
         calls.single().second shouldBe DesktopInstallAction.UPDATE
     }
 
+    test("update verify runs installed desktop verification after successful source update") {
+        val root = Paths.get("/tmp/cotor-update-verify-test")
+        val lifecycleCalls = mutableListOf<Pair<Path, String>>()
+        val verificationCalls = mutableListOf<DesktopInstallLayout>()
+        val layout = DesktopInstallLayout(DesktopInstallLayoutKind.SOURCE_CHECKOUT, root)
+        val command = UpdateCommand(
+            scriptRunner = { projectRoot, scriptName ->
+                lifecycleCalls += projectRoot to scriptName
+                DesktopScriptResult(exitCode = 0, output = "updated\n")
+            },
+            packagedActionRunner = { _, _ -> error("should not run packaged flow") },
+            verificationRunner = {
+                verificationCalls += it
+                DesktopScriptResult(exitCode = 0, output = "verified\n")
+            },
+            layoutResolver = { layout },
+            osNameProvider = { "Mac OS X" }
+        )
+
+        val result = command.test("--verify")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "updated"
+        result.output shouldContain "verified"
+        lifecycleCalls shouldBe listOf(root to "update-desktop-app.sh")
+        verificationCalls shouldBe listOf(layout)
+    }
+
+    test("upgrade is a user-facing alias for desktop update") {
+        val root = Paths.get("/tmp/cotor-upgrade-alias-test")
+        val calls = mutableListOf<Pair<Path, String>>()
+        val command = UpgradeCommand(
+            scriptRunner = { projectRoot, scriptName ->
+                calls += projectRoot to scriptName
+                DesktopScriptResult(exitCode = 0, output = "upgraded\n")
+            },
+            packagedActionRunner = { _, _ -> error("should not run packaged flow") },
+            verificationRunner = { DesktopScriptResult(exitCode = 0, output = "") },
+            layoutResolver = { DesktopInstallLayout(DesktopInstallLayoutKind.SOURCE_CHECKOUT, root) },
+            osNameProvider = { "Mac OS X" }
+        )
+
+        val result = command.test("")
+
+        result.statusCode shouldBe 0
+        result.output shouldContain "upgraded"
+        calls shouldBe listOf(root to "update-desktop-app.sh")
+    }
+
     test("runPackagedDesktopAction installs the bundled app into the override root") {
         val packagedRoot = Files.createTempDirectory("cotor-packaged-install")
         val bundle = createPackagedBundle(packagedRoot)
@@ -189,6 +238,22 @@ class DesktopLifecycleCommandTest : FunSpec({
         )
         installRoot.resolve(BUNDLED_DESKTOP_APP_NAME).exists() shouldBe true
         result.output shouldContain "Homebrew package upgraded"
+    }
+
+    test("resolveInstalledDesktopAppPath respects explicit app path and install root") {
+        val installRoot = Files.createTempDirectory("cotor-resolve-installed-app")
+        val appPath = installRoot.resolve(BUNDLED_DESKTOP_APP_NAME)
+        appPath.resolve("Contents").createDirectories()
+
+        resolveInstalledDesktopAppPath(
+            environment = mapOf("COTOR_DESKTOP_APP_PATH" to appPath.toString()),
+            homeDirectoryProvider = { installRoot.resolve("home") }
+        ) shouldBe appPath
+
+        resolveInstalledDesktopAppPath(
+            environment = mapOf("COTOR_DESKTOP_INSTALL_ROOT" to installRoot.toString()),
+            homeDirectoryProvider = { installRoot.resolve("home") }
+        ) shouldBe appPath
     }
 
     test("runDesktopScript times out hanging source lifecycle scripts") {

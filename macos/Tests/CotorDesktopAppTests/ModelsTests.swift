@@ -16,10 +16,10 @@ struct ModelsTests {
     }
 
     @Test
-    func companySidebarDisclosureStateStartsCollapsed() {
+    func companySidebarDisclosureStateShowsNewCompanyDraftByDefault() {
         var state = CompanySidebarDisclosureState()
 
-        #expect(state.isCompanyDraftExpanded == false)
+        #expect(state.isCompanyDraftExpanded == true)
         #expect(state.isAdvancedSettingsExpanded == false)
 
         state.isCompanyDraftExpanded = true
@@ -347,6 +347,43 @@ struct ModelsTests {
 
         #expect(ok)
         #expect(capturedPath == "/prefix/api/app/health")
+    }
+
+    @Test
+    func desktopUpdateStatusPayloadDecodesAndUsesStableRoutePath() throws {
+        let url = try DesktopAPI.makeURL(
+            baseURL: try #require(URL(string: "http://127.0.0.1:8787/prefix")),
+            path: "api/app/update-status"
+        )
+        let status = try JSONDecoder().decode(
+            DesktopUpdateStatusPayload.self,
+            from: Data(
+                """
+                {
+                  "health": {"ok": true, "service": "cotor-app-server", "owner": "cotor-desktop", "version": "1.0.6", "build": "20260608082842"},
+                  "backendOwner": "cotor-desktop",
+                  "currentVersion": "1.0.6",
+                  "currentBuild": "20260608082842",
+                  "sourceCommit": "abc1234",
+                  "installedAppPath": "/Applications/Cotor Desktop.app",
+                  "brewFormula": "bssm-oss/cotor/cotor",
+                  "updateCommand": "cotor update --verify",
+                  "updateAvailable": true,
+                  "latestVersion": null,
+                  "latestCommit": null,
+                  "checkedAtEpochMillis": 1783050000000,
+                  "status": "UPDATE_AVAILABLE",
+                  "message": "A newer Homebrew formula is available."
+                }
+                """.utf8
+            )
+        )
+
+        #expect(url.path == "/prefix/api/app/update-status")
+        #expect(status.updateAvailable == true)
+        #expect(status.backendOwner == "cotor-desktop")
+        #expect(status.health.ok)
+        #expect(status.updateCommand == "cotor update --verify")
     }
 
     @Test

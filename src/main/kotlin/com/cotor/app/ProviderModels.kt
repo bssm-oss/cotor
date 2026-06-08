@@ -1,5 +1,6 @@
 package com.cotor.app
 
+import com.cotor.model.LocalModelDefaults
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -98,8 +99,8 @@ fun directChatProviderCatalog(): List<DirectChatProviderCatalogEntry> = listOf(
         providerId = "ollama",
         displayName = "Ollama (local)",
         iconSystemName = "cpu.fill",
-        defaultModel = "gemma3",
-        defaultBaseUrl = "http://127.0.0.1:11434",
+        defaultModel = LocalModelDefaults.GEMMA4_MODEL,
+        defaultBaseUrl = LocalModelDefaults.OLLAMA_BASE_URL,
         allowsBaseUrl = true,
         supportsModelDiscovery = true
     ),
@@ -108,8 +109,8 @@ fun directChatProviderCatalog(): List<DirectChatProviderCatalogEntry> = listOf(
         providerId = "lm-studio",
         displayName = "LM Studio (local)",
         iconSystemName = "server.rack",
-        defaultModel = "model-name",
-        defaultBaseUrl = "http://127.0.0.1:1234",
+        defaultModel = LocalModelDefaults.GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL,
+        defaultBaseUrl = LocalModelDefaults.LM_STUDIO_BASE_URL.removeSuffix("/v1"),
         allowsBaseUrl = true
     ),
     DirectChatProviderCatalogEntry(

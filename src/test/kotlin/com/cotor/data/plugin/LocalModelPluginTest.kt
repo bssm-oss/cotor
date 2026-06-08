@@ -29,7 +29,7 @@ class LocalModelPluginTest : FunSpec({
                 context = localModelContext(
                     provider = "ollama",
                     baseUrl = "http://127.0.0.1:${server.address.port}",
-                    model = "gemma4:e2b"
+                    model = "gemma4:12b"
                 ),
                 processManager = unusedProcessManager()
             )
@@ -50,8 +50,8 @@ class LocalModelPluginTest : FunSpec({
                 )
                 "/api/chat" -> {
                     val request = exchange.requestBody.bufferedReader().readText()
-                    if (request.contains("\"model\":\"gemma4:e2b\"")) {
-                        exchange.respondJson("""{"error":"model 'gemma4:e2b' not found"}""", status = 404)
+                    if (request.contains("\"model\":\"gemma4:12b\"")) {
+                        exchange.respondJson("""{"error":"model 'gemma4:12b' not found"}""", status = 404)
                     } else {
                         request.contains("\"model\":\"gemma3:4b\"") shouldBe true
                         exchange.respondJson("""{"message":{"content":"fallback gemma ok"}}""")
@@ -65,7 +65,7 @@ class LocalModelPluginTest : FunSpec({
                 context = localModelContext(
                     provider = "ollama",
                     baseUrl = "http://127.0.0.1:${server.address.port}",
-                    model = "gemma4:e2b"
+                    model = "gemma4:12b"
                 ),
                 processManager = unusedProcessManager()
             )
@@ -81,10 +81,10 @@ class LocalModelPluginTest : FunSpec({
             when (exchange.requestURI.path) {
                 "/api/tags" -> exchange.respondJson(
                     """
-                    {"models":[{"name":"gemma3:4b","remote_host":"https://ollama.com:443"},{"name":"gemma4:e2b:cloud"}]}
+                    {"models":[{"name":"gemma3:4b","remote_host":"https://ollama.com:443"},{"name":"gemma4:12b:cloud"}]}
                     """.trimIndent()
                 )
-                "/api/chat" -> exchange.respondJson("""{"error":"model 'gemma4:e2b' not found"}""", status = 404)
+                "/api/chat" -> exchange.respondJson("""{"error":"model 'gemma4:12b' not found"}""", status = 404)
                 else -> exchange.sendResponseHeaders(404, -1)
             }
         }
@@ -94,13 +94,13 @@ class LocalModelPluginTest : FunSpec({
                     context = localModelContext(
                         provider = "ollama",
                         baseUrl = "http://127.0.0.1:${server.address.port}",
-                        model = "gemma4:e2b"
+                        model = "gemma4:12b"
                     ),
                     processManager = unusedProcessManager()
                 )
             }
 
-            error.message.orEmpty() shouldBe "Local model request failed (404): {\"error\":\"model 'gemma4:e2b' not found\"}"
+            error.message.orEmpty() shouldBe "Local model request failed (404): {\"error\":\"model 'gemma4:12b' not found\"}"
         } finally {
             server.stop(0)
         }
@@ -113,7 +113,7 @@ class LocalModelPluginTest : FunSpec({
                 context = localModelContext(
                     provider = "lmstudio",
                     baseUrl = "http://127.0.0.1:${server.address.port}/v1",
-                    model = "gemma4:e2b"
+                    model = "gemma4:12b"
                 ),
                 processManager = unusedProcessManager()
             )
@@ -136,7 +136,7 @@ class LocalModelPluginTest : FunSpec({
                 context = localModelContext(
                     provider = "ollama",
                     baseUrl = "http://127.0.0.1:11434",
-                    model = "gemma4:e2b"
+                    model = "gemma4:12b"
                 ),
                 processManager = unusedProcessManager()
             )
@@ -162,7 +162,7 @@ class LocalModelPluginTest : FunSpec({
                     context = localModelContext(
                         provider = "ollama",
                         baseUrl = "http://127.0.0.1:11434",
-                        model = "gemma4:e2b"
+                        model = "gemma4:12b"
                     ),
                     processManager = unusedProcessManager()
                 )
@@ -189,7 +189,7 @@ class LocalModelPluginTest : FunSpec({
                     context = localModelContext(
                         provider = "ollama",
                         baseUrl = "http://127.0.0.1:${server.address.port}",
-                        model = "gemma4:e2b"
+                        model = "gemma4:12b"
                     ),
                     processManager = unusedProcessManager()
                 )
@@ -224,7 +224,7 @@ class LocalModelPluginTest : FunSpec({
                         context = localModelContext(
                             provider = "ollama",
                             baseUrl = "http://127.0.0.1:${server.address.port}",
-                            model = "gemma4:e2b"
+                            model = "gemma4:12b"
                         ),
                         processManager = unusedProcessManager()
                     )
