@@ -98,8 +98,13 @@ JDK 17과 CLI가 함께 설치되며, 번들된 데스크톱 앱도 포함됩니
 업데이트:
 
 ```bash
-brew upgrade bssm-oss/cotor/cotor
+cotor update --verify
+# 또는: cotor upgrade --verify
 ```
+
+packaged install에서는 `cotor update --verify`가 Homebrew formula를 업그레이드하고,
+번들된 데스크톱 앱을 Applications에 복사한 뒤 codesign, 설치 앱 실행, `/health`
+확인을 이어서 수행합니다.
 
 ### DMG 직접 다운로드
 
@@ -155,7 +160,8 @@ open "/Applications/Cotor Desktop.app"
 
 ```bash
 cotor install   # 처음 설치
-cotor update    # 업데이트
+cotor update --verify
+cotor upgrade --verify
 cotor delete    # 삭제
 ```
 
@@ -163,6 +169,7 @@ cotor delete    # 삭제
 - 소스 설치: `cotor install`이 로컬에서 빌드 후 설치
 - `cotor install`은 정확한 설치 경로를 출력
 - `/Applications`에 쓸 수 없으면 `~/Applications` 사용
+- 설정 화면에서 현재 backend owner, build, 가능한 경우 source commit, health, 설치 앱 경로, Homebrew update 여부를 확인할 수 있습니다.
 
 현재 데스크톱 셸 구조:
 

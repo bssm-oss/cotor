@@ -111,6 +111,8 @@ final class DesktopStore: ObservableObject {
     @Published var codexOAuthAuthenticated = false
     @Published var codexOAuthHomePath = ""
     @Published var codexOAuthStatusMessage: String?
+    @Published var desktopUpdateStatus: DesktopUpdateStatusPayload?
+    @Published var isRefreshingDesktopUpdateStatus = false
     @Published var companyLinearSyncEnabled = false
     @Published var companyLinearEndpoint = ""
     @Published var companyLinearTeamID = ""
@@ -539,6 +541,21 @@ final class DesktopStore: ObservableObject {
         self.theme = theme
         UserDefaults.standard.set(theme.rawValue, forKey: Self.themeDefaultsKey)
         objectWillChange.send()
+    }
+
+    func refreshDesktopUpdateStatus() async {
+        guard !isRefreshingDesktopUpdateStatus else { return }
+        isRefreshingDesktopUpdateStatus = true
+        defer { isRefreshingDesktopUpdateStatus = false }
+        do {
+            desktopUpdateStatus = try await runWithEmbeddedBackendRecovery {
+                try await api.desktopUpdateStatus()
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            AppLogger.warning("Desktop update status refresh failed: \(error.localizedDescription)")
+        }
     }
 
     func setShellMode(_ mode: AppShellMode) {

@@ -9,6 +9,8 @@ Thank you for contributing to Cotor.
 - [ ] Describe **what changed** and **why**.
 - [ ] Run relevant tests or checks locally.
 - [ ] Keep docs aligned with behavior changes.
+- [ ] For desktop install/update changes, run `cotor update --verify` or `shell/update-desktop-app.sh --verify` and include the installed-app smoke result.
+- [ ] For self-merge delivery, prefer `shell/cotor-merge-pr.sh --wait --delete-branch <pr>` so the base branch is pulled in the worktree that owns it.
 - [ ] If source layout, route payloads, public import paths, or configuration paths changed, update `docs/ARCHITECTURE.md`, `docs/modules/README.md`, and add a migration note or compatibility statement.
 - [ ] Run `graphify update .` after source or documentation changes; run `graphify cluster-only .` after large boundary changes.
 - [ ] AI agents follow `AGENTS.md` when changing code, docs, tests, or workflows.
@@ -52,6 +54,8 @@ Cotor에 기여해 주셔서 감사합니다.
 - [ ] **무엇이** 변경되었는지와 **왜** 변경했는지 설명합니다.
 - [ ] 관련 테스트/점검을 로컬에서 실행합니다.
 - [ ] 동작 변경 시 문서도 함께 맞춰 갱신합니다.
+- [ ] 데스크톱 설치/업데이트를 바꿨다면 `cotor update --verify` 또는 `shell/update-desktop-app.sh --verify`를 실행하고 설치 앱 smoke 결과를 남깁니다.
+- [ ] 자체 머지 전달에는 `shell/cotor-merge-pr.sh --wait --delete-branch <pr>`를 우선 사용해서 base branch가 해당 branch를 소유한 worktree에서 pull되게 합니다.
 - [ ] 소스 구조, route payload, public import path, config path를 바꿨다면 `docs/ARCHITECTURE.md`, `docs/modules/README.md`를 갱신하고 migration note 또는 compatibility statement를 남깁니다.
 - [ ] source 또는 documentation 변경 후 `graphify update .`를 실행합니다. 큰 경계 변경 뒤에는 `graphify cluster-only .`도 실행합니다.
 - [ ] AI 에이전트는 코드, 문서, 테스트, 워크플로 변경 시 `AGENTS.md`를 따릅니다.

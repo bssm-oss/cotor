@@ -227,6 +227,10 @@ struct DesktopAPI {
         return payload.status?.lowercased() == "ok"
     }
 
+    func desktopUpdateStatus() async throws -> DesktopUpdateStatusPayload {
+        try await get(path: "api/app/update-status")
+    }
+
     func helpGuide(languageCode: String) async throws -> HelpGuidePayload {
         try await get(path: "api/app/help-guide", query: [URLQueryItem(name: "lang", value: languageCode)])
     }

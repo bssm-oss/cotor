@@ -386,16 +386,16 @@ struct DesktopStoreTests {
                 availableAgentModels: [
                     "opencode": ["opencode/big-pickle", "opencode/deepseek-v4-flash-free"],
                     "codex": ["openai/gpt-5.5"],
-                    "gemma4": ["gemma4:e2b"],
-                    "ollama": ["gemma4:e2b"],
-                    "lmstudio": ["gemma4:e2b"]
+                    "gemma4": ["gemma4:12b"],
+                    "ollama": ["gemma4:12b"],
+                    "lmstudio": ["gemma4:12b"]
                 ],
                 defaultAgentModels: [
                     "opencode": "opencode/deepseek-v4-flash-free",
                     "codex": "openai/gpt-5.5",
-                    "gemma4": "gemma4:e2b",
-                    "ollama": "gemma4:e2b",
-                    "lmstudio": "gemma4:e2b"
+                    "gemma4": "gemma4:12b",
+                    "ollama": "gemma4:12b",
+                    "lmstudio": "gemma4:12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -432,10 +432,10 @@ struct DesktopStoreTests {
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
 
         store.selectNewCompanyAgentCli("gemma4")
-        #expect(store.newCompanyAgentModel == "gemma4:e2b")
+        #expect(store.newCompanyAgentModel == "gemma4:12b")
 
         store.selectNewCompanyAgentCli("lmstudio")
-        #expect(store.newCompanyAgentModel == "gemma4:e2b")
+        #expect(store.newCompanyAgentModel == "gemma4:12b")
     }
 
     @Test
@@ -509,8 +509,8 @@ struct DesktopStoreTests {
                 ],
                 defaultAgentModels: [
                     "codex": "openai/gpt-5.5",
-                    "gemma4": "gemma4:e2b",
-                    "lmstudio": "gemma4:e2b"
+                    "gemma4": "gemma4:12b",
+                    "lmstudio": "gemma4:12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -567,7 +567,7 @@ struct DesktopStoreTests {
                     "gemma4": ["google/gemma-4-31b-it"]
                 ],
                 defaultAgentModels: [
-                    "gemma4": "gemma4:e2b"
+                    "gemma4": "gemma4:12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,

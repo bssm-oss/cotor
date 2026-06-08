@@ -555,7 +555,7 @@ class OpenCodePluginTest : FunSpec({
     test("passes local Ollama Gemma model to opencode without cloud fallback") {
         val server = localRoutingServer { exchange ->
             if (exchange.requestURI.path == "/api/tags") {
-                exchange.respondJson("""{"models":[{"name":"gemma3:4b"},{"name":"gemma3:4b:cloud","remote_host":"https://ollama.com:443"}]}""")
+                exchange.respondJson("""{"models":[{"name":"gemma4:12b"},{"name":"gemma4:12b:cloud","remote_host":"https://ollama.com:443"}]}""")
             } else {
                 exchange.sendResponseHeaders(404, -1)
             }
@@ -621,7 +621,7 @@ class OpenCodePluginTest : FunSpec({
     test("surfaces local Ollama Gemma tool-call incompatibility without fallback") {
         val server = localRoutingServer { exchange ->
             if (exchange.requestURI.path == "/api/tags") {
-                exchange.respondJson("""{"models":[{"name":"gemma3:4b"}]}""")
+                exchange.respondJson("""{"models":[{"name":"gemma4:12b"}]}""")
             } else {
                 exchange.sendResponseHeaders(404, -1)
             }
@@ -640,7 +640,7 @@ class OpenCodePluginTest : FunSpec({
                 return ProcessResult(
                     exitCode = 1,
                     stdout = """
-                        {"type":"error","error":{"name":"APIError","data":{"message":"registry.ollama.ai/library/gemma3:4b does not support tools","statusCode":400}}}
+                        {"type":"error","error":{"name":"APIError","data":{"message":"registry.ollama.ai/library/gemma4:12b does not support tools","statusCode":400}}}
                     """.trimIndent(),
                     stderr = "",
                     isSuccess = false
@@ -695,7 +695,7 @@ class OpenCodePluginTest : FunSpec({
     test("does not fall back to cloud or free OpenCode models when local Ollama Gemma is missing") {
         val server = localRoutingServer { exchange ->
             if (exchange.requestURI.path == "/api/tags") {
-                exchange.respondJson("""{"models":[{"name":"gemma3:4b","remote_host":"https://ollama.com:443"},{"name":"gemma3:4b:cloud"}]}""")
+                exchange.respondJson("""{"models":[{"name":"gemma4:12b","remote_host":"https://ollama.com:443"},{"name":"gemma4:12b:cloud"}]}""")
             } else {
                 exchange.sendResponseHeaders(404, -1)
             }
@@ -714,7 +714,7 @@ class OpenCodePluginTest : FunSpec({
                 return when (command) {
                     listOf("opencode", "models") -> ProcessResult(
                         exitCode = 0,
-                        stdout = "opencode/minimax-m2.5-free\nollama/gemma3:4b:cloud\n",
+                        stdout = "opencode/minimax-m2.5-free\nollama/gemma4:12b:cloud\n",
                         stderr = "",
                         isSuccess = true
                     )
@@ -743,7 +743,7 @@ class OpenCodePluginTest : FunSpec({
                 )
             }
 
-            error.message shouldBe "LOCAL_GEMMA_MODEL_MISSING: local Ollama model gemma3:4b was not discovered."
+            error.message shouldBe "LOCAL_GEMMA_MODEL_MISSING: local Ollama model gemma4:12b was not discovered."
             runInvoked shouldBe false
         } finally {
             server.stop(0)

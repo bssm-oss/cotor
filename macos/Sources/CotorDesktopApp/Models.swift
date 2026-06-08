@@ -1592,6 +1592,31 @@ struct DesktopLifecycleShutdownPayload: Codable, Equatable {
     let tuiSessionsShutdown: Bool
 }
 
+struct DesktopUpdateStatusPayload: Codable, Hashable {
+    let health: HealthPayload
+    let backendOwner: String
+    let currentVersion: String
+    let currentBuild: String
+    let sourceCommit: String?
+    let installedAppPath: String?
+    let brewFormula: String
+    let updateCommand: String
+    let updateAvailable: Bool?
+    let latestVersion: String?
+    let latestCommit: String?
+    let checkedAtEpochMillis: Int64
+    let status: String
+    let message: String
+}
+
+struct HealthPayload: Codable, Hashable {
+    let ok: Bool
+    let service: String
+    let owner: String
+    let version: String
+    let build: String
+}
+
 extension DashboardPayload {
     static let empty = DashboardPayload(
         repositories: [],

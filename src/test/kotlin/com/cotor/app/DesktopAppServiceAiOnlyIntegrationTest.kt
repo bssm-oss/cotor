@@ -324,6 +324,13 @@ class DesktopAppServiceAiOnlyIntegrationTest : FunSpec({
                 qaIssue.status shouldBe IssueStatus.PLANNED
                 qaIssue.pullRequestNumber shouldBe 42
                 qaIssue.pullRequestUrl shouldBe "https://github.com/example/cotor/pull/42"
+
+                val executionDetail = service.issueExecutionDetails(issue.id).single()
+                executionDetail.agentCli shouldBe "opencode"
+                executionDetail.branchName shouldBe settledIssue.branchName
+                executionDetail.pullRequestUrl shouldBe "https://github.com/example/cotor/pull/42"
+                executionDetail.publishSummary shouldContain "pr state: OPEN"
+                executionDetail.assignedPrompt shouldContain "Produce code that should open a review queue item."
             } finally {
                 service.shutdown()
             }

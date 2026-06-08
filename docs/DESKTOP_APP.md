@@ -12,6 +12,8 @@ cotor install         # Copies Cotor Desktop.app into Applications
 
 The Homebrew package carries a bundled `Cotor Desktop.app` asset. `cotor install`
 and `cotor update` reuse that packaged bundle instead of rebuilding from the Homebrew prefix.
+`cotor update --verify` and `cotor upgrade --verify` also run the installed-app
+smoke check: codesign verification, installed app launch, and `/health`.
 When `cotor` launches interactive mode with no local config in packaged installs, it writes the
 starter config under `~/.cotor/interactive/default/cotor.yaml`.
 See `docs/HOMEBREW_INSTALL.md` for the full packaged-install and first-run behavior.
@@ -26,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/bssm-oss/cotor/master/shell/brew-in
 
 ```bash
 cotor install    # Build + install to /Applications
-cotor update     # Rebuild + reinstall
+cotor update --verify
 cotor delete     # Remove app
 ```
 
@@ -98,20 +100,26 @@ Closing the last desktop window quits the app and shuts down the bundled backend
 You can update or remove the installed bundle from the CLI:
 
 ```bash
-cotor update
+cotor update --verify
+cotor upgrade --verify
 cotor delete
 ```
 
 `cotor delete` removes the standard `/Applications`, `~/Applications`, and download artifacts. When `COTOR_DESKTOP_INSTALL_ROOT` is set, it also removes `Cotor Desktop.app` from that override install root.
+For CI or local source-checkout verification, run `shell/test-installed-desktop-app.sh`
+after `shell/update-desktop-app.sh --verify` to exercise the same installed app,
+codesign, launch, and `/health` path.
 
 Behavior depends on the install layout:
 
 - Homebrew / packaged install
   - `cotor install` and `cotor update` copy the packaged desktop bundle from the install root
+  - `cotor update --verify` upgrades the Homebrew formula before copying the bundled app and verifying the installed app
   - no Gradle or Swift rebuild happens at runtime
   - browser skills use prebundled Playwright when the bundle was built with `COTOR_PREBUNDLE_PLAYWRIGHT=1`; runtime `npm install` is disabled unless `COTOR_BROWSER_SKILL_ALLOW_NPM_INSTALL=1` is explicitly set
 - Source checkout
   - `cotor install` and `cotor update` rebuild the desktop bundle locally, then install it
+  - `shell/update-desktop-app.sh --verify` rebuilds, reinstalls, verifies codesign, launches the installed app, and checks `/health`
   - source builds can prebundle Playwright with `COTOR_PREBUNDLE_PLAYWRIGHT=1` or point the backend at an existing dependency with `COTOR_BROWSER_SKILL_NODE_PATH`
 
 ## Current Shell Model
@@ -173,6 +181,7 @@ The current macOS shell has two top-level modes.
 Current company-first routes:
 
 - `GET /api/app/metrics`
+- `GET /api/app/update-status`
 - `GET /api/app/companies`
 - `POST /api/app/companies`
 - `GET /api/app/companies/{companyId}`

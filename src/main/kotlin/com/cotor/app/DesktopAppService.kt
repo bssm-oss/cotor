@@ -6125,6 +6125,7 @@ class DesktopAppService(
                 companyId = companyId,
                 includeAllCompanies = referencesAllCompanies(normalized),
                 requestedModel = modelUpdate.requestedModel,
+                appliedAgentCli = modelUpdate.appliedAgentCli,
                 appliedModel = modelUpdate.appliedModel
             )
             summary = buildOperatorCompanySummary(companyId)
@@ -6631,8 +6632,11 @@ class DesktopAppService(
             "planner-repair" -> 45_000L
             else -> 60_000L
         }
-        val localGemmaModel = discoverGemma4ModelsCached().firstOrNull()
-        if (localGemmaModel != null) {
+        val discoveredLocalGemmaModel = discoverGemma4ModelsCached().firstOrNull()
+        val shouldTryLocalGemma = discoveredLocalGemmaModel != null ||
+            commandAvailability(resolveBuiltinExecutableAlias("ollama"))
+        if (shouldTryLocalGemma) {
+            val localGemmaModel = discoveredLocalGemmaModel ?: LocalModelDefaults.GEMMA4_MODEL
             val agent = AgentConfig(
                 name = "operator-chat-$purpose",
                 pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
@@ -6643,20 +6647,18 @@ class DesktopAppService(
                 ),
                 timeout = timeoutMs
             )
-            val workingDirectory = stateStore.appHome().resolve("operator-chat-llm").also { Files.createDirectories(it) }
-            val result = agentExecutor.executeAgent(
-                agent = agent,
-                input = prompt,
-                metadata = AgentExecutionMetadata(
-                    agentId = "company-operator",
-                    workingDirectory = workingDirectory
+            try {
+                return executeOperatorChatAgent(
+                    agent = agent,
+                    prompt = prompt,
+                    failureMessage = "operator local model failed",
+                    emptyMessage = "operator local model returned empty output"
                 )
-            )
-            if (!result.isSuccess) {
-                throw IllegalStateException(result.error ?: "operator local model failed")
-            }
-            return result.output?.trim().orEmpty().ifBlank {
-                throw IllegalStateException("operator local model returned empty output")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (ignored: Throwable) {
+                // Fall back to the company's configured execution model when Gemma 4 12B
+                // is not installed yet or the local server is temporarily unavailable.
             }
         }
         val requestedModel = OpenCodeDefaults.normalizeModel(selected.model)
@@ -6680,6 +6682,20 @@ class DesktopAppService(
                 timeout = timeoutMs
             )
         }
+        return executeOperatorChatAgent(
+            agent = agent,
+            prompt = prompt,
+            failureMessage = "operator LLM failed",
+            emptyMessage = "operator LLM returned empty output"
+        )
+    }
+
+    private suspend fun executeOperatorChatAgent(
+        agent: AgentConfig,
+        prompt: String,
+        failureMessage: String,
+        emptyMessage: String
+    ): String {
         val workingDirectory = stateStore.appHome().resolve("operator-chat-llm").also { Files.createDirectories(it) }
         val result = agentExecutor.executeAgent(
             agent = agent,
@@ -6690,10 +6706,10 @@ class DesktopAppService(
             )
         )
         if (!result.isSuccess) {
-            throw IllegalStateException(result.error ?: "operator LLM failed")
+            throw IllegalStateException(result.error ?: failureMessage)
         }
         return result.output?.trim().orEmpty().ifBlank {
-            throw IllegalStateException("operator LLM returned empty output")
+            throw IllegalStateException(emptyMessage)
         }
     }
 
@@ -6719,8 +6735,8 @@ class DesktopAppService(
             appendLine("""JSON: {"reply":"상태를 확인해볼게요.","toolCalls":[{"tool":"inspect_runtime","reason":"User asked whether agents/runtime are working.","args":{}}],"answerSourceHints":["company-summary"]}""")
             appendLine("""User: 막힌 일 왜 그래?""")
             appendLine("""JSON: {"reply":"막힌 이슈를 확인해볼게요.","toolCalls":[{"tool":"inspect_blocked","reason":"User asked about blocked work.","args":{}}],"answerSourceHints":["issue"]}""")
-            appendLine("""User: opencode/deepseek-v4-flash-free로 바꿔""")
-            appendLine("""JSON: {"reply":"모델 변경을 적용해볼게요.","toolCalls":[{"tool":"update_agent_models","reason":"User requested model update.","args":{"model":"opencode/deepseek-v4-flash-free"}}],"answerSourceHints":["agent-models"]}""")
+            appendLine("""User: gemma4 12b로 바꿔""")
+            appendLine("""JSON: {"reply":"Gemma 4 12B 모델 변경을 적용해볼게요.","toolCalls":[{"tool":"update_agent_models","reason":"User requested Gemma 4 12B.","args":{"model":"gemma4:12b"}}],"answerSourceHints":["agent-models"]}""")
             appendLine("""User: 브라우저로 http://localhost:3000 확인해줘""")
             appendLine("""JSON: {"reply":"브라우저 스킬로 확인해볼게요.","toolCalls":[{"tool":"run_skill","reason":"User asked for browser evidence.","args":{"skill":"browser-smoke","url":"http://localhost:3000"}}],"answerSourceHints":["skill-run"]}""")
             appendLine("""User: 리포 구조 알려줘""")
@@ -6753,13 +6769,18 @@ class DesktopAppService(
                     ?: userMessage
                 val modelUpdate = resolveOperatorModelUpdate(requested)
                     ?: resolveOperatorModelUpdate("opencode $requested model")
-                    ?: OperatorModelUpdate(requestedModel = requested, appliedModel = OpenCodeDefaults.DEFAULT_MODEL)
+                    ?: OperatorModelUpdate(
+                        requestedModel = requested,
+                        appliedAgentCli = "opencode",
+                        appliedModel = OpenCodeDefaults.DEFAULT_MODEL
+                    )
                 val includeAllCompanies = toolCall.args["includeAllCompanies"]?.toBooleanStrictOrNull()
                     ?: referencesAllCompanies(userMessage.lowercase())
                 val action = updateOperatorAgentModels(
                     companyId = companyId,
                     includeAllCompanies = includeAllCompanies,
                     requestedModel = modelUpdate.requestedModel,
+                    appliedAgentCli = modelUpdate.appliedAgentCli,
                     appliedModel = modelUpdate.appliedModel
                 )
                 OperatorChatToolExecution(
@@ -7655,6 +7676,7 @@ class DesktopAppService(
 
     private data class OperatorModelUpdate(
         val requestedModel: String,
+        val appliedAgentCli: String,
         val appliedModel: String
     )
 
@@ -7662,6 +7684,7 @@ class DesktopAppService(
         companyId: String,
         includeAllCompanies: Boolean,
         requestedModel: String,
+        appliedAgentCli: String,
         appliedModel: String
     ): OperatorCommandAction = stateMutex.withLock {
         val state = stateStore.load()
@@ -7684,7 +7707,7 @@ class DesktopAppService(
         val nextDefinitions = state.companyAgentDefinitions.map { definition ->
             if (definition.id in updatedDefinitionIds && definition.companyId in targetCompanyIds) {
                 definition.copy(
-                    agentCli = "opencode",
+                    agentCli = appliedAgentCli,
                     model = appliedModel,
                     updatedAt = now
                 )
@@ -7715,7 +7738,7 @@ class DesktopAppService(
         OperatorCommandAction(
             type = "agent-model-update",
             title = "Agent models updated",
-            detail = "${targetDefinitions.size} agent(s) were moved to opencode with $appliedModel across ${targetCompanies.size} company scope(s). Requested model: $requestedModel. Applied model: $appliedModel.",
+            detail = "${targetDefinitions.size} agent(s) were moved to $appliedAgentCli with $appliedModel across ${targetCompanies.size} company scope(s). Requested model: $requestedModel. Applied model: $appliedModel.",
             status = "DONE"
         )
     }
@@ -8319,9 +8342,33 @@ class DesktopAppService(
     private fun resolveOperatorModelUpdate(rawText: String): OperatorModelUpdate? {
         val text = rawText.lowercase()
         val mentionsOpenCode = text.contains("opencode")
+        val mentionsGemma = containsAny(text, "gemma", "젬마")
         val mentionsModelChange =
-            containsAny(text, "model", "모델", "바꿔", "변경", "change", "set", "update", "deepseek", "nemotron", "free", "무료")
-        if (!mentionsOpenCode || !mentionsModelChange) {
+            containsAny(text, "model", "모델", "바꿔", "변경", "change", "set", "update", "deepseek", "nemotron", "free", "무료", "12b")
+        if (!mentionsModelChange) {
+            return null
+        }
+        if (mentionsGemma) {
+            Regex("""\b(?:gemma4:[a-z0-9._:-]+|google/gemma-4-[a-z0-9._:-]+)\b""")
+                .find(text)
+                ?.value
+                ?.let { explicit ->
+                    val normalized = LocalModelDefaults.normalizeModel(explicit)
+                    if (normalized?.let(LocalModelDefaults::isGemma4Model) == true) {
+                        return OperatorModelUpdate(
+                            requestedModel = explicit,
+                            appliedAgentCli = "gemma4",
+                            appliedModel = normalized
+                        )
+                    }
+                }
+            return OperatorModelUpdate(
+                requestedModel = "gemma4 12b",
+                appliedAgentCli = "gemma4",
+                appliedModel = LocalModelDefaults.GEMMA4_MODEL
+            )
+        }
+        if (!mentionsOpenCode) {
             return null
         }
 
@@ -8331,13 +8378,18 @@ class DesktopAppService(
             ?.let { explicit ->
                 val normalized = OpenCodeDefaults.normalizeModel(explicit)
                 if (normalized?.let(OpenCodeDefaults::isSelectableModel) == true) {
-                    return OperatorModelUpdate(requestedModel = explicit, appliedModel = normalized)
+                    return OperatorModelUpdate(
+                        requestedModel = explicit,
+                        appliedAgentCli = "opencode",
+                        appliedModel = normalized
+                    )
                 }
             }
 
         if (text.contains("deepseek")) {
             return OperatorModelUpdate(
                 requestedModel = "opencode deepseek",
+                appliedAgentCli = "opencode",
                 appliedModel = OpenCodeDefaults.DEEPSEEK_FLASH_MODEL
             )
         }
@@ -8345,12 +8397,14 @@ class DesktopAppService(
         if (containsAny(text, "nemotron", "free", "무료")) {
             return OperatorModelUpdate(
                 requestedModel = "opencode free",
+                appliedAgentCli = "opencode",
                 appliedModel = OpenCodeDefaults.DEFAULT_MODEL
             )
         }
 
         return OperatorModelUpdate(
             requestedModel = "opencode default",
+            appliedAgentCli = "opencode",
             appliedModel = OpenCodeDefaults.DEFAULT_MODEL
         )
     }

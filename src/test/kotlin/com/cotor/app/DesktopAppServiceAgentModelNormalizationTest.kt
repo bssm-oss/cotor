@@ -101,11 +101,11 @@ class DesktopAppServiceAgentModelNormalizationTest : FunSpec({
             companyId = company.id,
             agentId = builder.id,
             agentCli = "gemma4",
-            model = "gemma4:e2b"
+            model = "gemma4:12b"
         )
 
         updated.agentCli shouldBe "gemma4"
-        updated.model shouldBe "gemma4:e2b"
+        updated.model shouldBe "gemma4:12b"
     }
 })
 

@@ -1,12 +1,12 @@
-# Graph Report - cotor-qa-gradle-coverage-20260604  (2026-06-04)
+# Graph Report - cotor  (2026-06-08)
 
 ## Corpus Check
-- 394 files · ~1,499,347 words
+- 403 files · ~747,227 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5189 nodes · 7146 edges · 329 communities detected
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 917 edges (avg confidence: 0.8)
+- 5291 nodes · 7392 edges · 329 communities detected
+- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 997 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -52,7 +52,7 @@
 - [[_COMMUNITY_Community 39|Community 39]]
 - [[_COMMUNITY_Community 40|Community 40]]
 - [[_COMMUNITY_Community 41|Community 41]]
-- [[_COMMUNITY_Community 42|Community 42]]
+- [[_COMMUNITY_Community 43|Community 43]]
 - [[_COMMUNITY_Community 44|Community 44]]
 - [[_COMMUNITY_Community 45|Community 45]]
 - [[_COMMUNITY_Community 46|Community 46]]
@@ -168,7 +168,7 @@
 - [[_COMMUNITY_Community 156|Community 156]]
 - [[_COMMUNITY_Community 157|Community 157]]
 - [[_COMMUNITY_Community 158|Community 158]]
-- [[_COMMUNITY_Community 159|Community 159]]
+- [[_COMMUNITY_Community 160|Community 160]]
 - [[_COMMUNITY_Community 161|Community 161]]
 - [[_COMMUNITY_Community 162|Community 162]]
 - [[_COMMUNITY_Community 163|Community 163]]
@@ -181,7 +181,6 @@
 - [[_COMMUNITY_Community 170|Community 170]]
 - [[_COMMUNITY_Community 171|Community 171]]
 - [[_COMMUNITY_Community 172|Community 172]]
-- [[_COMMUNITY_Community 173|Community 173]]
 - [[_COMMUNITY_Community 174|Community 174]]
 - [[_COMMUNITY_Community 175|Community 175]]
 - [[_COMMUNITY_Community 176|Community 176]]
@@ -209,11 +208,11 @@
 - [[_COMMUNITY_Community 198|Community 198]]
 - [[_COMMUNITY_Community 199|Community 199]]
 - [[_COMMUNITY_Community 200|Community 200]]
+- [[_COMMUNITY_Community 201|Community 201]]
 - [[_COMMUNITY_Community 202|Community 202]]
 - [[_COMMUNITY_Community 203|Community 203]]
 - [[_COMMUNITY_Community 204|Community 204]]
 - [[_COMMUNITY_Community 205|Community 205]]
-- [[_COMMUNITY_Community 206|Community 206]]
 - [[_COMMUNITY_Community 207|Community 207]]
 - [[_COMMUNITY_Community 208|Community 208]]
 - [[_COMMUNITY_Community 209|Community 209]]
@@ -336,21 +335,22 @@
 - [[_COMMUNITY_Community 328|Community 328]]
 - [[_COMMUNITY_Community 329|Community 329]]
 - [[_COMMUNITY_Community 330|Community 330]]
-- [[_COMMUNITY_Community 333|Community 333]]
-- [[_COMMUNITY_Community 336|Community 336]]
+- [[_COMMUNITY_Community 331|Community 331]]
+- [[_COMMUNITY_Community 334|Community 334]]
 - [[_COMMUNITY_Community 337|Community 337]]
+- [[_COMMUNITY_Community 338|Community 338]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `DesktopStore` - 260 edges
+1. `DesktopStore` - 261 edges
 2. `DesktopTextKey` - 128 edges
-3. `DesktopAPI` - 114 edges
+3. `DesktopAPI` - 115 edges
 4. `CodingKeys` - 106 edges
 5. `GitWorkspaceService` - 79 edges
 6. `DesktopStateStore` - 77 edges
 7. `DesktopStoreTests` - 71 edges
-8. `language` - 60 edges
-9. `Data` - 36 edges
-10. `ModelsTests` - 35 edges
+8. `language` - 61 edges
+9. `Data` - 38 edges
+10. `ModelsTests` - 36 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `makeFallbackIcon()` --calls--> `Line`  [INFERRED]
@@ -361,8 +361,8 @@
   macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/UserFacingTextFormatters.swift
 - `language` --calls--> `localizedSourceKind()`  [INFERRED]
   macos/Sources/CotorDesktopApp/Localization.swift → macos/Sources/CotorDesktopApp/UserFacingTextFormatters.swift
-- `sceneState()` --calls--> `PixelOfficeLayout`  [INFERRED]
-  macos/Tests/CotorDesktopAppTests/MeetingRoomProjectionTests.swift → macos/Sources/CotorDesktopApp/MeetingRoomScene.swift
+- `N까지의 모든 소수를 찾는 함수 (에라토스테네스의 체 알고리즘 사용)      :param n: 소수를 찾을 범위의 상한값 (n > 1)` --rationale_for--> `find_primes()`  [EXTRACTED]
+  test-gemini/test/results/primes.py → test/results/primes.py
 
 ## Communities
 
@@ -372,55 +372,55 @@ Nodes (59): BrowserTarget, CachedAgentModels, CachedPullRequestMetadata, CeoChat
 
 ### Community 1 - "Community 1"
 Cohesion: 0.02
-Nodes (41): CompanyMarketingDashboardProjection, availableAgentModels(), companyDashboard(), companyEvents(), dashboard(), runIssue(), startCompanyRuntime(), stopCompanyRuntime() (+33 more)
+Nodes (43): CompanyMarketingDashboardProjection, availableAgentModels(), companyDashboard(), dashboard(), runIssue(), startCompanyRuntime(), stopCompanyRuntime(), updateGoal() (+35 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.01
-Nodes (141): App, ButtonStyle, Commands, AgentSkillCardView, AgentWorkSummaryRow, Array, CenterPaneView, CloneRepositorySheet (+133 more)
+Cohesion: 0.02
+Nodes (35): A2aArtifactStore, runSkill(), settings(), DirectChatMessage, BoundedDesktopCommandOutput, AgentSkillCardRecord, APIError, http (+27 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.02
-Nodes (190): CaseIterable, Codable, AgentSkillChipRecord, AgentSkillPolicy, approvalRequired, auto, disabled, readOnly (+182 more)
+Cohesion: 0.01
+Nodes (157): App, ButtonStyle, CaseIterable, Commands, AgentSkillCardView, AgentWorkSummaryRow, CenterPaneView, CloneRepositorySheet (+149 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.02
-Nodes (37): RetryingFileChannel, Line, runSkill(), BoundedDesktopCommandOutput, APIError, http, ConfigureGitHubOriginPayload, Data (+29 more)
+Nodes (231): Codable, AgentSkillChipRecord, AgentSkillPolicy, approvalRequired, auto, disabled, readOnly, AgentSkillScope (+223 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.02
-Nodes (99): AppLanguage, english, korean, AppTheme, dark, light, system, DesktopStrings (+91 more)
+Nodes (40): ResumeApproveCommand, ResumeCommand, ResumeContinueCommand, ResumeForkCommand, ResumeInspectCommand, Parser, Scanner, AppLogger (+32 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.02
-Nodes (64): CompanyAgentAddCommand, CompanyAgentBatchUpdateCommand, CompanyAgentCapabilitiesCommand, CompanyAgentCapabilitySetCommand, CompanyAgentCommand, CompanyAgentListCommand, CompanyAgentUpdateCommand, CompanyAutonomyCommand (+56 more)
+Cohesion: 0.01
+Nodes (130): AppLanguage, english, korean, DesktopStrings, DesktopTextKey, agentRuns, agentRunsSubtitle, agents (+122 more)
 
 ### Community 7 - "Community 7"
 Cohesion: 0.02
-Nodes (119): DirectChatMessage, CodingKey, DirectChatView, CodingKeys, community, confidenceScore, fileType, id (+111 more)
+Nodes (64): CompanyAgentAddCommand, CompanyAgentBatchUpdateCommand, CompanyAgentCapabilitiesCommand, CompanyAgentCapabilitySetCommand, CompanyAgentCommand, CompanyAgentListCommand, CompanyAgentUpdateCommand, CompanyAutonomyCommand (+56 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.02
-Nodes (126): DesktopTextKey, agentRuns, agentRunsSubtitle, agents, appHome, appLocation, appName, availableAgents (+118 more)
+Nodes (124): CodingKey, EmbeddedBackendHealthPayload, CodingKeys, community, confidenceScore, fileType, label, relation (+116 more)
 
 ### Community 9 - "Community 9"
 Cohesion: 0.02
-Nodes (13): BaseBranchSyncResult, BranchRestackResult, GitHubPublishEnvironment, GitHubPublishReadiness, GitHubRepositoryRef, GitWorkspaceService, ManagedPullRequestCleanupResult, MergeCommitRef (+5 more)
+Nodes (52): A2aSessionStore, BuiltinAgentCatalog, BuiltinAgentSpec, BrowserCommand, BrowserSmokeCommand, CapabilityCommand, CapabilityInspectCommand, CapabilityListCommand (+44 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.02
-Nodes (80): AgentAssignmentPlan, AgentCollaborationEdge, AgentContextEntry, AgentMessage, AgentPerformanceDataSufficiency, AgentPerformanceSnapshot, AgentRun, AgentRunStatus (+72 more)
+Nodes (59): AppServerInstanceGuardTest, FakeFileLock, IOExceptionFileChannel, RetryingFileChannel, AutonomousDiscoveryScanResult, AutonomousDiscoveryService, Line, ShellConnectionState (+51 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.04
-Nodes (17): ResumeApproveCommand, ResumeCommand, ResumeContinueCommand, ResumeForkCommand, ResumeInspectCommand, Parser, EmbeddedBackendLauncher, isBackendRuntimeJar() (+9 more)
+Cohesion: 0.02
+Nodes (13): BaseBranchSyncResult, BranchRestackResult, GitHubPublishEnvironment, GitHubPublishReadiness, GitHubRepositoryRef, GitWorkspaceService, ManagedPullRequestCleanupResult, MergeCommitRef (+5 more)
 
 ### Community 12 - "Community 12"
 Cohesion: 0.02
-Nodes (40): BrowserCommand, BrowserSmokeCommand, CapabilityCommand, CapabilityInspectCommand, CapabilityListCommand, CapabilitySimulateCommand, EvidenceCommand, EvidenceFileCommand (+32 more)
+Nodes (80): AgentAssignmentPlan, AgentCollaborationEdge, AgentContextEntry, AgentMessage, AgentPerformanceDataSufficiency, AgentPerformanceSnapshot, AgentRun, AgentRunStatus (+72 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.03
-Nodes (1): DesktopStateStore
+Cohesion: 0.02
+Nodes (4): CachedState, DesktopStateStore, SqliteCachedState, StateCollection
 
 ### Community 14 - "Community 14"
 Cohesion: 0.03
@@ -432,79 +432,79 @@ Nodes (16): OrgProfileBatchEditPayloadDraft, Entry, MeetingRoomSceneLedger, Meet
 
 ### Community 16 - "Community 16"
 Cohesion: 0.04
-Nodes (28): CachedState, SqliteCachedState, StateCollection, Scanner, DesktopAppLifecycleDelegate, containsInternalMemoryDetail(), issueTitle(), labeledLineValue() (+20 more)
+Nodes (55): BatchUpdateCompanyAgentDefinitionsRequest, BudgetResponse, ChatAssignmentPreview, ChatIntakeRequest, ChatIntakeResponse, CloneRepositoryRequest, CompanyDashboardResponse, CompanyEventEnvelope (+47 more)
 
 ### Community 17 - "Community 17"
-Cohesion: 0.08
-Nodes (7): A2aArtifactStore, settings(), AgentSkillCardRecord, CompanyEventStreamBackoff, isExpectedCompanyEventStreamInterruption(), AgentCapabilitySettingRecord, DesktopStoreTests
-
-### Community 18 - "Community 18"
-Cohesion: 0.04
-Nodes (54): BatchUpdateCompanyAgentDefinitionsRequest, BudgetResponse, ChatAssignmentPreview, ChatIntakeRequest, ChatIntakeResponse, CloneRepositoryRequest, CompanyDashboardResponse, CompanyEventEnvelope (+46 more)
-
-### Community 19 - "Community 19"
-Cohesion: 0.09
-Nodes (5): AppLogger, MeetingRoomSceneReducer, PixelOfficeLayout, PixelOfficeCanvas, AppLoggerTests
-
-### Community 20 - "Community 20"
 Cohesion: 0.04
 Nodes (41): AgentConfig, AgentExecutionMetadata, AgentMetadata, AgentMetrics, AgentReference, AgentResult, AggregatedResult, BackoffStrategy (+33 more)
 
-### Community 21 - "Community 21"
-Cohesion: 0.06
-Nodes (14): A2aSessionStore, BuiltinAgentCatalog, BuiltinAgentSpec, VideoBaseCommand, LinearPrFailureGateTest, KnowledgeStore, build_issue_update_input(), call_linear() (+6 more)
+### Community 18 - "Community 18"
+Cohesion: 0.07
+Nodes (11): runTask(), DesktopAppServiceRuntimeCleanupTest, issue(), StartupRecordingBrowserSkillRunner, task(), DesktopAPIClient, DesktopAPIError, http (+3 more)
 
-### Community 22 - "Community 22"
+### Community 19 - "Community 19"
+Cohesion: 0.12
+Nodes (6): MeetingRoomSceneReducer, PixelOfficeLayout, PixelOfficeCanvas, AgentRunStatus, Color, DesktopTaskStatus
+
+### Community 20 - "Community 20"
 Cohesion: 0.05
 Nodes (5): DefaultObservabilityService, NoopObservabilityService, ObservabilityService, ObservationHandle, TraceContext
 
-### Community 23 - "Community 23"
+### Community 21 - "Community 21"
 Cohesion: 0.06
 Nodes (12): CheatSheetPrinter, CheckpointCommand, CliHelpLanguage, CompletionCommand, CotorCli, CotorCommand, HelpCommand, InitCommand (+4 more)
 
-### Community 24 - "Community 24"
+### Community 22 - "Community 22"
 Cohesion: 0.06
 Nodes (8): ConcurrentGitMutationProcessManager, FakeHttpClient, FakeHttpResponse, FakeHttpResponseSpec, FakeProcessManager, GitWorkspaceServiceTest, RecordedHttpRequest, Step
 
-### Community 25 - "Community 25"
+### Community 23 - "Community 23"
 Cohesion: 0.06
 Nodes (7): AppServer, DesktopAppServerInstanceGuard, DesktopAppServerInstanceMetadata, DesktopAppServerInstanceStatus, DesktopAppServerLockRecord, IssueAssigneeUpdateRequest, ReviewQueueVerdictRequest
 
-### Community 26 - "Community 26"
+### Community 24 - "Community 24"
 Cohesion: 0.06
 Nodes (2): DesktopTuiSessionService, RuntimeSession
 
-### Community 27 - "Community 27"
+### Community 25 - "Community 25"
 Cohesion: 0.06
 Nodes (4): DecisionStageResult, DefaultPipelineOrchestrator, LoopStageResult, PipelineOrchestrator
 
-### Community 28 - "Community 28"
+### Community 26 - "Community 26"
 Cohesion: 0.07
 Nodes (11): AgentResultPayload, ConfigResponse, EditorPipelineDetail, EditorPipelineRequest, EditorPipelineSummary, EditorStagePayload, EditorTemplatePayload, RunResponse (+3 more)
 
-### Community 29 - "Community 29"
+### Community 27 - "Community 27"
 Cohesion: 0.07
 Nodes (8): CommandCall, CommentCall, DesktopAppServiceFixture, DesktopAppServiceTest, FakeGitProcessManager, FakeLinearTrackerAdapter, LateProcessStartAgentExecutor, SyncCall
 
-### Community 30 - "Community 30"
+### Community 28 - "Community 28"
 Cohesion: 0.07
 Nodes (3): DurableRunIndex, DurableRunIndexEntry, DurableRuntimeStore
 
-### Community 31 - "Community 31"
+### Community 29 - "Community 29"
 Cohesion: 0.07
 Nodes (2): GoalDrivenTaskPlanner, PlanningParticipant
 
-### Community 32 - "Community 32"
+### Community 30 - "Community 30"
+Cohesion: 0.1
+Nodes (10): DesktopAppLifecycleDelegate, Coordinator, SessionConfig, TerminalWebView, WebView, KnowledgeStore, NSApplicationDelegate, NSObject (+2 more)
+
+### Community 31 - "Community 31"
 Cohesion: 0.08
 Nodes (23): A2aAck, A2aAckMessagesRequest, A2aAckMessagesResponse, A2aAckResponse, A2aArtifactListResponse, A2aArtifactRegistration, A2aArtifactRegistrationRequest, A2aArtifactRegistrationResponse (+15 more)
 
-### Community 33 - "Community 33"
+### Community 32 - "Community 32"
 Cohesion: 0.08
 Nodes (1): InteractiveCommand
 
-### Community 34 - "Community 34"
+### Community 33 - "Community 33"
 Cohesion: 0.08
 Nodes (1): A2aRouter
+
+### Community 34 - "Community 34"
+Cohesion: 0.15
+Nodes (3): Array, MeetingRoomAgentResolver, MeetingRoomProjection
 
 ### Community 35 - "Community 35"
 Cohesion: 0.09
@@ -519,12 +519,12 @@ Cohesion: 0.1
 Nodes (3): CompanyRuntimeRetention, RetentionScope, WorktreeReferences
 
 ### Community 38 - "Community 38"
-Cohesion: 0.1
-Nodes (3): ActionLogIndex, ActionLogIndexEntry, ActionStore
+Cohesion: 0.11
+Nodes (1): DurableRuntimeService
 
 ### Community 39 - "Community 39"
 Cohesion: 0.11
-Nodes (1): DurableRuntimeService
+Nodes (3): ActionLogIndex, ActionLogIndexEntry, ActionStore
 
 ### Community 40 - "Community 40"
 Cohesion: 0.11
@@ -534,121 +534,121 @@ Nodes (9): ExecutionStatus, PerformanceTrend, PipelineExecution, PipelineStats, 
 Cohesion: 0.11
 Nodes (6): EstimatedDuration, Failure, PipelineValidator, StageEstimate, Success, ValidationResult
 
-### Community 42 - "Community 42"
-Cohesion: 0.11
-Nodes (3): AppServerInstanceGuardTest, FakeFileLock, IOExceptionFileChannel
-
-### Community 44 - "Community 44"
+### Community 43 - "Community 43"
 Cohesion: 0.11
 Nodes (1): TemplateCommand
 
-### Community 45 - "Community 45"
+### Community 44 - "Community 44"
 Cohesion: 0.12
 Nodes (2): ConfigRepository, ParsedConfig
 
-### Community 46 - "Community 46"
-Cohesion: 0.12
-Nodes (3): BoundedOutputBuffer, CoroutineProcessManager, ProcessManager
-
-### Community 47 - "Community 47"
+### Community 45 - "Community 45"
 Cohesion: 0.12
 Nodes (5): InteractiveAgentSummary, InteractiveSessionLogger, InteractiveTurnException, InteractiveTurnLogContext, InteractiveTurnOutcome
 
-### Community 48 - "Community 48"
+### Community 46 - "Community 46"
 Cohesion: 0.12
 Nodes (4): CheckpointManager, CheckpointSummary, PipelineCheckpoint, StageCheckpoint
 
-### Community 49 - "Community 49"
+### Community 47 - "Community 47"
 Cohesion: 0.12
 Nodes (1): AgentCapabilityGuard
 
-### Community 50 - "Community 50"
+### Community 48 - "Community 48"
 Cohesion: 0.12
 Nodes (4): CodexAppServerManager, ManagedCodexServerStatus, ManagedProcess, PreparedManagedLaunch
 
-### Community 51 - "Community 51"
+### Community 49 - "Community 49"
 Cohesion: 0.12
 Nodes (1): RecoveryExecutor
 
-### Community 52 - "Community 52"
+### Community 50 - "Community 50"
+Cohesion: 0.12
+Nodes (3): BoundedOutputBuffer, CoroutineProcessManager, ProcessManager
+
+### Community 51 - "Community 51"
 Cohesion: 0.12
 Nodes (5): GuardTextSample, PipelineGuardFinding, PipelineGuardResult, PipelineGuardService, PipelineGuardSeverity
 
-### Community 53 - "Community 53"
+### Community 52 - "Community 52"
 Cohesion: 0.12
 Nodes (3): DesktopInstallAction, DesktopInstallLayout, DesktopInstallLayoutKind
 
-### Community 54 - "Community 54"
+### Community 53 - "Community 53"
 Cohesion: 0.12
 Nodes (1): StarterAgentSpec
 
-### Community 55 - "Community 55"
+### Community 54 - "Community 54"
 Cohesion: 0.13
 Nodes (3): DesktopAppServiceRequeueOrphanedTest, NoopLinearTrackerAdapter, RequeueGitProcessManager
 
-### Community 56 - "Community 56"
+### Community 55 - "Community 55"
 Cohesion: 0.13
 Nodes (4): DefaultLinearTrackerAdapter, LinearClient, LinearIssueMirror, LinearTrackerAdapter
 
-### Community 57 - "Community 57"
+### Community 56 - "Community 56"
 Cohesion: 0.13
 Nodes (1): ConditionEvaluator
 
-### Community 58 - "Community 58"
+### Community 57 - "Community 57"
 Cohesion: 0.13
 Nodes (6): AuthCommand, CodexOAuthBaseCommand, CodexOAuthCommand, CodexOAuthLoginCommand, CodexOAuthLogoutCommand, CodexOAuthStatusCommand
 
-### Community 59 - "Community 59"
+### Community 58 - "Community 58"
 Cohesion: 0.14
 Nodes (1): BoardControllerTest
 
-### Community 60 - "Community 60"
+### Community 59 - "Community 59"
 Cohesion: 0.14
 Nodes (6): CodexAppServerBackend, ExecutionBackend, ExecutionBackendRequest, LocalCotorBackend, RemoteExecutionRequest, RemoteExecutionResponse
 
-### Community 61 - "Community 61"
+### Community 60 - "Community 60"
 Cohesion: 0.14
 Nodes (11): MarketingActionRecord, MarketingActionStatus, MarketingBrowserCommand, MarketingBrowserResult, MarketingBrowserRunner, MarketingChannelAccount, MarketingDelegationPolicy, MarketingRunRecord (+3 more)
 
-### Community 62 - "Community 62"
+### Community 61 - "Community 61"
 Cohesion: 0.14
 Nodes (2): BoundedDirectChatLineReader, DirectChatService
 
-### Community 63 - "Community 63"
+### Community 62 - "Community 62"
 Cohesion: 0.14
 Nodes (2): DefaultSecurityValidator, SecurityValidator
 
-### Community 64 - "Community 64"
+### Community 63 - "Community 63"
 Cohesion: 0.14
 Nodes (13): ApprovalPauseState, ApprovalPauseStatus, CheckpointNode, CheckpointNodeState, DurableExecutionPlan, DurableRunSnapshot, DurableRunStatus, DurableRunSummary (+5 more)
 
-### Community 65 - "Community 65"
+### Community 64 - "Community 64"
 Cohesion: 0.14
 Nodes (3): ActionExecutionService, ActionInterceptor, ActionInterceptorDecision
 
-### Community 66 - "Community 66"
+### Community 65 - "Community 65"
 Cohesion: 0.14
 Nodes (5): AgentAddCommand, AgentCommand, AgentListCommand, AgentPreset, InstallScope
 
-### Community 67 - "Community 67"
+### Community 66 - "Community 66"
 Cohesion: 0.15
 Nodes (3): LocalSkillOutputBuffer, LocalSkillProcessResult, LocalSkillProcessRunner
 
-### Community 68 - "Community 68"
+### Community 67 - "Community 67"
 Cohesion: 0.15
 Nodes (4): BrowserSkillCommand, BrowserSkillResult, BrowserSkillRunner, LocalPlaywrightBrowserSkillRunner
 
-### Community 69 - "Community 69"
+### Community 68 - "Community 68"
 Cohesion: 0.15
 Nodes (12): ActionApprovalRequiredException, ActionDeniedException, ActionEvidence, ActionExecutionRecord, ActionKind, ActionLogSnapshot, ActionLogSummary, ActionRequest (+4 more)
 
-### Community 70 - "Community 70"
+### Community 69 - "Community 69"
 Cohesion: 0.15
 Nodes (2): AgentRegistry, InMemoryAgentRegistry
 
-### Community 71 - "Community 71"
+### Community 70 - "Community 70"
 Cohesion: 0.15
 Nodes (4): AgentExecutor, CommandValidatingProcessManager, DefaultAgentExecutor, RuntimeServices
+
+### Community 71 - "Community 71"
+Cohesion: 0.17
+Nodes (12): MeetingRoomSpriteAction, approving, blocked, celebrating, listening, reviewing, sitting, stretching (+4 more)
 
 ### Community 72 - "Community 72"
 Cohesion: 0.17
@@ -696,75 +696,75 @@ Nodes (1): TemplateEngineTest
 
 ### Community 83 - "Community 83"
 Cohesion: 0.18
-Nodes (3): DesktopAppServiceRuntimeCleanupTest, issue(), StartupRecordingBrowserSkillRunner
+Nodes (2): AgentPerformanceCalculator, AgentPerformanceSubject
 
 ### Community 84 - "Community 84"
 Cohesion: 0.18
-Nodes (2): AgentPerformanceCalculator, AgentPerformanceSubject
+Nodes (8): AgentCapabilityProfile, AgentCapabilitySetting, CapabilityCatalogEntry, CapabilityKey, CapabilityMode, CapabilitySimulationRequest, CapabilitySimulationResult, UpdateAgentCapabilitiesRequest
 
 ### Community 85 - "Community 85"
 Cohesion: 0.18
-Nodes (8): AgentCapabilityProfile, AgentCapabilitySetting, CapabilityCatalogEntry, CapabilityKey, CapabilityMode, CapabilitySimulationRequest, CapabilitySimulationResult, UpdateAgentCapabilitiesRequest
+Nodes (1): VerificationBundleService
 
 ### Community 86 - "Community 86"
 Cohesion: 0.18
-Nodes (1): VerificationBundleService
+Nodes (1): ProvenanceService
 
 ### Community 87 - "Community 87"
 Cohesion: 0.18
-Nodes (1): ProvenanceService
+Nodes (10): AgentExecutionException, ConfigurationException, CotorException, PipelineAbortedException, PipelineException, PluginLoadException, ProcessExecutionException, SecurityException (+2 more)
 
 ### Community 88 - "Community 88"
 Cohesion: 0.18
-Nodes (10): AgentExecutionException, ConfigurationException, CotorException, PipelineAbortedException, PipelineException, PluginLoadException, ProcessExecutionException, SecurityException (+2 more)
+Nodes (3): PipelineRunSnapshot, PipelineRunStatus, PipelineRunTracker
 
 ### Community 89 - "Community 89"
 Cohesion: 0.18
-Nodes (3): PipelineRunSnapshot, PipelineRunStatus, PipelineRunTracker
+Nodes (3): PipelineMonitor, StageExecutionInfo, StageState
 
 ### Community 90 - "Community 90"
 Cohesion: 0.18
-Nodes (3): PipelineMonitor, StageExecutionInfo, StageState
+Nodes (3): BoundedHttpTextResponse, BoundedText, CotorHttpClients
 
 ### Community 91 - "Community 91"
 Cohesion: 0.18
-Nodes (3): BoundedHttpTextResponse, BoundedText, CotorHttpClients
+Nodes (2): ErrorMessages, UserFriendlyError
 
 ### Community 92 - "Community 92"
 Cohesion: 0.18
-Nodes (2): ErrorMessages, UserFriendlyError
+Nodes (10): AgentCompletedEvent, AgentFailedEvent, AgentStartedEvent, CotorEvent, PipelineCompletedEvent, PipelineFailedEvent, PipelineStartedEvent, StageCompletedEvent (+2 more)
 
 ### Community 93 - "Community 93"
 Cohesion: 0.18
-Nodes (10): AgentCompletedEvent, AgentFailedEvent, AgentStartedEvent, CotorEvent, PipelineCompletedEvent, PipelineFailedEvent, PipelineStartedEvent, StageCompletedEvent (+2 more)
+Nodes (1): StatsCommand
 
 ### Community 94 - "Community 94"
 Cohesion: 0.18
-Nodes (1): StatsCommand
-
-### Community 95 - "Community 95"
-Cohesion: 0.18
 Nodes (1): DoctorCommand
 
-### Community 96 - "Community 96"
+### Community 95 - "Community 95"
 Cohesion: 0.2
 Nodes (1): LocalPlaywrightDependencyResolver
 
-### Community 97 - "Community 97"
+### Community 96 - "Community 96"
 Cohesion: 0.2
 Nodes (9): CheckRollupSnapshot, CheckSnapshot, GitHubProviderEvent, GitHubProviderState, GitHubSyncResponse, MergeQueueState, MergeRequirement, ProviderEventDedupeKey (+1 more)
 
-### Community 98 - "Community 98"
+### Community 97 - "Community 97"
 Cohesion: 0.2
 Nodes (1): VerificationStore
 
-### Community 99 - "Community 99"
+### Community 98 - "Community 98"
 Cohesion: 0.2
 Nodes (3): NullablePathSerializer, PathListSerializer, PathSerializer
 
-### Community 100 - "Community 100"
+### Community 99 - "Community 99"
 Cohesion: 0.2
 Nodes (3): ErrorHelper, ErrorInfo, ErrorType
+
+### Community 100 - "Community 100"
+Cohesion: 0.2
+Nodes (6): DeleteCommand, DesktopLifecycleCommand, DesktopScriptResult, InstallCommand, UpdateCommand, UpgradeCommand
 
 ### Community 101 - "Community 101"
 Cohesion: 0.2
@@ -804,253 +804,249 @@ Nodes (1): DesktopDirectChatService
 
 ### Community 110 - "Community 110"
 Cohesion: 0.22
-Nodes (2): AutonomousDiscoveryScanResult, AutonomousDiscoveryService
+Nodes (3): CompanyIssueReadinessOverrides, CompanyIssueReadinessResolution, CompanyIssueReadinessResolver
 
 ### Community 111 - "Community 111"
 Cohesion: 0.22
-Nodes (3): CompanyIssueReadinessOverrides, CompanyIssueReadinessResolution, CompanyIssueReadinessResolver
+Nodes (3): BoundCompanyRuntime, CachedValue, CompanyRuntimeBindingService
 
 ### Community 112 - "Community 112"
 Cohesion: 0.22
-Nodes (3): BoundCompanyRuntime, CachedValue, CompanyRuntimeBindingService
+Nodes (8): VerificationArtifactRef, VerificationBundle, VerificationContract, VerificationObservation, VerificationOutcome, VerificationOutcomeStatus, VerificationSignal, VerificationSignalStatus
 
 ### Community 113 - "Community 113"
 Cohesion: 0.22
-Nodes (8): VerificationArtifactRef, VerificationBundle, VerificationContract, VerificationObservation, VerificationOutcome, VerificationOutcomeStatus, VerificationSignal, VerificationSignalStatus
+Nodes (1): LocalModelDefaults
 
 ### Community 114 - "Community 114"
 Cohesion: 0.22
-Nodes (1): LocalModelDefaults
+Nodes (3): CodeGeneratorPlugin, EchoPlugin, NaturalLanguageProcessorPlugin
 
 ### Community 115 - "Community 115"
 Cohesion: 0.22
-Nodes (3): CodeGeneratorPlugin, EchoPlugin, NaturalLanguageProcessorPlugin
-
-### Community 116 - "Community 116"
-Cohesion: 0.22
 Nodes (3): EnhancedRunCommand, TestCommand, ValidateCommand
 
-### Community 117 - "Community 117"
-Cohesion: 0.22
-Nodes (5): DeleteCommand, DesktopLifecycleCommand, DesktopScriptResult, InstallCommand, UpdateCommand
-
-### Community 118 - "Community 118"
+### Community 116 - "Community 116"
 Cohesion: 0.25
 Nodes (1): BoardController
 
-### Community 119 - "Community 119"
+### Community 117 - "Community 117"
 Cohesion: 0.25
 Nodes (1): GitWorkspaceServiceRealGitIntegrationTest
 
-### Community 120 - "Community 120"
+### Community 118 - "Community 118"
 Cohesion: 0.25
 Nodes (1): LocalModelPluginTest
 
-### Community 121 - "Community 121"
+### Community 119 - "Community 119"
 Cohesion: 0.25
 Nodes (1): DefaultResultAnalyzer
 
-### Community 122 - "Community 122"
+### Community 120 - "Community 120"
 Cohesion: 0.25
 Nodes (5): HelpGuideContent, HelpGuideItem, HelpGuidePayload, HelpGuideSection, HelpGuideTopic
 
-### Community 123 - "Community 123"
+### Community 121 - "Community 121"
+Cohesion: 0.25
+Nodes (2): BrewStatus, UpdateStatusCommandResult
+
+### Community 122 - "Community 122"
 Cohesion: 0.25
 Nodes (1): CompanyIssueReadiness
 
-### Community 124 - "Community 124"
+### Community 123 - "Community 123"
 Cohesion: 0.25
 Nodes (1): ChatSession
 
-### Community 125 - "Community 125"
+### Community 124 - "Community 124"
 Cohesion: 0.25
 Nodes (1): GitHubControlPlaneStore
 
-### Community 126 - "Community 126"
+### Community 125 - "Community 125"
 Cohesion: 0.25
 Nodes (1): OpenCodeDefaults
 
-### Community 127 - "Community 127"
+### Community 126 - "Community 126"
 Cohesion: 0.25
 Nodes (2): JsonParser, YamlParser
 
-### Community 128 - "Community 128"
+### Community 127 - "Community 127"
 Cohesion: 0.25
 Nodes (1): ProcessDescendantTracker
 
-### Community 129 - "Community 129"
+### Community 128 - "Community 128"
 Cohesion: 0.25
 Nodes (1): DiagramGenerator
 
-### Community 130 - "Community 130"
+### Community 129 - "Community 129"
 Cohesion: 0.25
 Nodes (2): Linter, LintResult
 
-### Community 131 - "Community 131"
+### Community 130 - "Community 130"
 Cohesion: 0.25
 Nodes (7): PolicyAuditLog, PolicyDecision, PolicyDocument, PolicyEffect, PolicyExplanation, PolicyRule, PolicyScopeLevel
 
-### Community 132 - "Community 132"
+### Community 131 - "Community 131"
 Cohesion: 0.29
 Nodes (3): DesktopAppServiceMarketingTest, NoOpMarketingBrowserRunner, RecordingMarketingBrowserRunner
 
-### Community 133 - "Community 133"
+### Community 132 - "Community 132"
 Cohesion: 0.29
 Nodes (2): ImmediateEventBus, PipelineRunTrackerTest
 
-### Community 134 - "Community 134"
+### Community 133 - "Community 133"
 Cohesion: 0.29
 Nodes (2): PipelineOrchestratorMapTest, TrackingAgentExecutor
 
-### Community 135 - "Community 135"
+### Community 134 - "Community 134"
 Cohesion: 0.29
 Nodes (2): A2aDedupeStore, StoredAck
 
-### Community 136 - "Community 136"
+### Community 135 - "Community 135"
 Cohesion: 0.29
 Nodes (2): A2aDedupePersistenceStore, SnapshotEntry
 
-### Community 137 - "Community 137"
+### Community 136 - "Community 136"
 Cohesion: 0.29
 Nodes (2): A2aSessionPersistenceStore, Snapshot
 
-### Community 138 - "Community 138"
+### Community 137 - "Community 137"
 Cohesion: 0.29
 Nodes (1): DurableResumeCoordinator
 
-### Community 139 - "Community 139"
+### Community 138 - "Community 138"
 Cohesion: 0.29
 Nodes (6): EvidenceBundle, EvidenceEdge, EvidenceGraph, EvidenceNode, EvidenceNodeKind, EvidenceReference
 
-### Community 140 - "Community 140"
+### Community 139 - "Community 139"
 Cohesion: 0.29
 Nodes (1): FileReaderPlugin
 
-### Community 141 - "Community 141"
+### Community 140 - "Community 140"
 Cohesion: 0.29
 Nodes (1): OpenAIPlugin
 
-### Community 142 - "Community 142"
+### Community 141 - "Community 141"
 Cohesion: 0.29
 Nodes (1): InteractiveCommandCompleter
 
-### Community 143 - "Community 143"
+### Community 142 - "Community 142"
 Cohesion: 0.29
 Nodes (4): ApprovalRequirement, RiskApprovalInterceptor, RiskScore, RiskSignal
 
-### Community 144 - "Community 144"
+### Community 143 - "Community 143"
 Cohesion: 0.33
 Nodes (6): StatusState, connected, connecting, offlineMock, taskStarted, waitingForServer
 
-### Community 145 - "Community 145"
+### Community 144 - "Community 144"
 Cohesion: 0.33
 Nodes (1): DirectChatServiceTest
 
-### Community 146 - "Community 146"
+### Community 145 - "Community 145"
 Cohesion: 0.33
 Nodes (1): DesktopStateStoreTest
 
-### Community 147 - "Community 147"
+### Community 146 - "Community 146"
 Cohesion: 0.33
 Nodes (1): DesktopAppServiceRuntimeDispositionSchedulerTest
 
-### Community 148 - "Community 148"
+### Community 147 - "Community 147"
 Cohesion: 0.33
 Nodes (1): CompanyRuntimeBindingServiceTest
 
-### Community 149 - "Community 149"
+### Community 148 - "Community 148"
 Cohesion: 0.33
 Nodes (1): ProductionReliabilityBaselineTest
 
-### Community 150 - "Community 150"
+### Community 149 - "Community 149"
 Cohesion: 0.33
 Nodes (1): PipelineContextTest
 
-### Community 151 - "Community 151"
+### Community 150 - "Community 150"
 Cohesion: 0.33
 Nodes (3): BlockingProcessManager, CommandPluginTest, RecordingProcessManager
 
-### Community 152 - "Community 152"
+### Community 151 - "Community 151"
 Cohesion: 0.33
 Nodes (2): PipelineOrchestratorConditionalTest, RecordingAgentExecutor
 
-### Community 153 - "Community 153"
+### Community 152 - "Community 152"
 Cohesion: 0.33
 Nodes (1): DesktopCommandProcessTest
 
-### Community 154 - "Community 154"
+### Community 153 - "Community 153"
 Cohesion: 0.33
 Nodes (1): AuthCommandTest
 
-### Community 155 - "Community 155"
+### Community 154 - "Community 154"
 Cohesion: 0.33
 Nodes (2): CompanyVerificationDecision, CompanyVerifierService
 
-### Community 156 - "Community 156"
+### Community 155 - "Community 155"
 Cohesion: 0.33
 Nodes (1): NetworkEndpointPolicy
 
-### Community 157 - "Community 157"
+### Community 156 - "Community 156"
 Cohesion: 0.33
 Nodes (1): GitHubControlPlaneService
 
-### Community 158 - "Community 158"
+### Community 157 - "Community 157"
 Cohesion: 0.33
 Nodes (1): QaVerificationPlugin
 
-### Community 159 - "Community 159"
+### Community 158 - "Community 158"
 Cohesion: 0.33
 Nodes (1): CommandPlugin
 
-### Community 161 - "Community 161"
+### Community 160 - "Community 160"
 Cohesion: 0.33
 Nodes (2): DefaultResultAggregator, ResultAggregator
 
-### Community 162 - "Community 162"
+### Community 161 - "Community 161"
 Cohesion: 0.33
 Nodes (1): CodexDashboardCommand
 
-### Community 163 - "Community 163"
+### Community 162 - "Community 162"
 Cohesion: 0.33
 Nodes (2): PluginCommand, PluginInitCommand
 
-### Community 164 - "Community 164"
+### Community 163 - "Community 163"
 Cohesion: 0.33
 Nodes (1): PolicyEngine
 
-### Community 165 - "Community 165"
+### Community 164 - "Community 164"
 Cohesion: 0.4
 Nodes (1): OpenCodePluginTest
 
-### Community 166 - "Community 166"
+### Community 165 - "Community 165"
 Cohesion: 0.4
 Nodes (2): PromptHandoffPluginTest, RecordingPromptProcessManager
 
-### Community 167 - "Community 167"
+### Community 166 - "Community 166"
 Cohesion: 0.4
 Nodes (1): PipelineOrchestratorOutputPropagationTest
 
-### Community 168 - "Community 168"
+### Community 167 - "Community 167"
 Cohesion: 0.4
 Nodes (2): MappedDelayedAgentExecutor, PipelineOrchestratorTimeoutTest
 
-### Community 169 - "Community 169"
+### Community 168 - "Community 168"
 Cohesion: 0.4
 Nodes (1): CliGoldenSnapshotTest
 
-### Community 170 - "Community 170"
+### Community 169 - "Community 169"
 Cohesion: 0.4
 Nodes (1): DesktopEndpointPolicy
 
-### Community 171 - "Community 171"
+### Community 170 - "Community 170"
 Cohesion: 0.4
 Nodes (1): EvidencePathPolicy
 
-### Community 172 - "Community 172"
+### Community 171 - "Community 171"
 Cohesion: 0.4
 Nodes (1): CompanyRuntimeMachine
 
-### Community 173 - "Community 173"
+### Community 172 - "Community 172"
 Cohesion: 0.4
 Nodes (1): WorkQueue
 
@@ -1162,23 +1158,23 @@ Nodes (1): StateRepository
 Cohesion: 0.5
 Nodes (3): ChatMessage, ChatMode, ChatRole
 
-### Community 202 - "Community 202"
+### Community 201 - "Community 201"
 Cohesion: 0.5
 Nodes (1): DurableRuntimeFlags
 
-### Community 203 - "Community 203"
+### Community 202 - "Community 202"
 Cohesion: 0.5
 Nodes (3): KnowledgeConflictStatus, KnowledgeRecord, KnowledgeSnapshot
 
-### Community 204 - "Community 204"
+### Community 203 - "Community 203"
 Cohesion: 0.5
 Nodes (3): AgentParameter, AgentParameterSchema, ParameterType
 
-### Community 205 - "Community 205"
+### Community 204 - "Community 204"
 Cohesion: 0.5
 Nodes (2): TimelineCollector, TimelineResult
 
-### Community 206 - "Community 206"
+### Community 205 - "Community 205"
 Cohesion: 0.5
 Nodes (1): StageConflictDetector
 
@@ -1404,318 +1400,320 @@ Nodes (1): DesktopStateStoreLockTest
 
 ### Community 264 - "Community 264"
 Cohesion: 1.0
-Nodes (1): DesktopEndpointPolicyTest
+Nodes (1): DesktopUpdateStatusTest
 
 ### Community 265 - "Community 265"
 Cohesion: 1.0
-Nodes (1): ExecutionBackendsTest
+Nodes (1): DesktopEndpointPolicyTest
 
 ### Community 266 - "Community 266"
 Cohesion: 1.0
-Nodes (1): CodexAppServerManagerTest
+Nodes (1): ExecutionBackendsTest
 
 ### Community 267 - "Community 267"
 Cohesion: 1.0
-Nodes (1): DesktopAppServiceMergeConfirmationTest
+Nodes (1): CodexAppServerManagerTest
 
 ### Community 268 - "Community 268"
 Cohesion: 1.0
-Nodes (1): LocalPlaywrightDependencyTest
+Nodes (1): DesktopAppServiceMergeConfirmationTest
 
 ### Community 269 - "Community 269"
 Cohesion: 1.0
-Nodes (1): DesktopAppServiceDashboardPrCleanupTest
+Nodes (1): LocalPlaywrightDependencyTest
 
 ### Community 270 - "Community 270"
 Cohesion: 1.0
-Nodes (1): AutonomousDiscoveryServiceTest
+Nodes (1): DesktopAppServiceDashboardPrCleanupTest
 
 ### Community 271 - "Community 271"
 Cohesion: 1.0
-Nodes (1): SkillModelsTest
+Nodes (1): AutonomousDiscoveryServiceTest
 
 ### Community 272 - "Community 272"
 Cohesion: 1.0
-Nodes (1): CompanyRuntimeMachineTest
+Nodes (1): SkillModelsTest
 
 ### Community 273 - "Community 273"
 Cohesion: 1.0
-Nodes (1): WorkQueueTest
+Nodes (1): CompanyRuntimeMachineTest
 
 ### Community 274 - "Community 274"
 Cohesion: 1.0
-Nodes (1): ChatTranscriptWriterTest
+Nodes (1): WorkQueueTest
 
 ### Community 275 - "Community 275"
 Cohesion: 1.0
-Nodes (1): ChatSessionTest
+Nodes (1): ChatTranscriptWriterTest
 
 ### Community 276 - "Community 276"
 Cohesion: 1.0
-Nodes (1): NetworkEndpointPolicyTest
+Nodes (1): ChatSessionTest
 
 ### Community 277 - "Community 277"
 Cohesion: 1.0
-Nodes (1): SecurityValidatorTest
+Nodes (1): NetworkEndpointPolicyTest
 
 ### Community 278 - "Community 278"
 Cohesion: 1.0
-Nodes (1): A2aArtifactStoreTest
+Nodes (1): SecurityValidatorTest
 
 ### Community 279 - "Community 279"
 Cohesion: 1.0
-Nodes (1): A2aApiTest
+Nodes (1): A2aArtifactStoreTest
 
 ### Community 280 - "Community 280"
 Cohesion: 1.0
-Nodes (1): A2aSessionStoreTest
+Nodes (1): A2aApiTest
 
 ### Community 281 - "Community 281"
 Cohesion: 1.0
-Nodes (1): A2aPersistenceTest
+Nodes (1): A2aSessionStoreTest
 
 ### Community 282 - "Community 282"
 Cohesion: 1.0
-Nodes (1): A2aDedupeStoreTest
+Nodes (1): A2aPersistenceTest
 
 ### Community 283 - "Community 283"
 Cohesion: 1.0
-Nodes (1): RecoveryExecutorTest
+Nodes (1): A2aDedupeStoreTest
 
 ### Community 284 - "Community 284"
 Cohesion: 1.0
-Nodes (1): GitHubControlPlaneServiceTest
+Nodes (1): RecoveryExecutorTest
 
 ### Community 285 - "Community 285"
 Cohesion: 1.0
-Nodes (1): DurableRuntimeServiceTest
+Nodes (1): GitHubControlPlaneServiceTest
 
 ### Community 286 - "Community 286"
 Cohesion: 1.0
-Nodes (1): DurableResumeCoordinatorTest
+Nodes (1): DurableRuntimeServiceTest
 
 ### Community 287 - "Community 287"
 Cohesion: 1.0
-Nodes (1): AtomicFileWriterTest
+Nodes (1): DurableResumeCoordinatorTest
 
 ### Community 288 - "Community 288"
 Cohesion: 1.0
-Nodes (1): LinearClientEndpointPolicyTest
+Nodes (1): AtomicFileWriterTest
 
 ### Community 289 - "Community 289"
 Cohesion: 1.0
-Nodes (1): VerificationBundleServiceTest
+Nodes (1): LinearClientEndpointPolicyTest
 
 ### Community 290 - "Community 290"
 Cohesion: 1.0
-Nodes (1): KnowledgeServiceTest
+Nodes (1): VerificationBundleServiceTest
 
 ### Community 291 - "Community 291"
 Cohesion: 1.0
-Nodes (1): LocalModelDefaultsTest
+Nodes (1): KnowledgeServiceTest
 
 ### Community 292 - "Community 292"
 Cohesion: 1.0
-Nodes (1): ObservabilityServiceTest
+Nodes (1): LocalModelDefaultsTest
 
 ### Community 293 - "Community 293"
 Cohesion: 1.0
-Nodes (1): FileConfigRepositoryTest
+Nodes (1): ObservabilityServiceTest
 
 ### Community 294 - "Community 294"
 Cohesion: 1.0
-Nodes (1): QaTestGenerationFixtureTest
+Nodes (1): FileConfigRepositoryTest
 
 ### Community 295 - "Community 295"
 Cohesion: 1.0
-Nodes (1): ConfigRepositoryImportTest
+Nodes (1): QaTestGenerationFixtureTest
 
 ### Community 296 - "Community 296"
 Cohesion: 1.0
-Nodes (1): ExampleConfigSmokeTest
+Nodes (1): ConfigRepositoryImportTest
 
 ### Community 297 - "Community 297"
 Cohesion: 1.0
-Nodes (1): YamlParserTest
+Nodes (1): ExampleConfigSmokeTest
 
 ### Community 298 - "Community 298"
 Cohesion: 1.0
-Nodes (1): CodexPluginTest
+Nodes (1): YamlParserTest
 
 ### Community 299 - "Community 299"
 Cohesion: 1.0
-Nodes (1): ProcessManagerTest
+Nodes (1): CodexPluginTest
 
 ### Community 300 - "Community 300"
 Cohesion: 1.0
-Nodes (1): ErrorHelperTest
+Nodes (1): ProcessManagerTest
 
 ### Community 301 - "Community 301"
 Cohesion: 1.0
-Nodes (1): ResultAggregatorTest
+Nodes (1): ErrorHelperTest
 
 ### Community 302 - "Community 302"
 Cohesion: 1.0
-Nodes (1): ConditionEvaluatorTest
+Nodes (1): ResultAggregatorTest
 
 ### Community 303 - "Community 303"
 Cohesion: 1.0
-Nodes (1): AgentExecutorTest
+Nodes (1): ConditionEvaluatorTest
 
 ### Community 304 - "Community 304"
 Cohesion: 1.0
-Nodes (1): StuckDetectorTest
+Nodes (1): AgentExecutorTest
 
 ### Community 305 - "Community 305"
 Cohesion: 1.0
-Nodes (1): PipelineGuardServiceTest
+Nodes (1): StuckDetectorTest
 
 ### Community 306 - "Community 306"
 Cohesion: 1.0
-Nodes (1): PipelineOrchestratorDagValidationTest
+Nodes (1): PipelineGuardServiceTest
 
 ### Community 307 - "Community 307"
 Cohesion: 1.0
-Nodes (1): StageConflictDetectorTest
+Nodes (1): PipelineOrchestratorDagValidationTest
 
 ### Community 308 - "Community 308"
 Cohesion: 1.0
-Nodes (1): PipelineOrchestratorTemplatingTest
+Nodes (1): StageConflictDetectorTest
 
 ### Community 309 - "Community 309"
 Cohesion: 1.0
-Nodes (1): CoroutineEventBusTest
+Nodes (1): PipelineOrchestratorTemplatingTest
 
 ### Community 310 - "Community 310"
 Cohesion: 1.0
-Nodes (1): WebServerTest
+Nodes (1): CoroutineEventBusTest
 
 ### Community 311 - "Community 311"
 Cohesion: 1.0
-Nodes (1): CompletionCommandTest
+Nodes (1): WebServerTest
 
 ### Community 312 - "Community 312"
 Cohesion: 1.0
-Nodes (1): HelpCommandTest
+Nodes (1): CompletionCommandTest
 
 ### Community 313 - "Community 313"
 Cohesion: 1.0
-Nodes (1): AppServerCommandTest
+Nodes (1): HelpCommandTest
 
 ### Community 314 - "Community 314"
 Cohesion: 1.0
-Nodes (1): StarterAgentResolverTest
+Nodes (1): AppServerCommandTest
 
 ### Community 315 - "Community 315"
 Cohesion: 1.0
-Nodes (1): InteractiveCommandCompleterTest
+Nodes (1): StarterAgentResolverTest
 
 ### Community 316 - "Community 316"
 Cohesion: 1.0
-Nodes (1): AgentCommandTest
+Nodes (1): InteractiveCommandCompleterTest
 
 ### Community 317 - "Community 317"
 Cohesion: 1.0
-Nodes (1): PluginCommandTest
+Nodes (1): AgentCommandTest
 
 ### Community 318 - "Community 318"
 Cohesion: 1.0
-Nodes (1): HelloCommandTest
+Nodes (1): PluginCommandTest
 
 ### Community 319 - "Community 319"
 Cohesion: 1.0
-Nodes (1): LintCommandTest
+Nodes (1): HelloCommandTest
 
 ### Community 320 - "Community 320"
 Cohesion: 1.0
-Nodes (1): CompanyCommandTest
+Nodes (1): LintCommandTest
 
 ### Community 321 - "Community 321"
 Cohesion: 1.0
-Nodes (1): InteractiveCommandTest
+Nodes (1): CompanyCommandTest
 
 ### Community 322 - "Community 322"
 Cohesion: 1.0
-Nodes (1): StatsCommandTest
+Nodes (1): InteractiveCommandTest
 
 ### Community 323 - "Community 323"
 Cohesion: 1.0
-Nodes (1): CodexDashboardCommandTest
+Nodes (1): StatsCommandTest
 
 ### Community 324 - "Community 324"
 Cohesion: 1.0
-Nodes (1): StatsManagerTest
+Nodes (1): CodexDashboardCommandTest
 
 ### Community 325 - "Community 325"
 Cohesion: 1.0
-Nodes (1): PipelineValidatorTest
+Nodes (1): StatsManagerTest
 
 ### Community 326 - "Community 326"
 Cohesion: 1.0
-Nodes (1): PipelineValidatorExtTest
+Nodes (1): PipelineValidatorTest
 
 ### Community 327 - "Community 327"
 Cohesion: 1.0
-Nodes (1): LinterTest
+Nodes (1): PipelineValidatorExtTest
 
 ### Community 328 - "Community 328"
 Cohesion: 1.0
-Nodes (1): DefaultOutputValidatorTest
+Nodes (1): LinterTest
 
 ### Community 329 - "Community 329"
 Cohesion: 1.0
-Nodes (1): PolicyEngineTest
+Nodes (1): DefaultOutputValidatorTest
 
 ### Community 330 - "Community 330"
 Cohesion: 1.0
+Nodes (1): PolicyEngineTest
+
+### Community 331 - "Community 331"
+Cohesion: 1.0
 Nodes (1): RiskApprovalInterceptorTest
 
-### Community 333 - "Community 333"
+### Community 334 - "Community 334"
 Cohesion: 1.0
 Nodes (1): CheckpointConfig
 
-### Community 336 - "Community 336"
+### Community 337 - "Community 337"
 Cohesion: 1.0
 Nodes (1): CotorProperties
 
-### Community 337 - "Community 337"
+### Community 338 - "Community 338"
 Cohesion: 1.0
 Nodes (1): RealtimeEvent
 
 ## Knowledge Gaps
-- **1016 isolated node(s):** `repositoryMap`, `browserQA`, `marketing`, `video`, `videoRender` (+1011 more)
+- **1038 isolated node(s):** `invalidResponse`, `DesktopTaskStatus`, `AgentRunStatus`, `local`, `cloned` (+1033 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **Thin community `Community 13`** (77 nodes): `DesktopStateStore`, `.appendAtomicMoveFallbackLog()`, `.appendStateLoadLog()`, `.appHome()`, `.applyJsonCollectionChunksLocked()`, `.atomicMoveFallbackMessage()`, `.backupStateFile()`, `.cleanupStateTempFiles()`, `.clearLockMetadata()`, `.compactDirectChatConversation()`, `.compactDirectChatConversations()`, `.compactRequiredText()`, `.compactRunForPersistence()`, `.compactStateForPersistence()`, `.compactTaskForPersistence()`, `.compactText()`, `.currentFingerprint()`, `.decodeState()`, `.decodeStateLenient()`, `.decodeStateOrNull()`, `.enforceOwnerOnlyPermissions()`, `.ensureSqliteSchema()`, `.jsonCollectionFile()`, `.jsonCollectionsDir()`, `.jsonCollectionsRevisionFile()`, `.jsonCollectionsRevisionFingerprint()`, `.load()`, `.loadCollection()`, `.loadGoals()`, `.loadIssues()`, `.loadJson()`, `.loadJsonCollection()`, `.loadJsonStateFromChunksLocked()`, `.loadJsonStateLocked()`, `.loadReviewQueue()`, `.loadRuns()`, `.loadSqlite()`, `.loadSqliteCollection()`, `.loadSqliteState()`, `.lockFile()`, `.lockMetadataFile()`, `.managedReposRoot()`, `.migrateJsonStateIfNeeded()`, `.normalizeLegacyCompanyRuntimeState()`, `.normalizeStateForPersistence()`, `.pruneDanglingCompanyReferences()`, `.readJsonCollectionLocked()`, `.readJsonStateForMigration()`, `.readSqliteCollection()`, `.save()`, `.saveJson()`, `.saveJsonLocked()`, `.saveSqlite()`, `.saveSqliteState()`, `.setSqliteMeta()`, `.sha256()`, `.sqliteCollectionCount()`, `.sqliteCollectionHashes()`, `.sqliteConnection()`, `.sqliteMeta()`, `.sqliteRevision()`, `.sqliteStateFile()`, `.stateCollection()`, `.stateFile()`, `.touchJsonCollectionsRevisionLocked()`, `.updateCache()`, `.updateCollection()`, `.updateJsonCollection()`, `.updateRuns()`, `.updateSqliteCollection()`, `.useJsonBackend()`, `.withStateFileLock()`, `.writeJsonCollectionChunksLocked()`, `.writeJsonCollectionLocked()`, `.writeLockMetadata()`, `.writeOwnerOnlyTextAtomically()`, `.writeSqliteCollection()`
+- **Thin community `Community 24`** (32 nodes): `DesktopTuiSessionService`, `.buildCommand()`, `.buildDesktopCliPath()`, `.buildPtyCommand()`, `.commandAvailability()`, `.failedSessionDelta()`, `.failedTuiSession()`, `.getDelta()`, `.getSession()`, `.listSessions()`, `.loadConfiguredAgents()`, `.materializePtyBridge()`, `.openSession()`, `.rememberFailedTuiSession()`, `.resolveBuiltinInteractiveAgent()`, `.resolveInteractiveAgent()`, `.sendInput()`, `.shouldReuse()`, `.shutdown()`, `.startReader()`, `.supportedConfigPaths()`, `.terminateRuntimeSession()`, `.terminateSession()`, `.watchProcess()`, `.writeIsolatedConfig()`, `isExpectedTuiExit()`, `RuntimeSession`, `.append()`, `.delta()`, `.snapshot()`, `.updateStatus()`, `DesktopTuiSessionService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 26`** (32 nodes): `DesktopTuiSessionService`, `.buildCommand()`, `.buildDesktopCliPath()`, `.buildPtyCommand()`, `.commandAvailability()`, `.failedSessionDelta()`, `.failedTuiSession()`, `.getDelta()`, `.getSession()`, `.listSessions()`, `.loadConfiguredAgents()`, `.materializePtyBridge()`, `.openSession()`, `.rememberFailedTuiSession()`, `.resolveBuiltinInteractiveAgent()`, `.resolveInteractiveAgent()`, `.sendInput()`, `.shouldReuse()`, `.shutdown()`, `.startReader()`, `.supportedConfigPaths()`, `.terminateRuntimeSession()`, `.terminateSession()`, `.watchProcess()`, `.writeIsolatedConfig()`, `isExpectedTuiExit()`, `RuntimeSession`, `.append()`, `.delta()`, `.snapshot()`, `.updateStatus()`, `DesktopTuiSessionService.kt`
+- **Thin community `Community 29`** (27 nodes): `GoalDrivenTaskPlanner`, `.buildApprovalAssignment()`, `.buildAssignedPrompt()`, `.buildExecutionAssignments()`, `.buildPlan()`, `.buildPlanForParticipants()`, `.buildReviewAssignments()`, `.buildSubtasks()`, `.defaultWorkItems()`, `.enrichWorkItems()`, `.executionRelevanceScore()`, `.extractWorkItems()`, `.fallbackWorkItem()`, `.isActionableWorkItem()`, `.isChief()`, `.isExecutionParticipant()`, `.isReviewer()`, `.participantFocus()`, `.participantRank()`, `.participantRoutingDescriptor()`, `.prioritizeExecutionParticipants()`, `.selectChief()`, `.selectExecutionParticipants()`, `.summarizeGoal()`, `.toSubtaskTitle()`, `PlanningParticipant`, `GoalDrivenTaskPlanner.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 31`** (27 nodes): `GoalDrivenTaskPlanner`, `.buildApprovalAssignment()`, `.buildAssignedPrompt()`, `.buildExecutionAssignments()`, `.buildPlan()`, `.buildPlanForParticipants()`, `.buildReviewAssignments()`, `.buildSubtasks()`, `.defaultWorkItems()`, `.enrichWorkItems()`, `.executionRelevanceScore()`, `.extractWorkItems()`, `.fallbackWorkItem()`, `.isActionableWorkItem()`, `.isChief()`, `.isExecutionParticipant()`, `.isReviewer()`, `.participantFocus()`, `.participantRank()`, `.participantRoutingDescriptor()`, `.prioritizeExecutionParticipants()`, `.selectChief()`, `.selectExecutionParticipants()`, `.summarizeGoal()`, `.toSubtaskTitle()`, `PlanningParticipant`, `GoalDrivenTaskPlanner.kt`
+- **Thin community `Community 32`** (26 nodes): `InteractiveCommand`, `.buildLineReader()`, `.defaultSaveDir()`, `.executeLoggedTurn()`, `.extractAgentSummaries()`, `.loadBootstrapContext()`, `.loadInteractiveConfig()`, `.normalizeInteractiveInput()`, `.parseAgentsOption()`, `.preferredSingleAgent()`, `.printAgents()`, `.printDesktopPrompt()`, `.printHelp()`, `.processPromptFileLines()`, `.resolveActiveAgent()`, `.resolveInitialChatMode()`, `.resolveStarterAgent()`, `.run()`, `.runInteractiveLoop()`, `.runTurn()`, `.runTurnWithSpinner()`, `.shouldRefreshStarterConfig()`, `.toInteractiveSummary()`, `.writeStarterConfig()`, `normalizeInteractiveInput()`, `InteractiveCommand.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 33`** (26 nodes): `InteractiveCommand`, `.buildLineReader()`, `.defaultSaveDir()`, `.executeLoggedTurn()`, `.extractAgentSummaries()`, `.loadBootstrapContext()`, `.loadInteractiveConfig()`, `.normalizeInteractiveInput()`, `.parseAgentsOption()`, `.preferredSingleAgent()`, `.printAgents()`, `.printDesktopPrompt()`, `.printHelp()`, `.processPromptFileLines()`, `.resolveActiveAgent()`, `.resolveInitialChatMode()`, `.resolveStarterAgent()`, `.run()`, `.runInteractiveLoop()`, `.runTurn()`, `.runTurnWithSpinner()`, `.shouldRefreshStarterConfig()`, `.toInteractiveSummary()`, `.writeStarterConfig()`, `normalizeInteractiveInput()`, `InteractiveCommand.kt`
+- **Thin community `Community 33`** (25 nodes): `A2aRouter`, `.acknowledgeMessages()`, `.artifactCount()`, `.enqueueSnapshotResponse()`, `.heartbeat()`, `.listArtifacts()`, `.normalizeArtifactKind()`, `.normalizeArtifactLabel()`, `.normalizeArtifactLocalPath()`, `.normalizeArtifactReference()`, `.normalizeArtifactTenant()`, `.normalizeArtifactUrl()`, `.openSession()`, `.persistInternalMessage()`, `.postMessage()`, `.pullMessages()`, `.recipientsFor()`, `.registerArtifact()`, `.requesterSessionsFor()`, `.snapshot()`, `.validateEnvelope()`, `.validateSenderTenant()`, `normalized()`, `normalizedForRouting()`, `A2aRouter.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 34`** (25 nodes): `A2aRouter`, `.acknowledgeMessages()`, `.artifactCount()`, `.enqueueSnapshotResponse()`, `.heartbeat()`, `.listArtifacts()`, `.normalizeArtifactKind()`, `.normalizeArtifactLabel()`, `.normalizeArtifactLocalPath()`, `.normalizeArtifactReference()`, `.normalizeArtifactTenant()`, `.normalizeArtifactUrl()`, `.openSession()`, `.persistInternalMessage()`, `.postMessage()`, `.pullMessages()`, `.recipientsFor()`, `.registerArtifact()`, `.requesterSessionsFor()`, `.snapshot()`, `.validateEnvelope()`, `.validateSenderTenant()`, `normalized()`, `normalizedForRouting()`, `A2aRouter.kt`
+- **Thin community `Community 38`** (19 nodes): `DurableRuntimeService`, `.approve()`, `.beginPipelineRun()`, `.buildExecutionPlan()`, `.compactDurableRuntimeText()`, `.completeRun()`, `.createFork()`, `.failRun()`, `.importLegacyCheckpoint()`, `.inspectRun()`, `.listRuns()`, `.listRunSummaries()`, `.nextOrdinal()`, `.parseReplayMode()`, `.recordSideEffect()`, `.recordStageCompleted()`, `.recordStageFailed()`, `.recordStageStarted()`, `DurableRuntimeService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 39`** (19 nodes): `DurableRuntimeService`, `.approve()`, `.beginPipelineRun()`, `.buildExecutionPlan()`, `.compactDurableRuntimeText()`, `.completeRun()`, `.createFork()`, `.failRun()`, `.importLegacyCheckpoint()`, `.inspectRun()`, `.listRuns()`, `.listRunSummaries()`, `.nextOrdinal()`, `.parseReplayMode()`, `.recordSideEffect()`, `.recordStageCompleted()`, `.recordStageFailed()`, `.recordStageStarted()`, `DurableRuntimeService.kt`
+- **Thin community `Community 43`** (18 nodes): `TemplateCommand`, `.applyFills()`, `.buildCustomTemplate()`, `.generateBlockedEscalationTemplate()`, `.generateChainTemplate()`, `.generateCompareTemplate()`, `.generateConsensusTemplate()`, `.generateCustomTemplate()`, `.generateFanoutTemplate()`, `.generateInteractiveTemplate()`, `.generateReleaseTemplate()`, `.generateReviewTemplate()`, `.generateSelfHealTemplate()`, `.generateTemplate()`, `.generateVerifiedTemplate()`, `.run()`, `.showTemplateList()`, `TemplateCommand.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 44`** (18 nodes): `TemplateCommand`, `.applyFills()`, `.buildCustomTemplate()`, `.generateBlockedEscalationTemplate()`, `.generateChainTemplate()`, `.generateCompareTemplate()`, `.generateConsensusTemplate()`, `.generateCustomTemplate()`, `.generateFanoutTemplate()`, `.generateInteractiveTemplate()`, `.generateReleaseTemplate()`, `.generateReviewTemplate()`, `.generateSelfHealTemplate()`, `.generateTemplate()`, `.generateVerifiedTemplate()`, `.run()`, `.showTemplateList()`, `TemplateCommand.kt`
+- **Thin community `Community 44`** (17 nodes): `ConfigRepository`, `.loadConfig()`, `.loadConfigExact()`, `.saveConfig()`, `listOverrideFiles()`, `listYamlFiles()`, `loadConfig()`, `loadConfigExact()`, `loadConfigInternal()`, `loadConfigWithImports()`, `mergeCollection()`, `mergeConfigs()`, `mergeParsedConfigs()`, `parseConfig()`, `ParsedConfig`, `resolveImportPath()`, `ConfigRepository.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 45`** (17 nodes): `ConfigRepository`, `.loadConfig()`, `.loadConfigExact()`, `.saveConfig()`, `listOverrideFiles()`, `listYamlFiles()`, `loadConfig()`, `loadConfigExact()`, `loadConfigInternal()`, `loadConfigWithImports()`, `mergeCollection()`, `mergeConfigs()`, `mergeParsedConfigs()`, `parseConfig()`, `ParsedConfig`, `resolveImportPath()`, `ConfigRepository.kt`
+- **Thin community `Community 47`** (16 nodes): `AgentCapabilityGuard`, `.allowlistsPermit()`, `.before()`, `.capabilityFor()`, `.classifyGitCapability()`, `.classifyShellCapability()`, `.hasRecordedApproval()`, `.isReadAction()`, `.isWithin()`, `.matchesDomainAllowlist()`, `.requiresScopedSubject()`, `.resolveSetting()`, `.simulate()`, `.toHostOrNull()`, `.toNormalizedPathOrNull()`, `AgentCapabilityGuard.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 49`** (16 nodes): `AgentCapabilityGuard`, `.allowlistsPermit()`, `.before()`, `.capabilityFor()`, `.classifyGitCapability()`, `.classifyShellCapability()`, `.hasRecordedApproval()`, `.isReadAction()`, `.isWithin()`, `.matchesDomainAllowlist()`, `.requiresScopedSubject()`, `.resolveSetting()`, `.simulate()`, `.toHostOrNull()`, `.toNormalizedPathOrNull()`, `AgentCapabilityGuard.kt`
+- **Thin community `Community 49`** (16 nodes): `RecoveryExecutor`, `.applyValidation()`, `.buildSelfRepairInput()`, `.escalatedForAttempt()`, `.executeRetryThenFallback()`, `.executeWithFallback()`, `.executeWithoutRecovery()`, `.executeWithRecovery()`, `.executeWithRetry()`, `.executeWithSkip()`, `.failureResult()`, `.isRetryable()`, `.resolvePath()`, `.runAgent()`, `.shouldAttemptSelfRepair()`, `RecoveryExecutor.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 51`** (16 nodes): `RecoveryExecutor`, `.applyValidation()`, `.buildSelfRepairInput()`, `.escalatedForAttempt()`, `.executeRetryThenFallback()`, `.executeWithFallback()`, `.executeWithoutRecovery()`, `.executeWithRecovery()`, `.executeWithRetry()`, `.executeWithSkip()`, `.failureResult()`, `.isRetryable()`, `.resolvePath()`, `.runAgent()`, `.shouldAttemptSelfRepair()`, `RecoveryExecutor.kt`
+- **Thin community `Community 53`** (16 nodes): `canUseRealAiStarter()`, `defaultInteractiveConfigPath()`, `defaultInteractiveSaveDir()`, `hasStarterCommand()`, `isClaudeReadyForStarter()`, `isCodexReadyForStarter()`, `isGeminiReadyForStarter()`, `resolveInteractiveConfigPath()`, `resolveStarterAgentSpec()`, `runStatusProbe()`, `safeLocalStarterAgentSpec()`, `StarterAgentSpec`, `starterAllowedDirectories()`, `starterAllowedDirectoriesYaml()`, `starterHomeDirectory()`, `StarterAgentResolver.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 54`** (16 nodes): `canUseRealAiStarter()`, `defaultInteractiveConfigPath()`, `defaultInteractiveSaveDir()`, `hasStarterCommand()`, `isClaudeReadyForStarter()`, `isCodexReadyForStarter()`, `isGeminiReadyForStarter()`, `resolveInteractiveConfigPath()`, `resolveStarterAgentSpec()`, `runStatusProbe()`, `safeLocalStarterAgentSpec()`, `StarterAgentSpec`, `starterAllowedDirectories()`, `starterAllowedDirectoriesYaml()`, `starterHomeDirectory()`, `StarterAgentResolver.kt`
+- **Thin community `Community 56`** (15 nodes): `ConditionEvaluator`, `.asDouble()`, `.attemptCoercion()`, `.compareNumbers()`, `.evaluate()`, `.isEqual()`, `.isTruthy()`, `.resolveStageReference()`, `.resolveValue()`, `.visitBinaryExpr()`, `.visitGroupingExpr()`, `.visitLiteralExpr()`, `.visitUnaryExpr()`, `.visitVariableExpr()`, `ConditionEvaluator.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 57`** (15 nodes): `ConditionEvaluator`, `.asDouble()`, `.attemptCoercion()`, `.compareNumbers()`, `.evaluate()`, `.isEqual()`, `.isTruthy()`, `.resolveStageReference()`, `.resolveValue()`, `.visitBinaryExpr()`, `.visitGroupingExpr()`, `.visitLiteralExpr()`, `.visitUnaryExpr()`, `.visitVariableExpr()`, `ConditionEvaluator.kt`
+- **Thin community `Community 58`** (14 nodes): `BoardControllerTest`, `.createDummyPost()`, `.`createPost should return 201 Created with post details`()`, `.`createPost with invalid request should return 400 Bad Request`()`, `.`deletePost should return 204 No Content`()`, `.`deletePost should return 403 Forbidden for permission denied`()`, `.`getAllPosts should return 200 OK with paginated posts`()`, `.`getPostById should return 200 OK with post details`()`, `.`getPostById should return 404 Not Found when post does not exist`()`, `.`updatePost should return 200 OK with updated post details`()`, `.`updatePost should return 403 Forbidden for permission denied`()`, `.`updatePost should return 409 Conflict for version mismatch`()`, `BoardControllerTest.kt`, `BoardControllerTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 59`** (14 nodes): `BoardControllerTest`, `.createDummyPost()`, `.`createPost should return 201 Created with post details`()`, `.`createPost with invalid request should return 400 Bad Request`()`, `.`deletePost should return 204 No Content`()`, `.`deletePost should return 403 Forbidden for permission denied`()`, `.`getAllPosts should return 200 OK with paginated posts`()`, `.`getPostById should return 200 OK with post details`()`, `.`getPostById should return 404 Not Found when post does not exist`()`, `.`updatePost should return 200 OK with updated post details`()`, `.`updatePost should return 403 Forbidden for permission denied`()`, `.`updatePost should return 409 Conflict for version mismatch`()`, `BoardControllerTest.kt`, `BoardControllerTest.kt`
+- **Thin community `Community 61`** (14 nodes): `BoundedDirectChatLineReader`, `.readLine()`, `DirectChatService`, `.buildClaudeCliPrompt()`, `.buildOllamaMessages()`, `.jsonString()`, `.listAvailableModels()`, `.streamChat()`, `.streamClaudeCli()`, `.streamLmStudio()`, `.streamOllama()`, `.updatedStreamContentChars()`, `.validateAndNormalizeBaseUrl()`, `DirectChatService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 62`** (14 nodes): `BoundedDirectChatLineReader`, `.readLine()`, `DirectChatService`, `.buildClaudeCliPrompt()`, `.buildOllamaMessages()`, `.jsonString()`, `.listAvailableModels()`, `.streamChat()`, `.streamClaudeCli()`, `.streamLmStudio()`, `.streamOllama()`, `.updatedStreamContentChars()`, `.validateAndNormalizeBaseUrl()`, `DirectChatService.kt`
+- **Thin community `Community 62`** (14 nodes): `DefaultSecurityValidator`, `.containsInjectionPattern()`, `.isShellExecuteOption()`, `.isShellInterpreter()`, `.validate()`, `.validateCommand()`, `.validateEnvironment()`, `.validateParameters()`, `.validatePath()`, `SecurityValidator`, `.validate()`, `.validateCommand()`, `.validatePath()`, `SecurityValidator.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 63`** (14 nodes): `DefaultSecurityValidator`, `.containsInjectionPattern()`, `.isShellExecuteOption()`, `.isShellInterpreter()`, `.validate()`, `.validateCommand()`, `.validateEnvironment()`, `.validateParameters()`, `.validatePath()`, `SecurityValidator`, `.validate()`, `.validateCommand()`, `.validatePath()`, `SecurityValidator.kt`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 70`** (13 nodes): `AgentRegistry`, `.findAgentsByTag()`, `.getAgent()`, `.getAllAgents()`, `.registerAgent()`, `.unregisterAgent()`, `InMemoryAgentRegistry`, `.findAgentsByTag()`, `.getAgent()`, `.getAllAgents()`, `.registerAgent()`, `.unregisterAgent()`, `AgentRegistry.kt`
+- **Thin community `Community 69`** (13 nodes): `AgentRegistry`, `.findAgentsByTag()`, `.getAgent()`, `.getAllAgents()`, `.registerAgent()`, `.unregisterAgent()`, `InMemoryAgentRegistry`, `.findAgentsByTag()`, `.getAgent()`, `.getAllAgents()`, `.registerAgent()`, `.unregisterAgent()`, `AgentRegistry.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 74`** (12 nodes): `GoalDrivenTaskPlannerTest`, `.`builder execution focus does not infer frontend from the word builder`()`, `.`buildPlan creates deterministic assignments for a high-level goal`()`, `.`buildPlan ignores workflow history bullets inside context sections`()`, `.`buildPlan includes A2A collaboration metadata in assigned prompts`()`, `.`buildPlan preserves explicit checklist items when present`()`, `.`collaboration notes do not accidentally turn builders into reviewers`()`, `.`default work items avoid internal planning jargon`()`, `.`generic builder fallback still fans out when multiple work items are available`()`, `.`generic goal with enterprise roster falls back to Builder instead of UX roles`()`, `.`short natural language prompts are enriched into a larger execution portfolio`()`, `GoalDrivenTaskPlannerTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -1727,21 +1725,21 @@ Nodes (1): RealtimeEvent
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 82`** (11 nodes): `TemplateEngineTest`, `.setUp()`, `.`should cap legacy all outputs interpolation`()`, `.`should handle invalid expressions gracefully`()`, `.`should handle multiple expressions`()`, `.`should handle nonexistent stage output`()`, `.`should interpolate environment variables`()`, `.`should interpolate pipeline name`()`, `.`should interpolate stage output expression`()`, `.`should maintain legacy mustache syntax for shared state`()`, `TemplateEngineTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 84`** (11 nodes): `AgentPerformanceCalculator`, `.belongsToScope()`, `.compute()`, `.isRejection()`, `.matchRun()`, `.normalizedKey()`, `.recentDeliveryRate()`, `.score()`, `.subjects()`, `AgentPerformanceSubject`, `AgentPerformanceCalculator.kt`
+- **Thin community `Community 83`** (11 nodes): `AgentPerformanceCalculator`, `.belongsToScope()`, `.compute()`, `.isRejection()`, `.matchRun()`, `.normalizedKey()`, `.recentDeliveryRate()`, `.score()`, `.subjects()`, `AgentPerformanceSubject`, `AgentPerformanceCalculator.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 86`** (11 nodes): `VerificationBundleService.kt`, `VerificationBundleService`, `.buildArtifactRefs()`, `.buildContract()`, `.buildForIssue()`, `.buildObservations()`, `.bundleFromEvaluation()`, `.evaluate()`, `.loadOutcome()`, `.parseChecks()`, `.persistForIssue()`
+- **Thin community `Community 85`** (11 nodes): `VerificationBundleService.kt`, `VerificationBundleService`, `.buildArtifactRefs()`, `.buildContract()`, `.buildForIssue()`, `.buildObservations()`, `.bundleFromEvaluation()`, `.evaluate()`, `.loadOutcome()`, `.parseChecks()`, `.persistForIssue()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 87`** (11 nodes): `ProvenanceService`, `.bundleForFile()`, `.bundleForPullRequest()`, `.bundleForRef()`, `.bundleForRun()`, `.mergeEdges()`, `.mergeNodes()`, `.recordAction()`, `.recordIssueRunLink()`, `.recordPullRequestState()`, `ProvenanceService.kt`
+- **Thin community `Community 86`** (11 nodes): `ProvenanceService`, `.bundleForFile()`, `.bundleForPullRequest()`, `.bundleForRef()`, `.bundleForRun()`, `.mergeEdges()`, `.mergeNodes()`, `.recordAction()`, `.recordIssueRunLink()`, `.recordPullRequestState()`, `ProvenanceService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 92`** (11 nodes): `buildMessage()`, `ErrorMessages`, `.agentNotFound()`, `.configNotFound()`, `.pipelineNotFound()`, `.pluginExecutionFailed()`, `.securityViolation()`, `.stageTimeout()`, `.validationFailed()`, `UserFriendlyError`, `UserFriendlyErrors.kt`
+- **Thin community `Community 91`** (11 nodes): `buildMessage()`, `ErrorMessages`, `.agentNotFound()`, `.configNotFound()`, `.pipelineNotFound()`, `.pluginExecutionFailed()`, `.securityViolation()`, `.stageTimeout()`, `.validationFailed()`, `UserFriendlyError`, `UserFriendlyErrors.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 94`** (11 nodes): `StatsCommand`, `.formatDuration()`, `.printAllStatsCsv()`, `.printDetailedStatsCsv()`, `.printStageDetailsCsv()`, `.run()`, `.showAllStats()`, `.showDetailedStats()`, `.showHistory()`, `.showStageDetails()`, `StatsCommand.kt`
+- **Thin community `Community 93`** (11 nodes): `StatsCommand`, `.formatDuration()`, `.printAllStatsCsv()`, `.printDetailedStatsCsv()`, `.printStageDetailsCsv()`, `.run()`, `.showAllStats()`, `.showDetailedStats()`, `.showHistory()`, `.showStageDetails()`, `StatsCommand.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 95`** (11 nodes): `defaultCommandAvailable()`, `DoctorCommand`, `.checkBinary()`, `.checkConfig()`, `.checkExamples()`, `.checkJar()`, `.checkJava()`, `.findCliJar()`, `.run()`, `isWindows()`, `DoctorCommand.kt`
+- **Thin community `Community 94`** (11 nodes): `defaultCommandAvailable()`, `DoctorCommand`, `.checkBinary()`, `.checkConfig()`, `.checkExamples()`, `.checkJar()`, `.checkJava()`, `.findCliJar()`, `.run()`, `isWindows()`, `DoctorCommand.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 96`** (10 nodes): `LocalPlaywrightDependencyResolver`, `.allowRuntimeInstall()`, `.configuredNodeModulesPath()`, `.existingNodePath()`, `.hasPlaywrightPackage()`, `.installIfExplicitlyAllowed()`, `.playwrightSetupMessage()`, `.prewarm()`, `.requireNodePath()`, `LocalPlaywrightDependencyResolver.kt`
+- **Thin community `Community 95`** (10 nodes): `LocalPlaywrightDependencyResolver`, `.allowRuntimeInstall()`, `.configuredNodeModulesPath()`, `.existingNodePath()`, `.hasPlaywrightPackage()`, `.installIfExplicitlyAllowed()`, `.playwrightSetupMessage()`, `.prewarm()`, `.requireNodePath()`, `LocalPlaywrightDependencyResolver.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 98`** (10 nodes): `VerificationStore.kt`, `VerificationStore`, `.appendObservation()`, `.dir()`, `.listOutcomes()`, `.loadObservations()`, `.loadOutcome()`, `.observationFile()`, `.outcomeFile()`, `.saveOutcome()`
+- **Thin community `Community 97`** (10 nodes): `VerificationStore.kt`, `VerificationStore`, `.appendObservation()`, `.dir()`, `.listOutcomes()`, `.loadObservations()`, `.loadOutcome()`, `.observationFile()`, `.outcomeFile()`, `.saveOutcome()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 102`** (10 nodes): `PolicyStore`, `.appendDecision()`, `.auditFile()`, `.defaultPermissiveProfile()`, `.listDocuments()`, `.loadAudit()`, `.loadDocument()`, `.policiesDir()`, `.saveDocument()`, `PolicyStore.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -1751,105 +1749,105 @@ Nodes (1): RealtimeEvent
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 109`** (9 nodes): `DesktopDirectChatService`, `.appendMessage()`, `.createConversation()`, `.deleteConversation()`, `.getConversation()`, `.listConversations()`, `.listModels()`, `.streamMessage()`, `DesktopDirectChatService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 110`** (9 nodes): `AutonomousDiscoveryScanResult`, `AutonomousDiscoveryService`, `.discoverSignals()`, `.markTriaged()`, `.mergeSignals()`, `.scan()`, `.selectActionableSignal()`, `.severityRank()`, `AutonomousDiscoveryService.kt`
+- **Thin community `Community 113`** (9 nodes): `LocalModelDefaults`, `.installedGemma4Models()`, `.isGemma4Model()`, `.isGemmaFamilyModel()`, `.isLocalOllamaTag()`, `.normalizeBaseUrl()`, `.normalizeModel()`, `.preferredInstalledGemmaModels()`, `LocalModelDefaults.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 114`** (9 nodes): `LocalModelDefaults`, `.installedGemma4Models()`, `.isGemma4Model()`, `.isGemmaFamilyModel()`, `.isLocalOllamaTag()`, `.normalizeBaseUrl()`, `.normalizeModel()`, `.preferredInstalledGemmaModels()`, `LocalModelDefaults.kt`
+- **Thin community `Community 116`** (8 nodes): `BoardController`, `.createPost()`, `.deletePost()`, `.getPostById()`, `.getPosts()`, `.updatePost()`, `BoardController.kt`, `BoardController.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 118`** (8 nodes): `BoardController`, `.createPost()`, `.deletePost()`, `.getPostById()`, `.getPosts()`, `.updatePost()`, `BoardController.kt`, `BoardController.kt`
+- **Thin community `Community 117`** (8 nodes): `cloneRepo()`, `git()`, `GitWorkspaceServiceRealGitIntegrationTest`, `initBareRemote()`, `initRepoWithCommit()`, `mockkStateStore()`, `realGitService()`, `GitWorkspaceServiceRealGitIntegrationTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 119`** (8 nodes): `cloneRepo()`, `git()`, `GitWorkspaceServiceRealGitIntegrationTest`, `initBareRemote()`, `initRepoWithCommit()`, `mockkStateStore()`, `realGitService()`, `GitWorkspaceServiceRealGitIntegrationTest.kt`
+- **Thin community `Community 118`** (8 nodes): `eventuallyProcessExited()`, `localJsonServer()`, `localModelContext()`, `LocalModelPluginTest`, `localRoutingServer()`, `respondJson()`, `unusedProcessManager()`, `LocalModelPluginTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 120`** (8 nodes): `eventuallyProcessExited()`, `localJsonServer()`, `localModelContext()`, `LocalModelPluginTest`, `localRoutingServer()`, `respondJson()`, `unusedProcessManager()`, `LocalModelPluginTest.kt`
+- **Thin community `Community 119`** (8 nodes): `DefaultResultAnalyzer`, `.analysisOutput()`, `.analyze()`, `.extractConfidence()`, `.percent()`, `.similarity()`, `.tokenize()`, `DefaultResultAnalyzer.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 121`** (8 nodes): `DefaultResultAnalyzer`, `.analysisOutput()`, `.analyze()`, `.extractConfidence()`, `.percent()`, `.similarity()`, `.tokenize()`, `DefaultResultAnalyzer.kt`
+- **Thin community `Community 121`** (8 nodes): `BrewStatus`, `desktopUpdateStatusResponse()`, `resolveBrewUpdateStatus()`, `resolveInstalledDesktopAppPath()`, `resolveSourceCommit()`, `runUpdateStatusCommand()`, `UpdateStatusCommandResult`, `DesktopUpdateStatus.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 123`** (8 nodes): `CompanyIssueReadiness`, `.dependenciesSatisfied()`, `.dependencyIds()`, `.isDependencySatisfied()`, `.isRuntimeStartCandidate()`, `.isSupersededCanceledDependency()`, `.runtimeDisposition()`, `CompanyIssueReadiness.kt`
+- **Thin community `Community 122`** (8 nodes): `CompanyIssueReadiness`, `.dependenciesSatisfied()`, `.dependencyIds()`, `.isDependencySatisfied()`, `.isRuntimeStartCandidate()`, `.isSupersededCanceledDependency()`, `.runtimeDisposition()`, `CompanyIssueReadiness.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 124`** (8 nodes): `ChatSession`, `.addAssistant()`, `.addUser()`, `.buildPrompt()`, `.clear()`, `.compactHistory()`, `.snapshot()`, `ChatSession.kt`
+- **Thin community `Community 123`** (8 nodes): `ChatSession`, `.addAssistant()`, `.addUser()`, `.buildPrompt()`, `.clear()`, `.compactHistory()`, `.snapshot()`, `ChatSession.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 125`** (8 nodes): `GitHubControlPlaneStore`, `.file()`, `.load()`, `.loadUnlocked()`, `.save()`, `.update()`, `.writeState()`, `GitHubControlPlaneStore.kt`
+- **Thin community `Community 124`** (8 nodes): `GitHubControlPlaneStore`, `.file()`, `.load()`, `.loadUnlocked()`, `.save()`, `.update()`, `.writeState()`, `GitHubControlPlaneStore.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 126`** (8 nodes): `OpenCodeDefaults`, `.isForbiddenCloudModel()`, `.isLocalOllamaModel()`, `.isSelectableModel()`, `.localOllamaEnvironment()`, `.normalizeModel()`, `.ollamaTagForOpenCodeModel()`, `OpenCodeDefaults.kt`
+- **Thin community `Community 125`** (8 nodes): `OpenCodeDefaults`, `.isForbiddenCloudModel()`, `.isLocalOllamaModel()`, `.isSelectableModel()`, `.localOllamaEnvironment()`, `.normalizeModel()`, `.ollamaTagForOpenCodeModel()`, `OpenCodeDefaults.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 127`** (8 nodes): `JsonParser`, `.parse()`, `.serialize()`, `YamlParser`, `.generateSnippet()`, `.parse()`, `.serialize()`, `ConfigParsers.kt`
+- **Thin community `Community 126`** (8 nodes): `JsonParser`, `.parse()`, `.serialize()`, `YamlParser`, `.generateSnippet()`, `.parse()`, `.serialize()`, `ConfigParsers.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 128`** (8 nodes): `cleanupSurvivingDescendants()`, `destroyProcessTree()`, `ProcessDescendantTracker`, `.recordDescendants()`, `.stopAndSnapshot()`, `terminateUnixChildren()`, `waitForProcessHandles()`, `ProcessTree.kt`
+- **Thin community `Community 127`** (8 nodes): `cleanupSurvivingDescendants()`, `destroyProcessTree()`, `ProcessDescendantTracker`, `.recordDescendants()`, `.stopAndSnapshot()`, `terminateUnixChildren()`, `waitForProcessHandles()`, `ProcessTree.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 129`** (8 nodes): `DiagramGenerator`, `.appendStageDetails()`, `.generate()`, `.generateDag()`, `.generateMap()`, `.generateParallel()`, `.generateSequential()`, `DiagramGenerator.kt`
+- **Thin community `Community 128`** (8 nodes): `DiagramGenerator`, `.appendStageDetails()`, `.generate()`, `.generateDag()`, `.generateMap()`, `.generateParallel()`, `.generateSequential()`, `DiagramGenerator.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 130`** (8 nodes): `Linter.kt`, `Linter`, `.checkDuplicateAgentNames()`, `.checkDuplicateStageIds()`, `.checkUndefinedAgentReferences()`, `.checkUnusedAgents()`, `.lint()`, `LintResult`
+- **Thin community `Community 129`** (8 nodes): `Linter.kt`, `Linter`, `.checkDuplicateAgentNames()`, `.checkDuplicateStageIds()`, `.checkUndefinedAgentReferences()`, `.checkUnusedAgents()`, `.lint()`, `LintResult`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 133`** (7 nodes): `completedResult()`, `ImmediateEventBus`, `.emit()`, `.subscribe()`, `.unsubscribe()`, `PipelineRunTrackerTest`, `PipelineRunTrackerTest.kt`
+- **Thin community `Community 132`** (7 nodes): `completedResult()`, `ImmediateEventBus`, `.emit()`, `.subscribe()`, `.unsubscribe()`, `PipelineRunTrackerTest`, `PipelineRunTrackerTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 134`** (7 nodes): `PipelineOrchestratorMapTest`, `.`executePipeline with MAP execution mode should fan out and aggregate results`()`, `.`MAP execution honors maxConcurrentAgents`()`, `TrackingAgentExecutor`, `.executeAgent()`, `.executeWithRetry()`, `PipelineOrchestratorMapTest.kt`
+- **Thin community `Community 133`** (7 nodes): `PipelineOrchestratorMapTest`, `.`executePipeline with MAP execution mode should fan out and aggregate results`()`, `.`MAP execution honors maxConcurrentAgents`()`, `TrackingAgentExecutor`, `.executeAgent()`, `.executeWithRetry()`, `PipelineOrchestratorMapTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 135`** (7 nodes): `A2aDedupeStore`, `.persist()`, `.prune()`, `.remember()`, `.size()`, `StoredAck`, `A2aDedupeStore.kt`
+- **Thin community `Community 134`** (7 nodes): `A2aDedupeStore`, `.persist()`, `.prune()`, `.remember()`, `.size()`, `StoredAck`, `A2aDedupeStore.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 136`** (7 nodes): `A2aDedupePersistenceStore`, `.dir()`, `.file()`, `.load()`, `.save()`, `SnapshotEntry`, `A2aDedupePersistenceStore.kt`
+- **Thin community `Community 135`** (7 nodes): `A2aDedupePersistenceStore`, `.dir()`, `.file()`, `.load()`, `.save()`, `SnapshotEntry`, `A2aDedupePersistenceStore.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 137`** (7 nodes): `A2aSessionPersistenceStore`, `.dir()`, `.file()`, `.load()`, `.save()`, `Snapshot`, `A2aSessionPersistenceStore.kt`
+- **Thin community `Community 136`** (7 nodes): `A2aSessionPersistenceStore`, `.dir()`, `.file()`, `.load()`, `.save()`, `Snapshot`, `A2aSessionPersistenceStore.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 138`** (7 nodes): `DurableResumeCoordinator`, `.approve()`, `.buildContext()`, `.continueRun()`, `.forkRun()`, `.inspect()`, `DurableResumeCoordinator.kt`
+- **Thin community `Community 137`** (7 nodes): `DurableResumeCoordinator`, `.approve()`, `.buildContext()`, `.continueRun()`, `.forkRun()`, `.inspect()`, `DurableResumeCoordinator.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 140`** (7 nodes): `FileReaderPlugin`, `.execute()`, `.executionRoot()`, `.parseMaxBytes()`, `.resolveInsideRoot()`, `.validateInput()`, `FileReaderPlugin.kt`
+- **Thin community `Community 139`** (7 nodes): `FileReaderPlugin`, `.execute()`, `.executionRoot()`, `.parseMaxBytes()`, `.resolveInsideRoot()`, `.validateInput()`, `FileReaderPlugin.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 141`** (7 nodes): `OpenAIPlugin`, `.buildMessage()`, `.execute()`, `.extractContent()`, `.resolveApiKey()`, `.validateInput()`, `OpenAIPlugin.kt`
+- **Thin community `Community 140`** (7 nodes): `OpenAIPlugin`, `.buildMessage()`, `.execute()`, `.extractContent()`, `.resolveApiKey()`, `.validateInput()`, `OpenAIPlugin.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 142`** (7 nodes): `InteractiveCommandCompleter`, `.complete()`, `.completeIncludeValue()`, `.completeSimpleArgValue()`, `.completionValues()`, `.suggest()`, `InteractiveCommandCompleter.kt`
+- **Thin community `Community 141`** (7 nodes): `InteractiveCommandCompleter`, `.complete()`, `.completeIncludeValue()`, `.completeSimpleArgValue()`, `.completionValues()`, `.suggest()`, `InteractiveCommandCompleter.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 145`** (6 nodes): `DirectChatServiceTest`, `isProcessAlive()`, `oneChunkHangingServer()`, `waitForFile()`, `waitUntilNotAlive()`, `DirectChatServiceTest.kt`
+- **Thin community `Community 144`** (6 nodes): `DirectChatServiceTest`, `isProcessAlive()`, `oneChunkHangingServer()`, `waitForFile()`, `waitUntilNotAlive()`, `DirectChatServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 146`** (6 nodes): `DesktopStateStoreTest`, `readSqliteCollection()`, `readSqliteCollectionUpdatedAt()`, `saveLegacyJsonState()`, `writeSqliteCollection()`, `DesktopStateStoreTest.kt`
+- **Thin community `Community 145`** (6 nodes): `DesktopStateStoreTest`, `readSqliteCollection()`, `readSqliteCollectionUpdatedAt()`, `saveLegacyJsonState()`, `writeSqliteCollection()`, `DesktopStateStoreTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 147`** (6 nodes): `DesktopAppServiceRuntimeDispositionSchedulerTest`, `runtimeDispositionCompany()`, `runtimeDispositionGoal()`, `runtimeDispositionIssue()`, `seedRuntimeDispositionWorkspace()`, `DesktopAppServiceRuntimeDispositionSchedulerTest.kt`
+- **Thin community `Community 146`** (6 nodes): `DesktopAppServiceRuntimeDispositionSchedulerTest`, `runtimeDispositionCompany()`, `runtimeDispositionGoal()`, `runtimeDispositionIssue()`, `seedRuntimeDispositionWorkspace()`, `DesktopAppServiceRuntimeDispositionSchedulerTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 148`** (6 nodes): `bindSingleIssueForRuntimeDisposition()`, `CompanyRuntimeBindingServiceTest`, `runtimeDispositionIssue()`, `runtimeDispositionTask()`, `testCompany()`, `CompanyRuntimeBindingServiceTest.kt`
+- **Thin community `Community 147`** (6 nodes): `bindSingleIssueForRuntimeDisposition()`, `CompanyRuntimeBindingServiceTest`, `runtimeDispositionIssue()`, `runtimeDispositionTask()`, `testCompany()`, `CompanyRuntimeBindingServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 149`** (6 nodes): `ProductionReliabilityBaselineTest`, `.`app server exposes explicit health and readiness endpoints`()`, `.`docker entrypoint generates runtime token for non-loopback app server`()`, `.`docker image runs long-lived app server with health probe`()`, `.`release workflow tracks master branch and publishes artifacts`()`, `ProductionReliabilityBaselineTest.kt`
+- **Thin community `Community 148`** (6 nodes): `ProductionReliabilityBaselineTest`, `.`app server exposes explicit health and readiness endpoints`()`, `.`docker entrypoint generates runtime token for non-loopback app server`()`, `.`docker image runs long-lived app server with health probe`()`, `.`release workflow tracks master branch and publishes artifacts`()`, `ProductionReliabilityBaselineTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 150`** (6 nodes): `PipelineContextTest`, `.agentResult()`, `.`getAllOutputs caps large execution history output aggregation`()`, `.`getAllOutputs preserves small outputs in execution order`()`, `.`getSuccessfulOutputs excludes failed outputs before applying aggregation cap`()`, `PipelineContextTest.kt`
+- **Thin community `Community 149`** (6 nodes): `PipelineContextTest`, `.agentResult()`, `.`getAllOutputs caps large execution history output aggregation`()`, `.`getAllOutputs preserves small outputs in execution order`()`, `.`getSuccessfulOutputs excludes failed outputs before applying aggregation cap`()`, `PipelineContextTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 152`** (6 nodes): `PipelineOrchestratorConditionalTest`, `RecordingAgentExecutor`, `.executeAgent()`, `.executeWithRetry()`, `.executionCount()`, `PipelineOrchestratorConditionalTest.kt`
+- **Thin community `Community 151`** (6 nodes): `PipelineOrchestratorConditionalTest`, `RecordingAgentExecutor`, `.executeAgent()`, `.executeWithRetry()`, `.executionCount()`, `PipelineOrchestratorConditionalTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 153`** (6 nodes): `DesktopCommandProcessTest`, `executableScript()`, `isProcessAlive()`, `waitForFile()`, `waitUntilNotAlive()`, `DesktopCommandProcessTest.kt`
+- **Thin community `Community 152`** (6 nodes): `DesktopCommandProcessTest`, `executableScript()`, `isProcessAlive()`, `waitForFile()`, `waitUntilNotAlive()`, `DesktopCommandProcessTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 154`** (6 nodes): `AuthCommandTest`, `executableScript()`, `isProcessAlive()`, `waitForFile()`, `waitUntilNotAlive()`, `AuthCommandTest.kt`
+- **Thin community `Community 153`** (6 nodes): `AuthCommandTest`, `executableScript()`, `isProcessAlive()`, `waitForFile()`, `waitUntilNotAlive()`, `AuthCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 155`** (6 nodes): `CompanyVerificationDecision`, `CompanyVerifierService`, `.requiresExecutionEvidence()`, `.shouldIgnoreReviewVerdictsForCompletion()`, `.verifyIssueCompletion()`, `CompanyVerifierService.kt`
+- **Thin community `Community 154`** (6 nodes): `CompanyVerificationDecision`, `CompanyVerifierService`, `.requiresExecutionEvidence()`, `.shouldIgnoreReviewVerdictsForCompletion()`, `.verifyIssueCompletion()`, `CompanyVerifierService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 156`** (6 nodes): `NetworkEndpointPolicy`, `.isPrivateOrLocalAddress()`, `.isPrivateOrLocalHost()`, `.parseIpv4()`, `.requirePublicHttpUrl()`, `NetworkEndpointPolicy.kt`
+- **Thin community `Community 155`** (6 nodes): `NetworkEndpointPolicy`, `.isPrivateOrLocalAddress()`, `.isPrivateOrLocalHost()`, `.parseIpv4()`, `.requirePublicHttpUrl()`, `NetworkEndpointPolicy.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 157`** (6 nodes): `GitHubControlPlaneService`, `.inspectPullRequest()`, `.listEvents()`, `.listPullRequests()`, `.recordSnapshot()`, `GitHubControlPlaneService.kt`
+- **Thin community `Community 156`** (6 nodes): `GitHubControlPlaneService`, `.inspectPullRequest()`, `.listEvents()`, `.listPullRequests()`, `.recordSnapshot()`, `GitHubControlPlaneService.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 158`** (6 nodes): `QaVerificationPlugin`, `.detectCommand()`, `.execute()`, `.jsonString()`, `.parseArgvJson()`, `QaVerificationPlugin.kt`
+- **Thin community `Community 157`** (6 nodes): `QaVerificationPlugin`, `.detectCommand()`, `.execute()`, `.jsonString()`, `.parseArgvJson()`, `QaVerificationPlugin.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 159`** (6 nodes): `CommandPlugin`, `.execute()`, `.jsonString()`, `.parseArgvJson()`, `.validateInput()`, `CommandPlugin.kt`
+- **Thin community `Community 158`** (6 nodes): `CommandPlugin`, `.execute()`, `.jsonString()`, `.parseArgvJson()`, `.validateInput()`, `CommandPlugin.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 161`** (6 nodes): `DefaultResultAggregator`, `.aggregate()`, `.mergeOutputs()`, `ResultAggregator`, `.aggregate()`, `ResultAggregator.kt`
+- **Thin community `Community 160`** (6 nodes): `DefaultResultAggregator`, `.aggregate()`, `.mergeOutputs()`, `ResultAggregator`, `.aggregate()`, `ResultAggregator.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 162`** (6 nodes): `CodexDashboardCommand`, `.promptLine()`, `.renderTimeline()`, `.run()`, `resolvePromptInput()`, `CodexDashboardCommand.kt`
+- **Thin community `Community 161`** (6 nodes): `CodexDashboardCommand`, `.promptLine()`, `.renderTimeline()`, `.run()`, `resolvePromptInput()`, `CodexDashboardCommand.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 163`** (6 nodes): `PluginCommand`, `.run()`, `PluginInitCommand`, `.createScaffold()`, `.run()`, `PluginCommand.kt`
+- **Thin community `Community 162`** (6 nodes): `PluginCommand`, `.run()`, `PluginInitCommand`, `.createScaffold()`, `.run()`, `PluginCommand.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 164`** (6 nodes): `PolicyEngine`, `.before()`, `.decisions()`, `.evaluate()`, `.matches()`, `PolicyEngine.kt`
+- **Thin community `Community 163`** (6 nodes): `PolicyEngine`, `.before()`, `.decisions()`, `.evaluate()`, `.matches()`, `PolicyEngine.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 165`** (5 nodes): `assertOpenCodeRunCommand()`, `localRoutingServer()`, `OpenCodePluginTest`, `respondJson()`, `OpenCodePluginTest.kt`
+- **Thin community `Community 164`** (5 nodes): `assertOpenCodeRunCommand()`, `localRoutingServer()`, `OpenCodePluginTest`, `respondJson()`, `OpenCodePluginTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 166`** (5 nodes): `PromptHandoffPluginTest`, `RecordingPromptProcessManager`, `.executeProcess()`, `.extractPromptFilePath()`, `PromptHandoffPluginTest.kt`
+- **Thin community `Community 165`** (5 nodes): `PromptHandoffPluginTest`, `RecordingPromptProcessManager`, `.executeProcess()`, `.extractPromptFilePath()`, `PromptHandoffPluginTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 167`** (5 nodes): `PipelineOrchestratorOutputPropagationTest`, `.`dag mode caps combined dependency outputs before dependent stage input`()`, `.orchestratorWithExecutor()`, `.`sequential mode caps implicit previous output before next stage input`()`, `PipelineOrchestratorOutputPropagationTest.kt`
+- **Thin community `Community 166`** (5 nodes): `PipelineOrchestratorOutputPropagationTest`, `.`dag mode caps combined dependency outputs before dependent stage input`()`, `.orchestratorWithExecutor()`, `.`sequential mode caps implicit previous output before next stage input`()`, `PipelineOrchestratorOutputPropagationTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 168`** (5 nodes): `MappedDelayedAgentExecutor`, `.executeAgent()`, `.executeWithRetry()`, `PipelineOrchestratorTimeoutTest`, `PipelineOrchestratorTimeoutTest.kt`
+- **Thin community `Community 167`** (5 nodes): `MappedDelayedAgentExecutor`, `.executeAgent()`, `.executeWithRetry()`, `PipelineOrchestratorTimeoutTest`, `PipelineOrchestratorTimeoutTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 169`** (5 nodes): `assertSnapshot()`, `CliGoldenSnapshotTest`, `createDoctorFixture()`, `normalize()`, `CliGoldenSnapshotTest.kt`
+- **Thin community `Community 168`** (5 nodes): `assertSnapshot()`, `CliGoldenSnapshotTest`, `createDoctorFixture()`, `normalize()`, `CliGoldenSnapshotTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 170`** (5 nodes): `DesktopEndpointPolicy`, `.isLoopback()`, `.remoteAllowed()`, `.resolveA2aEndpoint()`, `DesktopEndpointPolicy.kt`
+- **Thin community `Community 169`** (5 nodes): `DesktopEndpointPolicy`, `.isLoopback()`, `.remoteAllowed()`, `.resolveA2aEndpoint()`, `DesktopEndpointPolicy.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 171`** (5 nodes): `EvidencePathPolicy`, `.canonicalize()`, `.evidenceRoots()`, `.requireAllowedFilePath()`, `EvidencePathPolicy.kt`
+- **Thin community `Community 170`** (5 nodes): `EvidencePathPolicy`, `.canonicalize()`, `.evidenceRoots()`, `.requireAllowedFilePath()`, `EvidencePathPolicy.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 172`** (5 nodes): `CompanyRuntimeMachine`, `.normalizedExecutionAgentName()`, `.planGoalDecomposition()`, `.planIssueStarts()`, `CompanyRuntimeMachine.kt`
+- **Thin community `Community 171`** (5 nodes): `CompanyRuntimeMachine`, `.normalizedExecutionAgentName()`, `.planGoalDecomposition()`, `.planIssueStarts()`, `CompanyRuntimeMachine.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 173`** (5 nodes): `WorkQueue`, `.drain()`, `.enqueue()`, `.isEmpty()`, `WorkQueue.kt`
+- **Thin community `Community 172`** (5 nodes): `WorkQueue`, `.drain()`, `.enqueue()`, `.isEmpty()`, `WorkQueue.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 174`** (5 nodes): `CheckpointGraphStore`, `.appendCheckpoint()`, `.updateStatus()`, `.upsertRun()`, `CheckpointGraphStore.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -1901,11 +1899,11 @@ Nodes (1): RealtimeEvent
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 199`** (4 nodes): `StateRepository`, `.load()`, `.save()`, `StateRepository.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 202`** (4 nodes): `DurableRuntimeFlags`, `.enable()`, `.isEnabled()`, `DurableRuntimeFlags.kt`
+- **Thin community `Community 201`** (4 nodes): `DurableRuntimeFlags`, `.enable()`, `.isEnabled()`, `DurableRuntimeFlags.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 205`** (4 nodes): `TimelineCollector`, `.runWithTimeline()`, `TimelineResult`, `TimelineCollector.kt`
+- **Thin community `Community 204`** (4 nodes): `TimelineCollector`, `.runWithTimeline()`, `TimelineResult`, `TimelineCollector.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 206`** (4 nodes): `StageConflictDetector`, `.conflictKeys()`, `.conflictSafeBatches()`, `StageConflictDetector.kt`
+- **Thin community `Community 205`** (4 nodes): `StageConflictDetector`, `.conflictKeys()`, `.conflictSafeBatches()`, `StageConflictDetector.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 207`** (4 nodes): `SimpleCLI`, `.printHelp()`, `.run()`, `SimpleCLI.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -2017,161 +2015,163 @@ Nodes (1): RealtimeEvent
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 263`** (2 nodes): `DesktopStateStoreLockTest`, `DesktopStateStoreLockTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 264`** (2 nodes): `DesktopEndpointPolicyTest`, `DesktopEndpointPolicyTest.kt`
+- **Thin community `Community 264`** (2 nodes): `DesktopUpdateStatusTest`, `DesktopUpdateStatusTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 265`** (2 nodes): `ExecutionBackendsTest`, `ExecutionBackendsTest.kt`
+- **Thin community `Community 265`** (2 nodes): `DesktopEndpointPolicyTest`, `DesktopEndpointPolicyTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 266`** (2 nodes): `CodexAppServerManagerTest`, `CodexAppServerManagerTest.kt`
+- **Thin community `Community 266`** (2 nodes): `ExecutionBackendsTest`, `ExecutionBackendsTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 267`** (2 nodes): `DesktopAppServiceMergeConfirmationTest`, `DesktopAppServiceMergeConfirmationTest.kt`
+- **Thin community `Community 267`** (2 nodes): `CodexAppServerManagerTest`, `CodexAppServerManagerTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 268`** (2 nodes): `LocalPlaywrightDependencyTest`, `LocalPlaywrightDependencyTest.kt`
+- **Thin community `Community 268`** (2 nodes): `DesktopAppServiceMergeConfirmationTest`, `DesktopAppServiceMergeConfirmationTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 269`** (2 nodes): `DesktopAppServiceDashboardPrCleanupTest`, `DesktopAppServiceDashboardPrCleanupTest.kt`
+- **Thin community `Community 269`** (2 nodes): `LocalPlaywrightDependencyTest`, `LocalPlaywrightDependencyTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 270`** (2 nodes): `AutonomousDiscoveryServiceTest`, `AutonomousDiscoveryServiceTest.kt`
+- **Thin community `Community 270`** (2 nodes): `DesktopAppServiceDashboardPrCleanupTest`, `DesktopAppServiceDashboardPrCleanupTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 271`** (2 nodes): `SkillModelsTest`, `SkillModelsTest.kt`
+- **Thin community `Community 271`** (2 nodes): `AutonomousDiscoveryServiceTest`, `AutonomousDiscoveryServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 272`** (2 nodes): `CompanyRuntimeMachineTest`, `CompanyRuntimeMachineTest.kt`
+- **Thin community `Community 272`** (2 nodes): `SkillModelsTest`, `SkillModelsTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 273`** (2 nodes): `WorkQueueTest`, `WorkQueueTest.kt`
+- **Thin community `Community 273`** (2 nodes): `CompanyRuntimeMachineTest`, `CompanyRuntimeMachineTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 274`** (2 nodes): `ChatTranscriptWriterTest`, `ChatTranscriptWriterTest.kt`
+- **Thin community `Community 274`** (2 nodes): `WorkQueueTest`, `WorkQueueTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 275`** (2 nodes): `ChatSessionTest`, `ChatSessionTest.kt`
+- **Thin community `Community 275`** (2 nodes): `ChatTranscriptWriterTest`, `ChatTranscriptWriterTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 276`** (2 nodes): `NetworkEndpointPolicyTest`, `NetworkEndpointPolicyTest.kt`
+- **Thin community `Community 276`** (2 nodes): `ChatSessionTest`, `ChatSessionTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 277`** (2 nodes): `SecurityValidatorTest`, `SecurityValidatorTest.kt`
+- **Thin community `Community 277`** (2 nodes): `NetworkEndpointPolicyTest`, `NetworkEndpointPolicyTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 278`** (2 nodes): `A2aArtifactStoreTest`, `A2aArtifactStoreTest.kt`
+- **Thin community `Community 278`** (2 nodes): `SecurityValidatorTest`, `SecurityValidatorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 279`** (2 nodes): `A2aApiTest`, `A2aApiTest.kt`
+- **Thin community `Community 279`** (2 nodes): `A2aArtifactStoreTest`, `A2aArtifactStoreTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 280`** (2 nodes): `A2aSessionStoreTest`, `A2aSessionStoreTest.kt`
+- **Thin community `Community 280`** (2 nodes): `A2aApiTest`, `A2aApiTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 281`** (2 nodes): `A2aPersistenceTest`, `A2aPersistenceTest.kt`
+- **Thin community `Community 281`** (2 nodes): `A2aSessionStoreTest`, `A2aSessionStoreTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 282`** (2 nodes): `A2aDedupeStoreTest`, `A2aDedupeStoreTest.kt`
+- **Thin community `Community 282`** (2 nodes): `A2aPersistenceTest`, `A2aPersistenceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 283`** (2 nodes): `RecoveryExecutorTest`, `RecoveryExecutorTest.kt`
+- **Thin community `Community 283`** (2 nodes): `A2aDedupeStoreTest`, `A2aDedupeStoreTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 284`** (2 nodes): `GitHubControlPlaneServiceTest`, `GitHubControlPlaneServiceTest.kt`
+- **Thin community `Community 284`** (2 nodes): `RecoveryExecutorTest`, `RecoveryExecutorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 285`** (2 nodes): `DurableRuntimeServiceTest`, `DurableRuntimeServiceTest.kt`
+- **Thin community `Community 285`** (2 nodes): `GitHubControlPlaneServiceTest`, `GitHubControlPlaneServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 286`** (2 nodes): `DurableResumeCoordinatorTest`, `DurableResumeCoordinatorTest.kt`
+- **Thin community `Community 286`** (2 nodes): `DurableRuntimeServiceTest`, `DurableRuntimeServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 287`** (2 nodes): `AtomicFileWriterTest.kt`, `AtomicFileWriterTest`
+- **Thin community `Community 287`** (2 nodes): `DurableResumeCoordinatorTest`, `DurableResumeCoordinatorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 288`** (2 nodes): `LinearClientEndpointPolicyTest`, `LinearClientEndpointPolicyTest.kt`
+- **Thin community `Community 288`** (2 nodes): `AtomicFileWriterTest.kt`, `AtomicFileWriterTest`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 289`** (2 nodes): `VerificationBundleServiceTest.kt`, `VerificationBundleServiceTest`
+- **Thin community `Community 289`** (2 nodes): `LinearClientEndpointPolicyTest`, `LinearClientEndpointPolicyTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 290`** (2 nodes): `KnowledgeServiceTest`, `KnowledgeServiceTest.kt`
+- **Thin community `Community 290`** (2 nodes): `VerificationBundleServiceTest.kt`, `VerificationBundleServiceTest`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 291`** (2 nodes): `LocalModelDefaultsTest`, `LocalModelDefaultsTest.kt`
+- **Thin community `Community 291`** (2 nodes): `KnowledgeServiceTest`, `KnowledgeServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 292`** (2 nodes): `ObservabilityServiceTest`, `ObservabilityServiceTest.kt`
+- **Thin community `Community 292`** (2 nodes): `LocalModelDefaultsTest`, `LocalModelDefaultsTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 293`** (2 nodes): `FileConfigRepositoryTest`, `FileConfigRepositoryTest.kt`
+- **Thin community `Community 293`** (2 nodes): `ObservabilityServiceTest`, `ObservabilityServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 294`** (2 nodes): `QaTestGenerationFixtureTest`, `QaTestGenerationFixtureTest.kt`
+- **Thin community `Community 294`** (2 nodes): `FileConfigRepositoryTest`, `FileConfigRepositoryTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 295`** (2 nodes): `ConfigRepositoryImportTest`, `ConfigRepositoryImportTest.kt`
+- **Thin community `Community 295`** (2 nodes): `QaTestGenerationFixtureTest`, `QaTestGenerationFixtureTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 296`** (2 nodes): `ExampleConfigSmokeTest`, `ExampleConfigSmokeTest.kt`
+- **Thin community `Community 296`** (2 nodes): `ConfigRepositoryImportTest`, `ConfigRepositoryImportTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 297`** (2 nodes): `YamlParserTest`, `YamlParserTest.kt`
+- **Thin community `Community 297`** (2 nodes): `ExampleConfigSmokeTest`, `ExampleConfigSmokeTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 298`** (2 nodes): `CodexPluginTest`, `CodexPluginTest.kt`
+- **Thin community `Community 298`** (2 nodes): `YamlParserTest`, `YamlParserTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 299`** (2 nodes): `ProcessManagerTest`, `ProcessManagerTest.kt`
+- **Thin community `Community 299`** (2 nodes): `CodexPluginTest`, `CodexPluginTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 300`** (2 nodes): `ErrorHelperTest`, `ErrorHelperTest.kt`
+- **Thin community `Community 300`** (2 nodes): `ProcessManagerTest`, `ProcessManagerTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 301`** (2 nodes): `ResultAggregatorTest`, `ResultAggregatorTest.kt`
+- **Thin community `Community 301`** (2 nodes): `ErrorHelperTest`, `ErrorHelperTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 302`** (2 nodes): `ConditionEvaluatorTest`, `ConditionEvaluatorTest.kt`
+- **Thin community `Community 302`** (2 nodes): `ResultAggregatorTest`, `ResultAggregatorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 303`** (2 nodes): `AgentExecutorTest`, `AgentExecutorTest.kt`
+- **Thin community `Community 303`** (2 nodes): `ConditionEvaluatorTest`, `ConditionEvaluatorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 304`** (2 nodes): `StuckDetectorTest`, `StuckDetectorTest.kt`
+- **Thin community `Community 304`** (2 nodes): `AgentExecutorTest`, `AgentExecutorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 305`** (2 nodes): `PipelineGuardServiceTest`, `PipelineGuardServiceTest.kt`
+- **Thin community `Community 305`** (2 nodes): `StuckDetectorTest`, `StuckDetectorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 306`** (2 nodes): `PipelineOrchestratorDagValidationTest`, `PipelineOrchestratorDagValidationTest.kt`
+- **Thin community `Community 306`** (2 nodes): `PipelineGuardServiceTest`, `PipelineGuardServiceTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 307`** (2 nodes): `StageConflictDetectorTest`, `StageConflictDetectorTest.kt`
+- **Thin community `Community 307`** (2 nodes): `PipelineOrchestratorDagValidationTest`, `PipelineOrchestratorDagValidationTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 308`** (2 nodes): `PipelineOrchestratorTemplatingTest`, `PipelineOrchestratorTemplatingTest.kt`
+- **Thin community `Community 308`** (2 nodes): `StageConflictDetectorTest`, `StageConflictDetectorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 309`** (2 nodes): `CoroutineEventBusTest`, `CoroutineEventBusTest.kt`
+- **Thin community `Community 309`** (2 nodes): `PipelineOrchestratorTemplatingTest`, `PipelineOrchestratorTemplatingTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 310`** (2 nodes): `WebServerTest.kt`, `WebServerTest`
+- **Thin community `Community 310`** (2 nodes): `CoroutineEventBusTest`, `CoroutineEventBusTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 311`** (2 nodes): `CompletionCommandTest`, `CompletionCommandTest.kt`
+- **Thin community `Community 311`** (2 nodes): `WebServerTest.kt`, `WebServerTest`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 312`** (2 nodes): `HelpCommandTest`, `HelpCommandTest.kt`
+- **Thin community `Community 312`** (2 nodes): `CompletionCommandTest`, `CompletionCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 313`** (2 nodes): `AppServerCommandTest`, `AppServerCommandTest.kt`
+- **Thin community `Community 313`** (2 nodes): `HelpCommandTest`, `HelpCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 314`** (2 nodes): `StarterAgentResolverTest`, `StarterAgentResolverTest.kt`
+- **Thin community `Community 314`** (2 nodes): `AppServerCommandTest`, `AppServerCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 315`** (2 nodes): `InteractiveCommandCompleterTest`, `InteractiveCommandCompleterTest.kt`
+- **Thin community `Community 315`** (2 nodes): `StarterAgentResolverTest`, `StarterAgentResolverTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 316`** (2 nodes): `AgentCommandTest`, `AgentCommandTest.kt`
+- **Thin community `Community 316`** (2 nodes): `InteractiveCommandCompleterTest`, `InteractiveCommandCompleterTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 317`** (2 nodes): `PluginCommandTest`, `PluginCommandTest.kt`
+- **Thin community `Community 317`** (2 nodes): `AgentCommandTest`, `AgentCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 318`** (2 nodes): `HelloCommandTest`, `HelloCommandTest.kt`
+- **Thin community `Community 318`** (2 nodes): `PluginCommandTest`, `PluginCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 319`** (2 nodes): `LintCommandTest`, `LintCommandTest.kt`
+- **Thin community `Community 319`** (2 nodes): `HelloCommandTest`, `HelloCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 320`** (2 nodes): `CompanyCommandTest`, `CompanyCommandTest.kt`
+- **Thin community `Community 320`** (2 nodes): `LintCommandTest`, `LintCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 321`** (2 nodes): `InteractiveCommandTest`, `InteractiveCommandTest.kt`
+- **Thin community `Community 321`** (2 nodes): `CompanyCommandTest`, `CompanyCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 322`** (2 nodes): `StatsCommandTest`, `StatsCommandTest.kt`
+- **Thin community `Community 322`** (2 nodes): `InteractiveCommandTest`, `InteractiveCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 323`** (2 nodes): `CodexDashboardCommandTest`, `CodexDashboardCommandTest.kt`
+- **Thin community `Community 323`** (2 nodes): `StatsCommandTest`, `StatsCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 324`** (2 nodes): `StatsManagerTest.kt`, `StatsManagerTest`
+- **Thin community `Community 324`** (2 nodes): `CodexDashboardCommandTest`, `CodexDashboardCommandTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 325`** (2 nodes): `PipelineValidatorTest.kt`, `PipelineValidatorTest`
+- **Thin community `Community 325`** (2 nodes): `StatsManagerTest.kt`, `StatsManagerTest`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 326`** (2 nodes): `PipelineValidatorExtTest.kt`, `PipelineValidatorExtTest`
+- **Thin community `Community 326`** (2 nodes): `PipelineValidatorTest.kt`, `PipelineValidatorTest`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 327`** (2 nodes): `LinterTest.kt`, `LinterTest`
+- **Thin community `Community 327`** (2 nodes): `PipelineValidatorExtTest.kt`, `PipelineValidatorExtTest`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 328`** (2 nodes): `DefaultOutputValidatorTest`, `DefaultOutputValidatorTest.kt`
+- **Thin community `Community 328`** (2 nodes): `LinterTest.kt`, `LinterTest`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 329`** (2 nodes): `PolicyEngineTest`, `PolicyEngineTest.kt`
+- **Thin community `Community 329`** (2 nodes): `DefaultOutputValidatorTest`, `DefaultOutputValidatorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 330`** (2 nodes): `RiskApprovalInterceptorTest`, `RiskApprovalInterceptorTest.kt`
+- **Thin community `Community 330`** (2 nodes): `PolicyEngineTest`, `PolicyEngineTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 333`** (2 nodes): `CheckpointConfig`, `CheckpointConfig.kt`
+- **Thin community `Community 331`** (2 nodes): `RiskApprovalInterceptorTest`, `RiskApprovalInterceptorTest.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 336`** (2 nodes): `CotorProperties`, `CotorProperties.kt`
+- **Thin community `Community 334`** (2 nodes): `CheckpointConfig`, `CheckpointConfig.kt`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 337`** (2 nodes): `RealtimeEvent.kt`, `RealtimeEvent`
+- **Thin community `Community 337`** (2 nodes): `CotorProperties`, `CotorProperties.kt`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 338`** (2 nodes): `RealtimeEvent.kt`, `RealtimeEvent`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `DesktopStore` connect `Community 1` to `Community 2`, `Community 3`, `Community 4`, `Community 5`, `Community 11`, `Community 17`, `Community 21`?**
-  _High betweenness centrality (0.082) - this node is a cross-community bridge._
-- **Why does `language` connect `Community 1` to `Community 2`, `Community 3`, `Community 5`, `Community 8`, `Community 16`, `Community 19`?**
+- **Why does `DesktopStore` connect `Community 1` to `Community 2`, `Community 3`, `Community 4`, `Community 9`, `Community 18`?**
+  _High betweenness centrality (0.077) - this node is a cross-community bridge._
+- **Why does `DesktopTextKey` connect `Community 6` to `Community 1`?**
   _High betweenness centrality (0.029) - this node is a cross-community bridge._
-- **Why does `DesktopTextKey` connect `Community 8` to `Community 1`, `Community 5`?**
-  _High betweenness centrality (0.029) - this node is a cross-community bridge._
+- **Why does `language` connect `Community 1` to `Community 2`, `Community 3`, `Community 4`, `Community 5`, `Community 6`, `Community 10`, `Community 19`?**
+  _High betweenness centrality (0.027) - this node is a cross-community bridge._
 - **Are the 39 inferred relationships involving `DesktopStore` (e.g. with `.selectedCompanyAgentPerformanceFiltersAndCountsScoreableAgents()` and `.bootstrapRetriesEmptySuccessfulDashboardBeforeSettling()`) actually correct?**
   _`DesktopStore` has 39 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 14 inferred relationships involving `DesktopAPI` (e.g. with `.desktopAPIEncodesDynamicPathSegments()` and `.desktopAPIPreservesConfiguredBasePathWhenBuildingRoutes()`) actually correct?**
   _`DesktopAPI` has 14 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `repositoryMap`, `browserQA`, `marketing` to the rest of the system?**
-  _1016 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **What connects `invalidResponse`, `DesktopTaskStatus`, `AgentRunStatus` to the rest of the system?**
+  _1038 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.0 - nodes in this community are weakly interconnected._

@@ -534,6 +534,24 @@ data class HealthResponse(
 )
 
 @Serializable
+data class DesktopUpdateStatusResponse(
+    val health: HealthResponse,
+    val backendOwner: String,
+    val currentVersion: String,
+    val currentBuild: String,
+    val sourceCommit: String? = null,
+    val installedAppPath: String? = null,
+    val brewFormula: String = "bssm-oss/cotor/cotor",
+    val updateCommand: String = "cotor update --verify",
+    val updateAvailable: Boolean? = null,
+    val latestVersion: String? = null,
+    val latestCommit: String? = null,
+    val checkedAtEpochMillis: Long,
+    val status: String,
+    val message: String
+)
+
+@Serializable
 data class DesktopLifecycleStartupResponse(
     val stateWarmed: Boolean,
     val companyCount: Int,

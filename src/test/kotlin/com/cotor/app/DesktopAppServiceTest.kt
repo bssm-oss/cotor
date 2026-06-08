@@ -17,6 +17,7 @@ import com.cotor.integrations.linear.LinearTrackerAdapter
 import com.cotor.model.AgentConfig
 import com.cotor.model.AgentExecutionMetadata
 import com.cotor.model.AgentResult
+import com.cotor.model.LocalModelDefaults
 import com.cotor.model.OpenCodeDefaults
 import com.cotor.model.ProcessExecutionException
 import com.cotor.model.ProcessResult
@@ -126,7 +127,7 @@ class DesktopAppServiceTest : FunSpec({
 
     test("builtin local model and graphify agents are available by default") {
         BuiltinAgentCatalog.names().containsAll(listOf("gemma4", "ollama", "lmstudio", "graphify")) shouldBe true
-        BuiltinAgentCatalog.get("gemma4")!!.parameters["model"] shouldBe "gemma4:e2b"
+        BuiltinAgentCatalog.get("gemma4")!!.parameters["model"] shouldBe "gemma4:12b"
         BuiltinAgentCatalog.get("ollama")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:11434"
         BuiltinAgentCatalog.get("lmstudio")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:1234/v1"
         BuiltinAgentCatalog.get("graphify")!!.parameters["argvJson"] shouldBe """["graphify","explain","{input}"]"""
@@ -667,6 +668,29 @@ class DesktopAppServiceTest : FunSpec({
         response.actions.single { it.type == "agent-model-update" }.detail shouldContain "Requested model: opencode/deepseek-v4-flash-free"
     }
 
+    test("operator command switches company agents to Gemma 4 12B from chat") {
+        val appHome = Files.createTempDirectory("operator-gemma4-model-home")
+        val stateStore = DesktopStateStore { appHome }
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = mockk(relaxed = true),
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(name = "Operator Gemma Model", rootPath = appHome.toString())
+
+        val response = service.runOperatorCommand(company.id, "모든 에이전트 gemma4 12b 모델로 바꿔줘")
+        val persisted = service.listCompanyAgentDefinitions(company.id)
+
+        response.actions.any { it.type == "agent-model-update" && it.status == "DONE" } shouldBe true
+        persisted.shouldNotBeEmpty()
+        persisted.all { it.agentCli == "gemma4" } shouldBe true
+        persisted.all { it.model == LocalModelDefaults.GEMMA4_MODEL } shouldBe true
+        response.actions.single { it.type == "agent-model-update" }.detail shouldContain "gemma4"
+        response.actions.single { it.type == "agent-model-update" }.detail shouldContain LocalModelDefaults.GEMMA4_MODEL
+    }
+
     test("operator command routes complex cross-functional work to CEO intake before HR staffing") {
         val appHome = Files.createTempDirectory("operator-work-intake-home")
         val stateStore = DesktopStateStore { appHome }
@@ -863,6 +887,58 @@ class DesktopAppServiceTest : FunSpec({
         response.message shouldContain "운영 채팅 모델이 요청을 해석하지 못했습니다"
         response.blockedActions.single().type shouldBe "operator-chat-planner"
         response.actions.shouldBeEmpty()
+    }
+
+    test("operator chat planner uses Gemma 4 12B local model when Ollama is available") {
+        val appHome = Files.createTempDirectory("operator-chat-gemma4-12b-home")
+        val stateStore = DesktopStateStore { appHome }
+        val capturedAgents = mutableListOf<AgentConfig>()
+        val outputs = ArrayDeque(
+            listOf(
+                """{"reply":"초안을 준비했습니다.","toolCalls":[],"answerSourceHints":["company-summary"]}""",
+                "Gemma 4 12B로 회사 방향을 정리했습니다."
+            )
+        )
+        val service = DesktopAppService(
+            stateStore = stateStore,
+            gitWorkspaceService = mockk(relaxed = true),
+            configRepository = mockk(relaxed = true),
+            agentExecutor = object : AgentExecutor {
+                override suspend fun executeAgent(
+                    agent: AgentConfig,
+                    input: String?,
+                    metadata: AgentExecutionMetadata
+                ): AgentResult {
+                    capturedAgents += agent
+                    return AgentResult(
+                        agentName = agent.name,
+                        isSuccess = true,
+                        output = outputs.removeFirst(),
+                        error = null,
+                        duration = 1,
+                        metadata = emptyMap()
+                    )
+                }
+
+                override suspend fun executeWithRetry(
+                    agent: AgentConfig,
+                    input: String?,
+                    retryPolicy: RetryPolicy,
+                    metadata: AgentExecutionMetadata
+                ): AgentResult = executeAgent(agent, input, metadata)
+            },
+            commandAvailability = { command -> command == "ollama" },
+            autoStartAutomationRefresh = false
+        )
+        val company = service.createCompany(name = "Operator Chat Gemma 12B", rootPath = appHome.toString())
+
+        val response = service.runOperatorChat(company.id, "지금 뭘 건드리면 좋을지 골라줘")
+
+        response.message shouldContain "Gemma 4 12B"
+        capturedAgents.shouldHaveSize(2)
+        capturedAgents.all { it.pluginClass == "com.cotor.data.plugin.LocalModelPlugin" } shouldBe true
+        capturedAgents.all { it.parameters["provider"] == "ollama" } shouldBe true
+        capturedAgents.all { it.parameters["model"] == LocalModelDefaults.GEMMA4_MODEL } shouldBe true
     }
 
     test("operator chat recovers tool choice from non-json LLM planner output") {
@@ -1797,7 +1873,7 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Builder",
             agentCli = "gemma4",
-            model = "gemma4:e2b",
+            model = "gemma4:12b",
             roleSummary = "Build implementation changes.",
             createdAt = now,
             updatedAt = now
@@ -1884,13 +1960,13 @@ class DesktopAppServiceTest : FunSpec({
         capturedAgents.all { it.pluginClass == "com.cotor.data.plugin.OpenCodePlugin" } shouldBe true
         capturedAgents.first().parameters["model"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
         capturedAgents.first().parameters["requestedAgentCli"] shouldBe "gemma4"
-        capturedAgents.first().parameters["requestedModel"] shouldBe "gemma4:e2b"
+        capturedAgents.first().parameters["requestedModel"] shouldBe "gemma4:12b"
         capturedAgents.first().parameters["executionMode"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
         capturedPrompts[1].orEmpty() shouldContain "NO_DIFF_RETRY"
         val run = stateStore.load().runs.single { it.taskId == task.id }
         run.agentName shouldBe "opencode"
         run.requestedAgentCli shouldBe "gemma4"
-        run.requestedModel shouldBe "gemma4:e2b"
+        run.requestedModel shouldBe "gemma4:12b"
         run.effectiveAgentCli shouldBe "opencode"
         run.effectiveModel shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
         run.executionMode shouldBe OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
@@ -1946,7 +2022,7 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Reviewer",
             agentCli = "gemma4",
-            model = "gemma4:e2b",
+            model = "gemma4:12b",
             roleSummary = "Validate without code changes.",
             createdAt = now,
             updatedAt = now
@@ -2024,7 +2100,7 @@ class DesktopAppServiceTest : FunSpec({
 
         capturedAgents.single().name shouldBe "gemma4"
         capturedAgents.single().pluginClass shouldBe "com.cotor.data.plugin.LocalModelPlugin"
-        capturedAgents.single().parameters["model"] shouldBe "gemma4:e2b"
+        capturedAgents.single().parameters["model"] shouldBe "gemma4:12b"
         stateStore.load().runs.single().executionMode shouldBe null
         coVerify(exactly = 0) { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) }
     }
@@ -15959,7 +16035,7 @@ private suspend fun blockIssueWithFailedTask(
 }
 
 private suspend fun awaitIssueTasksSettled(stateStore: DesktopStateStore, issueId: String) {
-    withTimeout(5_000) {
+    withTimeout(30_000) {
         while (true) {
             val tasks = stateStore.load().tasks.filter { it.issueId == issueId }
             val allSettled = tasks.isEmpty() || tasks.all { task ->

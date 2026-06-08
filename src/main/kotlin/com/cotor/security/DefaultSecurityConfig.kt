@@ -54,8 +54,10 @@ fun defaultAllowedDirectories(allowedExecutables: Set<String> = defaultAllowedEx
         .split(File.pathSeparator)
         .mapNotNull { it.trim().takeIf(String::isNotBlank) }
         .map { Path(it).toAbsolutePath().normalize() }
-    val executableDirectories = allowedExecutables.mapNotNull { executable ->
-        runCatching { resolveExecutablePath(executable)?.parent }.getOrNull()
+    val executableDirectories = allowedExecutables.flatMap { executable ->
+        runCatching {
+            resolveExecutablePath(executable)?.let { executableAllowedDirectories(it) }.orEmpty()
+        }.getOrDefault(emptyList())
     }
     val userHome = Path(System.getProperty("user.home")).toAbsolutePath().normalize()
     val conventionalDirectories = listOf(
@@ -77,4 +79,28 @@ fun defaultAllowedDirectories(allowedExecutables: Set<String> = defaultAllowedEx
         .map { it.toAbsolutePath().normalize() }
         .filter { Files.exists(it) }
         .distinct()
+}
+
+internal fun executableAllowedDirectories(executablePath: Path): List<Path> {
+    val directories = mutableListOf<Path>()
+    val visited = mutableSetOf<Path>()
+    var current = executablePath.toAbsolutePath().normalize()
+
+    repeat(16) {
+        current.parent?.let(directories::add) ?: return directories.distinct()
+        if (!Files.isSymbolicLink(current)) {
+            return directories.distinct()
+        }
+        if (!visited.add(current)) {
+            return directories.distinct()
+        }
+        val target = Files.readSymbolicLink(current)
+        current = if (target.isAbsolute) {
+            target.normalize()
+        } else {
+            current.parent.resolve(target).normalize()
+        }
+    }
+
+    return directories.distinct()
 }
