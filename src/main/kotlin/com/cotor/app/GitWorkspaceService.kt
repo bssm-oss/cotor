@@ -1603,16 +1603,37 @@ class GitWorkspaceService(
             return false
         }
 
-        val checkoutResult = runGit(
+        val currentBranch = runGit(
             repositoryRoot,
-            "checkout",
-            "-B",
-            baseBranch,
-            remoteTrackingRef,
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
             failOnError = false,
-            timeoutMs = 30_000
-        )
-        if (!checkoutResult.isSuccess) {
+            timeoutMs = 10_000
+        ).stdout.trim()
+
+        val alignResult = if (currentBranch == baseBranch) {
+            runGit(
+                repositoryRoot,
+                "checkout",
+                "-B",
+                baseBranch,
+                remoteTrackingRef,
+                failOnError = false,
+                timeoutMs = 30_000
+            )
+        } else {
+            runGit(
+                repositoryRoot,
+                "branch",
+                "-f",
+                baseBranch,
+                remoteTrackingRef,
+                failOnError = false,
+                timeoutMs = 30_000
+            )
+        }
+        if (!alignResult.isSuccess) {
             logger.warn("Could not align bootstrap-only $baseBranch with $remoteTrackingRef")
             return false
         }
