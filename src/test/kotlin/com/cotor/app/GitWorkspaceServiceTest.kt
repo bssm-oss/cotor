@@ -464,8 +464,84 @@ class GitWorkspaceServiceTest : FunSpec({
                     ProcessResult(0, "?? .cotor/\n?? cotor.log\n", "", true)
                 ),
                 FakeProcessManager.Step(
+                    listOf("git", "rev-parse", "--abbrev-ref", "HEAD"),
+                    ProcessResult(0, "master\n", "", true)
+                ),
+                FakeProcessManager.Step(
                     listOf("git", "checkout", "-B", "master", "refs/remotes/origin/master"),
                     ProcessResult(0, "Reset branch 'master'\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "merge-base", "master", "refs/remotes/origin/master"),
+                    ProcessResult(0, "abc123\n", "", true)
+                )
+            )
+        )
+        val service = GitWorkspaceService(processManager, mockk(relaxed = true), mockk<Logger>(relaxed = true))
+
+        val readiness = service.ensureGitHubPublishReady(repositoryRoot, "master")
+
+        readiness.ready shouldBe true
+        readiness.originUrl shouldBe "https://github.com/heodongun/cotor.git"
+        readiness.error.shouldBeNull()
+        processManager.remainingSteps() shouldBe 0
+    }
+
+    test("ensureGitHubPublishReady repairs bootstrap base refs without switching a non-base checkout") {
+        val repositoryRoot = Files.createTempDirectory("git-workspace-bootstrap-repair-non-base")
+        val processManager = FakeProcessManager(
+            listOf(
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(0, "https://github.com/heodongun/cotor.git\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "config", "--get", "remote.origin.url"),
+                    ProcessResult(0, "https://github.com/heodongun/cotor.git\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "show-ref", "--verify", "--quiet", "refs/heads/master"),
+                    ProcessResult(0, "", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "ls-remote", "--heads", "origin", "master"),
+                    ProcessResult(0, "abc123\trefs/heads/master\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "fetch", "--no-tags", "origin", "refs/heads/master:refs/remotes/origin/master"),
+                    ProcessResult(0, "", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "merge-base", "master", "refs/remotes/origin/master"),
+                    ProcessResult(1, "", "", false)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "rev-list", "--count", "master"),
+                    ProcessResult(0, "1\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "log", "-1", "--format=%s", "master"),
+                    ProcessResult(0, "Initialize repository\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "log", "-1", "--format=%ae", "master"),
+                    ProcessResult(0, "cotor@local\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "rev-parse", "--git-common-dir"),
+                    ProcessResult(0, ".git\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "status", "--porcelain"),
+                    ProcessResult(0, "?? .cotor/\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "rev-parse", "--abbrev-ref", "HEAD"),
+                    ProcessResult(0, "codex-1\n", "", true)
+                ),
+                FakeProcessManager.Step(
+                    listOf("git", "branch", "-f", "master", "refs/remotes/origin/master"),
+                    ProcessResult(0, "", "", true)
                 ),
                 FakeProcessManager.Step(
                     listOf("git", "merge-base", "master", "refs/remotes/origin/master"),
