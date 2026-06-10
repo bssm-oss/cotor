@@ -370,6 +370,55 @@ data class CompanyEventEnvelope(
 )
 
 @Serializable
+data class TestCenterStepRecord(
+    val id: String,
+    val title: String,
+    val detail: String,
+    val command: String,
+    val args: List<String> = emptyList(),
+    val status: String = "PENDING",
+    val startedAt: Long? = null,
+    val completedAt: Long? = null,
+    val durationMs: Long? = null,
+    val exitCode: Int? = null,
+    val output: String? = null,
+    val error: String? = null
+)
+
+@Serializable
+data class TestCenterPlanRecord(
+    val companyId: String,
+    val rootPath: String,
+    val suiteId: String,
+    val availableSuites: List<String>,
+    val steps: List<TestCenterStepRecord>,
+    val warnings: List<String> = emptyList(),
+    val generatedAt: Long
+)
+
+@Serializable
+data class TestCenterSessionRecord(
+    val id: String,
+    val companyId: String,
+    val rootPath: String,
+    val suiteId: String,
+    val status: String,
+    val progress: Double,
+    val steps: List<TestCenterStepRecord>,
+    val createdAt: Long,
+    val startedAt: Long? = null,
+    val completedAt: Long? = null,
+    val durationMs: Long? = null,
+    val summary: String = "",
+    val error: String? = null
+)
+
+@Serializable
+data class StartTestCenterSessionRequest(
+    val suiteId: String = "baseline"
+)
+
+@Serializable
 data class LinearSyncResponse(
     val ok: Boolean,
     val message: String,
@@ -444,7 +493,7 @@ data class CreateDirectChatConversationRequest(
     val systemPrompt: String = ""
 ) {
     init {
-        require(provider in setOf("ollama", "lmstudio", "claude-cli")) {
+        require(provider in setOf("ollama", "lmstudio", "codex-oauth")) {
             "Unsupported provider: $provider"
         }
         require(model.isNotBlank() && model.length <= 200) { "Invalid model name" }

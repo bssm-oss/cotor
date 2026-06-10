@@ -46,11 +46,11 @@ class ProviderModelsTest : FunSpec({
         ollama.defaultModel shouldBe LocalModelDefaults.GEMMA4_MODEL
         lmStudio.providerId shouldBe "lm-studio"
         lmStudio.defaultModel shouldBe LocalModelDefaults.GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL
-        providers.first { it.id == "claude-cli" }.allowsBaseUrl shouldBe false
+        providers.first { it.id == "codex-oauth" }.allowsBaseUrl shouldBe false
 
         findDirectChatProvider("lm-studio")?.id shouldBe "lmstudio"
         findDirectChatProvider("lmstudio")?.id shouldBe "lmstudio"
-        findDirectChatProvider("claude")?.id shouldBe "claude-cli"
+        findDirectChatProvider("codex")?.id shouldBe "codex-oauth"
         findDirectChatProvider("missing") shouldBe null
     }
 })

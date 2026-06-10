@@ -13,6 +13,7 @@
 - [DESKTOP_APP.ko.md](DESKTOP_APP.ko.md): `app-server`와 macOS 셸
 - [CAPABILITIES.ko.md](CAPABILITIES.ko.md): 회사 에이전트 capability, skill, policy gate
 - [TEST_PLAN.ko.md](TEST_PLAN.ko.md): 자동/수동 검증 매트릭스
+- [TESTSPRITE.ko.md](TESTSPRITE.ko.md): TestSprite MCP 설정, PRD/API 입력, 안전 경계
 - [TROUBLESHOOTING.ko.md](TROUBLESHOOTING.ko.md): desktop, GitHub, company runtime, QA/CEO, interactive 복구 경로
 - [team-ops/README.ko.md](team-ops/README.ko.md): 온보딩과 유지보수 운영
 
@@ -22,7 +23,8 @@
 - CLI 명령: `src/main/kotlin/com/cotor/presentation/cli/`
 - 로컬 HTTP API: `src/main/kotlin/com/cotor/app/AppServer.kt`
 - 회사 워크플로 서비스: `src/main/kotlin/com/cotor/app/DesktopAppService.kt`
-- app-server DTO: `src/main/kotlin/com/cotor/app/DesktopModels.kt`
+- 내장 Test Center: `src/main/kotlin/com/cotor/app/CotorTestCenterService.kt`
+- app-server DTO: `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `src/main/kotlin/com/cotor/app/AppApiModels.kt`
 - 일반 파이프라인 런타임: `src/main/kotlin/com/cotor/domain/`
 - 런타임 상태, action, replay: `src/main/kotlin/com/cotor/runtime/`
 - policy/evidence/memory: `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`

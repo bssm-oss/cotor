@@ -15,7 +15,7 @@ Use this guide when changing source layout, public entrypoints, route payloads, 
 | Module | Responsibility | Public entrypoints | Tests |
 | --- | --- | --- | --- |
 | CLI and presentation | command parsing, interactive/TUI launch, web adapters, output formatting | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/Commands.kt`, `src/main/kotlin/com/cotor/presentation/cli/InteractiveCommand.kt` | `src/test/kotlin/com/cotor/presentation/cli/`, CLI-focused integration tests |
-| App server and company workflow | localhost `/api/app` routes, company dashboard/runtime/goals/issues/reviews/reports/operator chat, runtime retention | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt` | `src/test/kotlin/com/cotor/app/` |
+| App server and company workflow | localhost `/api/app` routes, company dashboard/runtime/goals/issues/reviews/reports/operator chat, native Test Center, runtime retention | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/CotorTestCenterService.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `src/main/kotlin/com/cotor/app/AppApiModels.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt` | `src/test/kotlin/com/cotor/app/` |
 | Generic pipeline runtime | pipeline orchestration, stage execution, deterministic guards, stuck/conflict detection, conditions, aggregation, checkpoints | `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/` | domain/orchestrator and executor tests under `src/test/kotlin/com/cotor/` |
 | Agent/provider execution | provider plugins, local process execution, model routing, OpenCode/Codex/local model adapters | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` | plugin/model/process tests under `src/test/kotlin/com/cotor/` |
 | Runtime evidence and memory | durable actions, provenance, knowledge memory, verification bundles, A2A context | `src/main/kotlin/com/cotor/runtime/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`, `src/main/kotlin/com/cotor/verification/`, `src/main/kotlin/com/cotor/context/` | runtime/provenance/knowledge/verification tests |
@@ -38,12 +38,12 @@ Use this guide when changing source layout, public entrypoints, route payloads, 
 
 ### App server and company workflow
 
-- Responsibility: maintain company state, route app-server payloads, coordinate runtime ticks, retention cleanup, goals, issues, review queue, reports, memory, and operator commands.
-- Public entrypoints: `AppServer.kt`, `DesktopAppService.kt`, `DesktopModels.kt`, `GitWorkspaceService.kt`, `CompanyRuntimeRetention.kt`.
+- Responsibility: maintain company state, route app-server payloads, coordinate runtime ticks, retention cleanup, goals, issues, review queue, reports, Test Center runs, memory, and operator commands.
+- Public entrypoints: `AppServer.kt`, `DesktopAppService.kt`, `CotorTestCenterService.kt`, `DesktopModels.kt`, `AppApiModels.kt`, `GitWorkspaceService.kt`, `CompanyRuntimeRetention.kt`.
 - Internal-only files: runtime disposition/projection helpers under `src/main/kotlin/com/cotor/app/runtime/` unless their API is explicitly consumed by routes/tests.
 - May depend on: domain runtime, provider adapters, GitHub integration, policy, evidence, verification, state stores.
 - Must not depend on: SwiftUI implementation details or UI-only copy.
-- Common changes: route field, dashboard card, runtime state transition, retention cleanup, GitHub readiness, blocked reason. Update Kotlin tests, Swift DTOs/store, and desktop docs together.
+- Common changes: route field, dashboard card, test-run payload, runtime state transition, retention cleanup, GitHub readiness, blocked reason. Update Kotlin tests, Swift DTOs/store, and desktop docs together.
 
 ### Generic pipeline runtime
 

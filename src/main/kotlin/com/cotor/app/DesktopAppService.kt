@@ -364,6 +364,8 @@ class DesktopAppService(
             "audience-scout",
             "content-publisher",
             "social-publisher",
+            "threads-publisher",
+            "producthunt-publisher",
             "analytics-reporter"
         )
         private val localModelHttpThreadCounter = java.util.concurrent.atomic.AtomicInteger()
@@ -2541,7 +2543,9 @@ class DesktopAppService(
             "browser-smoke" -> runBrowserSmokeSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
             "marketing-operator",
             "content-publisher",
-            "social-publisher" -> runMarketingSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
+            "social-publisher",
+            "threads-publisher",
+            "producthunt-publisher" -> runMarketingSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
             "audience-scout",
             "analytics-reporter" -> runMarketingReportSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
             "video-plan" -> runVideoPlanSkill(skill, companyId, agentId, input, parameters, runId, baseCapability)
@@ -2806,6 +2810,20 @@ class DesktopAppService(
                 requestedChannels = requestedChannels,
                 predicate = ::isOrganicSocialChannel
             )
+            "threads-publisher" -> constrainMarketingSkillChannels(
+                companyId = companyId,
+                agentId = agentId,
+                delegationPolicyId = parameters["delegationPolicyId"],
+                requestedChannels = requestedChannels,
+                predicate = ::isThreadsChannel
+            )
+            "producthunt-publisher" -> constrainMarketingSkillChannels(
+                companyId = companyId,
+                agentId = agentId,
+                delegationPolicyId = parameters["delegationPolicyId"],
+                requestedChannels = requestedChannels,
+                predicate = ::isProductHuntChannel
+            )
             else -> requestedChannels
         }
         if (channels == null) {
@@ -2818,7 +2836,7 @@ class DesktopAppService(
                 error = "Requested channels: ${requestedChannels.joinToString(", ")}"
             )
         }
-        if (skill.name in setOf("content-publisher", "social-publisher") && channels.isEmpty()) {
+        if (skill.name in setOf("content-publisher", "social-publisher", "threads-publisher", "producthunt-publisher") && channels.isEmpty()) {
             return SkillRunResult(
                 skill = skill.name,
                 status = "DENIED",
@@ -3294,6 +3312,12 @@ class DesktopAppService(
 
     private fun isOrganicSocialChannel(channel: String): Boolean =
         channel.lowercase() in setOf("x", "twitter", "linkedin", "social", "mastodon", "threads")
+
+    private fun isThreadsChannel(channel: String): Boolean =
+        channel.lowercase() in setOf("threads", "meta-threads")
+
+    private fun isProductHuntChannel(channel: String): Boolean =
+        channel.lowercase() in setOf("producthunt", "product-hunt", "ph")
 
     private fun String?.isTruthy(): Boolean =
         this?.trim()?.lowercase() in setOf("true", "1", "yes", "y", "on")
@@ -7126,6 +7150,8 @@ class DesktopAppService(
             "video" in normalized || "영상" in normalized -> "video-plan"
             "audience" in normalized || "audience-scout" in normalized || "고객" in normalized || "타깃" in normalized -> "audience-scout"
             "analytics" in normalized || "성과" in normalized || "report" in normalized || "리포트" in normalized -> "analytics-reporter"
+            "producthunt" in normalized || "product hunt" in normalized || "product-hunt" in normalized || "프로덕트헌트" in normalized -> "producthunt-publisher"
+            "threads" in normalized || "thread" in normalized || "쓰레드" in normalized || "스레드" in normalized -> "threads-publisher"
             "social" in normalized || "linkedin" in normalized || "twitter" in normalized || "x " in normalized || "소셜" in normalized -> "social-publisher"
             "content" in normalized || "blog" in normalized || "cms" in normalized || "블로그" in normalized -> "content-publisher"
             "marketing" in normalized || "마케팅" in normalized || "홍보" in normalized -> "marketing-operator"
@@ -7144,6 +7170,8 @@ class DesktopAppService(
             "audience-scout",
             "analytics-reporter",
             "social-publisher",
+            "threads-publisher",
+            "producthunt-publisher",
             "content-publisher",
             "marketing-operator"
         ).any { it in normalized }
@@ -8019,22 +8047,23 @@ class DesktopAppService(
             .map { definition ->
                 CompanyAgentExecutionModel(
                     agentCli = definition.agentCli.trim().ifBlank { "opencode" },
-                    model = OpenCodeDefaults.normalizeModel(definition.model)
+                    model = normalizeCompanyAgentModel(definition.agentCli, definition.model)
+                        ?: defaultModelForAgentCli(definition.agentCli)
                 )
             }
         if (activeModels.isEmpty()) {
-            return CompanyAgentExecutionModel("opencode", OpenCodeDefaults.DEFAULT_MODEL)
+            return CompanyAgentExecutionModel("gemma4", defaultModelForAgentCli("gemma4"))
         }
         return activeModels
             .groupingBy { it }
             .eachCount()
             .maxWithOrNull(
                 compareBy<Map.Entry<CompanyAgentExecutionModel, Int>> { it.value }
-                    .thenBy { if (it.key.agentCli.equals("opencode", ignoreCase = true)) 1 else 0 }
-                    .thenBy { if (it.key.model == OpenCodeDefaults.DEFAULT_MODEL) 1 else 0 }
+                    .thenBy { if (it.key.agentCli.equals("gemma4", ignoreCase = true)) 2 else if (it.key.agentCli.equals("ollama", ignoreCase = true)) 1 else 0 }
+                    .thenBy { if (it.key.model?.let(LocalModelDefaults::isGemmaFamilyModel) == true) 1 else 0 }
             )
             ?.key
-            ?: CompanyAgentExecutionModel("opencode", OpenCodeDefaults.DEFAULT_MODEL)
+            ?: CompanyAgentExecutionModel("gemma4", defaultModelForAgentCli("gemma4"))
     }
 
     private fun occupiedCompanyProfileIds(state: DesktopAppState, companyId: String): Set<String> {
@@ -8676,13 +8705,16 @@ class DesktopAppService(
             preserveWhenNull = true,
             currentMentorId = current.mentorAgentId
         )
+        val nextAgentCli = agentCli?.trim()?.takeIf { it.isNotBlank() } ?: current.agentCli
         val updated = current.copy(
             title = title?.trim()?.takeIf { it.isNotBlank() } ?: current.title,
-            agentCli = agentCli?.trim()?.takeIf { it.isNotBlank() } ?: current.agentCli,
-            model = when {
-                model == null -> normalizeCompanyAgentModel(agentCli ?: current.agentCli, current.model)
-                else -> normalizeCompanyAgentModel(agentCli ?: current.agentCli, model)
-            },
+            agentCli = nextAgentCli,
+            model = modelForCompanyAgentUpdate(
+                currentAgentCli = current.agentCli,
+                nextAgentCli = nextAgentCli,
+                currentModel = current.model,
+                requestedModel = model
+            ),
             roleSummary = roleSummary?.trim()?.takeIf { it.isNotBlank() } ?: current.roleSummary,
             specialties = specialties?.map { it.trim() }?.filter { it.isNotBlank() }?.distinct() ?: current.specialties,
             collaborationInstructions = when {
@@ -8750,12 +8782,15 @@ class DesktopAppService(
                 if (definition.companyId != companyId || definition.id !in updatedIds) {
                     definition
                 } else {
+                    val nextAgentCli = agentCli?.trim()?.takeIf { it.isNotBlank() } ?: definition.agentCli
                     definition.copy(
-                        agentCli = agentCli?.trim()?.takeIf { it.isNotBlank() } ?: definition.agentCli,
-                        model = when {
-                            model == null && agentCli == null -> definition.model
-                            else -> normalizeCompanyAgentModel(agentCli ?: definition.agentCli, model ?: definition.model)
-                        },
+                        agentCli = nextAgentCli,
+                        model = modelForCompanyAgentUpdate(
+                            currentAgentCli = definition.agentCli,
+                            nextAgentCli = nextAgentCli,
+                            currentModel = definition.model,
+                            requestedModel = model
+                        ),
                         specialties = normalizedSpecialties ?: definition.specialties,
                         enabled = enabled ?: definition.enabled,
                         updatedAt = updatedAt
@@ -11057,8 +11092,8 @@ class DesktopAppService(
                     issue
                 } else {
                     val updatedIssue = issue.copy(
-                        status = IssueStatus.BLOCKED,
-                        providerBlockReason = INTERRUPTED_RUN_ERROR,
+                        status = IssueStatus.DELEGATED,
+                        providerBlockReason = null,
                         transitionReason = INTERRUPTED_ISSUE_REASON,
                         updatedAt = now
                     )
@@ -12876,6 +12911,7 @@ class DesktopAppService(
                         status = IssueStatus.PLANNED,
                         blockedBy = emptyList(),
                         providerBlockReason = null,
+                        transitionReason = null,
                         updatedAt = now
                     )
                     traceEvents += buildCompanyAutomationTraceEvent(
@@ -12927,6 +12963,7 @@ class DesktopAppService(
                     status = IssueStatus.PLANNED,
                     blockedBy = emptyList(),
                     providerBlockReason = null,
+                    transitionReason = null,
                     updatedAt = now
                 )
                 traceEvents += buildCompanyAutomationTraceEvent(
@@ -13810,8 +13847,8 @@ class DesktopAppService(
                                 "Pull request ${issue.pullRequestUrl ?: issue.pullRequestNumber} is already merged; closing the stale execution issue."
                             approvalSatisfiedByMergedExecution ->
                                 "Linked execution issue already merged; closing the approval gate."
-                            recoverableRetryPending && nextStatus == IssueStatus.PLANNED ->
-                                "Recoverable execution failure is ready for automatic retry."
+                            (recoverableRetryPending || recoverableBlockedIssueReadyForRetry) && nextStatus == IssueStatus.PLANNED ->
+                                null
                             recoverableRetryPending && nextStatus == IssueStatus.BLOCKED ->
                                 "Recoverable execution failure is waiting for retry cooldown."
                             terminalFailureWithoutActiveTask && nextStatus == IssueStatus.BLOCKED ->
@@ -14894,7 +14931,7 @@ class DesktopAppService(
             ?: throw IllegalArgumentException("Repository not found for workspace: ${workspace.repositoryId}")
         val taskId = UUID.randomUUID().toString()
         val requestedAgents = agents.map { it.trim().lowercase() }.filter { it.isNotBlank() }.ifEmpty {
-            listOf("claude", "codex")
+            listOf("gemma4")
         }
         val linkedIssue = issueId?.let { id -> state.issues.firstOrNull { it.id == id } }
         val executionPlan = if (linkedIssue != null) {
@@ -15839,10 +15876,30 @@ class DesktopAppService(
                 if (normalized?.let(OpenCodeDefaults::isSelectableModel) == true) CodexDefaults.DEFAULT_MODEL else normalized
             }
             "opencode" -> OpenCodeDefaults.normalizeModel(trimmed)
-            "gemma4", "ollama", "lmstudio" -> LocalModelDefaults.normalizeModel(trimmed)
+            "gemma4", "ollama", "lmstudio" -> {
+                val normalized = LocalModelDefaults.normalizeModel(trimmed)
+                when {
+                    normalized == null -> null
+                    OpenCodeDefaults.isLocalOllamaModel(normalized) -> OpenCodeDefaults.ollamaTagForOpenCodeModel(normalized)
+                    OpenCodeDefaults.isSelectableModel(normalized) -> null
+                    else -> normalized
+                }
+            }
             else -> if (BuiltinAgentCatalog.get(agentCli)?.parameters?.containsKey("model") == true) trimmed else null
         }
     }
+
+    private fun modelForCompanyAgentUpdate(
+        currentAgentCli: String,
+        nextAgentCli: String,
+        currentModel: String?,
+        requestedModel: String?
+    ): String? =
+        when {
+            requestedModel != null -> normalizeCompanyAgentModel(nextAgentCli, requestedModel)
+            !currentAgentCli.equals(nextAgentCli, ignoreCase = true) -> defaultModelForAgentCli(nextAgentCli)
+            else -> normalizeCompanyAgentModel(nextAgentCli, currentModel)
+        }
 
     private fun defaultModelForAgentCli(agentCli: String): String? =
         when (agentCli.trim().lowercase()) {
@@ -20355,14 +20412,15 @@ class DesktopAppService(
 
     private fun seedCompanyAgentDefinitions(companyId: String, now: Long): List<CompanyAgentDefinition> {
         val builtins = BuiltinAgentCatalog.names()
-        val preferredAgent = builtins.firstOrNull { it.equals("opencode", ignoreCase = true) }
+        val preferredAgent = listOf("gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "opencode", "claude", "gemini")
+            .firstOrNull { candidate ->
+                builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate)
+            }
+            ?: builtins.firstOrNull { it.equals("gemma4", ignoreCase = true) }
             ?: listOf("gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "claude", "gemini")
                 .firstOrNull { candidate ->
-                    builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate)
+                    builtins.any { it.equals(candidate, ignoreCase = true) }
                 }
-            ?: builtins.firstOrNull { it.equals("qwen", ignoreCase = true) }
-            ?: builtins.firstOrNull { it.equals("codex-oauth", ignoreCase = true) }
-            ?: builtins.firstOrNull { it.equals("codex", ignoreCase = true) }
             ?: builtins.firstOrNull { isExecutableAvailable(it) }
             ?: builtins.firstOrNull()
             ?: "opencode"
@@ -20639,6 +20697,8 @@ class DesktopAppService(
                     "audience-scout",
                     "content-publisher",
                     "social-publisher",
+                    "threads-publisher",
+                    "producthunt-publisher",
                     "analytics-reporter"
                 ),
                 requiresEvidence = true,
@@ -20809,7 +20869,7 @@ class DesktopAppService(
 
     private fun preferredExecutableAgent(): String {
         val builtins = BuiltinAgentCatalog.names()
-        return listOf("opencode", "gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "claude", "gemini")
+        return listOf("gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "opencode", "claude", "gemini")
             .firstOrNull { candidate -> builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate) }
             ?: builtins.firstOrNull { isExecutableAvailable(it) }
             ?: builtins.firstOrNull()
@@ -21999,7 +22059,9 @@ class DesktopAppService(
                 pullRequestState = if (completedWithoutPublish) null else primaryRun?.publish?.pullRequestState ?: currentIssue.pullRequestState,
                 durableRunId = primaryRun?.id ?: currentIssue.durableRunId,
                 approvalPauseId = durableRuntimeApprovalPauseId(primaryRun?.id),
-                providerBlockReason = completionGateReason ?: providerBlockReasonForIssue(gatedIssueStatus, primaryRun),
+                providerBlockReason = completionGateReason
+                    ?: providerBlockReasonForIssue(gatedIssueStatus, primaryRun)
+                    ?: currentIssue.providerBlockReason.takeIf { gatedIssueStatus == IssueStatus.BLOCKED },
                 verificationStatus = when {
                     collaborationMissing -> "BLOCKED"
                     verificationDecision != null -> verificationDecision.status

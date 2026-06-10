@@ -176,7 +176,7 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Builder",
             agentCli = "opencode",
-            model = "opencode/deepseek-v4-flash-free",
+            model = "ollama/gemma4:12b",
             roleSummary = "Build and ship implementation work.",
             createdAt = now,
             updatedAt = now
@@ -664,7 +664,7 @@ class DesktopAppServiceTest : FunSpec({
         response.actions.any { it.type == "agent-model-update" && it.status == "DONE" } shouldBe true
         persisted.shouldNotBeEmpty()
         persisted.all { it.agentCli == "opencode" } shouldBe true
-        persisted.all { it.model == OpenCodeDefaults.DEFAULT_MODEL } shouldBe true
+        persisted.all { it.model == "opencode/deepseek-v4-flash-free" } shouldBe true
         response.actions.single { it.type == "agent-model-update" }.detail shouldContain "Requested model: opencode/deepseek-v4-flash-free"
     }
 
@@ -686,7 +686,7 @@ class DesktopAppServiceTest : FunSpec({
         response.actions.any { it.type == "agent-model-update" && it.status == "DONE" } shouldBe true
         persisted.shouldNotBeEmpty()
         persisted.all { it.agentCli == "gemma4" } shouldBe true
-        persisted.all { it.model == LocalModelDefaults.GEMMA4_MODEL } shouldBe true
+        persisted.all { definition -> definition.model?.let(LocalModelDefaults::isGemmaFamilyModel) == true } shouldBe true
         response.actions.single { it.type == "agent-model-update" }.detail shouldContain "gemma4"
         response.actions.single { it.type == "agent-model-update" }.detail shouldContain LocalModelDefaults.GEMMA4_MODEL
     }
@@ -938,7 +938,9 @@ class DesktopAppServiceTest : FunSpec({
         capturedAgents.shouldHaveSize(2)
         capturedAgents.all { it.pluginClass == "com.cotor.data.plugin.LocalModelPlugin" } shouldBe true
         capturedAgents.all { it.parameters["provider"] == "ollama" } shouldBe true
-        capturedAgents.all { it.parameters["model"] == LocalModelDefaults.GEMMA4_MODEL } shouldBe true
+        capturedAgents.all { agent ->
+            agent.parameters["model"]?.let(LocalModelDefaults::isGemmaFamilyModel) == true
+        } shouldBe true
     }
 
     test("operator chat recovers tool choice from non-json LLM planner output") {
@@ -1242,8 +1244,8 @@ class DesktopAppServiceTest : FunSpec({
 
         confirmed.actions.any { it.type == "hr-staffing" && it.status == "DONE" } shouldBe true
         confirmed.shouldHideRawOperatorInternals()
-        hired.agentCli shouldBe "opencode"
-        hired.model shouldBe inheritedModel
+        hired.agentCli shouldBe "gemma4"
+        hired.model?.let(LocalModelDefaults::isGemmaFamilyModel) shouldBe true
         hired.mentorAgentId shouldBe engineeringLead.id
         stateStore.load().agentMessages.any {
             it.kind == "hr-onboarding" && it.fromAgentName == "HR Manager" && it.toAgentName == hired.title
@@ -1322,7 +1324,8 @@ class DesktopAppServiceTest : FunSpec({
 
         tick.lastAction.orEmpty() shouldContain "hr-hired:1"
         hiredSpecialists shouldHaveSize 1
-        hiredSpecialists.single().model shouldBe OpenCodeDefaults.DEFAULT_MODEL
+        hiredSpecialists.single().agentCli shouldBe "gemma4"
+        hiredSpecialists.single().model?.let(LocalModelDefaults::isGemmaFamilyModel) shouldBe true
     }
 
     test("agent approved operator mode routes blocked issue retry to a senior agent") {
@@ -3923,12 +3926,12 @@ class DesktopAppServiceTest : FunSpec({
             workspaceId = WORKSPACE_ID,
             title = "Stabilize desktop planning",
             prompt = "Stabilize desktop planning so created tasks persist assignments and routed prompts.",
-            agents = listOf("claude", "codex")
+            agents = listOf("gemma4", "codex-oauth")
         )
 
         val plan = task.plan.shouldNotBeNull()
         plan.assignments.shouldNotBeEmpty()
-        plan.assignments.map { it.agentName }.all { it in listOf("claude", "codex") } shouldBe true
+        plan.assignments.map { it.agentName }.all { it in listOf("gemma4", "codex-oauth") } shouldBe true
         plan.assignments.all { it.assignedPrompt.contains("Goal-driven assignment") } shouldBe true
 
         val persistedTask = stateStore.load().tasks.single()
@@ -6262,6 +6265,9 @@ class DesktopAppServiceTest : FunSpec({
             stoppedWorkItem.activeTaskId shouldBe null
             stoppedWorkItem.durableRunId shouldBe null
             stoppedWorkItem.reason shouldBe "Runtime stopped while execution was in progress; the issue was returned to the queue."
+            val returnedIssue = stateStore.load().issues.single { it.id == issue.id }
+            returnedIssue.status shouldBe IssueStatus.DELEGATED
+            returnedIssue.providerBlockReason shouldBe null
             withTimeout(5_000) {
                 while (process.isAlive) {
                     delay(25)
@@ -6606,7 +6612,7 @@ class DesktopAppServiceTest : FunSpec({
         runtime.manuallyStoppedAt shouldNotBe null
     }
 
-    test("default org profiles prefer installed OpenCode CLIs over missing claude") {
+    test("default org profiles prefer local Gemma agents over cloud CLIs") {
         val appHome = Files.createTempDirectory("desktop-runtime-agents-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-agents-test").resolve("repo"))
         val stateStore = DesktopStateStore { appHome }
@@ -6628,14 +6634,14 @@ class DesktopAppServiceTest : FunSpec({
         val profiles = service.listOrgProfiles()
         val issues = service.listIssues(goal.id)
 
-        profiles.map { it.executionAgentName }.distinct() shouldBe listOf("opencode")
+        profiles.map { it.executionAgentName }.distinct() shouldBe listOf("gemma4")
         profiles shouldHaveSize 11
         val assignedProfileIds = issues.mapNotNull { it.assigneeProfileId }.toSet()
         assignedProfileIds.shouldNotBeEmpty()
         assignedProfileIds.subtract(profiles.map { it.id }.toSet()).shouldBeEmpty()
     }
 
-    test("company dashboard backfills legacy companies with an OpenCode-first seeded roster") {
+    test("company dashboard backfills legacy companies with a Gemma-first seeded roster") {
         val appHome = Files.createTempDirectory("desktop-legacy-company-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-legacy-company-test").resolve("repo"))
         val stateStore = DesktopStateStore { appHome }
@@ -6677,7 +6683,7 @@ class DesktopAppServiceTest : FunSpec({
         service.companyDashboardPrepared(company.id)
 
         val definitions = service.listCompanyAgentDefinitions(company.id)
-        definitions.map { it.agentCli }.distinct() shouldBe listOf("opencode")
+        definitions.map { it.agentCli }.distinct() shouldBe listOf("gemma4")
         definitions.map { it.title } shouldBe listOf(
             "CEO",
             "Product Strategist",
@@ -6813,6 +6819,8 @@ class DesktopAppServiceTest : FunSpec({
             title = "Execution issue",
             description = "Do the work",
             status = IssueStatus.BLOCKED,
+            transitionReason = "Previous GitHub readiness failure.",
+            providerBlockReason = "Previous provider block reason.",
             createdAt = 3L,
             updatedAt = 3L
         )
@@ -6897,6 +6905,8 @@ class DesktopAppServiceTest : FunSpec({
                 val latestIssue = stateStore.load().issues.first { it.id == issue.id }
                 if (latestIssue.status == IssueStatus.PLANNED) {
                     latestIssue.blockedBy.shouldBeEmpty()
+                    latestIssue.transitionReason.shouldBeNull()
+                    latestIssue.providerBlockReason.shouldBeNull()
                     return@withTimeout
                 }
                 delay(25)
@@ -7667,7 +7677,7 @@ class DesktopAppServiceTest : FunSpec({
         executionIssues.all { it.dependsOn.isEmpty() && it.status == IssueStatus.PLANNED } shouldBe true
     }
 
-    test("new companies seed an OpenCode-first enterprise roster with CEO as the sole merge authority") {
+    test("new companies seed a Gemma-first enterprise roster with CEO as the sole merge authority") {
         val appHome = Files.createTempDirectory("desktop-enterprise-roster-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-enterprise-roster-test").resolve("repo"))
         val stateStore = DesktopStateStore { appHome }
@@ -7701,7 +7711,7 @@ class DesktopAppServiceTest : FunSpec({
             "QA",
             "Release Manager"
         )
-        definitions.all { it.agentCli == "opencode" } shouldBe true
+        definitions.all { it.agentCli == "gemma4" } shouldBe true
 
         val mergeAuthorities = service.companyDashboard().orgProfiles
             .filter { it.companyId == company.id && it.mergeAuthority }

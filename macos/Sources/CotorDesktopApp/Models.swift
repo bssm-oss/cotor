@@ -1267,6 +1267,55 @@ struct CompanyDailyReportRecord: Codable, Hashable, Identifiable {
     let activityCount: Int
 }
 
+struct TestCenterStepRecord: Codable, Hashable, Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let command: String
+    let args: [String]
+    let status: String
+    let startedAt: Int64?
+    let completedAt: Int64?
+    let durationMs: Int64?
+    let exitCode: Int?
+    let output: String?
+    let error: String?
+
+    var commandLine: String {
+        ([command] + args).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+}
+
+struct TestCenterPlanRecord: Codable, Hashable {
+    let companyId: String
+    let rootPath: String
+    let suiteId: String
+    let availableSuites: [String]
+    let steps: [TestCenterStepRecord]
+    let warnings: [String]
+    let generatedAt: Int64
+}
+
+struct TestCenterSessionRecord: Codable, Hashable, Identifiable {
+    let id: String
+    let companyId: String
+    let rootPath: String
+    let suiteId: String
+    let status: String
+    let progress: Double
+    let steps: [TestCenterStepRecord]
+    let createdAt: Int64
+    let startedAt: Int64?
+    let completedAt: Int64?
+    let durationMs: Int64?
+    let summary: String
+    let error: String?
+}
+
+struct StartTestCenterSessionPayload: Codable, Hashable {
+    let suiteId: String
+}
+
 struct CompanyEventRecord: Codable, Hashable, Identifiable {
     let id: String
     let companyId: String

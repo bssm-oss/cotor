@@ -87,7 +87,7 @@ struct DesktopStoreTests {
                     agentName: "Builder",
                     roleName: "Builder",
                     agentCli: "opencode",
-                    model: "opencode/deepseek-v4-flash-free",
+                    model: "ollama/gemma4:12b",
                     score: 91,
                     completedIssues: 3,
                     activeIssues: 1,
@@ -384,14 +384,14 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode", "codex"],
                 availableCliAgents: ["opencode", "codex", "gemma4", "ollama", "lmstudio"],
                 availableAgentModels: [
-                    "opencode": ["opencode/big-pickle", "opencode/deepseek-v4-flash-free"],
+                    "opencode": ["ollama/gemma4:12b", "opencode/big-pickle", "opencode/deepseek-v4-flash-free"],
                     "codex": ["openai/gpt-5.5"],
                     "gemma4": ["gemma4:12b"],
                     "ollama": ["gemma4:12b"],
                     "lmstudio": ["gemma4:12b"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "opencode/deepseek-v4-flash-free",
+                    "opencode": "ollama/gemma4:12b",
                     "codex": "openai/gpt-5.5",
                     "gemma4": "gemma4:12b",
                     "ollama": "gemma4:12b",
@@ -426,7 +426,7 @@ struct DesktopStoreTests {
         )
 
         store.selectNewCompanyAgentCli("opencode")
-        #expect(store.newCompanyAgentModel == "opencode/deepseek-v4-flash-free")
+        #expect(store.newCompanyAgentModel == "ollama/gemma4:12b")
 
         store.selectNewCompanyAgentCli("codex")
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
@@ -452,10 +452,10 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode"],
                 availableCliAgents: ["opencode"],
                 availableAgentModels: [
-                    "opencode": ["opencode/deepseek-v4-flash-free"]
+                    "opencode": ["ollama/gemma4:12b"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "opencode/deepseek-v4-flash-free"
+                    "opencode": "ollama/gemma4:12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -488,7 +488,7 @@ struct DesktopStoreTests {
         store.newCompanyAgentCli = ""
 
         #expect(store.resolvedNewCompanyAgentCli == "opencode")
-        #expect(store.newCompanyAgentModelOptions == ["opencode/deepseek-v4-flash-free"])
+        #expect(store.newCompanyAgentModelOptions == ["ollama/gemma4:12b"])
     }
 
     @Test
@@ -692,13 +692,13 @@ struct DesktopStoreTests {
     func batchEditPayloadKeepsExplicitModelAndCapabilities() {
         let payload = OrgProfileBatchEditPayloadDraft.build(
             batchAgent: "opencode",
-            batchModel: " opencode/deepseek-v4-flash-free ",
+            batchModel: " ollama/gemma4:12b ",
             batchCapabilities: "qa, review, , deploy",
             batchEnabled: false
         )
 
         #expect(payload.agentCli == "opencode")
-        #expect(payload.model == "opencode/deepseek-v4-flash-free")
+        #expect(payload.model == "ollama/gemma4:12b")
         #expect(payload.specialties == ["qa", "review", "deploy"])
         #expect(payload.enabled == false)
     }

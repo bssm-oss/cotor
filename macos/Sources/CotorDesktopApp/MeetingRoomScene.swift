@@ -286,16 +286,26 @@ struct MeetingRoomSceneAgent: Identifiable, Hashable {
     let isFreshInteraction: Bool
 
     func point(at time: TimeInterval, animate: Bool) -> CGPoint {
-        guard animate, action == .walking, movementDuration > 0 else {
+        guard animate else {
             return targetPoint
         }
-        let raw = CGFloat((time - movementStartedAt) / movementDuration)
-        let progress = min(1, max(0, raw))
-        let eased = progress * progress * (3 - 2 * progress)
-        return CGPoint(
-            x: fromPoint.x + (targetPoint.x - fromPoint.x) * eased,
-            y: fromPoint.y + (targetPoint.y - fromPoint.y) * eased
-        )
+        if action == .walking, movementDuration > 0 {
+            let raw = CGFloat((time - movementStartedAt) / movementDuration)
+            let progress = min(1, max(0, raw))
+            let eased = progress * progress * (3 - 2 * progress)
+            return CGPoint(
+                x: fromPoint.x + (targetPoint.x - fromPoint.x) * eased,
+                y: fromPoint.y + (targetPoint.y - fromPoint.y) * eased
+            )
+        }
+        guard action.hasAmbientMotion else {
+            return targetPoint
+        }
+        let phase = Double(abs(id.hashValue % 97)) / 97.0 * Double.pi * 2.0
+        let amplitude: CGFloat = action == .typing ? 1.8 : 1.25
+        let dx = CGFloat(sin(time * 1.7 + phase)) * amplitude
+        let dy = CGFloat(cos(time * 1.15 + phase)) * amplitude * 0.55
+        return CGPoint(x: targetPoint.x + dx, y: targetPoint.y + dy)
     }
 }
 
@@ -450,11 +460,25 @@ struct MeetingRoomSceneState: Hashable {
     let startedAt: TimeInterval
 
     var shouldAnimate: Bool {
-        renderPlan.shouldAnimate && !freshInteractionIds.isEmpty
+        renderPlan.shouldAnimate && (!freshInteractionIds.isEmpty || hasLiveMotion)
     }
 
     var frameInterval: TimeInterval {
         shouldAnimate ? (1.0 / 15.0) : 1.0
+    }
+
+    private var hasLiveMotion: Bool {
+        if interactions.contains(where: { $0.isFresh }) || !keyframes.isEmpty {
+            return true
+        }
+        return agents.contains { agent in
+            agent.action.hasAmbientMotion &&
+                (
+                    agent.isFreshInteraction ||
+                        agent.projection.liveActivity != nil ||
+                        agent.projection.visualState != .idle
+                )
+        }
     }
 
     var cacheKey: String {
@@ -465,6 +489,17 @@ struct MeetingRoomSceneState: Hashable {
             renderPlan.animationKey,
             freshInteractionIds.sorted().joined(separator: "|"),
         ].joined(separator: "::")
+    }
+}
+
+private extension MeetingRoomSpriteAction {
+    var hasAmbientMotion: Bool {
+        switch self {
+        case .typing, .reviewing, .talking, .listening, .approving, .celebrating, .thinking, .stretching:
+            return true
+        case .walking, .sitting, .blocked:
+            return false
+        }
     }
 }
 
@@ -495,7 +530,8 @@ enum MeetingRoomSceneReducer {
         let basePointByAgentId = Dictionary(uniqueKeysWithValues: plan.visibleAgents.enumerated().map { index, agent in
             (agent.id, layout.targetPoint(for: agent, index: index, count: plan.visibleAgents.count))
         })
-        let interactionByAgentId = focusedInteractionByAgentId(plan.visibleInteractions, freshInteractionIds: freshInteractionIds)
+        let freshInteractions = plan.visibleInteractions.filter { freshInteractionIds.contains($0.id) }
+        let interactionByAgentId = focusedInteractionByAgentId(freshInteractions, freshInteractionIds: freshInteractionIds)
 
         let sceneAgents = plan.visibleAgents.enumerated().map { index, agent in
             let baseTarget = basePointByAgentId[agent.id] ?? layout.targetPoint(for: agent, index: index, count: plan.visibleAgents.count)
@@ -506,7 +542,7 @@ enum MeetingRoomSceneReducer {
             let existing = previousAgentsById[agent.id]
             let from = existing?.targetPoint ?? ledger.settledAgentPositions[agent.id] ?? baseTarget
             let isFresh = focusEvent.map { freshInteractionIds.contains($0.id) } ?? false
-            let shouldMove = !reduceMotion && !lowResourceMode && distance(from, target) > 4
+            let shouldMove = focusEvent != nil && !reduceMotion && !lowResourceMode && distance(from, target) > 4
             let action = spriteAction(for: agent, focusEvent: focusEvent, isFresh: isFresh, moved: shouldMove, time: now)
             return MeetingRoomSceneAgent(
                 id: agent.id,
@@ -544,7 +580,7 @@ enum MeetingRoomSceneReducer {
         let flowByIssueId = Dictionary(plan.visibleFlows.compactMap { flow in
             flow.issueId.map { ($0, flow) }
         }, uniquingKeysWith: { first, _ in first })
-        let interactionByIssueId = Dictionary(plan.visibleInteractions.compactMap { event in
+        let interactionByIssueId = Dictionary(freshInteractions.compactMap { event in
             event.issueId.map { ($0, event) }
         }, uniquingKeysWith: { first, _ in first })
         let previousCardsById = Dictionary(uniqueKeysWithValues: (previous?.issueCards ?? []).map { ($0.id, $0) })

@@ -35,11 +35,11 @@ cotor delete     # Remove app
 ## Components
 
 - `cotor app-server`
-  - localhost API for repositories, workspaces, tasks, goals, issues, review queue, and runtime state
+  - localhost API for repositories, workspaces, tasks, goals, issues, review queue, runtime state, and the native Test Center
 - `macos/`
   - SwiftUI shell
 - `src/main/kotlin/com/cotor/app/`
-  - repository, workspace, task, goal, issue, review-queue, and runtime services
+  - repository, workspace, task, goal, issue, review-queue, Test Center, and runtime services
 
 ## Run The Backend
 
@@ -138,6 +138,7 @@ The current macOS shell has two top-level modes.
   - dedicated `Operator Chat` navigation surface with a message-thread interface for natural-language company commands; selected-company messages go through an LLM-first operator planner that prefers local Ollama Gemma when available, chooses validated company tools, and answers from real tool results
   - progressive disclosure across the company and issue surfaces: the first view shows only the current company signal and focused issue queue, while backend health, paths, cost guardrails, metadata, execution logs, Linear links, and agent conversation details stay behind expandable detail views
   - dedicated `Reports` surface for previous-day morning reports covering completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
+  - dedicated `Tests` surface for local validation plans, safe predefined command runs, progress, step status, and bounded logs for the selected company root
   - dedicated `Performance` surface for derived per-agent execution scores, success rates, QA pass rates, retries, duration, and known estimated cost without storing separate evaluation history
   - company memory snapshot cards show company, project, team, and agent memory; `workflowMemory` remains in the backend contract for older clients
   - autonomous discovery scans internal quality signals before synthesizing CEO triage goals, and persisted problem signals are available through the app-server and CLI
@@ -203,6 +204,10 @@ Current company-first routes:
 - `GET /api/app/companies/{companyId}/reports`
 - `GET /api/app/companies/{companyId}/reports/{date}`
 - `POST /api/app/companies/{companyId}/reports/generate`
+- `GET /api/app/companies/{companyId}/test-center/plan`
+- `GET /api/app/companies/{companyId}/test-center/sessions`
+- `POST /api/app/companies/{companyId}/test-center/sessions`
+- `GET /api/app/companies/{companyId}/test-center/sessions/{sessionId}`
 - `GET /api/app/companies/{companyId}/memory-snapshot`
 - `GET /api/app/companies/{companyId}/problem-signals`
 - `POST /api/app/companies/{companyId}/autonomy/discovery-scan`
@@ -231,7 +236,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - create multiple companies
 - bind each company to one working folder
 - define company agents with minimal user input
-- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:e2b` alias is unavailable.
+- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:12b` alias is unavailable.
 - store an optional `mentorAgentId` per company agent; mentor choices are limited to active agents in the same company and clearable from the advanced assignment controls.
 - seed every new company with an HR Manager role plus default mentor relationships across CEO, product, engineering, builder, QA, and release roles.
 - show the built-in skill catalog in the company agent editor and save each agent's friendly skill selections into the `SKILL_RUN` capability allowlist.

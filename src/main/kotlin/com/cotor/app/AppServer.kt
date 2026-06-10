@@ -99,6 +99,7 @@ class AppServer : KoinComponent {
     private val tuiSessionService: DesktopTuiSessionService by inject()
     private val durableRuntimeService: DurableRuntimeService by inject()
     private val durableResumeCoordinator: DurableResumeCoordinator by inject()
+    private val testCenterService = CotorTestCenterService()
 
     fun start(
         port: Int = 8787,
@@ -125,6 +126,7 @@ class AppServer : KoinComponent {
         val cleanup = {
             if (cleanedUp.compareAndSet(false, true)) {
                 tuiSessionService.shutdown()
+                testCenterService.shutdown()
                 desktopService.shutdown()
                 desktopAppServerInstanceGuard.release()
             }
@@ -136,6 +138,7 @@ class AppServer : KoinComponent {
                 tuiSessionService = tuiSessionService,
                 durableRuntimeService = durableRuntimeService,
                 durableResumeCoordinator = durableResumeCoordinator,
+                testCenterService = testCenterService,
                 controlToken = controlToken,
                 readOnlyMode = readOnlyMode,
                 shutdownHandler = {
@@ -372,6 +375,7 @@ internal fun Application.cotorAppModule(
     a2aRouter: A2aRouter = A2aRouter(desktopService),
     durableRuntimeService: DurableRuntimeService? = null,
     durableResumeCoordinator: DurableResumeCoordinator? = null,
+    testCenterService: CotorTestCenterService = CotorTestCenterService(),
     controlToken: String? = null,
     readOnlyMode: Boolean = false,
     shutdownHandler: (() -> Unit)? = null,
@@ -1391,6 +1395,55 @@ internal fun Application.cotorAppModule(
                     respondDesktopRequest {
                         desktopService.generateMorningReport(companyId, date)
                     }
+                }
+
+                get("/{companyId}/test-center/plan") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    val company = desktopService.getCompany(companyId)
+                        ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Company not found: $companyId"))
+                    val suiteId = call.request.queryParameters["suiteId"] ?: CotorTestCenterService.DEFAULT_SUITE
+                    call.respond(testCenterService.plan(company, suiteId))
+                }
+
+                get("/{companyId}/test-center/sessions") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    if (desktopService.getCompany(companyId) == null) {
+                        return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Company not found: $companyId"))
+                    }
+                    call.respond(testCenterService.listSessions(companyId))
+                }
+
+                post("/{companyId}/test-center/sessions") {
+                    if (!requireToken(token)) return@post
+                    val companyId = call.parameters["companyId"]
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    val company = desktopService.getCompany(companyId)
+                        ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "Company not found: $companyId"))
+                    val request = call.receive<StartTestCenterSessionRequest>()
+                    respondDesktopRequest {
+                        testCenterService.startSession(company, request.suiteId)
+                    }
+                }
+
+                get("/{companyId}/test-center/sessions/{sessionId}") {
+                    if (!requireToken(token)) return@get
+                    val companyId = call.parameters["companyId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "companyId is required"))
+                    val sessionId = call.parameters["sessionId"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "sessionId is required"))
+                    if (desktopService.getCompany(companyId) == null) {
+                        return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Company not found: $companyId"))
+                    }
+                    val session = testCenterService.getSession(sessionId)
+                        ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Test session not found: $sessionId"))
+                    if (session.companyId != companyId) {
+                        return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Test session not found: $sessionId"))
+                    }
+                    call.respond(session)
                 }
 
                 get("/{companyId}/memory-snapshot") {

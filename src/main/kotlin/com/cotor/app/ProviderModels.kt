@@ -1,6 +1,7 @@
 package com.cotor.app
 
 import com.cotor.model.LocalModelDefaults
+import com.cotor.model.CodexDefaults
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -114,11 +115,11 @@ fun directChatProviderCatalog(): List<DirectChatProviderCatalogEntry> = listOf(
         allowsBaseUrl = true
     ),
     DirectChatProviderCatalogEntry(
-        id = "claude-cli",
-        providerId = "claude-code",
-        displayName = "Claude CLI",
-        iconSystemName = "sparkles",
-        defaultModel = "claude",
+        id = "codex-oauth",
+        providerId = "codex-cli",
+        displayName = "Codex OAuth",
+        iconSystemName = "person.crop.circle.badge.checkmark",
+        defaultModel = CodexDefaults.DEFAULT_MODEL,
         allowsBaseUrl = false
     )
 )

@@ -9,4 +9,11 @@ class SkillModelsTest : FunSpec({
 
         names.distinct().size shouldBe names.size
     }
+
+    test("marketing catalog advertises Threads and Product Hunt publishing skills") {
+        val names = skillCatalog().map { it.name }
+
+        names.contains("threads-publisher") shouldBe true
+        names.contains("producthunt-publisher") shouldBe true
+    }
 })

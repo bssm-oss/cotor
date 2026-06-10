@@ -195,18 +195,29 @@ class DirectChatServiceTest : FunSpec({
         }
     }
 
-    test("claude-cli direct chat sends prompt through stdin instead of argv") {
-        val scriptDir = Files.createTempDirectory("direct-chat-claude")
-        val script = scriptDir.resolve("fake-claude")
+    test("codex-oauth direct chat sends prompt through stdin and dedicated CODEX_HOME") {
+        val scriptDir = Files.createTempDirectory("direct-chat-codex")
+        val script = scriptDir.resolve("fake-codex")
         val argsFile = scriptDir.resolve("args.txt")
         val stdinFile = scriptDir.resolve("stdin.txt")
+        val codexHomeFile = scriptDir.resolve("codex-home.txt")
         Files.writeString(
             script,
             """
             #!/bin/sh
             printf '%s\n' "${'$'}@" > '${argsFile.toString().replace("'", "'\\''")}'
+            printf '%s\n' "${'$'}CODEX_HOME" > '${codexHomeFile.toString().replace("'", "'\\''")}'
+            out=''
+            prev=''
+            for arg in "${'$'}@"; do
+              if [ "${'$'}prev" = "--output-last-message" ]; then
+                out="${'$'}arg"
+              fi
+              prev="${'$'}arg"
+            done
             cat > '${stdinFile.toString().replace("'", "'\\''")}'
-            printf 'claude response'
+            printf 'codex response' > "${'$'}out"
+            printf 'stdout fallback'
             """.trimIndent()
         )
         Files.setPosixFilePermissions(
@@ -219,27 +230,34 @@ class DirectChatServiceTest : FunSpec({
         )
 
         val conversation = DirectChatConversation(
-            id = "conversation-claude",
+            id = "conversation-codex",
             companyId = "company-1",
             title = "test",
-            model = "claude",
-            provider = "claude-cli"
+            model = "gpt-5",
+            provider = "codex-oauth"
         )
+        val fakeHome = scriptDir.resolve("home")
 
-        val chunks = DirectChatService(claudeCommand = script.toString())
+        val chunks = DirectChatService(
+            codexCommand = script.toString(),
+            codexEnvironment = mapOf("HOME" to fakeHome.toString())
+        )
             .streamChat(conversation, userMessage = "hello from stdin", messageId = "message-1")
             .toList()
 
         chunks.last().done shouldBe true
-        chunks.last().content shouldBe "claude response"
-        argsFile.readText().trim() shouldBe "-p"
+        chunks.last().content shouldBe "codex response"
+        argsFile.readText() shouldContain "exec"
+        argsFile.readText() shouldContain "--model"
+        argsFile.readText() shouldContain "gpt-5"
+        codexHomeFile.readText().trim() shouldBe fakeHome.resolve(".cotor/auth/codex-oauth").toString()
         stdinFile.readText() shouldContain "hello from stdin"
     }
 
-    test("claude-cli direct chat cancellation kills descendant process and propagates cancellation") {
+    test("codex-oauth direct chat cancellation kills descendant process and propagates cancellation") {
         coroutineScope {
-            val scriptDir = Files.createTempDirectory("direct-chat-claude-cancel")
-            val script = scriptDir.resolve("fake-claude")
+            val scriptDir = Files.createTempDirectory("direct-chat-codex-cancel")
+            val script = scriptDir.resolve("fake-codex")
             val childPidFile = scriptDir.resolve("child.pid")
             Files.writeString(
                 script,
@@ -261,15 +279,19 @@ class DirectChatServiceTest : FunSpec({
                 )
             )
             val conversation = DirectChatConversation(
-                id = "conversation-claude-cancel",
+                id = "conversation-codex-cancel",
                 companyId = "company-1",
                 title = "test",
-                model = "claude",
-                provider = "claude-cli"
+                model = "gpt-5",
+                provider = "codex-oauth"
             )
             var childPid: Long? = null
             val deferred = async {
-                DirectChatService(claudeCommand = script.toString(), claudeTimeoutMillis = 30_000)
+                DirectChatService(
+                    codexCommand = script.toString(),
+                    codexTimeoutMillis = 30_000,
+                    codexEnvironment = mapOf("HOME" to scriptDir.resolve("home").toString())
+                )
                     .streamChat(conversation, userMessage = "cancel this", messageId = "message-1")
                     .toList()
             }

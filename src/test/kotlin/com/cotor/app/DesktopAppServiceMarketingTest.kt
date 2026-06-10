@@ -460,6 +460,53 @@ class DesktopAppServiceMarketingTest : FunSpec({
         social.actions.single() shouldContain "x:"
         runner.commands.shouldHaveSize(2)
     }
+
+    test("Threads and Product Hunt skill runners require matching delegated channels") {
+        val appHome = Files.createTempDirectory("desktop-marketing-launch-channel-home")
+        val runner = RecordingMarketingBrowserRunner()
+        val service = marketingService(appHome, runner)
+        val company = service.createCompany(name = "Launch Channel Co", rootPath = appHome.toString())
+        val agent = service.listCompanyAgentDefinitions(company.id).first { it.title == "Marketing Operator" }
+        service.upsertMarketingDelegationPolicy(
+            UpsertMarketingDelegationPolicyRequest(
+                companyId = company.id,
+                agentId = agent.id,
+                allowedDomains = listOf("threads.net", "producthunt.com"),
+                channelAccounts = listOf(
+                    MarketingChannelAccount(channel = "threads", accountRef = "threads-owned", allowedDomains = listOf("threads.net")),
+                    MarketingChannelAccount(channel = "producthunt", accountRef = "ph-owned", allowedDomains = listOf("producthunt.com"))
+                ),
+                dailyPostLimit = 4
+            )
+        )
+
+        val threads = service.runSkill(
+            name = "threads-publisher",
+            companyId = company.id,
+            agentId = agent.id,
+            input = "Publish a Threads launch update"
+        )
+        val productHunt = service.runSkill(
+            name = "producthunt-publisher",
+            companyId = company.id,
+            agentId = agent.id,
+            input = "Publish Product Hunt launch copy"
+        )
+        val denied = service.runSkill(
+            name = "producthunt-publisher",
+            companyId = company.id,
+            agentId = agent.id,
+            input = "Publish to the wrong channel",
+            parameters = mapOf("channels" to "threads")
+        )
+
+        threads.status shouldBe "COMPLETED"
+        productHunt.status shouldBe "COMPLETED"
+        denied.status shouldBe "DENIED"
+        threads.actions.single() shouldContain "threads:"
+        productHunt.actions.single() shouldContain "producthunt:"
+        runner.commands.shouldHaveSize(2)
+    }
 })
 
 private fun marketingService(

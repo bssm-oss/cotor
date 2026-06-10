@@ -62,6 +62,7 @@ private enum CompanySidebarSurface: CaseIterable, Identifiable {
     case goals
     case performance
     case reports
+    case tests
     case agents
     case issues
 
@@ -79,6 +80,8 @@ private enum CompanySidebarSurface: CaseIterable, Identifiable {
             return "performance"
         case .reports:
             return "reports"
+        case .tests:
+            return "tests"
         case .agents:
             return "agents"
         case .issues:
@@ -746,6 +749,8 @@ private struct SidebarView: View {
                 companySection
             case .reports:
                 companySection
+            case .tests:
+                companySection
             case .agents:
                 VStack(alignment: .leading, spacing: 14) {
                     rosterSection
@@ -845,6 +850,13 @@ private struct SidebarView: View {
                     subtitle: l("Daily operating brief", "하루 운영 요약"),
                     systemImage: "doc.text.magnifyingglass",
                     badge: "\(store.selectedCompanyReports.count)"
+                )
+                companyNavButton(
+                    .tests,
+                    title: l("Tests", "테스트"),
+                    subtitle: l("Local validation center", "로컬 검증 센터"),
+                    systemImage: "checkmark.seal",
+                    badge: "\(store.selectedTestCenterSessions.count)"
                 )
                 companyNavButton(
                     .agents,
@@ -4818,6 +4830,8 @@ private struct CenterPaneView: View {
             performanceReviewPage
         case .reports:
             companyReportsPage
+        case .tests:
+            testCenterPage
         case .agents:
             organizationOverviewPage
         case .issues:
@@ -5456,6 +5470,422 @@ private struct CenterPaneView: View {
                 }
             }
         }
+    }
+
+    private var testCenterSuiteOptions: [String] {
+        let suites = store.testCenterPlan?.availableSuites ?? ["baseline"]
+        return suites.isEmpty ? ["baseline"] : suites
+    }
+
+    private var testCenterPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            companyPageHeader(
+                title: l("Tests", "테스트"),
+                subtitle: l("Run the selected company's local validation steps and inspect each result.", "선택한 회사의 로컬 검증 단계를 실행하고 결과를 확인합니다.")
+            )
+
+            HStack(spacing: 8) {
+                if let plan = store.testCenterPlan {
+                    ShellTag(text: testCenterSuiteLabel(plan.suiteId), tint: ShellPalette.accent)
+                    ShellTag(text: "\(plan.steps.count) \(l("steps", "단계"))", tint: ShellPalette.accentWarm)
+                } else {
+                    ShellTag(text: l("No plan", "계획 없음"), tint: ShellPalette.warning)
+                }
+                Spacer()
+                Picker("", selection: $store.selectedTestCenterSuiteID) {
+                    ForEach(testCenterSuiteOptions, id: \.self) { suite in
+                        Text(testCenterSuiteLabel(suite)).tag(suite)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: layoutMode == .compact ? nil : 260)
+                .onChange(of: store.selectedTestCenterSuiteID) { _, _ in
+                    Task { await store.refreshTestCenter() }
+                }
+
+                Button {
+                    Task { await store.refreshTestCenter() }
+                } label: {
+                    Label(l("Refresh", "새로고침"), systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+
+                Button {
+                    Task { await store.startTestCenterSession() }
+                } label: {
+                    Label(
+                        store.isStartingTestCenterSession ? l("Starting", "시작 중") : l("Run", "실행"),
+                        systemImage: "play.fill"
+                    )
+                }
+                .buttonStyle(ShellTopBarButtonStyle(prominent: true))
+                .disabled(store.selectedCompany == nil || store.isStartingTestCenterSession || store.testCenterPlan == nil)
+            }
+
+            if store.selectedCompany == nil {
+                EmptyStateView(
+                    image: "checkmark.seal",
+                    title: l("Select a company", "회사를 선택하세요"),
+                    subtitle: l("Test Center runs against the selected company root.", "Test Center는 선택한 회사 루트에서 실행됩니다.")
+                )
+                .frame(minHeight: 260)
+                .shellInset()
+            } else {
+                testCenterMetricGrid
+                if layoutMode == .wide {
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            testCenterPlanPanel
+                            testCenterSessionListPanel
+                        }
+                        .frame(width: 320, alignment: .top)
+                        testCenterSessionDetailPanel
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .top)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        testCenterPlanPanel
+                        testCenterSessionListPanel
+                        testCenterSessionDetailPanel
+                    }
+                }
+            }
+        }
+        .task(id: store.selectedCompanyID) {
+            await store.refreshTestCenter()
+        }
+    }
+
+    private var testCenterMetricGrid: some View {
+        let session = store.selectedTestCenterSession
+        let steps = session?.steps ?? store.testCenterPlan?.steps ?? []
+        let passed = steps.filter { $0.status.uppercased() == "PASSED" }.count
+        let failed = steps.filter { $0.status.uppercased() == "FAILED" }.count
+        let skipped = steps.filter { $0.status.uppercased() == "SKIPPED" }.count
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+            PerformanceMetricTile(
+                title: l("Status", "상태"),
+                value: session.map { testCenterStatusLabel($0.status) } ?? l("Ready", "대기"),
+                detail: session?.summary ?? l("Plan is ready", "계획 준비됨"),
+                tint: session.map { testCenterTint(for: $0.status) } ?? ShellPalette.accent
+            )
+            PerformanceMetricTile(
+                title: l("Progress", "진행률"),
+                value: "\(Int((session?.progress ?? 0.0) * 100))%",
+                detail: testCenterDurationText(session?.durationMs),
+                tint: ShellPalette.accentWarm
+            )
+            PerformanceMetricTile(
+                title: l("Passed", "통과"),
+                value: "\(passed)",
+                detail: "\(failed) \(l("failed", "실패"))",
+                tint: failed > 0 ? ShellPalette.danger : ShellPalette.success
+            )
+            PerformanceMetricTile(
+                title: l("Skipped", "건너뜀"),
+                value: "\(skipped)",
+                detail: "\(steps.count) \(l("total steps", "전체 단계"))",
+                tint: skipped > 0 ? ShellPalette.warning : ShellPalette.panelRaised
+            )
+        }
+    }
+
+    private var testCenterPlanPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(l("Plan", "계획"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                Spacer()
+                if let plan = store.testCenterPlan {
+                    ShellTag(text: testCenterSuiteLabel(plan.suiteId), tint: ShellPalette.accent)
+                }
+            }
+
+            if let plan = store.testCenterPlan {
+                if !plan.warnings.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(plan.warnings, id: \.self) { warning in
+                            StatusSummaryPill(text: warning, tint: ShellPalette.warning)
+                        }
+                    }
+                }
+                LazyVStack(spacing: 8) {
+                    ForEach(plan.steps) { step in
+                        testCenterStepRow(step, showOutput: false)
+                    }
+                }
+            } else {
+                Text(l("No test plan has been loaded.", "아직 테스트 계획을 불러오지 않았습니다."))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(ShellPalette.panelAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            }
+        }
+        .padding(14)
+        .shellInset()
+    }
+
+    private var testCenterSessionListPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(l("Runs", "실행"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ShellPalette.text)
+                Spacer()
+                ShellTag(text: "\(store.selectedTestCenterSessions.count)", tint: ShellPalette.accentWarm)
+            }
+
+            if store.selectedTestCenterSessions.isEmpty {
+                Text(l("No test runs yet.", "아직 테스트 실행이 없습니다."))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ShellPalette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(ShellPalette.panelAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(store.selectedTestCenterSessions) { session in
+                        Button {
+                            store.selectedTestCenterSessionID = session.id
+                            Task { await store.refreshSelectedTestCenterSession() }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("#\(String(session.id.prefix(8)))")
+                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(ShellPalette.text)
+                                    Spacer()
+                                    ShellTag(text: testCenterStatusLabel(session.status), tint: testCenterTint(for: session.status))
+                                }
+                                HStack(spacing: 6) {
+                                    ShellTag(text: testCenterSuiteLabel(session.suiteId), tint: ShellPalette.accent)
+                                    ShellTag(text: "\(Int(session.progress * 100))%", tint: ShellPalette.panelRaised)
+                                }
+                                Text(session.summary.isEmpty ? relativeTimestamp(session.createdAt) : session.summary)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(ShellPalette.muted)
+                                    .lineLimit(2)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(store.selectedTestCenterSession?.id == session.id ? ShellPalette.panelRaised : ShellPalette.panelAlt)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                                    .stroke(store.selectedTestCenterSession?.id == session.id ? ShellPalette.lineStrong : ShellPalette.line, lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .shellInset()
+    }
+
+    @ViewBuilder
+    private var testCenterSessionDetailPanel: some View {
+        if let session = store.selectedTestCenterSession {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(l("Run Detail", "실행 상세"))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(ShellPalette.text)
+                        Text(session.rootPath)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(ShellPalette.faint)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    ShellTag(text: testCenterStatusLabel(session.status), tint: testCenterTint(for: session.status))
+                }
+
+                HStack(spacing: 8) {
+                    ShellTag(text: testCenterSuiteLabel(session.suiteId), tint: ShellPalette.accent)
+                    ShellTag(text: "\(Int(session.progress * 100))%", tint: ShellPalette.accentWarm)
+                    ShellTag(text: testCenterDurationText(session.durationMs), tint: ShellPalette.panelRaised)
+                    Spacer()
+                    Button {
+                        Task { await store.refreshSelectedTestCenterSession() }
+                    } label: {
+                        Label(l("Refresh", "새로고침"), systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(ShellTopBarButtonStyle(prominent: false))
+                }
+
+                if !session.summary.isEmpty {
+                    Text(session.summary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let error = session.error, !error.isEmpty {
+                    StatusSummaryPill(text: error, tint: ShellPalette.danger)
+                }
+
+                LazyVStack(spacing: 8) {
+                    ForEach(session.steps) { step in
+                        testCenterStepRow(step, showOutput: true)
+                    }
+                }
+            }
+            .padding(14)
+            .shellInset()
+        } else {
+            EmptyStateView(
+                image: "terminal",
+                title: l("No test run selected", "선택된 테스트 실행 없음"),
+                subtitle: l("Run the plan or select a previous run to inspect logs.", "계획을 실행하거나 이전 실행을 선택해 로그를 확인하세요.")
+            )
+            .frame(minHeight: 260)
+            .shellInset()
+        }
+    }
+
+    private func testCenterStepRow(_ step: TestCenterStepRecord, showOutput: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: testCenterStepIcon(step.status))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(testCenterTint(for: step.status))
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(step.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(ShellPalette.text)
+                        Spacer()
+                        ShellTag(text: testCenterStatusLabel(step.status), tint: testCenterTint(for: step.status))
+                    }
+                    Text(step.detail)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(2)
+                    if !step.commandLine.isEmpty {
+                        Text(step.commandLine)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(ShellPalette.faint)
+                            .lineLimit(1)
+                    }
+                    if let exitCode = step.exitCode {
+                        Text("exit \(exitCode) · \(testCenterDurationText(step.durationMs))")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(ShellPalette.faint)
+                    }
+                }
+            }
+
+            if showOutput {
+                if let error = step.error, !error.isEmpty {
+                    Text(error)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(ShellPalette.danger)
+                        .lineLimit(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(ShellPalette.panelDeeper)
+                        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                }
+                if let output = step.output, !output.isEmpty {
+                    Text(output)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(ShellPalette.muted)
+                        .lineLimit(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(ShellPalette.panelDeeper)
+                        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ShellPalette.panelAlt)
+        .overlay(
+            RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                .stroke(ShellPalette.line, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+    }
+
+    private func testCenterTint(for status: String) -> Color {
+        switch status.uppercased() {
+        case "PASSED":
+            return ShellPalette.success
+        case "FAILED":
+            return ShellPalette.danger
+        case "RUNNING":
+            return ShellPalette.accent
+        case "SKIPPED":
+            return ShellPalette.warning
+        default:
+            return ShellPalette.panelRaised
+        }
+    }
+
+    private func testCenterStatusLabel(_ status: String) -> String {
+        switch status.uppercased() {
+        case "PASSED":
+            return l("Passed", "통과")
+        case "FAILED":
+            return l("Failed", "실패")
+        case "RUNNING":
+            return l("Running", "실행 중")
+        case "SKIPPED":
+            return l("Skipped", "건너뜀")
+        default:
+            return l("Pending", "대기")
+        }
+    }
+
+    private func testCenterSuiteLabel(_ suiteId: String) -> String {
+        switch suiteId.lowercased() {
+        case "kotlin":
+            return "Kotlin"
+        case "desktop":
+            return l("Desktop", "데스크톱")
+        case "full":
+            return l("Full", "전체")
+        default:
+            return l("Baseline", "기본")
+        }
+    }
+
+    private func testCenterStepIcon(_ status: String) -> String {
+        switch status.uppercased() {
+        case "PASSED":
+            return "checkmark.circle.fill"
+        case "FAILED":
+            return "xmark.octagon.fill"
+        case "RUNNING":
+            return "play.circle.fill"
+        case "SKIPPED":
+            return "forward.circle.fill"
+        default:
+            return "circle"
+        }
+    }
+
+    private func testCenterDurationText(_ durationMs: Int64?) -> String {
+        guard let durationMs else {
+            return l("No duration", "시간 없음")
+        }
+        if durationMs < 1_000 {
+            return "\(durationMs)ms"
+        }
+        let seconds = Double(durationMs) / 1_000.0
+        if seconds < 60 {
+            return String(format: "%.1fs", seconds)
+        }
+        return "\(Int(seconds / 60))m \(Int(seconds) % 60)s"
     }
 
     private var issuePage: some View {
@@ -6460,6 +6890,10 @@ private struct CenterPaneView: View {
             return l("Create a short product video plan for the current company workflow.", "현재 회사 워크플로우를 설명하는 짧은 제품 영상 계획을 만들어줘")
         case "audience-scout", "analytics-reporter":
             return l("Summarize recent marketing evidence and next actions.", "최근 마케팅 증거와 다음 액션을 요약해줘")
+        case "threads-publisher":
+            return l("Publish a concise launch/update post on the delegated Threads account.", "위임된 Threads 계정에 짧은 출시/업데이트 홍보 글을 올려줘")
+        case "producthunt-publisher":
+            return l("Prepare and publish concise Product Hunt launch copy inside the delegated channel.", "위임된 Product Hunt 채널 안에서 짧은 출시 홍보 글을 준비하고 발행해줘")
         case "marketing-operator", "content-publisher", "social-publisher":
             return l("Publish a concise product update inside delegated channels.", "위임된 채널 안에서 짧은 제품 업데이트를 발행해줘")
         default:
@@ -6471,6 +6905,10 @@ private struct CenterPaneView: View {
         switch skillID {
         case "graphify":
             return ["refresh": "false"]
+        case "threads-publisher":
+            return ["channels": "threads"]
+        case "producthunt-publisher":
+            return ["channels": "producthunt"]
         default:
             return [:]
         }
@@ -7971,10 +8409,12 @@ private struct CollapsibleDisclosureHeader: View {
 
                 Spacer(minLength: 8)
 
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                Image(systemName: "chevron.down")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(isHovered ? ShellPalette.text.opacity(0.78) : ShellPalette.muted)
                     .frame(width: 18, height: 18)
+                    .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                    .animation(ShellMotion.quick, value: isExpanded)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
