@@ -228,6 +228,32 @@ if [ "${1:-}" = "app-server" ]; then
     exit $?
 fi
 
+uses_source_lifecycle_command() {
+    case "${1:-}" in
+        install|update|upgrade|delete)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+if uses_source_lifecycle_command "$@"; then
+    TMPDIR_VALUE="${TMPDIR:-/tmp}"
+    CLI_RUNTIME_DIR="$(/usr/bin/mktemp -d "${TMPDIR_VALUE%/}/cotor-cli-runtime.XXXXXX")" || exit 1
+    CLI_RUNTIME_JAR="$CLI_RUNTIME_DIR/cotor-cli.jar"
+    /bin/cp "$JAR_PATH" "$CLI_RUNTIME_JAR" || {
+        /bin/rm -rf "$CLI_RUNTIME_DIR" >/dev/null 2>&1 || true
+        exit 1
+    }
+    cleanup_cli_runtime_jar() {
+        /bin/rm -rf "$CLI_RUNTIME_DIR" >/dev/null 2>&1 || true
+    }
+    trap cleanup_cli_runtime_jar EXIT TERM INT HUP
+    JAR_PATH="$CLI_RUNTIME_JAR"
+fi
+
 # Run the JAR with all arguments passed to this script
 export COTOR_PROJECT_ROOT="$PROJECT_ROOT"
 "$JAVA_CMD" -jar "$JAR_PATH" "$@"
