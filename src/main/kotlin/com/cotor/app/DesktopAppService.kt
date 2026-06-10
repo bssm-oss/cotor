@@ -8268,6 +8268,8 @@ class DesktopAppService(
                     status = IssueStatus.PLANNED,
                     transitionReason = "Company Operator reopened this blocked issue for autonomous retry.",
                     blockedBy = emptyList(),
+                    approvalPauseId = null,
+                    providerBlockReason = null,
                     runtimeDisposition = null,
                     updatedAt = now
                 )

@@ -1443,6 +1443,8 @@ class DesktopAppServiceTest : FunSpec({
             title = "Blocked full-auto implementation",
             description = "Needs retry.",
             status = IssueStatus.BLOCKED,
+            approvalPauseId = "stale-opencode-approval",
+            providerBlockReason = "Capability SHELL_EXEC requires approval for agent.exec agent=opencode.",
             createdAt = now,
             updatedAt = now
         )
@@ -1468,7 +1470,10 @@ class DesktopAppServiceTest : FunSpec({
         retryResponse.shouldHideRawOperatorInternals()
         hardGateResponse.shouldHideRawOperatorInternals()
         retryResponse.actions.any { it.type == "blocked-issue-retry" && it.status == "DONE" } shouldBe true
-        stateStore.load().issues.first { it.id == issue.id }.status shouldBe IssueStatus.PLANNED
+        val retriedIssue = stateStore.load().issues.first { it.id == issue.id }
+        retriedIssue.status shouldBe IssueStatus.PLANNED
+        retriedIssue.approvalPauseId shouldBe null
+        retriedIssue.providerBlockReason shouldBe null
         hardGateResponse.blockedActions.single().type shouldBe "hard-gate"
     }
 
