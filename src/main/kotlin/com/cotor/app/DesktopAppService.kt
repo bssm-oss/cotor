@@ -14934,6 +14934,9 @@ class DesktopAppService(
             listOf("gemma4")
         }
         val linkedIssue = issueId?.let { id -> state.issues.firstOrNull { it.id == id } }
+        val effectiveRequestedAgents = linkedIssue
+            ?.let { issue -> currentIssueExecutionAgents(state, issue, requestedAgents) }
+            ?: requestedAgents
         val executionPlan = if (linkedIssue != null) {
             val assignmentPrompt = buildString {
                 appendLine(prompt.trim())
@@ -14952,7 +14955,7 @@ class DesktopAppService(
                 assignments = listOf(
                     AgentAssignmentPlan(
                         participantId = linkedIssue.assigneeProfileId,
-                        agentName = requestedAgents.first(),
+                        agentName = effectiveRequestedAgents.first(),
                         role = title?.takeIf { it.isNotBlank() } ?: linkedIssue.title,
                         phase = linkedIssue.kind.lowercase(),
                         focus = linkedIssue.kind.lowercase(),
@@ -14971,7 +14974,7 @@ class DesktopAppService(
             taskPlanner.buildPlan(
                 title = title,
                 prompt = prompt,
-                agents = requestedAgents
+                agents = effectiveRequestedAgents
             )
         }
 
@@ -14983,7 +14986,7 @@ class DesktopAppService(
             issueId = issueId,
             title = title?.takeIf { it.isNotBlank() } ?: prompt.lineSequence().firstOrNull()?.take(48).orEmpty().ifBlank { "New Task" },
             prompt = prompt,
-            agents = requestedAgents,
+            agents = effectiveRequestedAgents,
             plan = executionPlan,
             status = DesktopTaskStatus.QUEUED,
             createdAt = now,
@@ -16318,6 +16321,23 @@ class DesktopAppService(
     private suspend fun executeTask(taskId: String) {
         var snapshot = stateStore.load()
         val task = snapshot.tasks.firstOrNull { it.id == taskId } ?: return
+        val normalizedTask = normalizeTaskAgentsForCurrentIssueAssignment(snapshot, task)
+        if (normalizedTask != task) {
+            stateMutex.withLock {
+                val latest = stateStore.load()
+                if (latest.tasks.any { it.id == task.id }) {
+                    stateStore.save(
+                        latest.copy(
+                            tasks = latest.tasks.map { existing ->
+                                if (existing.id == task.id) normalizedTask else existing
+                            }
+                        )
+                    )
+                }
+            }
+            snapshot = stateStore.load()
+        }
+        val executableTask = normalizedTask
         var workspace = snapshot.workspaces.firstOrNull { it.id == task.workspaceId }
         if (workspace == null && task.issueId != null) {
             snapshot.issues.firstOrNull { it.id == task.issueId }?.let { ensureIssueWorkspace(it) }
@@ -16325,29 +16345,29 @@ class DesktopAppService(
             workspace = snapshot.workspaces.firstOrNull { it.id == task.workspaceId }
         }
         if (workspace == null) {
-            updateTaskStatus(task.id, DesktopTaskStatus.FAILED)
-            syncIssueFromTask(task.id, DesktopTaskStatus.FAILED)
+            updateTaskStatus(executableTask.id, DesktopTaskStatus.FAILED)
+            syncIssueFromTask(executableTask.id, DesktopTaskStatus.FAILED)
             return
         }
         val repository = snapshot.repositories.firstOrNull { it.id == workspace.repositoryId }
         if (repository == null) {
-            updateTaskStatus(task.id, DesktopTaskStatus.FAILED)
-            syncIssueFromTask(task.id, DesktopTaskStatus.FAILED)
+            updateTaskStatus(executableTask.id, DesktopTaskStatus.FAILED)
+            syncIssueFromTask(executableTask.id, DesktopTaskStatus.FAILED)
             return
         }
         val repositoryRoot = Path.of(repository.localPath)
-        val agents = resolveAgents(repositoryRoot, task.agents)
+        val agents = resolveAgents(repositoryRoot, executableTask.agents)
 
-        updateTaskStatus(task.id, DesktopTaskStatus.RUNNING)
+        updateTaskStatus(executableTask.id, DesktopTaskStatus.RUNNING)
 
         try {
             coroutineScope {
                 // Each requested agent gets its own branch/worktree pair, so parallel execution
                 // does not create cross-agent file conflicts inside the same repository root.
-                task.agents.map { agentName ->
+                executableTask.agents.map { agentName ->
                     async {
                         executeAgentRun(
-                            task = task,
+                            task = executableTask,
                             workspace = workspace,
                             repository = repository,
                             agentName = agentName,
@@ -16357,13 +16377,13 @@ class DesktopAppService(
                 }.awaitAll()
             }
         } catch (cancelled: CancellationException) {
-            if (!isTaskIntentionallyInterrupted(task.id)) {
+            if (!isTaskIntentionallyInterrupted(executableTask.id)) {
                 throw cancelled
             }
             return
         }
 
-        val latestRuns = listRuns(task.id)
+        val latestRuns = listRuns(executableTask.id)
         val successCount = latestRuns.count { it.status == AgentRunStatus.COMPLETED }
         val failedCount = latestRuns.count { it.status == AgentRunStatus.FAILED }
         val finalStatus = when {
@@ -16371,8 +16391,54 @@ class DesktopAppService(
             successCount > 0 && failedCount > 0 -> DesktopTaskStatus.PARTIAL
             else -> DesktopTaskStatus.FAILED
         }
-        updateTaskStatus(task.id, finalStatus)
-        syncIssueFromTask(task.id, finalStatus)
+        updateTaskStatus(executableTask.id, finalStatus)
+        syncIssueFromTask(executableTask.id, finalStatus)
+    }
+
+    private fun normalizeTaskAgentsForCurrentIssueAssignment(
+        state: DesktopAppState,
+        task: AgentTask
+    ): AgentTask {
+        val issue = task.issueId?.let { issueId -> state.issues.firstOrNull { it.id == issueId } }
+            ?: return task
+        val normalizedAgents = currentIssueExecutionAgents(state, issue, task.agents)
+        if (normalizedAgents == task.agents) {
+            return task
+        }
+        return task.copy(
+            agents = normalizedAgents,
+            plan = task.plan?.copy(
+                assignments = task.plan.assignments.mapIndexed { index, assignment ->
+                    assignment.copy(agentName = normalizedAgents.getOrElse(index) { normalizedAgents.first() })
+                }
+            ),
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    private fun currentIssueExecutionAgents(
+        state: DesktopAppState,
+        issue: CompanyIssue,
+        fallbackAgents: List<String>
+    ): List<String> {
+        val profiles = ensureOrgProfiles(state.orgProfiles, state.companyAgentDefinitions, state.companies)
+        val assignedAgent = issue.assigneeProfileId
+            ?.let { profileId -> profiles.firstOrNull { it.id == profileId && it.companyId == issue.companyId } }
+            ?.executionAgentName
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { it.isNotBlank() }
+        val assignedDefinitionAgent = issue.assigneeProfileId
+            ?.let { agentId -> state.companyAgentDefinitions.firstOrNull { it.id == agentId && it.companyId == issue.companyId } }
+            ?.agentCli
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { it.isNotBlank() }
+        return listOfNotNull(assignedAgent, assignedDefinitionAgent)
+            .ifEmpty { fallbackAgents.map { it.trim().lowercase() } }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .ifEmpty { listOf("gemma4") }
     }
 
     private suspend fun executeAgentRun(

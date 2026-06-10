@@ -4008,6 +4008,8 @@ class DesktopAppServiceTest : FunSpec({
         val plan = task.plan.shouldNotBeNull()
         plan.decompositionSource shouldBe "issue-assignment"
         plan.assignments shouldHaveSize 1
+        task.agents shouldBe listOf("gemma4")
+        plan.assignments.single().agentName shouldBe "gemma4"
         plan.assignments.single().assignedPrompt.contains("Primary issue") shouldBe true
         plan.assignments.single().subtasks.size shouldBe issue.acceptanceCriteria.size
     }
