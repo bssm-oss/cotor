@@ -236,7 +236,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - create multiple companies
 - bind each company to one working folder
 - define company agents with minimal user input
-- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:12b` alias is unavailable.
+- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, keeps `gemma4:12b` pinned as the local default, and exposes discovered Gemma-family models as alternatives.
 - store an optional `mentorAgentId` per company agent; mentor choices are limited to active agents in the same company and clearable from the advanced assignment controls.
 - seed every new company with an HR Manager role plus default mentor relationships across CEO, product, engineering, builder, QA, and release roles.
 - show the built-in skill catalog in the company agent editor and save each agent's friendly skill selections into the `SKILL_RUN` capability allowlist.

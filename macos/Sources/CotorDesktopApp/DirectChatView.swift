@@ -28,7 +28,7 @@ struct DirectChatView: View {
     var body: some View {
         HSplitView {
             conversationSidebar
-                .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
+                .frame(minWidth: 236, idealWidth: 280, maxWidth: 320)
 
             if let conversation = selectedConversation {
                 chatArea(conversation: conversation)
@@ -36,6 +36,8 @@ struct DirectChatView: View {
                 emptyState
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ShellPalette.canvasBottom)
         .task { await loadConversations() }
         .task { await loadProviderCatalog() }
         .task { await loadModels() }
@@ -84,6 +86,7 @@ struct DirectChatView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
+            .background(ShellPalette.panelAlt)
 
             Divider()
 
@@ -101,7 +104,7 @@ struct DirectChatView: View {
                     Text("아직 대화가 없습니다")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(ShellPalette.text)
-                    Text("Codex OAuth 또는 로컬 Ollama로 운영 대화를 시작하세요.")
+                    Text("로컬 Gemma 4 12B로 운영 대화를 시작하세요.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(ShellPalette.muted)
                         .multilineTextAlignment(.center)
@@ -124,9 +127,15 @@ struct DirectChatView: View {
                     }
                     .padding(10)
                 }
+                .scrollContentBackground(.hidden)
             }
         }
         .background(ShellPalette.panelAlt)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(ShellPalette.line)
+                .frame(width: 1)
+        }
     }
 
     private func conversationRow(_ conversation: DirectChatConversation) -> some View {
@@ -156,7 +165,7 @@ struct DirectChatView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 isSelected
-                    ? ShellPalette.panelRaised
+                    ? ShellPalette.accentSoft
                     : ShellPalette.panel
             )
             .overlay(
@@ -213,15 +222,19 @@ struct DirectChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .center, spacing: 12) {
-                        Text("오늘")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(ShellPalette.muted)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(ShellPalette.panelRaised)
-                            .clipShape(Capsule())
-                        ForEach(conversation.messages) { message in
-                            messageRow(message)
+                        if conversation.messages.isEmpty && !isStreaming {
+                            conversationWelcome(conversation)
+                        } else {
+                            Text("오늘")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(ShellPalette.muted)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(ShellPalette.panelRaised)
+                                .clipShape(Capsule())
+                            ForEach(conversation.messages) { message in
+                                messageRow(message)
+                            }
                         }
                         if isStreaming, let msgId = streamingMessageId, !streamingContent.isEmpty {
                             messageRow(DirectChatMessage(
@@ -233,8 +246,12 @@ struct DirectChatView: View {
                             .id("streaming")
                         }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, minHeight: 420, alignment: .top)
                 }
+                .frame(maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
+                .scrollContentBackground(.hidden)
                 .onChange(of: streamingContent) {
                     withAnimation { proxy.scrollTo("streaming", anchor: .bottom) }
                 }
@@ -276,9 +293,67 @@ struct DirectChatView: View {
                 .keyboardShortcut(.return, modifiers: .command)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
+            .background(ShellPalette.panelAlt)
         }
         .background(ShellPalette.canvasBottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func conversationWelcome(_ conversation: DirectChatConversation) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: providerIcon(conversation.provider))
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(ShellPalette.accent)
+                .frame(width: 44, height: 44)
+                .background(ShellPalette.accentSoft)
+                .clipShape(Circle())
+
+            VStack(spacing: 5) {
+                Text("운영 대화를 시작하세요")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(ShellPalette.text)
+                Text("\(conversation.providerDisplayName) · \(conversation.model)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(ShellPalette.muted)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                quickPrompt("오늘 시연용 진행 기록을 요약해줘")
+                quickPrompt("남은 이슈 중 바로 처리할 순서를 정리해줘")
+                quickPrompt("Lovedraw 게시판 프로젝트의 홍보 문구를 작성해줘")
+            }
+            .frame(maxWidth: 440)
+        }
+        .padding(.top, 82)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func quickPrompt(_ text: String) -> some View {
+        Button {
+            inputText = text
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(ShellPalette.accent)
+                Text(text)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(ShellPalette.text)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(ShellPalette.panel)
+            .overlay(
+                RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous)
+                    .stroke(ShellPalette.line, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: ShellMetrics.radiusSmall, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func messageRow(_ message: DirectChatMessage) -> some View {
@@ -346,7 +421,7 @@ struct DirectChatView: View {
             Text("대화를 선택하거나 새로 시작하세요")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(ShellPalette.text)
-            Text("로컬 모델과 Codex OAuth를 한 화면에서 바로 테스트할 수 있습니다.")
+            Text("로컬 Gemma 4 12B 모델로 운영 지시를 바로 테스트할 수 있습니다.")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(ShellPalette.muted)
             Button {

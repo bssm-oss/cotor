@@ -4400,6 +4400,12 @@ private struct CenterPaneView: View {
     @State private var issueActivityExpanded = false
     @State private var presentedGoal: GoalRecord?
     private var l: AppLanguage { store.language }
+    private var usesOuterScroll: Bool {
+        scrollsInternally && !(store.shellMode == .company && companySurface == .chat)
+    }
+    private var directChatMinHeight: CGFloat {
+        layoutMode == .compact ? 520 : 660
+    }
 
     private var workflowLeader: String {
         if !store.workflowLeadAgent.isEmpty {
@@ -4785,14 +4791,14 @@ private struct CenterPaneView: View {
 
     var body: some View {
         Group {
-            if scrollsInternally {
+            if usesOuterScroll {
                 ScrollView {
                     content
                 }
                 .scrollIndicators(.hidden)
             } else {
                 content
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .shellCard()
@@ -4863,6 +4869,7 @@ private struct CenterPaneView: View {
     private var directChatPage: some View {
         if let companyId = store.selectedCompanyID {
             DirectChatView(companyId: companyId)
+                .frame(minHeight: directChatMinHeight, maxHeight: .infinity)
         } else {
             Text(l("Select a company first", "먼저 회사를 선택하세요."))
                 .foregroundColor(ShellPalette.muted)

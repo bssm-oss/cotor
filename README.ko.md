@@ -194,7 +194,7 @@ cotor delete    # 삭제
 - CEO 머지는 GitHub 새로고침 결과가 실제 `MERGED`로 확인된 뒤에만 로컬 workflow 상태를 merged로 기록함
 - 회사 CEO/최종 승인 에이전트가 있으면 PR 생성 정책 게이트도 내부 승인으로 처리해서, 사용자가 직접 승인 프롬프트를 누르지 않아도 게시 재시도가 이어짐
 - 운영 채팅은 `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO`를 지원하며 기본값은 `AGENT_APPROVED`. `FULL_AUTO`에서도 저장소 삭제, 대량 파일 삭제, secret 작업, 비용 상한 해제, 배포/머지 정책 해제 같은 hard-gate 작업은 차단
-- 회사 에이전트 정의는 이제 Codex, OpenCode, Ollama, LM Studio, 앱 관리형 로컬 Gemma 모델 같은 provider별로 선택 모델을 개별 지정할 수 있음. Cotor는 설치된 Gemma 4 모델을 우선 사용하고, 기본 `gemma4:12b` alias가 없으면 설치된 Gemma 계열 모델로 실패 없이 이어감
+- 회사 에이전트 정의는 이제 Codex, OpenCode, Ollama, LM Studio, 앱 관리형 로컬 Gemma 모델 같은 provider별로 선택 모델을 개별 지정할 수 있음. Cotor는 로컬 Gemma 4 12B alias(`gemma4:12b`)를 기본값으로 고정하고, 검색된 Gemma 계열 모델은 선택 가능한 대체 후보로 노출함
 - 회사 에이전트 정의는 선택 사수도 저장하며, 팀 카드에는 `사수` 한 줄만 간단히 보여주고 고급 배정 영역에서 편집
 - 회사 에이전트에서 Marketing Operator skill을 선택하면 owned/social channel, 허용 domain, 게시 한도, 브랜드 규칙, session/secret reference를 설정하는 위임 정책 패널 표시
 - 회사 실시간 stream이 잠깐 끊겨도 현재 company snapshot은 유지하고, generic decode 오류 대신 회사 전용 재동기화 메시지를 보여줌
@@ -216,7 +216,7 @@ cotor delete    # 삭제
 - GitHub PR 모드인데 `gh` 인증이나 `origin` 연결이 없으면 회사 생성 직후 바로 경고 표시. `origin`이 없다고 Cotor가 GitHub 저장소를 자동 생성하지는 않음
 - 데스크톱 앱에서 `gh` 로그인과 기존 GitHub 저장소 URL 저장으로 `origin` 연결
 - 직함/CLI/역할 설명만으로 회사 에이전트 정의
-- `gemma4`, `ollama`, `lmstudio` 에이전트로 회사 에이전트별 provider 모델 선택 저장. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:12b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
+- `gemma4`, `ollama`, `lmstudio` 에이전트로 회사 에이전트별 provider 모델 선택 저장. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, `gemma4:12b`를 기본 로컬 모델로 유지하며, 설치된 Gemma 계열 모델은 대체 후보로 노출
 - 새 회사에는 HR Manager와 기본 사수 관계를 함께 만들고, `팀 보강`, `사수 지정` 같은 요청은 별도 제어 패널이 아니라 운영 채팅 명령으로 처리
 - 같은 에이전트 팀에서 내장 저장소 지도 에이전트로 작업공간 구조를 확인하며, 모든 회사 에이전트의 실행 메모리에도 가벼운 작업공간 지도 지침 주입
 - Marketing Operator browser 게시 작업은 사전 위임 정책으로만 열고, 정책 밖 owned/social action은 사용자 승인 queue로 보내지 않고 deny 처리
