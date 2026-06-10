@@ -24060,6 +24060,14 @@ class DesktopAppService(
 
     private fun DesktopAppState.computeCompanyRuntimes(): List<CompanyRuntimeSnapshot> =
         allKnownCompanyIds().map { companyId ->
+            val companyIssueIds = issues.asSequence()
+                .filter { it.companyId == companyId }
+                .map { it.id }
+                .toSet()
+            val companyReviewQueueItemIds = reviewQueue.asSequence()
+                .filter { it.companyId == companyId }
+                .map { it.id }
+                .toSet()
             val existing = runtimeWithinCurrentBudgetWindow(
                 (
                     companyRuntimes.firstOrNull { it.companyId == companyId }
@@ -24131,6 +24139,9 @@ class DesktopAppService(
                             )
                 },
                 autonomyEnabledGoalCount = goals.count { it.companyId == companyId && it.autonomyEnabled },
+                pendingIssueIds = existing.pendingIssueIds.filter { it in companyIssueIds },
+                blockedIssueIds = existing.blockedIssueIds.filter { it in companyIssueIds },
+                reviewQueueAttentionIds = existing.reviewQueueAttentionIds.filter { it in companyReviewQueueItemIds },
                 todaySpentCents = budgetWindow.todaySpentCents,
                 monthSpentCents = budgetWindow.monthSpentCents,
                 budgetPausedAt = budgetPausedAt
