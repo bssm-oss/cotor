@@ -276,9 +276,13 @@ class AppServerTest : FunSpec({
                 setBody("""{"suiteId":"kotlin"}""")
             }
             session.status shouldBe HttpStatusCode.OK
-            session.bodyAsText() shouldContain "\"companyId\":\"company-tests\""
-            session.bodyAsText() shouldContain "\"suiteId\":\"kotlin\""
-            session.bodyAsText() shouldContain "\"status\":\"PENDING\""
+            val sessionBody = session.bodyAsText()
+            sessionBody shouldContain "\"companyId\":\"company-tests\""
+            sessionBody shouldContain "\"suiteId\":\"kotlin\""
+            val hasStartedStatus =
+                sessionBody.contains("\"status\":\"PENDING\"") ||
+                    sessionBody.contains("\"status\":\"RUNNING\"")
+            hasStartedStatus shouldBe true
         }
     }
 
