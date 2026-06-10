@@ -309,6 +309,8 @@ class SkillRuntimeTest : FunSpec({
         service.inferOperatorSkillName("analytics") shouldBe "analytics-reporter"
         service.inferOperatorSkillName("browser screenshot test") shouldBe "browser-smoke"
         service.inferOperatorSkillName("graphify repo structure") shouldBe "graphify"
+        service.inferOperatorSkillName("Product Hunt 홍보글 올려줘") shouldBe "producthunt-publisher"
+        service.inferOperatorSkillName("Threads 업데이트 발행") shouldBe "threads-publisher"
     }
 
     test("prewarm is a no-op and completes without error when node and npm are unavailable") {

@@ -64,6 +64,7 @@ The current macOS shell includes:
 - company goal creation
 - company issue selection and execution
 - review queue inspection
+- native Test Center for selected-company local validation plans and run logs
 - company activity feed
 - runtime status and local runtime controls
 - top session strip with live execution context switching

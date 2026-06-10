@@ -8,6 +8,7 @@ Cotor는 로컬 우선 AI 워크플로우 실행기에서 출발해, CEO AI가 �
 - 검증, 린트, 상태 조회, 통계, 체크포인트, 템플릿 생성
 - 로컬 웹 에디터와 YAML 저장/실행
 - `cotor app-server` 기반 macOS 데스크톱 셸
+- 선택된 회사 안에서 로컬 검증 계획, 실행 상태, 단계별 로그를 보여주는 내장 데스크톱 Test Center
 - 회사, 에이전트 정의, 목표, 이슈, 리뷰 큐, 활동 피드, 런타임 상태를 포함한 다중 컴퍼니 운영 레이어
 - 필요한 역할을 보수적으로 고용하고 에이전트별 사수를 지정하는 기본 HR Manager 역할
 - 회사별 추정 AI 비용 집계와 일/월 비용 상한 설정
@@ -73,6 +74,7 @@ Cotor는 로컬 우선 AI 워크플로우 실행기에서 출발해, CEO AI가 �
 - CLI 명령: `src/main/kotlin/com/cotor/presentation/cli/`
 - 일반 파이프라인 런타임: `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/`, `src/main/kotlin/com/cotor/domain/planning/`
 - 로컬 app-server route: `src/main/kotlin/com/cotor/app/AppServer.kt`
+- 로컬 Test Center 실행기: `src/main/kotlin/com/cotor/app/CotorTestCenterService.kt`
 - 회사 워크플로 서비스: `src/main/kotlin/com/cotor/app/DesktopAppService.kt`
 - 데스크톱 API DTO와 상태 모델: `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `macos/Sources/CotorDesktopApp/Models.swift`
 - macOS 데스크톱 셸: `macos/Sources/CotorDesktopApp/DesktopStore.swift`, `macos/Sources/CotorDesktopApp/ContentView.swift`, `macos/Sources/CotorDesktopApp/DesktopAPI.swift`
@@ -192,7 +194,7 @@ cotor delete    # 삭제
 - CEO 머지는 GitHub 새로고침 결과가 실제 `MERGED`로 확인된 뒤에만 로컬 workflow 상태를 merged로 기록함
 - 회사 CEO/최종 승인 에이전트가 있으면 PR 생성 정책 게이트도 내부 승인으로 처리해서, 사용자가 직접 승인 프롬프트를 누르지 않아도 게시 재시도가 이어짐
 - 운영 채팅은 `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO`를 지원하며 기본값은 `AGENT_APPROVED`. `FULL_AUTO`에서도 저장소 삭제, 대량 파일 삭제, secret 작업, 비용 상한 해제, 배포/머지 정책 해제 같은 hard-gate 작업은 차단
-- 회사 에이전트 정의는 이제 Codex, OpenCode, Ollama, LM Studio, 앱 관리형 로컬 Gemma 모델 같은 provider별로 선택 모델을 개별 지정할 수 있음. Cotor는 설치된 Gemma 4 모델을 우선 사용하고, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 실패 없이 이어감
+- 회사 에이전트 정의는 이제 Codex, OpenCode, Ollama, LM Studio, 앱 관리형 로컬 Gemma 모델 같은 provider별로 선택 모델을 개별 지정할 수 있음. Cotor는 설치된 Gemma 4 모델을 우선 사용하고, 기본 `gemma4:12b` alias가 없으면 설치된 Gemma 계열 모델로 실패 없이 이어감
 - 회사 에이전트 정의는 선택 사수도 저장하며, 팀 카드에는 `사수` 한 줄만 간단히 보여주고 고급 배정 영역에서 편집
 - 회사 에이전트에서 Marketing Operator skill을 선택하면 owned/social channel, 허용 domain, 게시 한도, 브랜드 규칙, session/secret reference를 설정하는 위임 정책 패널 표시
 - 회사 실시간 stream이 잠깐 끊겨도 현재 company snapshot은 유지하고, generic decode 오류 대신 회사 전용 재동기화 메시지를 보여줌
@@ -214,7 +216,7 @@ cotor delete    # 삭제
 - GitHub PR 모드인데 `gh` 인증이나 `origin` 연결이 없으면 회사 생성 직후 바로 경고 표시. `origin`이 없다고 Cotor가 GitHub 저장소를 자동 생성하지는 않음
 - 데스크톱 앱에서 `gh` 로그인과 기존 GitHub 저장소 URL 저장으로 `origin` 연결
 - 직함/CLI/역할 설명만으로 회사 에이전트 정의
-- `gemma4`, `ollama`, `lmstudio` 에이전트로 회사 에이전트별 provider 모델 선택 저장. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
+- `gemma4`, `ollama`, `lmstudio` 에이전트로 회사 에이전트별 provider 모델 선택 저장. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:12b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
 - 새 회사에는 HR Manager와 기본 사수 관계를 함께 만들고, `팀 보강`, `사수 지정` 같은 요청은 별도 제어 패널이 아니라 운영 채팅 명령으로 처리
 - 같은 에이전트 팀에서 내장 저장소 지도 에이전트로 작업공간 구조를 확인하며, 모든 회사 에이전트의 실행 메모리에도 가벼운 작업공간 지도 지침 주입
 - Marketing Operator browser 게시 작업은 사전 위임 정책으로만 열고, 정책 밖 owned/social action은 사용자 승인 queue로 보내지 않고 deny 처리
@@ -227,7 +229,7 @@ cotor delete    # 삭제
 - 기존 회사 이슈, 실행, 리뷰, 조직 프로필, 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 생성
 - `라이브 오피스` 런타임 projection에서 이벤트 기반 에이전트 sprite, 이슈 이동, 리뷰 흐름, runtime/backend/review/session 요약, agent/issue/zone 상세 sheet를 제공하는 전용 미팅룸 보기
-- 운영 채팅 surface에서 상태 점검, 선택 회사의 모든 에이전트를 무료 OpenCode 기본값(`opencode/deepseek-v4-flash-free`)으로 변경, 명시적으로 요청한 경우에만 기본값이 아닌 DeepSeek alias 선택, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화, 보고서/문제 신호 확인을 LLM이 판단한 tool call로 실행
+- 운영 채팅 surface에서 상태 점검, 선택 회사의 에이전트를 로컬 Ollama Gemma 4 12B 기본값(`gemma4:12b` 또는 OpenCode의 `ollama/gemma4:12b` bridge)으로 변경, 명시적으로 요청한 경우에만 DeepSeek alias 선택, 런타임 시작/중지, 막힌 이슈 재시도, GitHub/Linear 상태 재동기화, 보고서/문제 신호 확인을 LLM이 판단한 tool call로 실행
 - 운영 채팅에서 HR Manager에게 필요한 specialist 고용이나 사수 지정을 맡길 수 있음. HR 고용은 회사의 현재 실행 모델 정책을 상속하고, 중복 역할과 무제한 고용은 막음
 - 느슨하게 쓴 채팅 요청도 CEO가 목표, 성공 기준, 담당 하위 이슈로 정리하게 하되 GitHub 저장소는 자동 생성하지 않음
 - `AGENT_APPROVED` 모드에서는 복구 가능한 민감 작업을 사용자 확인 패널 대신 상위 회사 에이전트 승인으로 라우팅

@@ -129,9 +129,6 @@ func sanitizeOperatorUserText(_ text: String, language: AppLanguage) -> String {
 
 func preferredDesktopAgent(from agents: [String]) -> String? {
     let normalized = agents.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-    if let opencode = normalized.first(where: { $0.caseInsensitiveCompare("opencode") == .orderedSame }) {
-        return opencode
-    }
     if let gemma4 = normalized.first(where: { $0.caseInsensitiveCompare("gemma4") == .orderedSame }) {
         return gemma4
     }
@@ -149,6 +146,9 @@ func preferredDesktopAgent(from agents: [String]) -> String? {
     }
     if let codex = normalized.first(where: { $0.caseInsensitiveCompare("codex") == .orderedSame }) {
         return codex
+    }
+    if let opencode = normalized.first(where: { $0.caseInsensitiveCompare("opencode") == .orderedSame }) {
+        return opencode
     }
     return normalized.first
 }

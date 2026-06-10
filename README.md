@@ -9,6 +9,7 @@ Smoke test: `cotor version`
 - Validation, linting, status, statistics, checkpoints, and template generation
 - Local web editor with YAML export and run support
 - macOS desktop shell backed by `cotor app-server`
+- Native desktop Test Center for local validation plans, run status, and step logs inside the selected company
 - Multi-company operations layer with companies, agent definitions, goals, issues, review queue, activity feed, and runtime start/stop/status
 - Built-in HR Manager role that can conservatively add missing specialists and assign a mentor for each company agent
 - Estimated AI spend tracking per company with configurable daily and monthly cost guardrails
@@ -75,6 +76,7 @@ Start from these files when reading or changing the project:
 - CLI commands: `src/main/kotlin/com/cotor/presentation/cli/`
 - generic pipeline runtime: `src/main/kotlin/com/cotor/domain/orchestrator/`, `src/main/kotlin/com/cotor/domain/executor/`, `src/main/kotlin/com/cotor/domain/planning/`
 - local app-server routes: `src/main/kotlin/com/cotor/app/AppServer.kt`
+- local Test Center runner: `src/main/kotlin/com/cotor/app/CotorTestCenterService.kt`
 - company workflow service: `src/main/kotlin/com/cotor/app/DesktopAppService.kt`
 - desktop API DTOs and state models: `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `macos/Sources/CotorDesktopApp/Models.swift`
 - macOS desktop shell: `macos/Sources/CotorDesktopApp/DesktopStore.swift`, `macos/Sources/CotorDesktopApp/ContentView.swift`, `macos/Sources/CotorDesktopApp/DesktopAPI.swift`
@@ -212,7 +214,7 @@ The current build includes a working local operations layer:
 - surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing; Cotor does not create GitHub repositories automatically when no origin exists
 - connect an existing GitHub repository from the desktop app by signing in with `gh` and saving the repository URL as `origin`
 - define company agents with only title, CLI, and role summary
-- optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:e2b` alias is not present.
+- optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:12b` alias is not present.
 - seed new companies with an HR Manager plus mentor relationships, and let Operator Chat handle requests such as team staffing or mentor assignment without adding another always-visible control panel
 - use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory
 - delegate Marketing Operator browser publishing only through a prior policy; out-of-policy owned/social actions are denied rather than sent to a user approval queue
@@ -225,7 +227,7 @@ The current build includes a working local operations layer:
 - inspect per-agent performance derived from existing company issues, runs, reviews, org profiles, and agent definitions, with insufficient-data agents shown separately
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page as a `Live Office` runtime projection with event-driven agent sprites, issue movement, review flow, runtime/backend/review/session summaries, and click-through agent/issue/zone detail sheets
-- use the Operator Chat surface to ask for status, change all selected-company agents to the free OpenCode default (`opencode/deepseek-v4-flash-free`), explicitly choose a non-default DeepSeek alias only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
+- use the Operator Chat surface to ask for status, change selected-company agents to the local Ollama Gemma 4 12B default (`gemma4:12b` or OpenCode's `ollama/gemma4:12b` bridge), explicitly choose DeepSeek only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
 - ask the HR Manager through Operator Chat to hire missing specialists or assign mentors; HR hires inherit the company execution model policy, avoid duplicate roles, and cap automatic hiring so teams do not grow without bounds
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel

@@ -882,16 +882,17 @@ class OpenCodePlugin : AgentPlugin {
         } else {
             context
         }
-        requestedModel
+        val effectiveRequestedModel = requestedModel
             ?.takeIf(OpenCodeDefaults::isLocalOllamaModel)
             ?.let { ensureLocalOllamaModelAvailable(it, executionContext) }
+            ?: requestedModel
 
-        var model = requestedModel
-        if (requestedModel != null) {
+        var model = effectiveRequestedModel
+        if (effectiveRequestedModel != null) {
             model = resolvePreferredOpenCodeModel(
                 processManager = processManager,
                 context = executionContext,
-                requestedModel = requestedModel
+                requestedModel = effectiveRequestedModel
             )
         }
         var result = executeOpenCodeRun(
@@ -903,7 +904,7 @@ class OpenCodePlugin : AgentPlugin {
         val initialError = extractOpenCodeError(result)
 
         if (
-            requestedModel != null &&
+            effectiveRequestedModel != null &&
             (
                 initialError?.contains("Model not found", ignoreCase = true) == true ||
                     initialError?.let(::isOpenCodeProviderRateLimit) == true
@@ -912,7 +913,7 @@ class OpenCodePlugin : AgentPlugin {
             val fallbackModel = discoverFallbackOpenCodeModel(
                 processManager = processManager,
                 context = executionContext,
-                rejectedModel = requestedModel
+                rejectedModel = effectiveRequestedModel
             )
             if (fallbackModel != null) {
                 model = fallbackModel
@@ -927,7 +928,7 @@ class OpenCodePlugin : AgentPlugin {
 
         val parsedText = parseOpenCodeJsonOutput(result.stdout)
         val finalError = extractOpenCodeError(result)
-            ?.let { normalizeLocalOllamaExecutionError(it, requestedModel) }
+            ?.let { normalizeLocalOllamaExecutionError(it, effectiveRequestedModel) }
         if (parsedText.isNotBlank() && finalError?.let(::isOpenCodePostTextSerializationError) == true) {
             return PluginExecutionOutput(parsedText, result.processId)
         }
@@ -1289,8 +1290,8 @@ class OpenCodePlugin : AgentPlugin {
             .toList()
     }
 
-    private suspend fun ensureLocalOllamaModelAvailable(model: String, context: ExecutionContext) {
-        val tag = OpenCodeDefaults.ollamaTagForOpenCodeModel(model) ?: return
+    private suspend fun ensureLocalOllamaModelAvailable(model: String, context: ExecutionContext): String {
+        val tag = OpenCodeDefaults.ollamaTagForOpenCodeModel(model) ?: return model
         val baseUrl = LocalModelDefaults.normalizeBaseUrl(
             context.parameters["ollamaBaseUrl"] ?: context.parameters["baseUrl"],
             LocalModelDefaults.OLLAMA_BASE_URL
@@ -1328,9 +1329,16 @@ class OpenCodePlugin : AgentPlugin {
                 ?.distinct()
                 ?: emptyList()
         }.getOrDefault(emptyList())
-        if (tag !in models) {
-            throw AgentExecutionException("LOCAL_GEMMA_MODEL_MISSING: local Ollama model $tag was not discovered.")
+        if (tag in models) {
+            return model
         }
+        val fallbackTag = LocalModelDefaults.preferredInstalledGemmaModels(models)
+            .firstOrNull()
+            ?.takeIf { LocalModelDefaults.isGemmaFamilyModel(tag) }
+        if (fallbackTag != null) {
+            return "ollama/$fallbackTag"
+        }
+        throw AgentExecutionException("LOCAL_GEMMA_MODEL_MISSING: local Ollama model $tag was not discovered.")
     }
 
     private fun extractOpenCodeError(result: ProcessResult): String? {

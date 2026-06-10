@@ -16,7 +16,9 @@ flowchart LR
     Web["Web editor<br/>presentation/web"] --> Core
     Mac["macOS shell<br/>DesktopStore + DesktopAPI"] --> AppServer["localhost app-server<br/>AppServer.kt"]
     AppServer --> Service["Company service<br/>DesktopAppService.kt"]
+    AppServer --> TestCenter["Test Center<br/>CotorTestCenterService.kt"]
     Service --> Core
+    TestCenter --> Checks["Local validation commands<br/>Gradle + SwiftPM"]
     Core --> Agents["Agent/provider adapters<br/>data/plugin + data/process"]
     Service --> Git["Git/GitHub workspace<br/>GitWorkspaceService + providers/github"]
     Service --> Evidence["Evidence, policy, memory<br/>runtime + policy + provenance + knowledge"]
@@ -27,7 +29,7 @@ flowchart LR
 | Boundary | Responsibility | Primary files |
 | --- | --- | --- |
 | CLI | command parsing, interactive/TUI launch, packaged lifecycle commands | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/` |
-| App server | local HTTP API and desktop contract | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
+| App server | local HTTP API and desktop contract, including native Test Center routes | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/AppApiModels.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
 | Company workflow | company state machine, goals, issues, review queue, runtime ticks, runtime retention, reports, operator chat | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
 | Pipeline runtime | generic pipeline planning, orchestration, execution, deterministic guards, stuck/conflict detection, aggregation, condition evaluation | `src/main/kotlin/com/cotor/domain/` |
 | Agent/tool execution | provider plugins, local process execution, model defaults, command adapters | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` |
@@ -119,13 +121,13 @@ Avoid circular dependencies by keeping public entrypoints small and by passing t
 
 The app-server contract is the boundary between Kotlin and Swift. Additive payload fields are preferred. When changing a route response:
 
-1. update Kotlin models in `DesktopModels.kt`
+1. update Kotlin models in `DesktopModels.kt` or `AppApiModels.kt`
 2. update route serialization in `AppServer.kt`
 3. update Swift DTOs in `macos/Sources/CotorDesktopApp/Models.swift`
 4. update `DesktopStore` and views that consume the field
 5. add focused Kotlin and Swift decode/store tests
 
-Important route groups live under `/api/app`: settings/backends, capabilities, providers, skills, browser, marketing, video, repositories, workspaces, tasks, runs, durable-runtime, policy, evidence, github, knowledge, verification, runtime, company, companies, issues, review-queue, and TUI sessions.
+Important route groups live under `/api/app`: settings/backends, capabilities, providers, skills, browser, marketing, video, repositories, workspaces, tasks, runs, durable-runtime, policy, evidence, github, knowledge, verification, runtime, company, companies, company Test Center, issues, review-queue, and TUI sessions.
 
 ## 6. Company Workflow Invariants
 

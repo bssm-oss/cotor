@@ -60,13 +60,13 @@ opencode run --print-logs --log-level ERROR --dangerously-skip-permissions --mod
 
 ### 에이전트 파라미터
 
-OpenCode는 선택적 `model` 파라미터를 받습니다. 지정하지 않으면 Cotor는 무료 기본값 `opencode/deepseek-v4-flash-free`를 사용합니다.
+OpenCode는 선택적 `model` 파라미터를 받습니다. 지정하지 않으면 Cotor는 로컬 Ollama bridge 기본값 `ollama/gemma4:12b`를 사용합니다.
 
-회사 생성 시 시드되는 기본 에이전트도 실행 파일이 존재하면 OpenCode를 우선 사용하도록 바뀌었기 때문에, 사용자가 명시적으로 바꾸지 않는 한 회사 워크플로우는 이 저비용 기본 모델을 우선 사용합니다.
+회사 생성 시 시드되는 기본 에이전트는 로컬 Gemma 4 에이전트를 먼저 사용하므로, 사용자가 명시적으로 바꾸지 않는 한 회사 워크플로우는 로컬 모델을 우선 사용합니다.
 
-운영 채팅은 `free`, `무료`, `deepseek-flash`, `opencode/deepseek-v4-flash-free` 요청을 이 무료 기본값으로 처리합니다. 기존 raw DeepSeek alias는 유지하지만, 사용자가 기본값이 아닌 DeepSeek를 명시적으로 요청한 경우에만 적용합니다.
+운영 채팅은 `gemma4`, `gemma4 12b`, `ollama/gemma4:12b` 요청을 로컬 기본값으로 처리합니다. DeepSeek alias는 유지하지만, 사용자가 DeepSeek를 명시적으로 요청한 경우에만 적용합니다.
 
-데스크톱 app-server는 `GET /api/app/agents/models?agent=opencode`로 발견된 OpenCode 모델 목록을 제공합니다. 이 endpoint는 `opencode models`를 호출하고 `opencode/` provider ID만 표시하며, 성공한 조회를 짧게 캐시하고 discovery 결과가 비어 있으면 수동 모델 입력 fallback을 유지합니다.
+데스크톱 app-server는 `GET /api/app/agents/models?agent=opencode`로 발견된 OpenCode 모델 목록을 제공합니다. 이 endpoint는 `opencode models`를 호출하고 선택 가능한 OpenCode 및 로컬 Ollama provider ID를 표시하며, 성공한 조회를 짧게 캐시하고 discovery 결과가 비어 있으면 수동 모델 입력 fallback을 유지합니다.
 
 ### 타임아웃
 

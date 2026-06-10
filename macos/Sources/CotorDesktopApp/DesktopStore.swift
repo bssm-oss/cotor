@@ -124,7 +124,7 @@ final class DesktopStore: ObservableObject {
     @Published var companyGitHubOriginInput = ""
     @Published var newTaskTitle = ""
     @Published var newTaskPrompt = ""
-    @Published var agentSelection: Set<String> = ["claude", "codex"]
+    @Published var agentSelection: Set<String> = ["gemma4", "codex-oauth"]
     @Published var selectedOrgProfileIDs: Set<String> = []
     @Published var selectedCompanyAgentDefinitionIDs: Set<String> = []
     @Published var showingOrgProfileBatchEdit = false
@@ -153,6 +153,11 @@ final class DesktopStore: ObservableObject {
     @Published var selectedCompanyReportDate: String?
     @Published var selectedCompanyReport: CompanyDailyReportRecord?
     @Published var isGeneratingCompanyReport = false
+    @Published var testCenterPlan: TestCenterPlanRecord?
+    @Published var testCenterSessions: [TestCenterSessionRecord] = []
+    @Published var selectedTestCenterSessionID: String?
+    @Published var selectedTestCenterSuiteID = "baseline"
+    @Published var isStartingTestCenterSession = false
 
     let api: DesktopAPI
     private var statusState: StatusState = .connecting
@@ -160,6 +165,7 @@ final class DesktopStore: ObservableObject {
     private var companyEventTask: Task<Void, Never>?
     private var companyPollingTask: Task<Void, Never>?
     private var backendWatchdogTask: Task<Void, Never>?
+    private var testCenterPollingTask: Task<Void, Never>?
     private var isBootstrapping = false
     private var isRefreshingDashboard = false
     private var companyEventStreamGeneration = 0
@@ -181,6 +187,7 @@ final class DesktopStore: ObservableObject {
         companyEventTask?.cancel()
         companyPollingTask?.cancel()
         backendWatchdogTask?.cancel()
+        testCenterPollingTask?.cancel()
     }
 
     /// Header status copy is generated from the current state and active language.
@@ -333,6 +340,20 @@ final class DesktopStore: ObservableObject {
                 }
                 return $0.date > $1.date
             }
+    }
+
+    var selectedTestCenterSessions: [TestCenterSessionRecord] {
+        testCenterSessions
+            .filter { selectedCompanyID == nil || $0.companyId == selectedCompanyID }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    var selectedTestCenterSession: TestCenterSessionRecord? {
+        if let selectedTestCenterSessionID,
+           let session = selectedTestCenterSessions.first(where: { $0.id == selectedTestCenterSessionID }) {
+            return session
+        }
+        return selectedTestCenterSessions.first
     }
 
     var companyRuntimes: [CompanyRuntimeSnapshotRecord] {
@@ -708,7 +729,15 @@ final class DesktopStore: ObservableObject {
     }
 
     private func isMarketingSkill(_ skillID: String) -> Bool {
-        ["marketing-operator", "audience-scout", "content-publisher", "social-publisher", "analytics-reporter"].contains(skillID)
+        [
+            "marketing-operator",
+            "audience-scout",
+            "content-publisher",
+            "social-publisher",
+            "threads-publisher",
+            "producthunt-publisher",
+            "analytics-reporter",
+        ].contains(skillID)
     }
 
     /// Toggle or range-select org chart profiles for multi-selection.
@@ -895,6 +924,7 @@ final class DesktopStore: ObservableObject {
             syncIssueComposerState()
             syncBackendFormState()
             await refreshCompanyReports()
+            await refreshTestCenter()
             await refreshCompanyProblemSignals()
             await refreshAvailableBranches()
             await refreshTaskDetails()
@@ -1107,6 +1137,115 @@ final class DesktopStore: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             AppLogger.error("Company report generation failed: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshTestCenter(companyId: String? = nil) async {
+        guard let scopedCompanyId = companyId ?? selectedCompanyID else {
+            testCenterPlan = nil
+            testCenterSessions = []
+            selectedTestCenterSessionID = nil
+            return
+        }
+        do {
+            let plan = try await runWithEmbeddedBackendRecovery {
+                try await api.testCenterPlan(companyId: scopedCompanyId, suiteId: selectedTestCenterSuiteID)
+            }
+            let sessions = try await runWithEmbeddedBackendRecovery {
+                try await api.testCenterSessions(companyId: scopedCompanyId)
+            }
+            guard isCurrentCompany(scopedCompanyId) else { return }
+            testCenterPlan = plan
+            selectedTestCenterSuiteID = plan.suiteId
+            testCenterSessions = testCenterSessions.filter { $0.companyId != scopedCompanyId } + sessions
+            if let selectedTestCenterSessionID,
+               sessions.contains(where: { $0.id == selectedTestCenterSessionID }) {
+                // Keep the user's selected run.
+            } else {
+                selectedTestCenterSessionID = sessions.first?.id
+            }
+            if let running = sessions.first(where: Self.isActiveTestCenterSession) {
+                startTestCenterPolling(sessionId: running.id, companyId: scopedCompanyId)
+            }
+        } catch {
+            AppLogger.error("Test Center refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    func startTestCenterSession() async {
+        guard let companyID = selectedCompanyID else { return }
+        isStartingTestCenterSession = true
+        defer { isStartingTestCenterSession = false }
+        do {
+            let session = try await runWithEmbeddedBackendRecovery {
+                try await api.startTestCenterSession(companyId: companyID, suiteId: selectedTestCenterSuiteID)
+            }
+            guard isCurrentCompany(companyID) else { return }
+            upsertTestCenterSession(session)
+            selectedTestCenterSessionID = session.id
+            errorMessage = nil
+            startTestCenterPolling(sessionId: session.id, companyId: companyID)
+        } catch {
+            errorMessage = error.localizedDescription
+            AppLogger.error("Test Center session start failed: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshSelectedTestCenterSession() async {
+        guard let companyID = selectedCompanyID,
+              let sessionID = selectedTestCenterSessionID ?? selectedTestCenterSession?.id
+        else { return }
+        do {
+            let session = try await runWithEmbeddedBackendRecovery {
+                try await api.testCenterSession(companyId: companyID, sessionId: sessionID)
+            }
+            guard isCurrentCompany(companyID) else { return }
+            upsertTestCenterSession(session)
+            selectedTestCenterSessionID = session.id
+            if Self.isActiveTestCenterSession(session) {
+                startTestCenterPolling(sessionId: session.id, companyId: companyID)
+            }
+        } catch {
+            AppLogger.error("Test Center session refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func upsertTestCenterSession(_ session: TestCenterSessionRecord) {
+        testCenterSessions = testCenterSessions.filter { $0.id != session.id } + [session]
+    }
+
+    private static func isActiveTestCenterSession(_ session: TestCenterSessionRecord) -> Bool {
+        let status = session.status.uppercased()
+        return status == "PENDING" || status == "RUNNING"
+    }
+
+    private func startTestCenterPolling(sessionId: String, companyId: String) {
+        testCenterPollingTask?.cancel()
+        testCenterPollingTask = Task { [weak self] in
+            await self?.pollTestCenterSession(sessionId: sessionId, companyId: companyId)
+        }
+    }
+
+    private func pollTestCenterSession(sessionId: String, companyId: String) async {
+        for _ in 0..<360 {
+            if Task.isCancelled || !isCurrentCompany(companyId) {
+                return
+            }
+            do {
+                let session = try await runWithEmbeddedBackendRecovery {
+                    try await api.testCenterSession(companyId: companyId, sessionId: sessionId)
+                }
+                guard isCurrentCompany(companyId) else { return }
+                upsertTestCenterSession(session)
+                selectedTestCenterSessionID = session.id
+                if !Self.isActiveTestCenterSession(session) {
+                    return
+                }
+            } catch {
+                AppLogger.error("Test Center polling failed: \(error.localizedDescription)")
+                return
+            }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
     }
 
@@ -2227,7 +2366,9 @@ final class DesktopStore: ObservableObject {
     func deleteSelectedGoal() async {
         guard let company = selectedCompany, let goal = selectedGoal else { return }
         do {
-            _ = try await api.deleteGoal(companyId: company.id, goalId: goal.id)
+            _ = try await runWithEmbeddedBackendRecovery {
+                try await api.deleteGoal(companyId: company.id, goalId: goal.id)
+            }
             if editingGoalID == goal.id {
                 resetGoalComposer()
             }
@@ -3435,7 +3576,9 @@ final class DesktopStore: ObservableObject {
     func deleteSelectedIssue() async {
         guard let company = selectedCompany, let issue = selectedIssue else { return }
         do {
-            _ = try await api.deleteIssue(companyId: company.id, issueId: issue.id)
+            _ = try await runWithEmbeddedBackendRecovery {
+                try await api.deleteIssue(companyId: company.id, issueId: issue.id)
+            }
             selectedIssueID = nil
             selectedTaskID = nil
             await refreshDashboard()
@@ -3760,6 +3903,7 @@ final class DesktopStore: ObservableObject {
         syncSelectedCompanyBudgetFormState()
         syncSelectedCompanyLinearFormState()
         await refreshCompanyReports(companyId: company.id)
+        await refreshTestCenter(companyId: company.id)
         await restartCompanyEventStream()
     }
 

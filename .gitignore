@@ -118,7 +118,10 @@ hs_err_pid*
 
 # Test output
 test-output/
+outputs/
 *.test
+testsprite_tests/tmp/
+testsprite_tests/TestSprite_MCP_Test_Report.*
 
 # JaCoCo coverage reports
 .jacoco/

@@ -14,6 +14,7 @@ Korean companion documents use the same path with `.ko.md` when available.
 - [Features](FEATURES.md): code-backed capability inventory
 - [Capabilities](CAPABILITIES.md): company agent capabilities, skills, and policy gates
 - [Test Plan](TEST_PLAN.md): automated, CLI, desktop, and company runtime validation
+- [TestSprite Setup](TESTSPRITE.md): TestSprite MCP setup, PRD/API inputs, and safety boundaries
 - [Troubleshooting](TROUBLESHOOTING.md): recovery paths for desktop, GitHub, company runtime, QA/CEO, and interactive sessions
 - [Team Ops](team-ops/README.md): maintainer and review workflows
 
@@ -23,7 +24,8 @@ Korean companion documents use the same path with `.ko.md` when available.
 - CLI commands: `src/main/kotlin/com/cotor/presentation/cli/`
 - local HTTP API: `src/main/kotlin/com/cotor/app/AppServer.kt`
 - company workflow service: `src/main/kotlin/com/cotor/app/DesktopAppService.kt`
-- app-server DTOs: `src/main/kotlin/com/cotor/app/DesktopModels.kt`
+- native Test Center: `src/main/kotlin/com/cotor/app/CotorTestCenterService.kt`
+- app-server DTOs: `src/main/kotlin/com/cotor/app/DesktopModels.kt`, `src/main/kotlin/com/cotor/app/AppApiModels.kt`
 - generic pipeline runtime: `src/main/kotlin/com/cotor/domain/`
 - runtime state, actions, and replay: `src/main/kotlin/com/cotor/runtime/`
 - policy/evidence/memory: `src/main/kotlin/com/cotor/policy/`, `src/main/kotlin/com/cotor/provenance/`, `src/main/kotlin/com/cotor/knowledge/`

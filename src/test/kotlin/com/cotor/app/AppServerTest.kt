@@ -30,8 +30,10 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
+import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.io.path.writeText
 
 class AppServerTest : FunSpec({
     val desktopService = mockk<DesktopAppService>(relaxed = true)
@@ -234,6 +236,49 @@ class AppServerTest : FunSpec({
             }
             writeResponse.status shouldBe HttpStatusCode.Forbidden
             writeResponse.bodyAsText() shouldContain "read-only mode"
+        }
+    }
+
+    test("company test center routes expose plan and session contracts") {
+        val root = Files.createTempDirectory("app-server-test-center")
+        val gradlew = root.resolve("gradlew")
+        gradlew.writeText("#!/bin/sh\necho route-test-ok\nexit 0\n")
+        gradlew.toFile().setExecutable(true)
+        coEvery { desktopService.getCompany("company-tests") } returns Company(
+            id = "company-tests",
+            name = "Test Co",
+            rootPath = root.toString(),
+            repositoryId = "repo-tests",
+            defaultBaseBranch = "main",
+            createdAt = 1,
+            updatedAt = 1
+        )
+
+        testApplication {
+            application {
+                cotorAppModule(
+                    token = "secret-token",
+                    desktopService = desktopService,
+                    tuiSessionService = tuiSessionService
+                )
+            }
+
+            val plan = client.get("/api/app/companies/company-tests/test-center/plan?suiteId=kotlin") {
+                header("Authorization", "Bearer secret-token")
+            }
+            plan.status shouldBe HttpStatusCode.OK
+            plan.bodyAsText() shouldContain "\"suiteId\":\"kotlin\""
+            plan.bodyAsText() shouldContain "\"kotlin-gradle-test\""
+
+            val session = client.post("/api/app/companies/company-tests/test-center/sessions") {
+                header("Authorization", "Bearer secret-token")
+                header("Content-Type", "application/json")
+                setBody("""{"suiteId":"kotlin"}""")
+            }
+            session.status shouldBe HttpStatusCode.OK
+            session.bodyAsText() shouldContain "\"companyId\":\"company-tests\""
+            session.bodyAsText() shouldContain "\"suiteId\":\"kotlin\""
+            session.bodyAsText() shouldContain "\"status\":\"PENDING\""
         }
     }
 

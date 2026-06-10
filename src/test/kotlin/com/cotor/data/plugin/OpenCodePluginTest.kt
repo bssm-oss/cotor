@@ -23,6 +23,8 @@ import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
 
+private const val TEST_OPENCODE_MODEL = "opencode/minimax-m2.5-free"
+
 /**
  * Regression test for the OpenCode wrapper.
  *
@@ -111,7 +113,7 @@ class OpenCodePluginTest : FunSpec({
                         environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"edit\": \"allow\"") shouldBe true
                         environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"bash\": \"allow\"") shouldBe true
                         environment["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"external_directory\": \"deny\"") shouldBe true
-                        assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                        assertOpenCodeRunCommand(command, TEST_OPENCODE_MODEL, "hello")
                         ProcessResult(
                             exitCode = 0,
                             stdout = """{"type":"text","text":"configured"}""",
@@ -128,7 +130,7 @@ class OpenCodePluginTest : FunSpec({
                 agentName = "opencode",
                 input = "hello",
                 timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                 environment = emptyMap(),
                 workingDirectory = workdir
             ),
@@ -158,7 +160,7 @@ class OpenCodePluginTest : FunSpec({
                         isSuccess = false
                     )
                     else -> {
-                        assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                        assertOpenCodeRunCommand(command, TEST_OPENCODE_MODEL, "hello")
                         ProcessResult(
                             exitCode = 2,
                             stdout = "partial output",
@@ -178,7 +180,7 @@ class OpenCodePluginTest : FunSpec({
                     agentName = "opencode",
                     input = "hello",
                     timeout = 1_000,
-                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                     environment = emptyMap()
                 ),
                 processManager
@@ -209,7 +211,7 @@ class OpenCodePluginTest : FunSpec({
                     isSuccess = false
                 )
                 else -> {
-                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    assertOpenCodeRunCommand(command, TEST_OPENCODE_MODEL, "hello")
                     ProcessResult(
                         exitCode = 0,
                         stdout = """
@@ -230,7 +232,7 @@ class OpenCodePluginTest : FunSpec({
                 agentName = "opencode",
                 input = "hello",
                 timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                 environment = emptyMap()
             ),
             processManager
@@ -257,7 +259,7 @@ class OpenCodePluginTest : FunSpec({
                     isSuccess = false
                 )
                 else -> {
-                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    assertOpenCodeRunCommand(command, TEST_OPENCODE_MODEL, "hello")
                     ProcessResult(
                         exitCode = 0,
                         stdout = """
@@ -275,7 +277,7 @@ class OpenCodePluginTest : FunSpec({
                 agentName = "opencode",
                 input = "hello",
                 timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                 environment = emptyMap()
             ),
             processManager
@@ -302,7 +304,7 @@ class OpenCodePluginTest : FunSpec({
                     isSuccess = false
                 )
                 else -> {
-                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    assertOpenCodeRunCommand(command, TEST_OPENCODE_MODEL, "hello")
                     ProcessResult(
                         exitCode = 1,
                         stdout = """
@@ -322,7 +324,7 @@ class OpenCodePluginTest : FunSpec({
                 agentName = "opencode",
                 input = "hello",
                 timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                 environment = emptyMap()
             ),
             processManager
@@ -349,7 +351,7 @@ class OpenCodePluginTest : FunSpec({
                     isSuccess = false
                 )
                 else -> {
-                    assertOpenCodeRunCommand(command, OpenCodeDefaults.DEFAULT_MODEL, "hello")
+                    assertOpenCodeRunCommand(command, TEST_OPENCODE_MODEL, "hello")
                     ProcessResult(
                         exitCode = 0,
                         stdout = """
@@ -370,7 +372,7 @@ class OpenCodePluginTest : FunSpec({
                     agentName = "opencode",
                     input = "hello",
                     timeout = 1_000,
-                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                     environment = emptyMap()
                 ),
                 processManager
@@ -425,7 +427,7 @@ class OpenCodePluginTest : FunSpec({
                 agentName = "opencode",
                 input = "hello",
                 timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                 environment = emptyMap()
             ),
             processManager
@@ -475,7 +477,7 @@ class OpenCodePluginTest : FunSpec({
                 agentName = "opencode",
                 input = "hello",
                 timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                 environment = emptyMap()
             ),
             processManager
@@ -490,6 +492,7 @@ class OpenCodePluginTest : FunSpec({
     test("retries with fallback model when opencode provider rate limit is reported") {
         val plugin = OpenCodePlugin()
         val runModels = mutableListOf<String>()
+        val cloudModel = "opencode/deepseek-v4-flash-free"
         val processManager = object : ProcessManager {
             override suspend fun executeProcess(
                 command: List<String>,
@@ -503,7 +506,7 @@ class OpenCodePluginTest : FunSpec({
                     command == listOf("opencode", "models") -> ProcessResult(
                         exitCode = 0,
                         stdout = """
-                            ${OpenCodeDefaults.DEFAULT_MODEL}
+                            $cloudModel
                             deepseek/deepseek-v4-flash
                         """.trimIndent(),
                         stderr = "",
@@ -512,7 +515,7 @@ class OpenCodePluginTest : FunSpec({
                     command.take(2) == listOf("opencode", "run") -> {
                         val model = command[command.indexOf("--model") + 1]
                         runModels += model
-                        if (model == OpenCodeDefaults.DEFAULT_MODEL) {
+                        if (model == cloudModel) {
                             ProcessResult(
                                 exitCode = 143,
                                 stdout = """{"type":"text","text":"partial"}""",
@@ -541,13 +544,13 @@ class OpenCodePluginTest : FunSpec({
                 agentName = "opencode",
                 input = "hello",
                 timeout = 1_000,
-                parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                parameters = mapOf("model" to cloudModel),
                 environment = emptyMap()
             ),
             processManager
         )
 
-        runModels shouldBe listOf(OpenCodeDefaults.DEFAULT_MODEL, "deepseek/deepseek-v4-flash")
+        runModels shouldBe listOf(cloudModel, "deepseek/deepseek-v4-flash")
         result.output shouldBe "fallback ok"
         result.processId shouldBe 302L
     }
@@ -613,6 +616,57 @@ class OpenCodePluginTest : FunSpec({
             environments.all { it["OLLAMA_HOST"] == "127.0.0.1:11434" } shouldBe true
             environments.all { it["OLLAMA_NO_CLOUD"] == "1" } shouldBe true
             environments.all { it["OLLAMA_API_KEY"].orEmpty().isBlank() } shouldBe true
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    test("falls back to installed local Gemma when default Gemma 4 12B tag is missing") {
+        val server = localRoutingServer { exchange ->
+            if (exchange.requestURI.path == "/api/tags") {
+                exchange.respondJson("""{"models":[{"name":"gemma4:e4b"},{"name":"gemma3:4b"}]}""")
+            } else {
+                exchange.sendResponseHeaders(404, -1)
+            }
+        }
+        val plugin = OpenCodePlugin()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult {
+                assertOpenCodeRunCommand(command, "ollama/gemma4:e4b", "edit files")
+                return ProcessResult(
+                    exitCode = 0,
+                    stdout = """{"type":"text","text":"edited with fallback"}""",
+                    stderr = "",
+                    isSuccess = true,
+                    processId = 203L
+                )
+            }
+        }
+
+        try {
+            val result = plugin.execute(
+                ExecutionContext(
+                    agentName = "opencode",
+                    input = "edit files",
+                    timeout = 1_000,
+                    parameters = mapOf(
+                        "model" to OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL,
+                        "ollamaBaseUrl" to "http://127.0.0.1:${server.address.port}"
+                    ),
+                    environment = emptyMap()
+                ),
+                processManager
+            )
+
+            result.output shouldBe "edited with fallback"
+            result.processId shouldBe 203L
         } finally {
             server.stop(0)
         }
@@ -782,7 +836,7 @@ class OpenCodePluginTest : FunSpec({
                     agentName = "opencode",
                     input = "hello",
                     timeout = 1_000,
-                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                     environment = emptyMap()
                 ),
                 processManager
@@ -832,7 +886,7 @@ class OpenCodePluginTest : FunSpec({
                     agentName = "opencode",
                     input = "hello",
                     timeout = 1_000,
-                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                     environment = emptyMap(),
                     workingDirectory = workDir
                 ),
@@ -914,7 +968,7 @@ class OpenCodePluginTest : FunSpec({
                     input = "hello",
                     timeout = 1_000,
                     parameters = mapOf(
-                        "model" to OpenCodeDefaults.DEFAULT_MODEL,
+                        "model" to TEST_OPENCODE_MODEL,
                         "agent" to "cotor-plan",
                         "ephemeralOpencodeProfile" to "planning-only"
                     ),
@@ -993,7 +1047,7 @@ class OpenCodePluginTest : FunSpec({
                     agentName = "opencode",
                     input = "hello",
                     timeout = 1_000,
-                    parameters = mapOf("model" to OpenCodeDefaults.DEFAULT_MODEL),
+                    parameters = mapOf("model" to TEST_OPENCODE_MODEL),
                     environment = emptyMap(),
                     workingDirectory = workDir
                 ),
@@ -1081,7 +1135,7 @@ class OpenCodePluginTest : FunSpec({
                         input = "hello",
                         timeout = 1_000,
                         parameters = mapOf(
-                            "model" to OpenCodeDefaults.DEFAULT_MODEL,
+                            "model" to TEST_OPENCODE_MODEL,
                             "agent" to "cotor-plan",
                             "ephemeralOpencodeProfile" to "planning-only"
                         ),

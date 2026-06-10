@@ -18,7 +18,9 @@ flowchart LR
     Web["Web editor<br/>presentation/web"] --> Core
     Mac["macOS shell<br/>DesktopStore + DesktopAPI"] --> AppServer["localhost app-server<br/>AppServer.kt"]
     AppServer --> Service["Company service<br/>DesktopAppService.kt"]
+    AppServer --> TestCenter["Test Center<br/>CotorTestCenterService.kt"]
     Service --> Core
+    TestCenter --> Checks["Local validation commands<br/>Gradle + SwiftPM"]
     Core --> Agents["Agent/provider adapters<br/>data/plugin + data/process"]
     Service --> Git["Git/GitHub workspace<br/>GitWorkspaceService + providers/github"]
     Service --> Evidence["Evidence, policy, memory<br/>runtime + policy + provenance + knowledge"]
@@ -29,7 +31,7 @@ flowchart LR
 | 경계 | 책임 | 주요 파일 |
 | --- | --- | --- |
 | CLI | 명령 파싱, interactive/TUI 실행, packaged lifecycle 명령 | `src/main/kotlin/com/cotor/Main.kt`, `src/main/kotlin/com/cotor/presentation/cli/` |
-| App server | 로컬 HTTP API와 데스크톱 계약 | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
+| App server | 내장 Test Center route를 포함한 로컬 HTTP API와 데스크톱 계약 | `src/main/kotlin/com/cotor/app/AppServer.kt`, `src/main/kotlin/com/cotor/app/AppApiModels.kt`, `src/main/kotlin/com/cotor/app/DesktopModels.kt` |
 | Company workflow | 회사 상태 머신, 목표, 이슈, 리뷰 큐, 런타임 tick, 런타임 retention, 보고서, 운영 채팅 | `src/main/kotlin/com/cotor/app/DesktopAppService.kt`, `src/main/kotlin/com/cotor/app/CompanyRuntimeRetention.kt`, `src/main/kotlin/com/cotor/app/runtime/` |
 | Pipeline runtime | 범용 파이프라인 계획, 오케스트레이션, 실행, deterministic guard, stuck/conflict detection, 집계, 조건 평가 | `src/main/kotlin/com/cotor/domain/` |
 | Agent/tool execution | provider plugin, 로컬 프로세스 실행, 모델 기본값, 명령 adapter | `src/main/kotlin/com/cotor/data/plugin/`, `src/main/kotlin/com/cotor/data/process/`, `src/main/kotlin/com/cotor/model/` |
@@ -121,13 +123,13 @@ sequenceDiagram
 
 app-server 계약이 Kotlin과 Swift 사이의 경계입니다. payload field는 additive 변경을 우선합니다. route response를 바꿀 때는 다음을 함께 갱신합니다.
 
-1. `DesktopModels.kt`의 Kotlin model
+1. `DesktopModels.kt` 또는 `AppApiModels.kt`의 Kotlin model
 2. `AppServer.kt`의 route serialization
 3. `macos/Sources/CotorDesktopApp/Models.swift`의 Swift DTO
 4. 해당 field를 소비하는 `DesktopStore`와 view
 5. 집중 Kotlin test와 Swift decode/store test
 
-주요 route group은 `/api/app` 아래에 있습니다. settings/backends, capabilities, providers, skills, browser, marketing, video, repositories, workspaces, tasks, runs, durable-runtime, policy, evidence, github, knowledge, verification, runtime, company, companies, issues, review-queue, TUI sessions가 여기에 포함됩니다.
+주요 route group은 `/api/app` 아래에 있습니다. settings/backends, capabilities, providers, skills, browser, marketing, video, repositories, workspaces, tasks, runs, durable-runtime, policy, evidence, github, knowledge, verification, runtime, company, companies, company Test Center, issues, review-queue, TUI sessions가 여기에 포함됩니다.
 
 ## 6. 회사 워크플로 불변 조건
 

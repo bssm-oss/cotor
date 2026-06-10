@@ -185,6 +185,28 @@ struct DesktopAPI {
         try await post(pathSegments: ["api", "app", "companies", companyId, "reports", "generate"], body: EmptyPayload())
     }
 
+    func testCenterPlan(companyId: String, suiteId: String = "baseline") async throws -> TestCenterPlanRecord {
+        try await get(
+            pathSegments: ["api", "app", "companies", companyId, "test-center", "plan"],
+            query: [URLQueryItem(name: "suiteId", value: suiteId)]
+        )
+    }
+
+    func testCenterSessions(companyId: String) async throws -> [TestCenterSessionRecord] {
+        try await get(pathSegments: ["api", "app", "companies", companyId, "test-center", "sessions"])
+    }
+
+    func startTestCenterSession(companyId: String, suiteId: String) async throws -> TestCenterSessionRecord {
+        try await post(
+            pathSegments: ["api", "app", "companies", companyId, "test-center", "sessions"],
+            body: StartTestCenterSessionPayload(suiteId: suiteId)
+        )
+    }
+
+    func testCenterSession(companyId: String, sessionId: String) async throws -> TestCenterSessionRecord {
+        try await get(pathSegments: ["api", "app", "companies", companyId, "test-center", "sessions", sessionId])
+    }
+
     func companyMemorySnapshot(companyId: String, issueId: String?, agentProfileId: String?) async throws -> CompanyMemorySnapshotPayload {
         var query: [URLQueryItem] = []
         if let issueId, !issueId.isEmpty {

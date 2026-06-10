@@ -71,6 +71,7 @@ cd macos && swift build
 | session card 클릭 | 카드 어느 곳이든 클릭 시 선택 전환 |
 | base branch 업데이트 | backend workspace 갱신 후 TUI 세션 재시작 |
 | Meeting Room 라이브 오피스 | 픽셀 오피스 projection이 실제 회사 에이전트/이슈/리뷰/활동을 반영하고, idle 상태가 안정적이며, agent/issue/zone 클릭 detail sheet가 열림 |
+| Test Center | 선택 회사의 `테스트` surface가 로컬 검증 계획을 불러오고, 고정 suite를 시작하며, 임의 명령 입력 없이 단계별 상태/로그를 갱신 |
 | GitHub readiness card | company settings가 `gh`/auth/origin 상태를 표시하고 credential 포함 remote URL을 redaction |
 | capability/provider controls | secret 값을 저장하지 않고 backend capability/provider payload 표시 |
 

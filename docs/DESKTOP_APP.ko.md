@@ -39,11 +39,11 @@ cotor delete
 ## 구성 요소
 
 - `cotor app-server`
-  - 저장소, 워크스페이스, 태스크, 목표, 이슈, 리뷰 큐, 런타임 상태를 제공하는 localhost API
+  - 저장소, 워크스페이스, 태스크, 목표, 이슈, 리뷰 큐, 런타임 상태, 내장 Test Center를 제공하는 localhost API
 - `macos/`
   - SwiftUI 셸
 - `src/main/kotlin/com/cotor/app/`
-  - 저장소/워크스페이스/태스크/목표/이슈/리뷰 큐/런타임 서비스
+  - 저장소/워크스페이스/태스크/목표/이슈/리뷰 큐/Test Center/런타임 서비스
 
 ## 백엔드 실행
 
@@ -141,6 +141,7 @@ CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --veri
 - 자연어 회사 명령을 메시지 스레드처럼 처리하는 전용 `운영 채팅` 탐색 surface. 선택된 회사의 메시지는 LLM-first 운영 planner가 먼저 해석하고, 가능한 경우 로컬 Ollama Gemma를 사용하며, 검증된 회사 도구를 고른 뒤 실제 tool 결과를 근거로 답함
 - 회사와 이슈 surface는 점진적 공개 구조를 사용해서 첫 화면에는 현재 회사 신호와 핵심 이슈 큐만 보이고, 백엔드 health, 경로, 비용 상한, 메타데이터, 실행 로그, Linear 링크, 에이전트 대화는 펼치는 상세 화면 안에 둠
 - 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 집계한 아침 보고서 전용 `보고서` surface
+- 선택된 회사 루트의 로컬 검증 계획, 안전한 고정 명령 실행, 진행률, 단계별 상태, 제한된 로그를 보여주는 전용 `테스트` surface
 - 별도 평가 이력을 저장하지 않고 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 에이전트별 점수, 성공률, QA 통과율, 재시도, 평균 시간, 확인된 추정 비용을 계산하는 전용 `인사평가` surface
 - 회사 메모리 스냅샷 카드는 company/project/team/agent 4계층을 보여주며, backend contract의 `workflowMemory`는 예전 client를 위한 호환 필드로 유지
 - 자율 discovery scan은 CEO triage goal을 만들기 전에 내부 품질 신호를 먼저 수집하고, 저장된 problem signal은 app-server와 CLI에서 확인 가능
@@ -209,6 +210,10 @@ CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --veri
 - `GET /api/app/companies/{companyId}/reports`
 - `GET /api/app/companies/{companyId}/reports/{date}`
 - `POST /api/app/companies/{companyId}/reports/generate`
+- `GET /api/app/companies/{companyId}/test-center/plan`
+- `GET /api/app/companies/{companyId}/test-center/sessions`
+- `POST /api/app/companies/{companyId}/test-center/sessions`
+- `GET /api/app/companies/{companyId}/test-center/sessions/{sessionId}`
 - `GET /api/app/companies/{companyId}/memory-snapshot`
 - `GET /api/app/companies/{companyId}/problem-signals`
 - `POST /api/app/companies/{companyId}/autonomy/discovery-scan`
@@ -237,7 +242,7 @@ CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --veri
 - 여러 회사 생성
 - 회사당 하나의 작업 폴더 바인딩
 - 최소 입력 기반 회사 에이전트 정의
-- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:e2b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
+- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:12b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
 - 회사 에이전트별 선택 사수(`mentorAgentId`) 저장. 사수는 같은 회사의 활성 에이전트만 선택할 수 있고, 고급 배정 영역에서 비울 수 있음
 - 새 회사에는 HR Manager와 CEO/Product/Engineering/Builder/QA/Release 기본 사수 관계를 함께 생성
 - 회사 에이전트 편집기에서 내장 스킬 카탈로그를 보여주고, 친근한 스킬 선택값을 각 에이전트의 `SKILL_RUN` capability allowlist로 저장

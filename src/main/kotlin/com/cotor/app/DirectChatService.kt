@@ -10,6 +10,7 @@ package com.cotor.app
 
 import com.cotor.data.http.sendBoundedText
 import com.cotor.data.process.destroyProcessTree
+import com.cotor.model.CodexDefaults
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -31,6 +32,8 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.util.concurrent.TimeUnit
@@ -61,9 +64,10 @@ private const val DEFAULT_DIRECT_CHAT_STREAM_LINE_LIMIT_CHARS = 200_000
 private const val DEFAULT_DIRECT_CHAT_STREAM_CONTENT_LIMIT_CHARS = 1_000_000
 
 class DirectChatService(
-    private val claudeCommand: String = "claude",
-    private val claudeTimeoutMillis: Long = TimeUnit.MINUTES.toMillis(5),
-    private val claudeOutputLimitChars: Int = 1_000_000,
+    private val codexCommand: String = "codex",
+    private val codexTimeoutMillis: Long = TimeUnit.MINUTES.toMillis(5),
+    private val codexOutputLimitChars: Int = 1_000_000,
+    private val codexEnvironment: Map<String, String> = System.getenv(),
     private val modelListResponseLimitChars: Int = DEFAULT_DIRECT_CHAT_MODEL_LIST_RESPONSE_LIMIT_CHARS,
     private val streamLineLimitChars: Int = DEFAULT_DIRECT_CHAT_STREAM_LINE_LIMIT_CHARS,
     private val streamContentLimitChars: Int = DEFAULT_DIRECT_CHAT_STREAM_CONTENT_LIMIT_CHARS
@@ -127,7 +131,7 @@ class DirectChatService(
                 .collect { emit(it) }
             "lmstudio" -> streamLmStudio(conversation, userMessage, messageId, effectiveBase)
                 .collect { emit(it) }
-            "claude-cli" -> streamClaudeCli(conversation, userMessage, messageId)
+            "codex-oauth" -> streamCodexOAuth(conversation, userMessage, messageId)
                 .collect { emit(it) }
             else -> emit(
                 DirectChatStreamChunk(
@@ -359,19 +363,41 @@ class DirectChatService(
         }
     }
 
-    private fun streamClaudeCli(
+    private fun streamCodexOAuth(
         conversation: DirectChatConversation,
         userMessage: String,
         messageId: String
     ): Flow<DirectChatStreamChunk> = flow {
-        val prompt = buildClaudeCliPrompt(conversation, userMessage)
+        val prompt = buildCliChatPrompt(conversation, userMessage)
+        val outputFile = withContext(Dispatchers.IO) {
+            Files.createTempFile("cotor-direct-chat-codex-", ".txt")
+        }
         try {
             val output = withContext(Dispatchers.IO) {
                 coroutineScope {
                     var process: Process? = null
                     try {
-                        process = ProcessBuilder(claudeCommand, "-p")
+                        val model = CodexDefaults.normalizeModel(conversation.model)
+                            ?: CodexDefaults.DEFAULT_MODEL
+                        process = ProcessBuilder(
+                            codexCommand,
+                            "exec",
+                            "--skip-git-repo-check",
+                            "--sandbox",
+                            "read-only",
+                            "--output-last-message",
+                            outputFile.toString(),
+                            "-c",
+                            "mcp_servers={}",
+                            "--model",
+                            model,
+                            "-"
+                        )
                             .redirectErrorStream(true)
+                            .also { builder ->
+                                builder.environment().putAll(codexEnvironment)
+                                builder.environment()["CODEX_HOME"] = effectiveCodexOAuthHome(codexEnvironment).toString()
+                            }
                             .start()
                         // Read and wait concurrently so killing the process unblocks the read.
                         val readJob = async(Dispatchers.IO) {
@@ -381,9 +407,9 @@ class DirectChatService(
                                 var read: Int
                                 while (reader.read(buf).also { read = it } != -1) {
                                     sb.append(buf, 0, read)
-                                    if (sb.length > claudeOutputLimitChars) {
+                                    if (sb.length > codexOutputLimitChars) {
                                         destroyProcessTree(process)
-                                        error("claude-cli output exceeded $claudeOutputLimitChars character limit")
+                                        error("codex-oauth output exceeded $codexOutputLimitChars character limit")
                                     }
                                 }
                             }
@@ -395,7 +421,7 @@ class DirectChatService(
                                 writer.flush()
                             }
                         }
-                        val finished = withTimeoutOrNull(claudeTimeoutMillis.coerceAtLeast(1)) {
+                        val finished = withTimeoutOrNull(codexTimeoutMillis.coerceAtLeast(1)) {
                             while (!process.waitFor(50, TimeUnit.MILLISECONDS)) {
                                 yield()
                             }
@@ -405,15 +431,16 @@ class DirectChatService(
                             destroyProcessTree(process)
                             readJob.cancel()
                             writeJob.cancel()
-                            error("claude-cli timed out after ${claudeTimeoutMillis}ms")
+                            error("codex-oauth timed out after ${codexTimeoutMillis}ms")
                         }
                         writeJob.await()
-                        val output = readJob.await()
+                        val stdout = readJob.await()
                         val exitCode = process.exitValue()
-                        if (exitCode != 0) {
-                            error(output.ifBlank { "claude-cli failed with exit $exitCode" })
+                        val finalText = readBoundedUtf8Text(outputFile, codexOutputLimitChars).trim()
+                        if (exitCode != 0 && finalText.isBlank()) {
+                            error(stdout.ifBlank { "codex-oauth failed with exit $exitCode" })
                         }
-                        output
+                        finalText.ifBlank { stdout }
                     } finally {
                         process?.takeIf { it.isAlive }?.let(::destroyProcessTree)
                     }
@@ -436,9 +463,13 @@ class DirectChatService(
                     messageId = messageId,
                     content = "",
                     done = true,
-                    error = e.message ?: "claude-cli execution failed"
+                    error = e.message ?: "codex-oauth execution failed"
                 )
             )
+        } finally {
+            withContext(Dispatchers.IO) {
+                runCatching { Files.deleteIfExists(outputFile) }
+            }
         }
     }
 
@@ -505,7 +536,7 @@ class DirectChatService(
         return result
     }
 
-    private fun buildClaudeCliPrompt(
+    private fun buildCliChatPrompt(
         conversation: DirectChatConversation,
         userMessage: String
     ): String = buildString {
@@ -517,6 +548,59 @@ class DirectChatService(
             append("$label: ${msg.content}\n\n")
         }
         append("Human: $userMessage\n\nAssistant:")
+    }
+
+    private fun managedCodexOAuthHome(environment: Map<String, String>): Path {
+        environment["COTOR_CODEX_OAUTH_HOME"]?.trim()?.takeIf { it.isNotBlank() }?.let {
+            return Path.of(it)
+        }
+        val home = environment["HOME"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: System.getProperty("user.home")
+        return Path.of(home).resolve(".cotor").resolve("auth").resolve("codex-oauth")
+    }
+
+    private fun nativeCodexHome(environment: Map<String, String>): Path? {
+        environment["CODEX_HOME"]?.trim()?.takeIf { it.isNotBlank() }?.let {
+            return Path.of(it)
+        }
+        return environment["HOME"]?.trim()?.takeIf { it.isNotBlank() }
+            ?.let { Path.of(it).resolve(".codex") }
+    }
+
+    private fun effectiveCodexOAuthHome(environment: Map<String, String>): Path {
+        val managed = managedCodexOAuthHome(environment)
+        val native = nativeCodexHome(environment)
+        val managedAuth = managed.resolve("auth.json")
+        val nativeAuth = native?.resolve("auth.json")
+        return when {
+            nativeAuth != null && Files.exists(nativeAuth) && Files.exists(managedAuth) -> {
+                val managedUpdatedAt = Files.getLastModifiedTime(managedAuth).toMillis()
+                val nativeUpdatedAt = Files.getLastModifiedTime(nativeAuth).toMillis()
+                if (nativeUpdatedAt > managedUpdatedAt) native else managed
+            }
+            nativeAuth != null && Files.exists(nativeAuth) -> native
+            else -> managed
+        }
+    }
+
+    private fun readBoundedUtf8Text(path: Path, maxChars: Int): String {
+        if (!Files.exists(path)) return ""
+        val limit = maxChars.coerceAtLeast(1)
+        Files.newBufferedReader(path, StandardCharsets.UTF_8).use { reader ->
+            val buffer = CharArray(limit)
+            var offset = 0
+            while (offset < limit) {
+                val read = reader.read(buffer, offset, limit - offset)
+                if (read < 0) return String(buffer, 0, offset)
+                offset += read
+            }
+            val truncated = reader.read() >= 0
+            return if (truncated) {
+                String(buffer, 0, offset) + "\n[cotor truncated direct chat output after $limit chars]"
+            } else {
+                String(buffer, 0, offset)
+            }
+        }
     }
 
     private fun jsonString(value: String): String {

@@ -75,14 +75,14 @@ enum ShellPalette {
     static let warning = Color(nsColor: NSColor(red: 0.98, green: 0.72, blue: 0.31, alpha: 1))
     static let danger = Color(nsColor: NSColor(red: 0.93, green: 0.38, blue: 0.40, alpha: 1))
 
-    // Chat surface tokens keep operator chat aligned with the shell instead of a separate messenger skin.
+    // Chat surface tokens keep messenger affordances readable without detaching from the shell.
     static let chatUserBubble = dynamic(
-        NSColor(red: 0.88, green: 0.93, blue: 0.99, alpha: 1),
-        NSColor(red: 0.13, green: 0.18, blue: 0.27, alpha: 1)
+        NSColor(red: 1.00, green: 0.91, blue: 0.32, alpha: 1),
+        NSColor(red: 0.92, green: 0.73, blue: 0.18, alpha: 1)
     )
     static let chatUserText = dynamic(
-        NSColor.black.withAlphaComponent(0.86),
-        NSColor.white.withAlphaComponent(0.92)
+        NSColor.black.withAlphaComponent(0.88),
+        NSColor.black.withAlphaComponent(0.88)
     )
     static let chatAssistantBubble = dynamic(
         NSColor(red: 0.95, green: 0.97, blue: 0.99, alpha: 1),
@@ -104,6 +104,7 @@ enum ShellMetrics {
 
 enum ShellMotion {
     static let spring = Animation.spring(response: 0.28, dampingFraction: 0.86)
+    static let quick = Animation.easeInOut(duration: 0.18)
 }
 
 /// Full-window admin-shell background used behind the split view columns.
@@ -451,10 +452,12 @@ struct ShellDisclosureSection<Accessory: View, Content: View>: View {
 
                     accessory()
 
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    Image(systemName: "chevron.down")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(ShellPalette.muted)
                         .frame(width: 14, alignment: .center)
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                        .animation(ShellMotion.quick, value: isExpanded)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -473,7 +476,11 @@ struct ShellDisclosureSection<Accessory: View, Content: View>: View {
 
             if isExpanded {
                 content()
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
+                    .clipped()
             }
         }
     }

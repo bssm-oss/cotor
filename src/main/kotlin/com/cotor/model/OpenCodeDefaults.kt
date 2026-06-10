@@ -7,7 +7,7 @@ package com.cotor.model
  * company-created agents so execution costs stay predictable.
  */
 object OpenCodeDefaults {
-    const val DEFAULT_MODEL = "opencode/deepseek-v4-flash-free"
+    const val DEFAULT_MODEL = "ollama/gemma4:12b"
     const val DEEPSEEK_FLASH_MODEL = "opencode-go/deepseek-v4-flash"
     const val LOCAL_OLLAMA_GEMMA_MODEL = "ollama/gemma4:12b"
     const val LOCAL_OLLAMA_EXECUTION_MODE = "local-ollama-opencode"

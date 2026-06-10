@@ -69,6 +69,7 @@ Failure capture:
 | session card click | clicking anywhere on a session/run card changes selection |
 | base branch update | applying `Current workspace base branch` updates the backend workspace and restarts the TUI session |
 | Meeting Room Live Office | pixel-office projection renders actual company agents/issues/reviews/activity, idle state stays stable, and click targets open agent/issue/zone detail sheets |
+| Test Center | selected-company `Tests` surface loads a local validation plan, starts a predefined suite, and streams step status/log updates without accepting arbitrary commands |
 | GitHub readiness card | company settings show `gh`/auth/origin status and redact credential-bearing remote URLs |
 | capability/provider controls | backend capability/provider payloads render without storing secret values |
 

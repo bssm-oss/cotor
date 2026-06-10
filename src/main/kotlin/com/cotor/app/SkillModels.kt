@@ -125,6 +125,25 @@ fun skillCatalog(): List<SkillCatalogEntry> = listOf(
         requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_INTERACT, CapabilityKey.SOCIAL_POST_CREATE)
     ),
     SkillCatalogEntry(
+        name = "threads-publisher",
+        displayName = "Threads Publisher",
+        description = "Create delegated Threads launch/update posts inside the Marketing Operator policy.",
+        requiredCapabilities = listOf(CapabilityKey.SKILL_RUN, CapabilityKey.BROWSER_READ, CapabilityKey.BROWSER_INTERACT, CapabilityKey.SOCIAL_POST_CREATE)
+    ),
+    SkillCatalogEntry(
+        name = "producthunt-publisher",
+        displayName = "Product Hunt Publisher",
+        description = "Prepare or publish Product Hunt launch copy only when the delegated Product Hunt channel is configured.",
+        requiredCapabilities = listOf(
+            CapabilityKey.SKILL_RUN,
+            CapabilityKey.BROWSER_READ,
+            CapabilityKey.BROWSER_INTERACT,
+            CapabilityKey.BROWSER_EXTERNAL_DOMAIN,
+            CapabilityKey.WEB_PUBLISH,
+            CapabilityKey.SOCIAL_POST_CREATE
+        )
+    ),
+    SkillCatalogEntry(
         name = "analytics-reporter",
         displayName = "Analytics Reporter",
         description = "Read delegated marketing analytics and summarize channel performance.",
