@@ -124,7 +124,7 @@ final class DesktopStore: ObservableObject {
     @Published var companyGitHubOriginInput = ""
     @Published var newTaskTitle = ""
     @Published var newTaskPrompt = ""
-    @Published var agentSelection: Set<String> = ["gemma4", "codex-oauth"]
+    @Published var agentSelection: Set<String> = ["gemma4"]
     @Published var selectedOrgProfileIDs: Set<String> = []
     @Published var selectedCompanyAgentDefinitionIDs: Set<String> = []
     @Published var showingOrgProfileBatchEdit = false
@@ -276,12 +276,24 @@ final class DesktopStore: ObservableObject {
         if options.contains(defaultModel) {
             return true
         }
+        if isPinnedGemma4Default(agentCli: agentCli, model: defaultModel) {
+            return true
+        }
         return options.isEmpty && !requiresDiscoveredLocalModel(agentCli)
     }
 
     func requiresDiscoveredLocalModel(_ agentCli: String) -> Bool {
         let normalized = agentCli.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return ["gemma4", "ollama", "lmstudio"].contains(normalized)
+    }
+
+    func isPinnedGemma4Default(agentCli: String, model: String) -> Bool {
+        let normalizedAgent = agentCli.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard ["gemma4", "ollama", "lmstudio"].contains(normalizedAgent) else { return false }
+        let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedModel == "gemma4:12b" ||
+            normalizedModel == "google/gemma-4-12b" ||
+            normalizedModel == "google/gemma-4-12b-it"
     }
 
     var availableCompanyAgentCollaborators: [CompanyAgentDefinitionRecord] {

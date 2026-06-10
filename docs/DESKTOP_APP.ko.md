@@ -242,7 +242,7 @@ CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --veri
 - 여러 회사 생성
 - 회사당 하나의 작업 폴더 바인딩
 - 최소 입력 기반 회사 에이전트 정의
-- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, 설치된 Gemma 4 모델을 우선 사용하며, 기본 `gemma4:12b` alias가 없으면 설치된 Gemma 계열 모델로 자동 대체
+- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, `gemma4:12b`를 로컬 기본값으로 고정하며, 검색된 Gemma 계열 모델은 대체 후보로 노출
 - 회사 에이전트별 선택 사수(`mentorAgentId`) 저장. 사수는 같은 회사의 활성 에이전트만 선택할 수 있고, 고급 배정 영역에서 비울 수 있음
 - 새 회사에는 HR Manager와 CEO/Product/Engineering/Builder/QA/Release 기본 사수 관계를 함께 생성
 - 회사 에이전트 편집기에서 내장 스킬 카탈로그를 보여주고, 친근한 스킬 선택값을 각 에이전트의 `SKILL_RUN` capability allowlist로 저장

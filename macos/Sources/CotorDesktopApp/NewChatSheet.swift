@@ -27,7 +27,16 @@ struct NewChatSheet: View {
 
     private var selectedProviderModels: [String] {
         guard let provider = selectedProviderEntry else { return [] }
-        return availableModels.filter { $0.provider == provider.id }.map { $0.id }
+        let discovered = availableModels.filter { $0.provider == provider.id }.map { $0.id }
+        return ([provider.defaultModel] + discovered).compactMap { model in
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        .reduce(into: [String]()) { result, model in
+            if !result.contains(model) {
+                result.append(model)
+            }
+        }
     }
 
     var body: some View {

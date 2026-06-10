@@ -5,6 +5,13 @@ import Testing
 @MainActor
 struct DesktopStoreTests {
     @Test
+    func defaultAgentSelectionUsesGemma4Only() {
+        let store = DesktopStore()
+
+        #expect(store.agentSelection == Set(["gemma4"]))
+    }
+
+    @Test
     func expectedCompanyEventStreamInterruptionsDoNotRepresentOfflineState() {
         #expect(isExpectedCompanyEventStreamInterruption(URLError(.networkConnectionLost)))
         #expect(isExpectedCompanyEventStreamInterruption(URLError(.timedOut)))
@@ -492,7 +499,7 @@ struct DesktopStoreTests {
     }
 
     @Test
-    func localAgentSelectionDoesNotAutoFillUndiscoveredDefaultModel() {
+    func localAgentSelectionPinsGemma4DefaultEvenWhenAliasIsNotDiscovered() {
         let store = DesktopStore()
         let baseSettings = DashboardPayload.empty.settings
         store.dashboard = DashboardPayload(
@@ -544,14 +551,14 @@ struct DesktopStoreTests {
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
 
         store.selectNewCompanyAgentCli("gemma4")
-        #expect(store.newCompanyAgentModel == "")
+        #expect(store.newCompanyAgentModel == "gemma4:12b")
 
         store.selectNewCompanyAgentCli("lmstudio")
-        #expect(store.newCompanyAgentModel == "")
+        #expect(store.newCompanyAgentModel == "gemma4:12b")
     }
 
     @Test
-    func localAgentSelectionUsesDiscoveredGemmaModelWhenDefaultIsNotInstalled() {
+    func localAgentSelectionKeepsGemma4DefaultAheadOfDiscoveredFallback() {
         let store = DesktopStore()
         let baseSettings = DashboardPayload.empty.settings
         store.dashboard = DashboardPayload(
@@ -598,7 +605,7 @@ struct DesktopStoreTests {
         )
 
         store.selectNewCompanyAgentCli("gemma4")
-        #expect(store.newCompanyAgentModel == "google/gemma-4-31b-it")
+        #expect(store.newCompanyAgentModel == "gemma4:12b")
     }
 
     @Test

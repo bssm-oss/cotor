@@ -192,7 +192,7 @@ Current desktop model:
 - CEO merge only marks local workflow state as merged after GitHub refresh confirms the PR is actually `MERGED`
 - company CEO/chief approval agents can satisfy PR creation policy gates internally, so publish retries do not stop on a user-facing approval prompt when the company has an approval authority
 - Company Operator supports `ASK_ME`, `AGENT_APPROVED`, and `FULL_AUTO`; `AGENT_APPROVED` is the default, while `FULL_AUTO` still blocks hard-gated actions such as repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks
-- company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, Ollama, LM Studio, and app-managed local Gemma models; Cotor prefers installed Gemma 4 models and falls back to installed Gemma-family models instead of failing on a missing default alias
+- company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, Ollama, LM Studio, and app-managed local Gemma models; Cotor pins the local Gemma 4 12B alias (`gemma4:12b`) as the default and exposes discovered Gemma-family models as selectable alternatives
 - company agent definitions also store an optional mentor, shown as one compact team-card line and editable from the advanced assignment controls
 - selecting the Marketing Operator skill on a company agent exposes a delegation-policy panel for owned/social channels, allowed domains, publish limits, brand rules, and session/secret references
 - stale Cotor-managed retry PRs are reconciled and closed in batches so repeated review loops do not keep hundreds of obsolete open PRs around
@@ -214,7 +214,7 @@ The current build includes a working local operations layer:
 - surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing; Cotor does not create GitHub repositories automatically when no origin exists
 - connect an existing GitHub repository from the desktop app by signing in with `gh` and saving the repository URL as `origin`
 - define company agents with only title, CLI, and role summary
-- optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents. The desktop backend can start local Ollama on demand, prefers installed Gemma 4 models, and falls back to installed Gemma-family models when the default `gemma4:12b` alias is not present.
+- optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents. The desktop backend can start local Ollama on demand, keeps `gemma4:12b` as the default local model, and exposes installed Gemma-family models as alternatives.
 - seed new companies with an HR Manager plus mentor relationships, and let Operator Chat handle requests such as team staffing or mentor assignment without adding another always-visible control panel
 - use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory
 - delegate Marketing Operator browser publishing only through a prior policy; out-of-policy owned/social actions are denied rather than sent to a user approval queue

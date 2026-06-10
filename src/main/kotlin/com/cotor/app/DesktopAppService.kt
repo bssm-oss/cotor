@@ -15938,10 +15938,9 @@ class DesktopAppService(
 
     private fun defaultModelForAgentCli(agentCli: String): String? =
         when (agentCli.trim().lowercase()) {
-            "gemma4" -> availableAgentModels("gemma4").firstOrNull()
-                ?: normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
-            "ollama", "lmstudio" -> availableAgentModels(agentCli).firstOrNull { LocalModelDefaults.isGemmaFamilyModel(it) }
-                ?: normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
+            "gemma4", "ollama", "lmstudio" ->
+                normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
+                    ?: availableAgentModels(agentCli).firstOrNull { LocalModelDefaults.isGemmaFamilyModel(it) }
             else -> normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
         }
 
