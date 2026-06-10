@@ -9016,6 +9016,9 @@ class DesktopAppService(
         val deletedIssueIds = state.issues.filter { it.goalId == goalId }.map { it.id }.toSet()
         val deletedTaskIds = state.tasks.filter { it.issueId in deletedIssueIds }.map { it.id }.toSet()
         val deletedRunIds = state.runs.filter { it.taskId in deletedTaskIds }.map { it.id }.toSet()
+        val deletedReviewQueueItemIds = state.reviewQueue.filter {
+            it.issueId in deletedIssueIds || it.runId in deletedRunIds
+        }.map { it.id }.toSet()
         val nextState = state.copy(
             goals = state.goals.filterNot { it.id == goalId },
             issues = state.issues.filterNot { it.id in deletedIssueIds },
@@ -9034,6 +9037,9 @@ class DesktopAppService(
             },
             agentMessages = state.agentMessages.filterNot { it.goalId == goalId || it.issueId in deletedIssueIds },
             companyRuntimeWorkItems = state.companyRuntimeWorkItems.filterNot { it.issueId in deletedIssueIds }
+        ).withoutRuntimeAttentionReferences(
+            issueIds = deletedIssueIds,
+            reviewQueueItemIds = deletedReviewQueueItemIds
         ).recordCompanyActivity(
             companyId = goal.companyId,
             projectContextId = goal.projectContextId,
@@ -9059,6 +9065,9 @@ class DesktopAppService(
             ?: throw IllegalArgumentException("Issue not found: $issueId")
         val deletedTaskIds = state.tasks.filter { it.issueId == issueId }.map { it.id }.toSet()
         val deletedRunIds = state.runs.filter { it.taskId in deletedTaskIds }.map { it.id }.toSet()
+        val deletedReviewQueueItemIds = state.reviewQueue.filter {
+            it.issueId == issueId || it.runId in deletedRunIds
+        }.map { it.id }.toSet()
         val nextState = state.copy(
             issues = state.issues.filterNot { it.id == issueId },
             issueDependencies = state.issueDependencies.filterNot {
@@ -9070,6 +9079,9 @@ class DesktopAppService(
             reviewQueue = state.reviewQueue.filterNot { it.issueId == issueId || it.runId in deletedRunIds },
             companyActivity = state.companyActivity.filterNot { it.issueId == issueId },
             signals = state.signals.filterNot { it.issueId == issueId }
+        ).withoutRuntimeAttentionReferences(
+            issueIds = setOf(issueId),
+            reviewQueueItemIds = deletedReviewQueueItemIds
         ).recordCompanyActivity(
             companyId = issue.companyId,
             projectContextId = issue.projectContextId,
@@ -9087,6 +9099,24 @@ class DesktopAppService(
             }
         }
         issue
+    }
+
+    private fun DesktopAppState.withoutRuntimeAttentionReferences(
+        issueIds: Set<String>,
+        reviewQueueItemIds: Set<String> = emptySet()
+    ): DesktopAppState {
+        if (issueIds.isEmpty() && reviewQueueItemIds.isEmpty()) {
+            return this
+        }
+        return copy(
+            companyRuntimes = companyRuntimes.map { runtime ->
+                runtime.copy(
+                    pendingIssueIds = runtime.pendingIssueIds.filterNot { it in issueIds },
+                    blockedIssueIds = runtime.blockedIssueIds.filterNot { it in issueIds },
+                    reviewQueueAttentionIds = runtime.reviewQueueAttentionIds.filterNot { it in reviewQueueItemIds }
+                )
+            }
+        )
     }
 
     suspend fun createIssue(
