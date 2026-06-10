@@ -11411,6 +11411,15 @@ class DesktopAppServiceTest : FunSpec({
                         updatedAt = now
                     )
                 ),
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(
+                        companyId = company.id,
+                        status = CompanyRuntimeStatus.RUNNING,
+                        pendingIssueIds = listOf(issue.id, "other-pending-issue"),
+                        blockedIssueIds = listOf(issue.id, "other-blocked-issue"),
+                        reviewQueueAttentionIds = listOf("issue-delete-rq", "other-review")
+                    )
+                ),
                 signals = listOf(
                     OpsSignal(
                         id = "issue-delete-signal",
@@ -11434,6 +11443,10 @@ class DesktopAppServiceTest : FunSpec({
         state.runs.firstOrNull { it.taskId == "issue-delete-task" } shouldBe null
         state.reviewQueue.firstOrNull { it.issueId == issue.id } shouldBe null
         state.signals.firstOrNull { it.issueId == issue.id } shouldBe null
+        val runtime = state.companyRuntimes.single { it.companyId == company.id }
+        runtime.pendingIssueIds shouldBe listOf("other-pending-issue")
+        runtime.blockedIssueIds shouldBe listOf("other-blocked-issue")
+        runtime.reviewQueueAttentionIds shouldBe listOf("other-review")
         issueFile.exists() shouldBe false
     }
 
