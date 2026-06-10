@@ -11444,10 +11444,69 @@ class DesktopAppServiceTest : FunSpec({
         state.reviewQueue.firstOrNull { it.issueId == issue.id } shouldBe null
         state.signals.firstOrNull { it.issueId == issue.id } shouldBe null
         val runtime = state.companyRuntimes.single { it.companyId == company.id }
-        runtime.pendingIssueIds shouldBe listOf("other-pending-issue")
-        runtime.blockedIssueIds shouldBe listOf("other-blocked-issue")
-        runtime.reviewQueueAttentionIds shouldBe listOf("other-review")
+        runtime.pendingIssueIds shouldBe emptyList()
+        runtime.blockedIssueIds shouldBe emptyList()
+        runtime.reviewQueueAttentionIds shouldBe emptyList()
         issueFile.exists() shouldBe false
+    }
+
+    test("runtimeStatus filters orphan runtime attention references") {
+        val appHome = Files.createTempDirectory("desktop-runtime-orphan-attention-home")
+        val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-runtime-orphan-attention-test").resolve("repo"))
+        val stateStore = DesktopStateStore { appHome }
+        seedWorkspace(stateStore, repoRoot)
+        val service = testService(
+            processManager = FakeGitProcessManager(
+                repoRoot = repoRoot,
+                remoteUrl = "https://github.com/heodongun/cotor.git",
+                defaultBranch = "master"
+            ),
+            stateStore = stateStore
+        )
+
+        val company = service.createCompany(
+            name = "Runtime Orphan Co",
+            rootPath = repoRoot.toString(),
+            defaultBaseBranch = "master"
+        )
+        val goal = service.createGoal(
+            companyId = company.id,
+            title = "Keep runtime attention scoped",
+            description = "Existing runtime snapshots may contain IDs for deleted issues.",
+            autonomyEnabled = false
+        )
+        val issue = service.listIssues(goal.id).first()
+        stateStore.save(
+            stateStore.load().copy(
+                reviewQueue = listOf(
+                    ReviewQueueItem(
+                        id = "runtime-valid-review",
+                        companyId = company.id,
+                        issueId = issue.id,
+                        runId = "runtime-valid-run",
+                        status = ReviewQueueStatus.AWAITING_QA,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                ),
+                companyRuntimes = listOf(
+                    CompanyRuntimeSnapshot(
+                        companyId = company.id,
+                        status = CompanyRuntimeStatus.RUNNING,
+                        pendingIssueIds = listOf(issue.id, "missing-pending-issue"),
+                        blockedIssueIds = listOf("missing-blocked-issue"),
+                        reviewQueueAttentionIds = listOf("runtime-valid-review", "missing-review")
+                    )
+                )
+            )
+        )
+
+        val runtime = service.runtimeStatus(company.id)
+        runtime.pendingIssueIds.contains(issue.id) shouldBe true
+        runtime.pendingIssueIds.contains("missing-pending-issue") shouldBe false
+        runtime.blockedIssueIds.contains("missing-blocked-issue") shouldBe false
+        runtime.blockedIssueIds shouldBe emptyList()
+        runtime.reviewQueueAttentionIds.contains("missing-review") shouldBe false
     }
 
     test("createIssue creates a company-scoped manual issue for the selected goal") {
