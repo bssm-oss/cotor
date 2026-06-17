@@ -48,7 +48,7 @@ struct TerminalWebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
 
-        guard let htmlURL = Bundle.module.url(forResource: "terminal", withExtension: "html", subdirectory: "Terminal") else {
+        guard let htmlURL = DesktopResources.url(forResource: "terminal", withExtension: "html", subdirectory: "Terminal") else {
             webView.loadHTMLString(
                 """
                 <html><body style="background:#0b0f14;color:#f5f7fb;font-family:Menlo,monospace;padding:24px;">Missing terminal bundle resources.</body></html>
