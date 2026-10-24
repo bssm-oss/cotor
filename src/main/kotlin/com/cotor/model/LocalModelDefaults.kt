@@ -5,9 +5,12 @@ package com.cotor.model
  */
 object LocalModelDefaults {
     const val GEMMA4_12B_OLLAMA_MODEL = "gemma4:12b"
+    const val GEMMA4_12B_SGLANG_MODEL = "gemma4-12b"
     const val GEMMA4_12B_HUGGING_FACE_MODEL = "google/gemma-4-12B"
     const val GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL = "google/gemma-4-12B-it"
-    const val GEMMA4_MODEL = GEMMA4_12B_OLLAMA_MODEL
+    const val GEMMA4_MODEL = GEMMA4_12B_SGLANG_MODEL
+    const val SGLANG_BASE_URL = "http://127.0.0.1:30001"
+    const val SGLANG_OPENAI_BASE_URL = "$SGLANG_BASE_URL/v1"
     const val OLLAMA_BASE_URL = "http://127.0.0.1:11434"
     const val LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
 
@@ -34,6 +37,7 @@ object LocalModelDefaults {
     fun preferredInstalledGemmaModels(models: List<String>): List<String> {
         val normalized = models.mapNotNull(::normalizeModel).distinct()
         val preferredGemma4Models = listOf(
+            GEMMA4_12B_SGLANG_MODEL,
             GEMMA4_12B_OLLAMA_MODEL,
             GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL,
             GEMMA4_12B_HUGGING_FACE_MODEL

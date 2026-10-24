@@ -391,18 +391,18 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode", "codex"],
                 availableCliAgents: ["opencode", "codex", "gemma4", "ollama", "lmstudio"],
                 availableAgentModels: [
-                    "opencode": ["ollama/gemma4:12b", "opencode/big-pickle", "opencode/deepseek-v4-flash-free"],
+                    "opencode": ["sglang/gemma4-12b", "opencode/big-pickle", "opencode/deepseek-v4-flash-free"],
                     "codex": ["openai/gpt-5.5"],
-                    "gemma4": ["gemma4:12b"],
+                    "gemma4": ["gemma4-12b"],
                     "ollama": ["gemma4:12b"],
-                    "lmstudio": ["gemma4:12b"]
+                    "lmstudio": ["gemma4-12b"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "ollama/gemma4:12b",
+                    "opencode": "sglang/gemma4-12b",
                     "codex": "openai/gpt-5.5",
-                    "gemma4": "gemma4:12b",
+                    "gemma4": "gemma4-12b",
                     "ollama": "gemma4:12b",
-                    "lmstudio": "gemma4:12b"
+                    "lmstudio": "gemma4-12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -433,16 +433,16 @@ struct DesktopStoreTests {
         )
 
         store.selectNewCompanyAgentCli("opencode")
-        #expect(store.newCompanyAgentModel == "ollama/gemma4:12b")
+        #expect(store.newCompanyAgentModel == "sglang/gemma4-12b")
 
         store.selectNewCompanyAgentCli("codex")
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
 
         store.selectNewCompanyAgentCli("gemma4")
-        #expect(store.newCompanyAgentModel == "gemma4:12b")
+        #expect(store.newCompanyAgentModel == "gemma4-12b")
 
         store.selectNewCompanyAgentCli("lmstudio")
-        #expect(store.newCompanyAgentModel == "gemma4:12b")
+        #expect(store.newCompanyAgentModel == "gemma4-12b")
     }
 
     @Test
@@ -459,10 +459,10 @@ struct DesktopStoreTests {
                 availableAgents: ["opencode"],
                 availableCliAgents: ["opencode"],
                 availableAgentModels: [
-                    "opencode": ["ollama/gemma4:12b"]
+                    "opencode": ["sglang/gemma4-12b"]
                 ],
                 defaultAgentModels: [
-                    "opencode": "ollama/gemma4:12b"
+                    "opencode": "sglang/gemma4-12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -495,7 +495,7 @@ struct DesktopStoreTests {
         store.newCompanyAgentCli = ""
 
         #expect(store.resolvedNewCompanyAgentCli == "opencode")
-        #expect(store.newCompanyAgentModelOptions == ["ollama/gemma4:12b"])
+        #expect(store.newCompanyAgentModelOptions == ["sglang/gemma4-12b"])
     }
 
     @Test
@@ -516,8 +516,8 @@ struct DesktopStoreTests {
                 ],
                 defaultAgentModels: [
                     "codex": "openai/gpt-5.5",
-                    "gemma4": "gemma4:12b",
-                    "lmstudio": "gemma4:12b"
+                    "gemma4": "gemma4-12b",
+                    "lmstudio": "gemma4-12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -551,10 +551,10 @@ struct DesktopStoreTests {
         #expect(store.newCompanyAgentModel == "openai/gpt-5.5")
 
         store.selectNewCompanyAgentCli("gemma4")
-        #expect(store.newCompanyAgentModel == "gemma4:12b")
+        #expect(store.newCompanyAgentModel == "gemma4-12b")
 
         store.selectNewCompanyAgentCli("lmstudio")
-        #expect(store.newCompanyAgentModel == "gemma4:12b")
+        #expect(store.newCompanyAgentModel == "gemma4-12b")
     }
 
     @Test
@@ -574,7 +574,7 @@ struct DesktopStoreTests {
                     "gemma4": ["google/gemma-4-31b-it"]
                 ],
                 defaultAgentModels: [
-                    "gemma4": "gemma4:12b"
+                    "gemma4": "gemma4-12b"
                 ],
                 recentCompanies: baseSettings.recentCompanies,
                 defaultLaunchMode: baseSettings.defaultLaunchMode,
@@ -605,7 +605,7 @@ struct DesktopStoreTests {
         )
 
         store.selectNewCompanyAgentCli("gemma4")
-        #expect(store.newCompanyAgentModel == "gemma4:12b")
+        #expect(store.newCompanyAgentModel == "gemma4-12b")
     }
 
     @Test

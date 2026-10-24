@@ -4818,7 +4818,11 @@ private struct CenterPaneView: View {
                 companyPageContent
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: usesOuterScroll ? nil : .infinity,
+            alignment: .topLeading
+        )
     }
 
     @ViewBuilder

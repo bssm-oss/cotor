@@ -31,9 +31,29 @@ class DirectChatServiceTest : FunSpec({
         server.start()
         try {
             val models = DirectChatService(modelListResponseLimitChars = 32)
-                .listAvailableModels("http://127.0.0.1:${server.address.port}")
+                .listAvailableModels("http://127.0.0.1:${server.address.port}", "ollama")
 
             models shouldBe emptyList()
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    test("listAvailableModels reads SGLang OpenAI-compatible model list") {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/v1/models") { exchange ->
+            val body = """{"data":[{"id":"gemma4-12b"},{"id":"qwen3:14b"}]}"""
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val models = DirectChatService()
+                .listAvailableModels("http://127.0.0.1:${server.address.port}", "sglang")
+
+            models.map { it.id } shouldBe listOf("gemma4-12b", "qwen3:14b")
+            models.all { it.provider == "sglang" } shouldBe true
         } finally {
             server.stop(0)
         }
@@ -59,6 +79,42 @@ class DirectChatServiceTest : FunSpec({
                 title = "test",
                 model = "test-model",
                 provider = "ollama",
+                baseUrl = baseUrl
+            )
+
+            val chunks = DirectChatService()
+                .streamChat(conversation, userMessage = "hi", messageId = "message-1")
+                .toList()
+
+            chunks.filter { it.done } shouldHaveSize 1
+            chunks.last().done shouldBe true
+            chunks.joinToString("") { it.content } shouldBe "hello"
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    test("sglang stream emits OpenAI-compatible SSE chunks") {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/v1/chat/completions") { exchange ->
+            val body = """
+                data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}
+                data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}
+            """.trimIndent()
+            val bytes = body.toByteArray()
+            exchange.responseHeaders.add("Content-Type", "text/event-stream")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val baseUrl = "http://127.0.0.1:${server.address.port}"
+            val conversation = DirectChatConversation(
+                id = "conversation-sglang",
+                companyId = "company-1",
+                title = "test",
+                model = "gemma4-12b",
+                provider = "sglang",
                 baseUrl = baseUrl
             )
 
@@ -126,6 +182,37 @@ class DirectChatServiceTest : FunSpec({
 
             chunks.last().done shouldBe true
             chunks.last().error shouldContain "stream line exceeded 32 character limit"
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    test("ollama missing gemma4 default includes install guidance") {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/api/chat") { exchange ->
+            val body = """{"error":"model 'gemma4:12b' not found"}"""
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(404, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val conversation = DirectChatConversation(
+                id = "conversation-missing-gemma4",
+                companyId = "company-1",
+                title = "test",
+                model = "gemma4:12b",
+                provider = "ollama",
+                baseUrl = "http://127.0.0.1:${server.address.port}"
+            )
+
+            val chunks = DirectChatService()
+                .streamChat(conversation, userMessage = "hi", messageId = "message-1")
+                .toList()
+
+            chunks.last().done shouldBe true
+            chunks.last().error shouldContain "ollama run gemma4:12b"
+            chunks.last().error shouldContain "model 'gemma4:12b' not found"
         } finally {
             server.stop(0)
         }

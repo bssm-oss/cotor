@@ -564,7 +564,7 @@ class CursorPlugin : AgentPlugin {
 }
 
 /**
- * Local model plugin for Ollama and LM Studio/OpenAI-compatible servers.
+ * Local model plugin for SGLang, Ollama, and LM Studio/OpenAI-compatible servers.
  */
 class LocalModelPlugin(
     private val ollamaExecutableResolver: () -> String? = ::resolveDefaultOllamaExecutable,
@@ -577,7 +577,7 @@ class LocalModelPlugin(
     override val metadata = AgentMetadata(
         name = "local-model",
         version = "1.0.0",
-        description = "Local Gemma/Ollama/LM Studio model connection",
+        description = "Local Gemma/SGLang/Ollama/LM Studio model connection",
         author = "Cotor Team",
         supportedFormats = listOf(DataFormat.JSON, DataFormat.TEXT)
     )
@@ -588,15 +588,15 @@ class LocalModelPlugin(
                 name = "provider",
                 type = ParameterType.STRING,
                 required = false,
-                description = "Local model provider: ollama or lmstudio.",
-                defaultValue = "ollama"
+                description = "Local model provider: sglang, ollama, or lmstudio.",
+                defaultValue = "sglang"
             ),
             AgentParameter(
                 name = "baseUrl",
                 type = ParameterType.STRING,
                 required = false,
                 description = "Provider base URL.",
-                defaultValue = LocalModelDefaults.OLLAMA_BASE_URL
+                defaultValue = LocalModelDefaults.SGLANG_BASE_URL
             ),
             AgentParameter(
                 name = "model",
@@ -619,11 +619,13 @@ class LocalModelPlugin(
         val provider = normalizeProvider(context.parameters["provider"] ?: context.agentName)
         val model = LocalModelDefaults.normalizeModel(context.parameters["model"]) ?: LocalModelDefaults.GEMMA4_MODEL
         val baseUrl = when (provider) {
+            "sglang" -> LocalModelDefaults.normalizeBaseUrl(context.parameters["baseUrl"], LocalModelDefaults.SGLANG_BASE_URL)
             "lmstudio" -> LocalModelDefaults.normalizeBaseUrl(context.parameters["baseUrl"], LocalModelDefaults.LM_STUDIO_BASE_URL)
             else -> LocalModelDefaults.normalizeBaseUrl(context.parameters["baseUrl"], LocalModelDefaults.OLLAMA_BASE_URL)
         }
         when (provider) {
-            "lmstudio" -> executeLmStudio(baseUrl, model, prompt, context.timeout)
+            "sglang" -> executeOpenAiCompatible("SGLang", baseUrl, model, prompt, context.timeout)
+            "lmstudio" -> executeOpenAiCompatible("LM Studio", baseUrl, model, prompt, context.timeout)
             else -> executeOllama(baseUrl, model, prompt, context.timeout)
         }
     }
@@ -637,6 +639,7 @@ class LocalModelPlugin(
 
     private fun normalizeProvider(raw: String): String =
         when (raw.trim().lowercase()) {
+            "sglang", "sg-lang", "sg_lang", "sg lang", "turbo", "gemma4" -> "sglang"
             "lmstudio", "lm-studio", "lm_studio", "lm studio" -> "lmstudio"
             else -> "ollama"
         }
@@ -699,7 +702,13 @@ class LocalModelPlugin(
                 ?: emptyList()
         }.getOrDefault(emptyList())
 
-    private fun executeLmStudio(baseUrl: String, model: String, prompt: String, timeoutMs: Long): PluginExecutionOutput {
+    private fun executeOpenAiCompatible(
+        providerLabel: String,
+        baseUrl: String,
+        model: String,
+        prompt: String,
+        timeoutMs: Long
+    ): PluginExecutionOutput {
         val body = buildJsonObject {
             put("model", model)
             put("stream", false)
@@ -710,12 +719,25 @@ class LocalModelPlugin(
                 }
             )
         }.toString()
-        val response = postJson("$baseUrl/chat/completions", body, timeoutMs)
+        val response = runCatching {
+            postJson(openAiChatCompletionsUrl(baseUrl), body, timeoutMs)
+        }.getOrElse { error ->
+            throw AgentExecutionException("$providerLabel request failed: ${error.message ?: error::class.simpleName}")
+        }
         val parsed = json.parseToJsonElement(response.body).jsonObject
         val text = parsed["choices"]?.jsonArray?.firstOrNull()
             ?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
             ?: response.body
         return PluginExecutionOutput(text)
+    }
+
+    private fun openAiChatCompletionsUrl(baseUrl: String): String {
+        val normalized = baseUrl.trimEnd('/')
+        return if (normalized.endsWith("/v1")) {
+            "$normalized/chat/completions"
+        } else {
+            "$normalized/v1/chat/completions"
+        }
     }
 
     private fun postJson(url: String, body: String, timeoutMs: Long): BoundedHttpTextResponse {
@@ -882,10 +904,13 @@ class OpenCodePlugin : AgentPlugin {
         } else {
             context
         }
-        val effectiveRequestedModel = requestedModel
-            ?.takeIf(OpenCodeDefaults::isLocalOllamaModel)
-            ?.let { ensureLocalOllamaModelAvailable(it, executionContext) }
-            ?: requestedModel
+        val effectiveRequestedModel = requestedModel?.let { model ->
+            when {
+                OpenCodeDefaults.isLocalOllamaModel(model) -> ensureLocalOllamaModelAvailable(model, executionContext)
+                OpenCodeDefaults.isLocalSglangModel(model) -> ensureLocalSglangModelAvailable(model, executionContext)
+                else -> model
+            }
+        }
 
         var model = effectiveRequestedModel
         if (effectiveRequestedModel != null) {
@@ -1117,11 +1142,11 @@ class OpenCodePlugin : AgentPlugin {
         if (planningOnly) {
             planningOnlyOpenCodeEnvironment(context)
         } else {
-            executionOpenCodeEnvironment()
+            executionOpenCodeEnvironment(context)
         }
 
-    private fun executionOpenCodeEnvironment(): Map<String, String> = mapOf(
-        "OPENCODE_CONFIG_CONTENT" to executionOpenCodeConfigJson(),
+    private fun executionOpenCodeEnvironment(context: ExecutionContext): Map<String, String> = mapOf(
+        "OPENCODE_CONFIG_CONTENT" to executionOpenCodeConfigJson(context),
         "OPENCODE_DISABLE_PROJECT_CONFIG" to "true",
         "OPENCODE_DISABLE_AUTOUPDATE" to "true"
     )
@@ -1135,35 +1160,70 @@ class OpenCodePlugin : AgentPlugin {
         "OPENCODE_PURE" to "true"
     )
 
-    private fun executionOpenCodeConfigJson(): String = """
-        {
-          "${'$'}schema": "https://opencode.ai/config.json",
-          "tools": {
-            "read": true,
-            "write": true,
-            "edit": true,
-            "bash": true,
-            "grep": true,
-            "glob": true,
-            "list": true,
-            "task": false,
-            "task_*": false
-          },
-          "permission": {
-            "question": "deny",
-            "task": "deny",
-            "read": "allow",
-            "write": "allow",
-            "edit": "allow",
-            "bash": "allow",
-            "grep": "allow",
-            "glob": "allow",
-            "list": "allow",
-            "webfetch": "deny",
-            "external_directory": "deny"
-          }
+    private fun executionOpenCodeConfigJson(context: ExecutionContext): String {
+        fun jsonString(value: String): String = value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+
+        val baseUrl = normalizeOpenAiBaseUrl(
+            LocalModelDefaults.normalizeBaseUrl(
+                context.parameters["sglangBaseUrl"] ?: context.parameters["baseUrl"],
+                OpenCodeDefaults.LOCAL_SGLANG_BASE_URL
+            )
+        )
+        val requestedSglangModel = context.parameters["model"]
+            ?.let(OpenCodeDefaults::sglangModelForOpenCodeModel)
+        val modelIds = listOfNotNull(LocalModelDefaults.GEMMA4_MODEL, requestedSglangModel)
+            .mapNotNull(LocalModelDefaults::normalizeModel)
+            .distinct()
+        val sglangModelsJson = modelIds.joinToString(",\n") { modelId ->
+            """                "${jsonString(modelId)}": {"name": "${jsonString("$modelId (SGLang Turbo)") }"}"""
         }
-    """.trimIndent()
+
+        return """
+            {
+              "${'$'}schema": "https://opencode.ai/config.json",
+              "provider": {
+                "sglang": {
+                  "npm": "@ai-sdk/openai-compatible",
+                  "name": "SGLang Turbo (local)",
+                  "options": {
+                    "baseURL": "${jsonString(baseUrl)}",
+                    "apiKey": "local"
+                  },
+                  "models": {
+$sglangModelsJson
+                  }
+                }
+              },
+              "tools": {
+                "read": true,
+                "write": true,
+                "edit": true,
+                "bash": true,
+                "grep": true,
+                "glob": true,
+                "list": true,
+                "task": false,
+                "task_*": false
+              },
+              "permission": {
+                "question": "deny",
+                "task": "deny",
+                "read": "allow",
+                "write": "allow",
+                "edit": "allow",
+                "bash": "allow",
+                "grep": "allow",
+                "glob": "allow",
+                "list": "allow",
+                "webfetch": "deny",
+                "external_directory": "deny"
+              }
+            }
+        """.trimIndent()
+    }
 
     private fun planningOnlyOpenCodeConfigJson(context: ExecutionContext): String {
         val agentName = context.parameters["agent"]
@@ -1241,6 +1301,7 @@ class OpenCodePlugin : AgentPlugin {
         rejectedModel: String
     ): String? {
         if (OpenCodeDefaults.isLocalOllamaModel(rejectedModel)) return null
+        if (OpenCodeDefaults.isLocalSglangModel(rejectedModel)) return null
         val models = discoverAvailableOpenCodeModels(processManager, context)
         if (models.isEmpty()) return null
         listOf(
@@ -1261,7 +1322,7 @@ class OpenCodePlugin : AgentPlugin {
         context: ExecutionContext,
         requestedModel: String
     ): String {
-        if (OpenCodeDefaults.isLocalOllamaModel(requestedModel)) {
+        if (OpenCodeDefaults.isLocalOllamaModel(requestedModel) || OpenCodeDefaults.isLocalSglangModel(requestedModel)) {
             return requestedModel
         }
         val models = discoverAvailableOpenCodeModels(processManager, context)
@@ -1278,7 +1339,7 @@ class OpenCodePlugin : AgentPlugin {
         val result = processManager.executeProcess(
             command = listOf("opencode", "models"),
             input = null,
-            environment = context.environment,
+            environment = context.environment + executionOpenCodeEnvironment(context),
             timeout = minOf(context.timeout, 10_000),
             workingDirectory = context.workingDirectory,
             onStart = null
@@ -1339,6 +1400,60 @@ class OpenCodePlugin : AgentPlugin {
             return "ollama/$fallbackTag"
         }
         throw AgentExecutionException("LOCAL_GEMMA_MODEL_MISSING: local Ollama model $tag was not discovered.")
+    }
+
+    private suspend fun ensureLocalSglangModelAvailable(model: String, context: ExecutionContext): String {
+        val servedModel = OpenCodeDefaults.sglangModelForOpenCodeModel(model) ?: return model
+        val baseUrl = normalizeOpenAiBaseUrl(
+            LocalModelDefaults.normalizeBaseUrl(
+                context.parameters["sglangBaseUrl"] ?: context.parameters["baseUrl"],
+                OpenCodeDefaults.LOCAL_SGLANG_BASE_URL
+            )
+        )
+        val response = withContext(Dispatchers.IO) {
+            runCatching {
+                val request = HttpRequest.newBuilder(URI.create("$baseUrl/models"))
+                    .timeout(Duration.ofMillis(minOf(context.timeout, 2_000).coerceAtLeast(1_000L)))
+                    .GET()
+                    .build()
+                httpClient.sendBoundedText(request, DEFAULT_LOCAL_MODEL_HTTP_RESPONSE_BODY_LIMIT_CHARS)
+            }.getOrElse { cause ->
+                throw AgentExecutionException("LOCAL_SGLANG_MODEL_MISSING: could not reach SGLang at $baseUrl (${cause.message}).")
+            }
+        }
+        if (response.statusCode !in 200..299) {
+            throw AgentExecutionException("LOCAL_SGLANG_MODEL_MISSING: SGLang at $baseUrl returned ${response.statusCode}.")
+        }
+        if (response.truncated) {
+            throw AgentExecutionException(
+                "LOCAL_SGLANG_MODEL_MISSING: SGLang /v1/models response exceeded " +
+                    "$DEFAULT_LOCAL_MODEL_HTTP_RESPONSE_BODY_LIMIT_CHARS character limit."
+            )
+        }
+        val models = runCatching {
+            json.parseToJsonElement(response.body).jsonObject["data"]?.jsonArray
+                ?.mapNotNull { item ->
+                    item.jsonObject["id"]?.jsonPrimitive?.contentOrNull
+                }
+                ?.mapNotNull(LocalModelDefaults::normalizeModel)
+                ?.distinct()
+                ?: emptyList()
+        }.getOrDefault(emptyList())
+        if (servedModel in models) {
+            return model
+        }
+        val fallbackModel = LocalModelDefaults.preferredInstalledGemmaModels(models)
+            .firstOrNull()
+            ?.takeIf { LocalModelDefaults.isGemmaFamilyModel(servedModel) }
+        if (fallbackModel != null) {
+            return "sglang/$fallbackModel"
+        }
+        throw AgentExecutionException("LOCAL_SGLANG_MODEL_MISSING: SGLang model $servedModel was not discovered.")
+    }
+
+    private fun normalizeOpenAiBaseUrl(baseUrl: String): String {
+        val normalized = baseUrl.trimEnd('/')
+        return if (normalized.endsWith("/v1")) normalized else "$normalized/v1"
     }
 
     private fun extractOpenCodeError(result: ProcessResult): String? {

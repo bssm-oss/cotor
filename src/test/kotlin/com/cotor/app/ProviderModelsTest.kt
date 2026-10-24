@@ -12,7 +12,8 @@ class ProviderModelsTest : FunSpec({
         providers.map { it.id }.distinct().size shouldBe providers.size
         providers.first { it.id == "codex-cli" }.aliases shouldContainAll listOf("codex", "codex-exec", "codex-oauth")
         providers.first { it.id == "claude-code" }.aliases shouldContainAll listOf("claude")
-        providers.first { it.id == "ollama" }.aliases shouldContainAll listOf("gemma4")
+        providers.first { it.id == "sglang" }.aliases shouldContainAll listOf("gemma4", "turbo")
+        providers.first { it.id == "ollama" }.aliases shouldContainAll listOf("ollama-gemma4")
         providers.first { it.id == "lm-studio" }.aliases shouldContainAll listOf("lmstudio")
     }
 
@@ -31,7 +32,8 @@ class ProviderModelsTest : FunSpec({
         findProviderByIdOrAlias("codex-exec")?.id shouldBe "codex-cli"
         findProviderByIdOrAlias("codex-oauth")?.id shouldBe "codex-cli"
         findProviderByIdOrAlias("CLAUDE")?.id shouldBe "claude-code"
-        findProviderByIdOrAlias("gemma4")?.id shouldBe "ollama"
+        findProviderByIdOrAlias("gemma4")?.id shouldBe "sglang"
+        findProviderByIdOrAlias("ollama-gemma4")?.id shouldBe "ollama"
         findProviderByIdOrAlias(" ") shouldBe null
         findProviderByIdOrAlias("missing") shouldBe null
     }
@@ -40,10 +42,14 @@ class ProviderModelsTest : FunSpec({
         val providers = directChatProviderCatalog()
 
         providers.map { it.id }.distinct().size shouldBe providers.size
+        val sglang = providers.first { it.id == "sglang" }
         val ollama = providers.first { it.id == "ollama" }
         val lmStudio = providers.first { it.id == "lmstudio" }
+        sglang.supportsModelDiscovery shouldBe true
+        sglang.defaultBaseUrl shouldBe LocalModelDefaults.SGLANG_BASE_URL
         ollama.supportsModelDiscovery shouldBe true
-        ollama.defaultModel shouldBe LocalModelDefaults.GEMMA4_MODEL
+        ollama.defaultModel shouldBe LocalModelDefaults.GEMMA4_12B_OLLAMA_MODEL
+        ollama.defaultBaseUrl shouldBe LocalModelDefaults.OLLAMA_BASE_URL
         lmStudio.providerId shouldBe "lm-studio"
         lmStudio.defaultModel shouldBe LocalModelDefaults.GEMMA4_12B_HUGGING_FACE_INSTRUCT_MODEL
         providers.first { it.id == "codex-oauth" }.allowsBaseUrl shouldBe false

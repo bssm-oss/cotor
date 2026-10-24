@@ -55,7 +55,14 @@ fun providerCatalog(): List<ProviderCatalogEntry> = listOf(
     ProviderCatalogEntry("opencode", "OpenCode", "opencode", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
     ProviderCatalogEntry("graphify", "Graphify", "graphify", listOf(CapabilityKey.KNOWLEDGE_GRAPH_READ, CapabilityKey.KNOWLEDGE_GRAPH_WRITE)),
     ProviderCatalogEntry("qwen", "Qwen CLI", "qwen", listOf(CapabilityKey.SHELL_EXEC, CapabilityKey.EXTERNAL_API_CALL)),
-    ProviderCatalogEntry("ollama", "Ollama", "ollama", listOf(CapabilityKey.EXTERNAL_API_CALL), aliases = listOf("gemma4")),
+    ProviderCatalogEntry(
+        "sglang",
+        "Turbo Engine: SGLang",
+        "python3",
+        listOf(CapabilityKey.EXTERNAL_API_CALL),
+        aliases = listOf("gemma4", "turbo", "sglang-turbo")
+    ),
+    ProviderCatalogEntry("ollama", "Ollama", "ollama", listOf(CapabilityKey.EXTERNAL_API_CALL), aliases = listOf("ollama-gemma4")),
     ProviderCatalogEntry("lm-studio", "LM Studio CLI", "lms", listOf(CapabilityKey.EXTERNAL_API_CALL), aliases = listOf("lmstudio")),
     ProviderCatalogEntry("gh", "GitHub CLI", "gh", listOf(CapabilityKey.GITHUB_READ, CapabilityKey.GITHUB_PR_CREATE, CapabilityKey.GITHUB_PR_UPDATE)),
     ProviderCatalogEntry("git", "Git", "git", listOf(CapabilityKey.GIT_READ, CapabilityKey.GIT_WRITE)),
@@ -96,11 +103,21 @@ fun findProviderByIdOrAlias(providerId: String): ProviderCatalogEntry? =
 
 fun directChatProviderCatalog(): List<DirectChatProviderCatalogEntry> = listOf(
     DirectChatProviderCatalogEntry(
+        id = "sglang",
+        providerId = "sglang",
+        displayName = "Turbo Engine: SGLang",
+        iconSystemName = "bolt.fill",
+        defaultModel = LocalModelDefaults.GEMMA4_MODEL,
+        defaultBaseUrl = LocalModelDefaults.SGLANG_BASE_URL,
+        allowsBaseUrl = true,
+        supportsModelDiscovery = true
+    ),
+    DirectChatProviderCatalogEntry(
         id = "ollama",
         providerId = "ollama",
         displayName = "Ollama (local)",
         iconSystemName = "cpu.fill",
-        defaultModel = LocalModelDefaults.GEMMA4_MODEL,
+        defaultModel = LocalModelDefaults.GEMMA4_12B_OLLAMA_MODEL,
         defaultBaseUrl = LocalModelDefaults.OLLAMA_BASE_URL,
         allowsBaseUrl = true,
         supportsModelDiscovery = true

@@ -79,8 +79,17 @@ object BuiltinAgentCatalog {
             pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
             defaultTimeoutMs = DEFAULT_AI_TIMEOUT_MS,
             defaultParameters = mapOf(
-                "provider" to "ollama",
-                "baseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                "provider" to "sglang",
+                "baseUrl" to LocalModelDefaults.SGLANG_BASE_URL,
+                "model" to LocalModelDefaults.GEMMA4_MODEL
+            )
+        ),
+        "sglang" to BuiltinAgentSpec(
+            pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
+            defaultTimeoutMs = DEFAULT_AI_TIMEOUT_MS,
+            defaultParameters = mapOf(
+                "provider" to "sglang",
+                "baseUrl" to LocalModelDefaults.SGLANG_BASE_URL,
                 "model" to LocalModelDefaults.GEMMA4_MODEL
             )
         ),
@@ -90,7 +99,7 @@ object BuiltinAgentCatalog {
             defaultParameters = mapOf(
                 "provider" to "ollama",
                 "baseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
-                "model" to LocalModelDefaults.GEMMA4_MODEL
+                "model" to LocalModelDefaults.GEMMA4_12B_OLLAMA_MODEL
             )
         ),
         "lmstudio" to BuiltinAgentSpec(

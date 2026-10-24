@@ -1063,10 +1063,17 @@ struct DesktopAPI {
         )
     }
 
-    func listDirectChatModels(companyId: String, baseUrl: String = "http://127.0.0.1:11434") async throws -> [DirectChatAvailableModel] {
+    func listDirectChatModels(
+        companyId: String,
+        provider: String = "sglang",
+        baseUrl: String = "http://127.0.0.1:30001"
+    ) async throws -> [DirectChatAvailableModel] {
         try await get(
             pathSegments: ["api", "app", "companies", companyId, "direct-chat", "models"],
-            query: [URLQueryItem(name: "baseUrl", value: baseUrl)]
+            query: [
+                URLQueryItem(name: "provider", value: provider),
+                URLQueryItem(name: "baseUrl", value: baseUrl)
+            ]
         )
     }
 

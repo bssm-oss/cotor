@@ -11,6 +11,7 @@ package com.cotor.app
 import com.cotor.data.http.sendBoundedText
 import com.cotor.data.process.destroyProcessTree
 import com.cotor.model.CodexDefaults
+import com.cotor.model.LocalModelDefaults
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -87,11 +88,24 @@ class DirectChatService(
         return raw.trimEnd('/')
     }
 
-    fun listAvailableModels(baseUrl: String = "http://127.0.0.1:11434"): List<DirectChatAvailableModel> {
-        val effectiveBase = validateAndNormalizeBaseUrl(baseUrl, "http://127.0.0.1:11434")
+    fun listAvailableModels(
+        baseUrl: String = LocalModelDefaults.SGLANG_BASE_URL,
+        provider: String = "sglang"
+    ): List<DirectChatAvailableModel> {
+        val providerId = findDirectChatProvider(provider)?.id ?: provider.trim().lowercase()
+        val defaultBase = findDirectChatProvider(providerId)?.defaultBaseUrl ?: LocalModelDefaults.SGLANG_BASE_URL
+        val effectiveBase = validateAndNormalizeBaseUrl(baseUrl, defaultBase)
+        return when (providerId) {
+            "ollama" -> listOllamaModels(effectiveBase)
+            "sglang", "lmstudio" -> listOpenAiCompatibleModels(effectiveBase, providerId)
+            else -> emptyList()
+        }
+    }
+
+    private fun listOllamaModels(baseUrl: String): List<DirectChatAvailableModel> {
         return try {
             val request = HttpRequest.newBuilder()
-                .uri(URI.create("$effectiveBase/api/tags"))
+                .uri(URI.create("$baseUrl/api/tags"))
                 .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build()
@@ -105,6 +119,30 @@ class DirectChatService(
                     id = name,
                     provider = "ollama",
                     displayName = name
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun listOpenAiCompatibleModels(baseUrl: String, providerId: String): List<DirectChatAvailableModel> {
+        return try {
+            val request = HttpRequest.newBuilder()
+                .uri(URI.create(openAiModelsUrl(baseUrl)))
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build()
+            val response = directChatHttpClient.sendBoundedText(request, modelListResponseLimitChars)
+            if (response.statusCode != 200 || response.truncated) return emptyList()
+            val body = directChatJson.parseToJsonElement(response.body).jsonObject
+            val modelsArray = body["data"]?.jsonArray ?: return emptyList()
+            modelsArray.mapNotNull { element ->
+                val id = element.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                DirectChatAvailableModel(
+                    id = id,
+                    provider = providerId,
+                    displayName = id
                 )
             }
         } catch (_: Exception) {
@@ -127,9 +165,11 @@ class DirectChatService(
         }
 
         when (providerId) {
+            "sglang" -> streamOpenAiCompatible("SGLang", conversation, userMessage, messageId, effectiveBase)
+                .collect { emit(it) }
             "ollama" -> streamOllama(conversation, userMessage, messageId, effectiveBase)
                 .collect { emit(it) }
-            "lmstudio" -> streamLmStudio(conversation, userMessage, messageId, effectiveBase)
+            "lmstudio" -> streamOpenAiCompatible("LM Studio", conversation, userMessage, messageId, effectiveBase)
                 .collect { emit(it) }
             "codex-oauth" -> streamCodexOAuth(conversation, userMessage, messageId)
                 .collect { emit(it) }
@@ -176,7 +216,10 @@ class DirectChatService(
                 directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
             }
             if (response.statusCode() !in 200..299) {
-                error("Ollama request failed with HTTP ${response.statusCode()}")
+                val errorBody = withContext(Dispatchers.IO) {
+                    readDirectChatErrorBody(response.body())
+                }
+                error(ollamaRequestFailureMessage(response.statusCode(), conversation.model, errorBody))
             }
             var doneSent = false
             var emittedContentChars = 0
@@ -238,13 +281,44 @@ class DirectChatService(
                     messageId = messageId,
                     content = "",
                     done = true,
-                    error = e.message ?: "Ollama request failed"
+                    error = ollamaRequestExceptionMessage(conversation.model, e)
                 )
             )
         }
     }
 
-    private fun streamLmStudio(
+    private fun readDirectChatErrorBody(stream: java.io.InputStream): String =
+        stream.use { input ->
+            val buffer = ByteArray(4096)
+            val read = input.read(buffer)
+            if (read <= 0) "" else String(buffer, 0, read, StandardCharsets.UTF_8)
+        }.trim()
+
+    private fun ollamaRequestFailureMessage(statusCode: Int, model: String, responseBody: String): String {
+        val detail = responseBody.takeIf { it.isNotBlank() }?.let { " Response: $it" }.orEmpty()
+        return withGemma4InstallHintIfNeeded(
+            model = model,
+            message = "Ollama request failed with HTTP $statusCode.$detail"
+        )
+    }
+
+    private fun ollamaRequestExceptionMessage(model: String, error: Exception): String {
+        val message = error.message ?: "Ollama request failed"
+        return withGemma4InstallHintIfNeeded(model, message)
+    }
+
+    private fun withGemma4InstallHintIfNeeded(model: String, message: String): String {
+        val normalized = LocalModelDefaults.normalizeModel(model)
+        if (normalized?.equals(LocalModelDefaults.GEMMA4_12B_OLLAMA_MODEL, ignoreCase = true) != true) {
+            return message
+        }
+        return "Ollama 선택 모델 gemma4:12b를 사용할 수 없습니다. " +
+            "터미널에서 `ollama run gemma4:12b`를 한 번 실행해 모델을 내려받은 뒤 다시 시도하세요. " +
+            message
+    }
+
+    private fun streamOpenAiCompatible(
+        providerLabel: String,
         conversation: DirectChatConversation,
         userMessage: String,
         messageId: String,
@@ -265,7 +339,7 @@ class DirectChatService(
 
         try {
             val request = HttpRequest.newBuilder()
-                .uri(URI.create("$baseUrl/v1/chat/completions"))
+                .uri(URI.create(openAiChatCompletionsUrl(baseUrl)))
                 .timeout(Duration.ofMinutes(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
@@ -275,7 +349,11 @@ class DirectChatService(
                 directChatHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
             }
             if (response.statusCode() !in 200..299) {
-                error("LM Studio request failed with HTTP ${response.statusCode()}")
+                val errorBody = withContext(Dispatchers.IO) {
+                    readDirectChatErrorBody(response.body())
+                }
+                val detail = errorBody.takeIf { it.isNotBlank() }?.let { " Response: $it" }.orEmpty()
+                error("$providerLabel request failed with HTTP ${response.statusCode()}.$detail")
             }
             var doneSent = false
             var emittedContentChars = 0
@@ -283,7 +361,7 @@ class DirectChatService(
                 val reader = BoundedDirectChatLineReader(
                     reader = InputStreamReader(stream, StandardCharsets.UTF_8),
                     lineLimitChars = streamLineLimitChars,
-                    provider = "LM Studio"
+                    provider = providerLabel
                 )
                 while (true) {
                     val line = withContext(Dispatchers.IO) { reader.readLine() } ?: break
@@ -323,7 +401,7 @@ class DirectChatService(
                     } ?: continue
 
                     val (content, done) = parsedChunk
-                    emittedContentChars = updatedStreamContentChars("LM Studio", emittedContentChars, content)
+                    emittedContentChars = updatedStreamContentChars(providerLabel, emittedContentChars, content)
                     emit(
                         DirectChatStreamChunk(
                             conversationId = conversation.id,
@@ -357,10 +435,20 @@ class DirectChatService(
                     messageId = messageId,
                     content = "",
                     done = true,
-                    error = e.message ?: "LM Studio request failed"
+                    error = e.message ?: "$providerLabel request failed"
                 )
             )
         }
+    }
+
+    private fun openAiModelsUrl(baseUrl: String): String {
+        val normalized = baseUrl.trimEnd('/')
+        return if (normalized.endsWith("/v1")) "$normalized/models" else "$normalized/v1/models"
+    }
+
+    private fun openAiChatCompletionsUrl(baseUrl: String): String {
+        val normalized = baseUrl.trimEnd('/')
+        return if (normalized.endsWith("/v1")) "$normalized/chat/completions" else "$normalized/v1/chat/completions"
     }
 
     private fun streamCodexOAuth(

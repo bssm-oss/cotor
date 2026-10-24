@@ -134,9 +134,12 @@ internal class DesktopDirectChatService(
         }
     }
 
-    suspend fun listModels(baseUrl: String = "http://127.0.0.1:11434"): List<DirectChatAvailableModel> =
+    suspend fun listModels(
+        baseUrl: String = com.cotor.model.LocalModelDefaults.SGLANG_BASE_URL,
+        provider: String = "sglang"
+    ): List<DirectChatAvailableModel> =
         withContext(Dispatchers.IO) {
-            directChatService.listAvailableModels(baseUrl)
+            directChatService.listAvailableModels(baseUrl, provider)
         }
 
     private suspend fun appendMessage(conversationId: String, message: DirectChatMessage) {

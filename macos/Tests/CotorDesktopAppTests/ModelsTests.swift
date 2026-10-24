@@ -4,6 +4,95 @@ import Testing
 
 struct ModelsTests {
     @Test
+    func directChatModelOptionsKeepPinnedDefaultAheadOfDiscoveredModels() {
+        let provider = DirectChatProviderCatalogEntryRecord(
+            id: "ollama",
+            providerId: "ollama",
+            displayName: "Ollama (local)",
+            iconSystemName: "cpu.fill",
+            defaultModel: "gemma4:12b",
+            defaultBaseUrl: "http://127.0.0.1:11434",
+            allowsBaseUrl: true,
+            supportsModelDiscovery: true
+        )
+        let models = [
+            DirectChatAvailableModel(id: "gemma4:e4b", provider: "ollama", displayName: "gemma4:e4b"),
+            DirectChatAvailableModel(id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b"),
+            DirectChatAvailableModel(id: "gemma4-yuni:latest", provider: "ollama", displayName: "gemma4-yuni:latest")
+        ]
+
+        #expect(directChatModelOptions(for: provider, availableModels: models) == [
+            "gemma4:12b",
+            "gemma4:e4b",
+            "gemma4-yuni:latest"
+        ])
+    }
+
+    @Test
+    func directChatModelInstallHintShowsForMissingDiscoveredLocalModel() {
+        let ollama = DirectChatProviderCatalogEntryRecord(
+            id: "ollama",
+            providerId: "ollama",
+            displayName: "Ollama (local)",
+            iconSystemName: "cpu.fill",
+            defaultModel: "gemma4:12b",
+            defaultBaseUrl: "http://127.0.0.1:11434",
+            allowsBaseUrl: true,
+            supportsModelDiscovery: true
+        )
+        let codex = DirectChatProviderCatalogEntryRecord(
+            id: "codex-oauth",
+            providerId: "codex-cli",
+            displayName: "Codex OAuth",
+            iconSystemName: "person.crop.circle.badge.checkmark",
+            defaultModel: "gpt-5.4",
+            defaultBaseUrl: "",
+            allowsBaseUrl: false,
+            supportsModelDiscovery: false
+        )
+        let sglang = DirectChatProviderCatalogEntryRecord(
+            id: "sglang",
+            providerId: "sglang",
+            displayName: "Turbo Engine: SGLang",
+            iconSystemName: "bolt.fill",
+            defaultModel: "gemma4-12b",
+            defaultBaseUrl: "http://127.0.0.1:30001",
+            allowsBaseUrl: true,
+            supportsModelDiscovery: true
+        )
+        let models = [
+            DirectChatAvailableModel(id: "gemma4:e4b", provider: "ollama", displayName: "gemma4:e4b"),
+            DirectChatAvailableModel(id: "gemma4-12b", provider: "sglang", displayName: "gemma4-12b")
+        ]
+
+        #expect(directChatSelectedModelNeedsInstallHint(
+            provider: ollama,
+            availableModels: models,
+            selectedModel: "gemma4:12b"
+        ))
+        #expect(!directChatSelectedModelNeedsInstallHint(
+            provider: ollama,
+            availableModels: models,
+            selectedModel: "gemma4:e4b"
+        ))
+        #expect(!directChatSelectedModelNeedsInstallHint(
+            provider: sglang,
+            availableModels: models,
+            selectedModel: "gemma4-12b"
+        ))
+        #expect(directChatSelectedModelNeedsInstallHint(
+            provider: sglang,
+            availableModels: models,
+            selectedModel: "gemma4-31b"
+        ))
+        #expect(!directChatSelectedModelNeedsInstallHint(
+            provider: codex,
+            availableModels: models,
+            selectedModel: "gpt-5.4"
+        ))
+    }
+
+    @Test
     func desktopApiUrlBuilderKeepsQueryOutOfPath() throws {
         let url = try DesktopAPI.makeURL(
             baseURL: URL(string: "http://127.0.0.1:8787")!,

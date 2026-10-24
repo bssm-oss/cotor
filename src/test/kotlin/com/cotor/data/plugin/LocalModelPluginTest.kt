@@ -124,6 +124,24 @@ class LocalModelPluginTest : FunSpec({
         }
     }
 
+    test("calls SGLang OpenAI-compatible chat completions endpoint by default") {
+        val server = localJsonServer("/v1/chat/completions", """{"choices":[{"message":{"content":"sglang ok"}}]}""")
+        try {
+            val output = LocalModelPlugin().execute(
+                context = localModelContext(
+                    provider = "sglang",
+                    baseUrl = "http://127.0.0.1:${server.address.port}",
+                    model = "gemma4-12b"
+                ),
+                processManager = unusedProcessManager()
+            )
+
+            output.output shouldBe "sglang ok"
+        } finally {
+            server.stop(0)
+        }
+    }
+
     test("managed Ollama start failure surfaces an actionable agent error") {
         val plugin = LocalModelPlugin(
             ollamaExecutableResolver = { "/tmp/fake-ollama" },

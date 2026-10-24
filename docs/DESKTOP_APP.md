@@ -135,7 +135,7 @@ The current macOS shell has two top-level modes.
   - Marketing Operator skill selection that reveals a delegation-policy panel for allowed channels, domains, daily publish limits, brand rules, session/secret references, and recent marketing run logs
   - goal list and goal creation
   - Linear-style issue board/canvas inside the app
-  - dedicated `Operator Chat` navigation surface with a message-thread interface for natural-language company commands; selected-company messages go through an LLM-first operator planner that prefers local Ollama Gemma when available, chooses validated company tools, and answers from real tool results
+  - dedicated `Operator Chat` navigation surface with a message-thread interface for natural-language company commands; selected-company messages go through an LLM-first operator planner that prefers the local SGLang Turbo Gemma engine when available, chooses validated company tools, and answers from real tool results
   - progressive disclosure across the company and issue surfaces: the first view shows only the current company signal and focused issue queue, while backend health, paths, cost guardrails, metadata, execution logs, Linear links, and agent conversation details stay behind expandable detail views
   - dedicated `Reports` surface for previous-day morning reports covering completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
   - dedicated `Tests` surface for local validation plans, safe predefined command runs, progress, step status, and bounded logs for the selected company root
@@ -236,7 +236,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - create multiple companies
 - bind each company to one working folder
 - define company agents with minimal user input
-- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from Ollama/LM Studio explicitly. The desktop backend can start local Ollama on demand, keeps `gemma4:12b` pinned as the local default, and exposes discovered Gemma-family models as alternatives.
+- store an optional per-agent model override alongside the provider CLI so company roles can pin Codex/OpenCode models or app-managed local models discovered from SGLang Turbo, Ollama, or LM Studio explicitly. The desktop backend treats SGLang Turbo at `http://127.0.0.1:30001/v1` as the default local Gemma engine, keeps `gemma4-12b` pinned as the SGLang served-model name, and exposes discovered Gemma-family models as alternatives. Ollama remains selectable as a fallback local engine with its own `gemma4:12b` tag.
 - store an optional `mentorAgentId` per company agent; mentor choices are limited to active agents in the same company and clearable from the advanced assignment controls.
 - seed every new company with an HR Manager role plus default mentor relationships across CEO, product, engineering, builder, QA, and release roles.
 - show the built-in skill catalog in the company agent editor and save each agent's friendly skill selections into the `SKILL_RUN` capability allowlist.
@@ -254,7 +254,7 @@ Compatibility routes under `/api/app/company/*` still exist for older clients.
 - inspect derived per-agent performance from existing issues, runs, reviews, org profiles, and company agent definitions, with insufficient-data agents called out separately
 - populate and merge review queue items
 - inspect a dedicated Meeting Room view that defaults to the `Live Office` runtime projection, with synthesized runtime/backend/review/session summaries, event-driven movement, and agent/issue/zone detail sheets
-- use the Operator Chat surface to ask messy natural-language questions or commands. The backend asks the operator LLM, preferring local Ollama Gemma when available, to pick tools such as runtime inspection, performance inspection, blocked issue inspection, model updates, goal creation, HR staffing, GitHub/Linear sync, report generation, and problem-signal inspection, then returns a natural answer grounded in those tool results.
+- use the Operator Chat surface to ask messy natural-language questions or commands. The backend asks the operator LLM, preferring local SGLang Turbo Gemma when available, to pick tools such as runtime inspection, performance inspection, blocked issue inspection, model updates, goal creation, HR staffing, GitHub/Linear sync, report generation, and problem-signal inspection, then returns a natural answer grounded in those tool results.
 - use Operator Chat for HR staffing requests such as hiring missing specialists or assigning mentors. HR hires inherit the current company execution model policy, avoid duplicate role coverage, and stay capped per chat command and runtime tick.
 - turn a loose chat request into a CEO interpretation, success criteria, a company goal, and assigned issues while keeping GitHub connection/publishing as a separate explicit setup step
 - choose `ASK_ME`, `AGENT_APPROVED`, or `FULL_AUTO` automation; `AGENT_APPROVED` is the default and routes recoverable sensitive actions to CEO/QA/Reviewer approval instead of a user confirmation rail

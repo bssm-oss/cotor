@@ -621,6 +621,63 @@ class OpenCodePluginTest : FunSpec({
         }
     }
 
+    test("passes local SGLang Gemma model to opencode with OpenAI-compatible provider config") {
+        val server = localRoutingServer { exchange ->
+            if (exchange.requestURI.path == "/v1/models") {
+                exchange.respondJson("""{"data":[{"id":"gemma4-12b"}]}""")
+            } else {
+                exchange.sendResponseHeaders(404, -1)
+            }
+        }
+        val plugin = OpenCodePlugin()
+        val environments = mutableListOf<Map<String, String>>()
+        val processManager = object : ProcessManager {
+            override suspend fun executeProcess(
+                command: List<String>,
+                input: String?,
+                environment: Map<String, String>,
+                timeout: Long,
+                workingDirectory: Path?,
+                onStart: ((Long) -> Unit)?
+            ): ProcessResult {
+                environments += environment
+                assertOpenCodeRunCommand(command, OpenCodeDefaults.LOCAL_SGLANG_GEMMA_MODEL, "edit files")
+                return ProcessResult(
+                    exitCode = 0,
+                    stdout = """{"type":"text","text":"edited"}""",
+                    stderr = "",
+                    isSuccess = true,
+                    processId = 204L
+                )
+            }
+        }
+
+        try {
+            val result = plugin.execute(
+                ExecutionContext(
+                    agentName = "opencode",
+                    input = "edit files",
+                    timeout = 1_000,
+                    parameters = mapOf(
+                        "model" to OpenCodeDefaults.LOCAL_SGLANG_GEMMA_MODEL,
+                        "sglangBaseUrl" to "http://127.0.0.1:${server.address.port}/v1"
+                    ),
+                    environment = emptyMap()
+                ),
+                processManager
+            )
+
+            result.output shouldBe "edited"
+            result.processId shouldBe 204L
+            environments.all { env ->
+                env["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("\"sglang\"") &&
+                    env["OPENCODE_CONFIG_CONTENT"].orEmpty().contains("http://127.0.0.1:${server.address.port}/v1")
+            } shouldBe true
+        } finally {
+            server.stop(0)
+        }
+    }
+
     test("falls back to installed local Gemma when default Gemma 4 12B tag is missing") {
         val server = localRoutingServer { exchange ->
             if (exchange.requestURI.path == "/api/tags") {

@@ -6658,15 +6658,15 @@ class DesktopAppService(
         }
         val discoveredLocalGemmaModel = discoverGemma4ModelsCached().firstOrNull()
         val shouldTryLocalGemma = discoveredLocalGemmaModel != null ||
-            commandAvailability(resolveBuiltinExecutableAlias("ollama"))
+            commandAvailability(resolveBuiltinExecutableAlias("sglang"))
         if (shouldTryLocalGemma) {
             val localGemmaModel = discoveredLocalGemmaModel ?: LocalModelDefaults.GEMMA4_MODEL
             val agent = AgentConfig(
                 name = "operator-chat-$purpose",
                 pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
                 parameters = mapOf(
-                    "provider" to "ollama",
-                    "baseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                    "provider" to "sglang",
+                    "baseUrl" to LocalModelDefaults.SGLANG_BASE_URL,
                     "model" to localGemmaModel
                 ),
                 timeout = timeoutMs
@@ -6700,7 +6700,7 @@ class DesktopAppService(
                 name = "operator-chat-$purpose",
                 pluginClass = "com.cotor.data.plugin.LocalModelPlugin",
                 parameters = buildMap {
-                    put("provider", selected.agentCli.ifBlank { "ollama" })
+                    put("provider", selected.agentCli.ifBlank { "sglang" })
                     selected.model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
                 },
                 timeout = timeoutMs
@@ -6760,7 +6760,7 @@ class DesktopAppService(
             appendLine("""User: 막힌 일 왜 그래?""")
             appendLine("""JSON: {"reply":"막힌 이슈를 확인해볼게요.","toolCalls":[{"tool":"inspect_blocked","reason":"User asked about blocked work.","args":{}}],"answerSourceHints":["issue"]}""")
             appendLine("""User: gemma4 12b로 바꿔""")
-            appendLine("""JSON: {"reply":"Gemma 4 12B 모델 변경을 적용해볼게요.","toolCalls":[{"tool":"update_agent_models","reason":"User requested Gemma 4 12B.","args":{"model":"gemma4:12b"}}],"answerSourceHints":["agent-models"]}""")
+            appendLine("""JSON: {"reply":"Gemma 4 12B 모델 변경을 적용해볼게요.","toolCalls":[{"tool":"update_agent_models","reason":"User requested Gemma 4 12B.","args":{"model":"gemma4-12b"}}],"answerSourceHints":["agent-models"]}""")
             appendLine("""User: 브라우저로 http://localhost:3000 확인해줘""")
             appendLine("""JSON: {"reply":"브라우저 스킬로 확인해볼게요.","toolCalls":[{"tool":"run_skill","reason":"User asked for browser evidence.","args":{"skill":"browser-smoke","url":"http://localhost:3000"}}],"answerSourceHints":["skill-run"]}""")
             appendLine("""User: 리포 구조 알려줘""")
@@ -15108,7 +15108,7 @@ class DesktopAppService(
         pruneRuntimeCaches()
         val state = runBlocking { stateStore.load() }
         val githubPublishStatus = runBlocking { computeGitHubPublishStatus(state = state) }
-        val availableAgentModels = listOf("opencode", "gemma4", "ollama", "lmstudio")
+        val availableAgentModels = listOf("opencode", "gemma4", "sglang", "ollama", "lmstudio")
             .associateWith(::availableAgentModels)
             .filterValues { it.isNotEmpty() }
         return DesktopSettings(
@@ -15135,6 +15135,7 @@ class DesktopAppService(
         return when (normalizedAgent) {
             "opencode" -> discoverOpenCodeModelsCached()
             "gemma4" -> discoverGemma4ModelsCached()
+            "sglang" -> discoverSglangModelsCached()
             "ollama" -> discoverOllamaModelsCached()
             "lmstudio" -> discoverLmStudioModelsCached()
             else -> emptyList()
@@ -15142,7 +15143,21 @@ class DesktopAppService(
     }
 
     private fun discoverGemma4ModelsCached(): List<String> =
-        LocalModelDefaults.preferredInstalledGemmaModels(discoverOllamaModelsCached() + discoverLmStudioModelsCached())
+        LocalModelDefaults.preferredInstalledGemmaModels(
+            discoverSglangModelsCached() + discoverOllamaModelsCached() + discoverLmStudioModelsCached()
+        )
+
+    private fun discoverSglangModelsCached(): List<String> =
+        discoverLocalModelsCached("sglang") {
+            val body = getLocalModelJson("${LocalModelDefaults.SGLANG_OPENAI_BASE_URL}/models")
+                ?: return@discoverLocalModelsCached emptyList()
+            backendJson.parseToJsonElement(body).jsonObject["data"]?.jsonArray
+                ?.mapNotNull { model ->
+                    model.jsonObject["id"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+                }
+                ?.distinct()
+                ?: emptyList()
+        }
 
     private fun discoverOllamaModelsCached(): List<String> =
         discoverLocalModelsCached("ollama") {
@@ -15911,10 +15926,11 @@ class DesktopAppService(
                 if (normalized?.let(OpenCodeDefaults::isSelectableModel) == true) CodexDefaults.DEFAULT_MODEL else normalized
             }
             "opencode" -> OpenCodeDefaults.normalizeModel(trimmed)
-            "gemma4", "ollama", "lmstudio" -> {
+            "gemma4", "sglang", "ollama", "lmstudio" -> {
                 val normalized = LocalModelDefaults.normalizeModel(trimmed)
                 when {
                     normalized == null -> null
+                    OpenCodeDefaults.isLocalSglangModel(normalized) -> OpenCodeDefaults.sglangModelForOpenCodeModel(normalized)
                     OpenCodeDefaults.isLocalOllamaModel(normalized) -> OpenCodeDefaults.ollamaTagForOpenCodeModel(normalized)
                     OpenCodeDefaults.isSelectableModel(normalized) -> null
                     else -> normalized
@@ -15938,7 +15954,7 @@ class DesktopAppService(
 
     private fun defaultModelForAgentCli(agentCli: String): String? =
         when (agentCli.trim().lowercase()) {
-            "gemma4", "ollama", "lmstudio" ->
+            "gemma4", "sglang", "ollama", "lmstudio" ->
                 normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
                     ?: availableAgentModels(agentCli).firstOrNull { LocalModelDefaults.isGemmaFamilyModel(it) }
             else -> normalizeCompanyAgentModel(agentCli, BuiltinAgentCatalog.get(agentCli)?.parameters?.get("model"))
@@ -15992,16 +16008,15 @@ class DesktopAppService(
         )
         return opencode.copy(
             parameters = opencode.parameters + mapOf(
-                "model" to OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL,
-                "ollamaBaseUrl" to LocalModelDefaults.OLLAMA_BASE_URL,
+                "model" to OpenCodeDefaults.LOCAL_SGLANG_GEMMA_MODEL,
+                "sglangBaseUrl" to LocalModelDefaults.SGLANG_OPENAI_BASE_URL,
                 "requestedAgentCli" to definition.agentCli,
                 "requestedModel" to requestedModel,
                 "effectiveAgentCli" to "opencode",
-                "effectiveModel" to OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL,
-                "executionMode" to OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+                "effectiveModel" to OpenCodeDefaults.LOCAL_SGLANG_GEMMA_MODEL,
+                "executionMode" to OpenCodeDefaults.LOCAL_SGLANG_EXECUTION_MODE
             ),
-            environment = OpenCodeDefaults.localOllamaEnvironment(opencode.environment),
-            tags = (opencode.tags + "local-ollama-opencode").distinct()
+            tags = (opencode.tags + "local-sglang-opencode").distinct()
         )
     }
 
@@ -16748,7 +16763,10 @@ class DesktopAppService(
                 ) ?: executeWithPrompt(assignedPrompt)
                 val publishRequired = requiresCodePublish(issue)
                 val noDiffRetryEnabled = publishRequired &&
-                    effectiveAgent.parameters["executionMode"] == OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+                    effectiveAgent.parameters["executionMode"] in setOf(
+                        OpenCodeDefaults.LOCAL_SGLANG_EXECUTION_MODE,
+                        OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+                    )
                 if (
                     executionResult.isSuccess &&
                     noDiffRetryEnabled &&
@@ -20509,12 +20527,12 @@ class DesktopAppService(
 
     private fun seedCompanyAgentDefinitions(companyId: String, now: Long): List<CompanyAgentDefinition> {
         val builtins = BuiltinAgentCatalog.names()
-        val preferredAgent = listOf("gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "opencode", "claude", "gemini")
+        val preferredAgent = listOf("gemma4", "sglang", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "opencode", "claude", "gemini")
             .firstOrNull { candidate ->
                 builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate)
             }
             ?: builtins.firstOrNull { it.equals("gemma4", ignoreCase = true) }
-            ?: listOf("gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "claude", "gemini")
+            ?: listOf("gemma4", "sglang", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "claude", "gemini")
                 .firstOrNull { candidate ->
                     builtins.any { it.equals(candidate, ignoreCase = true) }
                 }
@@ -20966,7 +20984,7 @@ class DesktopAppService(
 
     private fun preferredExecutableAgent(): String {
         val builtins = BuiltinAgentCatalog.names()
-        return listOf("gemma4", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "opencode", "claude", "gemini")
+        return listOf("gemma4", "sglang", "ollama", "lmstudio", "qwen", "codex-oauth", "codex", "opencode", "claude", "gemini")
             .firstOrNull { candidate -> builtins.any { it.equals(candidate, ignoreCase = true) } && isExecutableAvailable(candidate) }
             ?: builtins.firstOrNull { isExecutableAvailable(it) }
             ?: builtins.firstOrNull()
@@ -24308,8 +24326,11 @@ class DesktopAppService(
     ): Flow<DirectChatStreamChunk> =
         directChatService.streamMessage(conversationId, companyId, userMessage)
 
-    suspend fun listDirectChatModels(baseUrl: String = "http://127.0.0.1:11434"): List<DirectChatAvailableModel> =
-        directChatService.listModels(baseUrl)
+    suspend fun listDirectChatModels(
+        baseUrl: String = LocalModelDefaults.SGLANG_BASE_URL,
+        provider: String = "sglang"
+    ): List<DirectChatAvailableModel> =
+        directChatService.listModels(baseUrl, provider)
 }
 
 internal fun defaultCommandAvailability(command: String): Boolean {

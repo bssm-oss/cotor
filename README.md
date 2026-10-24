@@ -175,7 +175,7 @@ Current desktop model:
 
 - top-level `Company` and `TUI` shell modes
 - `Company` mode for multi-company operations, agent team, goals, issue board/canvas, activity feed, runtime controls, and a dedicated `Meeting Room` surface
-- dedicated `Operator Chat` navigation surface that sends selected-company messages through an LLM-first operator planner; the planner prefers local Ollama Gemma when available, interprets loose natural language, chooses validated company tools, and then answers from the actual tool results instead of keyword-matching canned status text
+- dedicated `Operator Chat` navigation surface that sends selected-company messages through an LLM-first operator planner; the planner prefers the local SGLang Turbo Gemma engine when available, interprets loose natural language, chooses validated company tools, and then answers from the actual tool results instead of keyword-matching canned status text
 - `Company` summary keeps only the immediate company signal and recent issues visible by default; team work, live runs, CEO decisions, Linear state, and activity history sit behind an expandable detail section
 - `Company` and issue surfaces use progressive disclosure so paths, backend health, cost guardrails, metadata, execution logs, and agent conversation details appear only after opening deeper detail views
 - dedicated `Reports` navigation surface shows deterministic previous-day morning reports with completed work, PR/review outcomes, blockers, recovery events, and estimated cost snapshots
@@ -192,7 +192,7 @@ Current desktop model:
 - CEO merge only marks local workflow state as merged after GitHub refresh confirms the PR is actually `MERGED`
 - company CEO/chief approval agents can satisfy PR creation policy gates internally, so publish retries do not stop on a user-facing approval prompt when the company has an approval authority
 - Company Operator supports `ASK_ME`, `AGENT_APPROVED`, and `FULL_AUTO`; `AGENT_APPROVED` is the default, while `FULL_AUTO` still blocks hard-gated actions such as repository deletion, bulk file deletion, secret operations, budget-cap removal, and deployment/merge policy unlocks
-- company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, Ollama, LM Studio, and app-managed local Gemma models; Cotor pins the local Gemma 4 12B alias (`gemma4:12b`) as the default and exposes discovered Gemma-family models as selectable alternatives
+- company agent definitions now support an optional per-agent model override for providers like Codex, OpenCode, SGLang Turbo, Ollama, LM Studio, and app-managed local Gemma models; Cotor pins the SGLang Turbo Gemma 4 12B served-model alias (`gemma4-12b`, or OpenCode `sglang/gemma4-12b`) as the default and exposes discovered Gemma-family models as selectable alternatives. Ollama remains selectable as a fallback local engine with its own `gemma4:12b` tag.
 - company agent definitions also store an optional mentor, shown as one compact team-card line and editable from the advanced assignment controls
 - selecting the Marketing Operator skill on a company agent exposes a delegation-policy panel for owned/social channels, allowed domains, publish limits, brand rules, and session/secret references
 - stale Cotor-managed retry PRs are reconciled and closed in batches so repeated review loops do not keep hundreds of obsolete open PRs around
@@ -214,7 +214,7 @@ The current build includes a working local operations layer:
 - surface a GitHub readiness warning during company creation when GitHub PR mode is enabled but `gh` auth/origin setup is missing; Cotor does not create GitHub repositories automatically when no origin exists
 - connect an existing GitHub repository from the desktop app by signing in with `gh` and saving the repository URL as `origin`
 - define company agents with only title, CLI, and role summary
-- optionally pin a provider model per company agent definition, including local `gemma4`, `ollama`, and `lmstudio` agents. The desktop backend can start local Ollama on demand, keeps `gemma4:12b` as the default local model, and exposes installed Gemma-family models as alternatives.
+- optionally pin a provider model per company agent definition, including local `gemma4`, `sglang`, `ollama`, and `lmstudio` agents. The desktop backend treats SGLang Turbo at `http://127.0.0.1:30001/v1` as the default local Gemma engine, keeps `gemma4-12b` as the pinned SGLang served-model name, and exposes discovered Gemma-family models as alternatives. Ollama remains available when explicitly selected.
 - seed new companies with an HR Manager plus mentor relationships, and let Operator Chat handle requests such as team staffing or mentor assignment without adding another always-visible control panel
 - use the built-in repository map agent from the same team, while every company agent receives lightweight workspace-map guidance in its execution memory
 - delegate Marketing Operator browser publishing only through a prior policy; out-of-policy owned/social actions are denied rather than sent to a user approval queue
@@ -227,7 +227,7 @@ The current build includes a working local operations layer:
 - inspect per-agent performance derived from existing company issues, runs, reviews, org profiles, and agent definitions, with insufficient-data agents shown separately
 - populate and merge ready review queue items
 - inspect the dedicated Meeting Room page as a `Live Office` runtime projection with event-driven agent sprites, issue movement, review flow, runtime/backend/review/session summaries, and click-through agent/issue/zone detail sheets
-- use the Operator Chat surface to ask for status, change selected-company agents to the local Ollama Gemma 4 12B default (`gemma4:12b` or OpenCode's `ollama/gemma4:12b` bridge), explicitly choose DeepSeek only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
+- use the Operator Chat surface to ask for status, change selected-company agents to the SGLang Turbo Gemma 4 12B default (`gemma4-12b` or OpenCode's `sglang/gemma4-12b` bridge), explicitly choose Ollama or DeepSeek only when requested, start/stop runtime, retry blocked issues, and re-sync GitHub/Linear state from one command chat
 - ask the HR Manager through Operator Chat to hire missing specialists or assign mentors; HR hires inherit the company execution model policy, avoid duplicate roles, and cap automatic hiring so teams do not grow without bounds
 - let the CEO clarify a loose chat request into a goal, success criteria, and assigned downstream issues without auto-creating GitHub repositories
 - route sensitive recoverable actions to senior company agents in `AGENT_APPROVED` mode instead of requiring a user-facing confirmation panel

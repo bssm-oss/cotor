@@ -132,6 +132,9 @@ func preferredDesktopAgent(from agents: [String]) -> String? {
     if let gemma4 = normalized.first(where: { $0.caseInsensitiveCompare("gemma4") == .orderedSame }) {
         return gemma4
     }
+    if let sglang = normalized.first(where: { $0.caseInsensitiveCompare("sglang") == .orderedSame }) {
+        return sglang
+    }
     if let ollama = normalized.first(where: { $0.caseInsensitiveCompare("ollama") == .orderedSame }) {
         return ollama
     }

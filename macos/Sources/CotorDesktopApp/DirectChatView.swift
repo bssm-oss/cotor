@@ -104,7 +104,7 @@ struct DirectChatView: View {
                     Text("아직 대화가 없습니다")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(ShellPalette.text)
-                    Text("로컬 Gemma 4 12B로 운영 대화를 시작하세요.")
+                    Text("SGLang Turbo 엔진으로 운영 대화를 시작하세요.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(ShellPalette.muted)
                         .multilineTextAlignment(.center)
@@ -421,7 +421,7 @@ struct DirectChatView: View {
             Text("대화를 선택하거나 새로 시작하세요")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(ShellPalette.text)
-            Text("로컬 Gemma 4 12B 모델로 운영 지시를 바로 테스트할 수 있습니다.")
+            Text("SGLang Turbo 기본 모델로 운영 지시를 테스트할 수 있습니다.")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(ShellPalette.muted)
             Button {
@@ -457,10 +457,19 @@ struct DirectChatView: View {
     private func loadModels() async {
         let api = DesktopAPI()
         do {
-            let models = try await api.listDirectChatModels(companyId: companyId)
+            let providers = providerCatalog.isEmpty ? try await api.directChatProviders() : providerCatalog
+            var models: [DirectChatAvailableModel] = []
+            for provider in providers where provider.supportsModelDiscovery {
+                let providerModels = try await api.listDirectChatModels(
+                    companyId: companyId,
+                    provider: provider.id,
+                    baseUrl: provider.defaultBaseUrl
+                )
+                models.append(contentsOf: providerModels)
+            }
             await MainActor.run { availableModels = models }
         } catch {
-            // Ollama may not be running; silently ignore
+            // Local model servers may not be running; keep provider defaults visible.
         }
     }
 
@@ -556,6 +565,8 @@ struct DirectChatView: View {
 private extension DirectChatConversation {
     var providerDisplayName: String {
         switch provider {
+        case "sglang":
+            return "SGLang Turbo"
         case "ollama":
             return "Ollama"
         case "lmstudio":

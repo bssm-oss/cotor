@@ -1,5 +1,39 @@
 import SwiftUI
 
+func directChatModelOptions(
+    for provider: DirectChatProviderCatalogEntryRecord,
+    availableModels: [DirectChatAvailableModel]
+) -> [String] {
+    let discovered = availableModels.filter { $0.provider == provider.id }.map { $0.id }
+    return ([provider.defaultModel] + discovered).compactMap { model in
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+    .reduce(into: [String]()) { result, model in
+        if !result.contains(model) {
+            result.append(model)
+        }
+    }
+}
+
+func directChatSelectedModelNeedsInstallHint(
+    provider: DirectChatProviderCatalogEntryRecord,
+    availableModels: [DirectChatAvailableModel],
+    selectedModel: String
+) -> Bool {
+    let normalizedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard provider.supportsModelDiscovery,
+          !normalizedModel.isEmpty
+    else {
+        return false
+    }
+    let discoveredModels = Set(
+        availableModels
+            .filter { $0.provider == provider.id }
+            .map { $0.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    )
+    return !discoveredModels.contains(normalizedModel)
+}
 
 // MARK: - File Overview
 // NewChatSheet belongs to the native macOS client layer for the Cotor desktop application.
@@ -13,7 +47,7 @@ struct NewChatSheet: View {
     let onCreated: (DirectChatConversation) -> Void
 
     @State private var title: String = ""
-    @State private var selectedProvider: String = "ollama"
+    @State private var selectedProvider: String = "sglang"
     @State private var customModel: String = ""
     @State private var systemPrompt: String = ""
     @State private var baseUrl: String = ""
@@ -27,16 +61,16 @@ struct NewChatSheet: View {
 
     private var selectedProviderModels: [String] {
         guard let provider = selectedProviderEntry else { return [] }
-        let discovered = availableModels.filter { $0.provider == provider.id }.map { $0.id }
-        return ([provider.defaultModel] + discovered).compactMap { model in
-            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
-        }
-        .reduce(into: [String]()) { result, model in
-            if !result.contains(model) {
-                result.append(model)
-            }
-        }
+        return directChatModelOptions(for: provider, availableModels: availableModels)
+    }
+
+    private var selectedModelNeedsInstallHint: Bool {
+        guard let provider = selectedProviderEntry else { return false }
+        return directChatSelectedModelNeedsInstallHint(
+            provider: provider,
+            availableModels: availableModels,
+            selectedModel: customModel
+        )
     }
 
     var body: some View {
@@ -172,11 +206,37 @@ struct NewChatSheet: View {
                 )
                 .textFieldStyle(.roundedBorder)
             }
+
+            if selectedModelNeedsInstallHint {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(ShellPalette.warning)
+                        .padding(.top, 1)
+                    Text(modelDiscoveryHintText)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(ShellPalette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+            }
         }
     }
 
     private var modelPlaceholder: String {
         selectedProviderEntry?.defaultModel ?? "model-name"
+    }
+
+    private var modelDiscoveryHintText: String {
+        switch selectedProviderEntry?.id {
+        case "sglang":
+            let servedModel = customModel.isEmpty ? "gemma4-12b" : customModel
+            return "SGLang 서버가 `\(servedModel)` 모델을 노출하지 않습니다. 실행 중인 SGLang 서버의 `--served-model-name`과 포트 30001을 확인하세요."
+        case "ollama":
+            return "Ollama 목록에 없으면 터미널에서 `ollama run \(customModel)`를 먼저 실행하세요."
+        default:
+            return "선택한 로컬 엔진의 모델 목록에 이 모델이 보이지 않습니다."
+        }
     }
 
     private var systemPromptSection: some View {
@@ -204,7 +264,7 @@ struct NewChatSheet: View {
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundColor(ShellPalette.text)
-            TextField("http://127.0.0.1:11434", text: $baseUrl)
+            TextField(selectedProviderEntry?.defaultBaseUrl ?? "http://127.0.0.1:30001", text: $baseUrl)
                 .textFieldStyle(.roundedBorder)
         }
     }

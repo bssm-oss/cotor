@@ -138,7 +138,7 @@ CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --veri
 - Marketing Operator skill을 선택하면 channel, domain, 일일 게시 한도, 브랜드 규칙, session/secret reference, 최근 marketing run log를 설정하는 위임 정책 패널 표시
 - 목표 목록과 목표 생성
 - 앱 내부의 Linear 스타일 이슈 보드/캔버스
-- 자연어 회사 명령을 메시지 스레드처럼 처리하는 전용 `운영 채팅` 탐색 surface. 선택된 회사의 메시지는 LLM-first 운영 planner가 먼저 해석하고, 가능한 경우 로컬 Ollama Gemma를 사용하며, 검증된 회사 도구를 고른 뒤 실제 tool 결과를 근거로 답함
+- 자연어 회사 명령을 메시지 스레드처럼 처리하는 전용 `운영 채팅` 탐색 surface. 선택된 회사의 메시지는 LLM-first 운영 planner가 먼저 해석하고, 가능한 경우 로컬 SGLang Turbo Gemma 엔진을 사용하며, 검증된 회사 도구를 고른 뒤 실제 tool 결과를 근거로 답함
 - 회사와 이슈 surface는 점진적 공개 구조를 사용해서 첫 화면에는 현재 회사 신호와 핵심 이슈 큐만 보이고, 백엔드 health, 경로, 비용 상한, 메타데이터, 실행 로그, Linear 링크, 에이전트 대화는 펼치는 상세 화면 안에 둠
 - 완료한 일, PR/리뷰 결과, 차단 항목, 복구 이벤트, 추정 비용을 전날 기준으로 집계한 아침 보고서 전용 `보고서` surface
 - 선택된 회사 루트의 로컬 검증 계획, 안전한 고정 명령 실행, 진행률, 단계별 상태, 제한된 로그를 보여주는 전용 `테스트` surface
@@ -242,7 +242,7 @@ CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --veri
 - 여러 회사 생성
 - 회사당 하나의 작업 폴더 바인딩
 - 최소 입력 기반 회사 에이전트 정의
-- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 필요하면 로컬 Ollama를 직접 켜고, `gemma4:12b`를 로컬 기본값으로 고정하며, 검색된 Gemma 계열 모델은 대체 후보로 노출
+- 회사 에이전트별 모델 선택 저장. Codex/OpenCode뿐 아니라 SGLang Turbo/Ollama/LM Studio에서 발견된 앱 관리형 로컬 모델도 같은 방식으로 선택 가능. 데스크톱 백엔드는 `http://127.0.0.1:30001/v1`의 SGLang Turbo를 기본 로컬 Gemma 엔진으로 보고, `gemma4-12b`를 SGLang served-model 이름으로 고정하며, 검색된 Gemma 계열 모델은 대체 후보로 노출. Ollama는 자체 `gemma4:12b` 태그를 쓰는 fallback 로컬 엔진으로 유지
 - 회사 에이전트별 선택 사수(`mentorAgentId`) 저장. 사수는 같은 회사의 활성 에이전트만 선택할 수 있고, 고급 배정 영역에서 비울 수 있음
 - 새 회사에는 HR Manager와 CEO/Product/Engineering/Builder/QA/Release 기본 사수 관계를 함께 생성
 - 회사 에이전트 편집기에서 내장 스킬 카탈로그를 보여주고, 친근한 스킬 선택값을 각 에이전트의 `SKILL_RUN` capability allowlist로 저장
@@ -260,7 +260,7 @@ CI나 로컬 source-checkout 검증에서는 `shell/update-desktop-app.sh --veri
 - 기존 이슈, 실행, 리뷰, 조직 프로필, 회사 에이전트 정의에서 파생한 에이전트별 성과를 조회하고, 데이터가 부족한 에이전트는 별도로 표시
 - 리뷰 큐 아이템 생성 및 머지 처리
 - `라이브 오피스` 런타임 projection과 runtime/backend/review/session 요약, 이벤트 기반 움직임, agent/issue/zone 상세 sheet를 함께 제공하는 전용 상황실 보기
-- 운영 채팅 surface에서 대충 쓴 자연어 질문이나 명령을 보내면 backend가 운영 LLM에게, 가능한 경우 로컬 Ollama Gemma를 우선 사용해, 런타임 점검, 인사평가, 막힌 이슈 확인, 모델 변경, 목표 생성, HR 보강, GitHub/Linear 동기화, 보고서 생성, 문제 신호 확인 같은 tool을 고르게 하고, 그 결과로 자연어 응답을 작성
+- 운영 채팅 surface에서 대충 쓴 자연어 질문이나 명령을 보내면 backend가 운영 LLM에게, 가능한 경우 로컬 SGLang Turbo Gemma를 우선 사용해, 런타임 점검, 인사평가, 막힌 이슈 확인, 모델 변경, 목표 생성, HR 보강, GitHub/Linear 동기화, 보고서 생성, 문제 신호 확인 같은 tool을 고르게 하고, 그 결과로 자연어 응답을 작성
 - 운영 채팅에서 필요한 specialist 고용이나 사수 지정을 HR Manager에게 맡길 수 있음. HR 고용은 회사의 현재 실행 모델 정책을 상속하고, 중복 역할과 chat/runtime tick별 무제한 고용을 막음
 - 느슨한 채팅 요청을 CEO 해석, 성공 기준, 회사 목표, 담당 이슈로 바꾸되 GitHub 연결/PR 발행은 별도 명시 설정으로 유지
 - `ASK_ME`, `AGENT_APPROVED`, `FULL_AUTO` 자동화 모드를 채팅 명령으로 바꿀 수 있고 기본값은 `AGENT_APPROVED`. 복구 가능한 민감 작업은 사용자 확인 rail 대신 CEO/QA/Reviewer 승인으로 라우팅

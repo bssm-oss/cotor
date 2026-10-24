@@ -6,6 +6,7 @@ import io.kotest.matchers.shouldBe
 class LocalModelDefaultsTest : FunSpec({
     test("detects Gemma 4 model aliases from local model lists") {
         LocalModelDefaults.isGemma4Model("gemma4:12b") shouldBe true
+        LocalModelDefaults.isGemma4Model("gemma4-12b") shouldBe true
         LocalModelDefaults.isGemma4Model("google/gemma-4-31b-it") shouldBe true
         LocalModelDefaults.isGemma4Model("nvidia/google/gemma_4_31b_it") shouldBe true
     }
@@ -18,6 +19,7 @@ class LocalModelDefaultsTest : FunSpec({
 
     test("detects installed Gemma family models for app-managed local fallback") {
         LocalModelDefaults.isGemmaFamilyModel("gemma4:12b") shouldBe true
+        LocalModelDefaults.isGemmaFamilyModel("gemma4-12b") shouldBe true
         LocalModelDefaults.isGemmaFamilyModel("gemma3:4b") shouldBe true
         LocalModelDefaults.isGemmaFamilyModel("google/gemma-4-31b-it") shouldBe true
         LocalModelDefaults.isGemmaFamilyModel("notgemma4:latest") shouldBe false

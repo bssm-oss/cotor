@@ -127,7 +127,7 @@ class DesktopAppServiceTest : FunSpec({
 
     test("builtin local model and graphify agents are available by default") {
         BuiltinAgentCatalog.names().containsAll(listOf("gemma4", "ollama", "lmstudio", "graphify")) shouldBe true
-        BuiltinAgentCatalog.get("gemma4")!!.parameters["model"] shouldBe "gemma4:12b"
+        BuiltinAgentCatalog.get("gemma4")!!.parameters["model"] shouldBe "gemma4-12b"
         BuiltinAgentCatalog.get("ollama")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:11434"
         BuiltinAgentCatalog.get("lmstudio")!!.parameters["baseUrl"] shouldBe "http://127.0.0.1:1234/v1"
         BuiltinAgentCatalog.get("graphify")!!.parameters["argvJson"] shouldBe """["graphify","explain","{input}"]"""
@@ -927,7 +927,7 @@ class DesktopAppServiceTest : FunSpec({
                     metadata: AgentExecutionMetadata
                 ): AgentResult = executeAgent(agent, input, metadata)
             },
-            commandAvailability = { command -> command == "ollama" },
+            commandAvailability = { command -> command == "python3" },
             autoStartAutomationRefresh = false
         )
         val company = service.createCompany(name = "Operator Chat Gemma 12B", rootPath = appHome.toString())
@@ -937,7 +937,7 @@ class DesktopAppServiceTest : FunSpec({
         response.message shouldContain "Gemma 4 12B"
         capturedAgents.shouldHaveSize(2)
         capturedAgents.all { it.pluginClass == "com.cotor.data.plugin.LocalModelPlugin" } shouldBe true
-        capturedAgents.all { it.parameters["provider"] == "ollama" } shouldBe true
+        capturedAgents.all { it.parameters["provider"] == "sglang" } shouldBe true
         capturedAgents.all { agent ->
             agent.parameters["model"]?.let(LocalModelDefaults::isGemmaFamilyModel) == true
         } shouldBe true
@@ -1838,7 +1838,7 @@ class DesktopAppServiceTest : FunSpec({
         )
     }
 
-    test("runTask routes gemma4 code-producing company agents through local Ollama OpenCode") {
+    test("runTask routes gemma4 code-producing company agents through local SGLang OpenCode") {
         val appHome = Files.createTempDirectory("desktop-gemma-opencode-home")
         val repoRoot = Files.createDirectories(Files.createTempDirectory("desktop-gemma-opencode-repo").resolve("repo"))
         val worktreeRoot = Files.createDirectories(Files.createTempDirectory("desktop-gemma-opencode-worktree").resolve("repo"))
@@ -1881,7 +1881,7 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Builder",
             agentCli = "gemma4",
-            model = "gemma4:12b",
+            model = "gemma4-12b",
             roleSummary = "Build implementation changes.",
             createdAt = now,
             updatedAt = now
@@ -1966,18 +1966,18 @@ class DesktopAppServiceTest : FunSpec({
         capturedAgents shouldHaveSize 2
         capturedAgents.all { it.name == "opencode" } shouldBe true
         capturedAgents.all { it.pluginClass == "com.cotor.data.plugin.OpenCodePlugin" } shouldBe true
-        capturedAgents.first().parameters["model"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
+        capturedAgents.first().parameters["model"] shouldBe OpenCodeDefaults.LOCAL_SGLANG_GEMMA_MODEL
         capturedAgents.first().parameters["requestedAgentCli"] shouldBe "gemma4"
-        capturedAgents.first().parameters["requestedModel"] shouldBe "gemma4:12b"
-        capturedAgents.first().parameters["executionMode"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+        capturedAgents.first().parameters["requestedModel"] shouldBe "gemma4-12b"
+        capturedAgents.first().parameters["executionMode"] shouldBe OpenCodeDefaults.LOCAL_SGLANG_EXECUTION_MODE
         capturedPrompts[1].orEmpty() shouldContain "NO_DIFF_RETRY"
         val run = stateStore.load().runs.single { it.taskId == task.id }
         run.agentName shouldBe "opencode"
         run.requestedAgentCli shouldBe "gemma4"
-        run.requestedModel shouldBe "gemma4:12b"
+        run.requestedModel shouldBe "gemma4-12b"
         run.effectiveAgentCli shouldBe "opencode"
-        run.effectiveModel shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
-        run.executionMode shouldBe OpenCodeDefaults.LOCAL_OLLAMA_EXECUTION_MODE
+        run.effectiveModel shouldBe OpenCodeDefaults.LOCAL_SGLANG_GEMMA_MODEL
+        run.executionMode shouldBe OpenCodeDefaults.LOCAL_SGLANG_EXECUTION_MODE
         @Suppress("UNCHECKED_CAST")
         val executionLogTasks = service.executionLog(company.id).first { it["issueId"] == issue.id }["tasks"] as List<Map<String, Any?>>
 
@@ -1985,7 +1985,7 @@ class DesktopAppServiceTest : FunSpec({
         val executionLogRuns = executionLogTasks.first { it["taskId"] == task.id }["runs"] as List<Map<String, Any?>>
         val executionLogRun = executionLogRuns.single()
         executionLogRun["requestedAgentCli"] shouldBe "gemma4"
-        executionLogRun["effectiveModel"] shouldBe OpenCodeDefaults.LOCAL_OLLAMA_GEMMA_MODEL
+        executionLogRun["effectiveModel"] shouldBe OpenCodeDefaults.LOCAL_SGLANG_GEMMA_MODEL
     }
 
     test("runTask keeps gemma4 direct local model routing for validation-only work") {
@@ -2030,7 +2030,7 @@ class DesktopAppServiceTest : FunSpec({
             companyId = company.id,
             title = "Reviewer",
             agentCli = "gemma4",
-            model = "gemma4:12b",
+            model = "gemma4-12b",
             roleSummary = "Validate without code changes.",
             createdAt = now,
             updatedAt = now
@@ -2108,7 +2108,7 @@ class DesktopAppServiceTest : FunSpec({
 
         capturedAgents.single().name shouldBe "gemma4"
         capturedAgents.single().pluginClass shouldBe "com.cotor.data.plugin.LocalModelPlugin"
-        capturedAgents.single().parameters["model"] shouldBe "gemma4:12b"
+        capturedAgents.single().parameters["model"] shouldBe "gemma4-12b"
         stateStore.load().runs.single().executionMode shouldBe null
         coVerify(exactly = 0) { gitWorkspaceService.publishRun(any(), any(), any(), any(), any(), any(), any()) }
     }

@@ -1849,8 +1849,15 @@ internal fun Application.cotorAppModule(
                 route("/{companyId}/direct-chat") {
                     get("/models") {
                         if (!requireToken(token)) return@get
+                        val provider = call.request.queryParameters["provider"]
+                            ?.takeIf { it.isNotBlank() } ?: "sglang"
+                        val providerEntry = findDirectChatProvider(provider)
+                            ?: return@get call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf("error" to "Unsupported provider: $provider")
+                            )
                         val rawBaseUrl = call.request.queryParameters["baseUrl"]
-                            ?.takeIf { it.isNotBlank() } ?: "http://127.0.0.1:11434"
+                            ?.takeIf { it.isNotBlank() } ?: providerEntry.defaultBaseUrl
                         val baseUrlHost = runCatching { java.net.URI.create(rawBaseUrl).host?.lowercase() }.getOrNull()
                         if (baseUrlHost !in setOf("127.0.0.1", "localhost", "::1")) {
                             return@get call.respond(
@@ -1858,7 +1865,7 @@ internal fun Application.cotorAppModule(
                                 mapOf("error" to "Only localhost base URLs are allowed")
                             )
                         }
-                        call.respond(desktopService.listDirectChatModels(rawBaseUrl))
+                        call.respond(desktopService.listDirectChatModels(rawBaseUrl, providerEntry.id))
                     }
 
                     route("/conversations") {

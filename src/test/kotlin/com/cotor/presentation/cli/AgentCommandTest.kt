@@ -148,7 +148,7 @@ class AgentCommandTest : FunSpec({
         val added = root.resolve(".cotor/agents/opencode.yaml")
         added.exists() shouldBe true
         added.readText() shouldContain "pluginClass: com.cotor.data.plugin.OpenCodePlugin"
-        added.readText() shouldContain "model: \"ollama/gemma4:12b\""
+        added.readText() shouldContain "model: \"sglang/gemma4-12b\""
     }
 
     test("agent add gemma4 writes local model provider defaults") {
@@ -164,9 +164,9 @@ class AgentCommandTest : FunSpec({
         val added = root.resolve(".cotor/agents/gemma4.yaml")
         added.exists() shouldBe true
         added.readText() shouldContain "pluginClass: com.cotor.data.plugin.LocalModelPlugin"
-        added.readText() shouldContain "baseUrl: \"http://127.0.0.1:11434\""
-        added.readText() shouldContain "model: \"gemma4:12b\""
-        added.readText() shouldContain "provider: \"ollama\""
+        added.readText() shouldContain "baseUrl: \"http://127.0.0.1:30001\""
+        added.readText() shouldContain "model: \"gemma4-12b\""
+        added.readText() shouldContain "provider: \"sglang\""
     }
 
     test("agent add graphify writes built in graph query command") {

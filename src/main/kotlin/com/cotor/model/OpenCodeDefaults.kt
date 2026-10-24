@@ -7,13 +7,17 @@ package com.cotor.model
  * company-created agents so execution costs stay predictable.
  */
 object OpenCodeDefaults {
-    const val DEFAULT_MODEL = "ollama/gemma4:12b"
+    const val DEFAULT_MODEL = "sglang/gemma4-12b"
     const val DEEPSEEK_FLASH_MODEL = "opencode-go/deepseek-v4-flash"
+    const val LOCAL_SGLANG_GEMMA_MODEL = "sglang/gemma4-12b"
+    const val LOCAL_SGLANG_EXECUTION_MODE = "local-sglang-opencode"
+    const val LOCAL_SGLANG_BASE_URL = "http://127.0.0.1:30001/v1"
     const val LOCAL_OLLAMA_GEMMA_MODEL = "ollama/gemma4:12b"
     const val LOCAL_OLLAMA_EXECUTION_MODE = "local-ollama-opencode"
     const val LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
 
     private val selectableModelPrefixes = listOf(
+        "sglang/",
         "ollama/",
         "opencode/",
         "opencode-go/",
@@ -34,10 +38,21 @@ object OpenCodeDefaults {
         return normalized.startsWith("ollama/") && !isForbiddenCloudModel(normalized)
     }
 
+    fun isLocalSglangModel(model: String?): Boolean {
+        val normalized = normalizeModel(model) ?: return false
+        return normalized.startsWith("sglang/") && !isForbiddenCloudModel(normalized)
+    }
+
     fun ollamaTagForOpenCodeModel(model: String): String? =
         normalizeModel(model)
             ?.takeIf(::isLocalOllamaModel)
             ?.removePrefix("ollama/")
+            ?.takeIf { it.isNotBlank() }
+
+    fun sglangModelForOpenCodeModel(model: String): String? =
+        normalizeModel(model)
+            ?.takeIf(::isLocalSglangModel)
+            ?.removePrefix("sglang/")
             ?.takeIf { it.isNotBlank() }
 
     fun localOllamaEnvironment(environment: Map<String, String>): Map<String, String> =

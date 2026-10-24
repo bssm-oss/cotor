@@ -493,7 +493,7 @@ data class CreateDirectChatConversationRequest(
     val systemPrompt: String = ""
 ) {
     init {
-        require(provider in setOf("ollama", "lmstudio", "codex-oauth")) {
+        require(provider in setOf("sglang", "ollama", "lmstudio", "codex-oauth")) {
             "Unsupported provider: $provider"
         }
         require(model.isNotBlank() && model.length <= 200) { "Invalid model name" }

@@ -284,14 +284,15 @@ final class DesktopStore: ObservableObject {
 
     func requiresDiscoveredLocalModel(_ agentCli: String) -> Bool {
         let normalized = agentCli.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return ["gemma4", "ollama", "lmstudio"].contains(normalized)
+        return ["gemma4", "sglang", "ollama", "lmstudio"].contains(normalized)
     }
 
     func isPinnedGemma4Default(agentCli: String, model: String) -> Bool {
         let normalizedAgent = agentCli.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard ["gemma4", "ollama", "lmstudio"].contains(normalizedAgent) else { return false }
+        guard ["gemma4", "sglang", "ollama", "lmstudio"].contains(normalizedAgent) else { return false }
         let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalizedModel == "gemma4:12b" ||
+        return normalizedModel == "gemma4-12b" ||
+            normalizedModel == "gemma4:12b" ||
             normalizedModel == "google/gemma-4-12b" ||
             normalizedModel == "google/gemma-4-12b-it"
     }
